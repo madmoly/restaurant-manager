@@ -1,0 +1,48 @@
+# =============================================================================
+# Local Development Environment
+# Usage: docker compose up -d db   → MySQL만 실행 (앱은 로컬 pnpm dev)
+#        docker compose up         → 전체 실행 (프로덕션 테스트)
+# =============================================================================
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: rm-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-restaurant_manager}
+      MYSQL_USER: ${MYSQL_USER:-rmuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-rmpass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rm-app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql://${MYSQL_USER:-rmuser}:${MYSQL_PASSWORD:-rmpass}@db:3306/${MYSQL_DATABASE:-restaurant_manager}
+
+volumes:
+  mysql_data:

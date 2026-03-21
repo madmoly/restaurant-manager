@@ -1,0 +1,1 @@
+ALTER TABLE `employment_electronic_contracts` ADD `previousContractId` int;

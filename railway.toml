@@ -1,0 +1,11 @@
+[build]
+builder = "nixpacks"
+buildCommand = "corepack enable && pnpm install --frozen-lockfile && pnpm run build"
+
+[deploy]
+startCommand = "pnpm run db:push && pnpm start"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[service]
+internalPort = 3000

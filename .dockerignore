@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.gitignore
+.env
+.env.*
+.manus*
+.manus-logs
+*.md
+*.zip
+.vscode
+.idea
+coverage
+tmp
+temp

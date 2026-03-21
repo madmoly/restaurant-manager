@@ -1,0 +1,97 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1772345661764,
+      "tag": "0000_short_morlocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1772346465577,
+      "tag": "0001_good_firebird",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1772354925296,
+      "tag": "0002_open_mongoose",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1772355819681,
+      "tag": "0003_lumpy_unus",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1772362649056,
+      "tag": "0004_friendly_butterfly",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1772365567352,
+      "tag": "0005_burly_masque",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1773391448878,
+      "tag": "0006_salty_darwin",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1773393453660,
+      "tag": "0007_big_yellow_claw",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1773587775297,
+      "tag": "0008_chilly_black_widow",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1773590632201,
+      "tag": "0009_eminent_wendell_vaughn",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1773590796503,
+      "tag": "0010_chunky_blockbuster",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1773767206423,
+      "tag": "0011_daily_monthly_closings",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1773863947841,
+      "tag": "0012_edit_history",
+      "breakpoints": true
+    }
+  ]
+}

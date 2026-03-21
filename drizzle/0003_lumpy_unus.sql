@@ -1,0 +1,1 @@
+ALTER TABLE `monthly_fixed_costs` ADD `contractId` int;
