@@ -1,0 +1,617 @@
+import {
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar,
+  decimal,
+  date,
+  boolean,
+  json,
+  uniqueIndex,
+} from "drizzle-orm/mysql-core";
+
+// ─── Users ───────────────────────────────────────────────────────────────────
+export const users = mysqlTable("users", {
+  id: int("id").autoincrement().primaryKey(),
+  username: varchar("username", { length: 100 }).notNull().unique(),
+  passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  email: varchar("email", { length: 320 }),
+  phone: varchar("phone", { length: 30 }),
+  // 시스템 역할: master > admin > manager > employee
+  role: mysqlEnum("role", ["master", "admin", "manager", "employee"]).default("employee").notNull(),
+  authProvider: varchar("authProvider", { length: 20 }).default("local"),
+  authProviderId: varchar("authProviderId", { length: 255 }),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  lastSignedIn: timestamp("lastSignedIn"),
+});
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+
+// ─── Restaurants ─────────────────────────────────────────────────────────────
+export const restaurants = mysqlTable("restaurants", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  address: varchar("address", { length: 255 }),
+  phone: varchar("phone", { length: 30 }),
+  monthlyTargetSales: decimal("monthlyTargetSales", { precision: 14, scale: 2 }).default("0"),
+  targetLaborRatio: decimal("targetLaborRatio", { precision: 5, scale: 2 }).default("30"),
+  targetCostRatio: decimal("targetCostRatio", { precision: 5, scale: 2 }).default("80"),
+  openTime: varchar("openTime", { length: 5 }).default("09:00"),
+  closeTime: varchar("closeTime", { length: 5 }).default("22:00"),
+  // 반차 판별 기준: 전체 운영시간 대비 근무시간 비율(%) 미만이면 반차
+  halfShiftThreshold: int("halfShiftThreshold").default(60).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  // 소프트 삭제 일시 (null이면 활성)
+  deletedAt: timestamp("deletedAt"),
+  // 매출 입력 허용 시간대 (null이면 제한 없음)
+  salesInputStartTime: varchar("salesInputStartTime", { length: 5 }),
+  salesInputEndTime: varchar("salesInputEndTime", { length: 5 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Restaurant = typeof restaurants.$inferSelect;
+export type InsertRestaurant = typeof restaurants.$inferInsert;
+
+// ─── Restaurant ↔ User ───────────────────────────────────────────────────────
+export const restaurantUsers = mysqlTable(
+  "restaurant_users",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    restaurantId: int("restaurantId").notNull(),
+    userId: int("userId").notNull(),
+    // 매장 내 역할: store_manager(점장), manager(매니저), employee(직원)
+    role: mysqlEnum("role", ["store_manager", "manager", "employee"]).notNull().default("employee"),
+    roleChangedAt: timestamp("roleChangedAt"),
+    roleChangedBy: int("roleChangedBy"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("uniq_rest_user").on(t.restaurantId, t.userId)]
+);
+
+export type RestaurantUser = typeof restaurantUsers.$inferSelect;
+
+// ─── Sales ───────────────────────────────────────────────────────────────────
+export const sales = mysqlTable("sales", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  saleDate: date("saleDate").notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  note: text("note"),
+  source: varchar("source", { length: 50 }).default("manual"),
+  recordedBy: int("recordedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Sale = typeof sales.$inferSelect;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 1: 매입/거래처 + 고정비 + 일마감 + 수익성
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Counterparties (거래처) ─────────────────────────────────────────────────
+export const counterparties = mysqlTable("counterparties", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  counterpartyType: mysqlEnum("counterpartyType", ["supplier", "online", "mart", "repair", "other"])
+    .default("supplier").notNull(),
+  contactName: varchar("contactName", { length: 50 }),
+  contactPhone: varchar("contactPhone", { length: 30 }),
+  note: text("note"),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Counterparty = typeof counterparties.$inferSelect;
+
+// ─── Purchase Orders (매입 전표) ─────────────────────────────────────────────
+export const purchaseOrders = mysqlTable("purchase_orders", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  counterpartyId: int("counterpartyId"),
+  purchaseDate: date("purchaseDate").notNull(),
+  totalAmount: decimal("totalAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+  note: text("note"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+
+// ─── Purchase Order Items (매입 항목) ────────────────────────────────────────
+export const purchaseOrderItems = mysqlTable("purchase_order_items", {
+  id: int("id").autoincrement().primaryKey(),
+  purchaseOrderId: int("purchaseOrderId").notNull(),
+  itemName: varchar("itemName", { length: 100 }).notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }),
+  unitName: varchar("unitName", { length: 30 }),
+  unitPrice: decimal("unitPrice", { precision: 14, scale: 2 }),
+  lineTotal: decimal("lineTotal", { precision: 14, scale: 2 }).notNull(),
+  category: varchar("category", { length: 50 }).default("식재료"),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PurchaseOrderItem = typeof purchaseOrderItems.$inferSelect;
+
+// ─── Fixed Costs (고정비) ────────────────────────────────────────────────────
+export const fixedCosts = mysqlTable("fixed_costs", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  costName: varchar("costName", { length: 100 }).notNull(),
+  // monthly: 월 고정, yearly: 연간(월할), one_time: 일회성
+  costType: mysqlEnum("costType", ["monthly", "yearly", "one_time"]).default("monthly").notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  // yearly면 12로 나눠서 월 배분, one_time이면 해당 월에만
+  effectiveMonth: varchar("effectiveMonth", { length: 7 }), // YYYY-MM (one_time용)
+  note: text("note"),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type FixedCost = typeof fixedCosts.$inferSelect;
+
+// ─── Daily Closing Sales Types (매출 항목 유형) ──────────────────────────────
+export const dailyClosingSalesTypes = mysqlTable("daily_closing_sales_types", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  typeName: varchar("typeName", { length: 50 }).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type DailyClosingSalesType = typeof dailyClosingSalesTypes.$inferSelect;
+
+// ─── Daily Closings (일마감) ─────────────────────────────────────────────────
+export const dailyClosings = mysqlTable("daily_closings", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  closingDate: date("closingDate").notNull(),
+  // 스냅샷 수치
+  salesTotal: decimal("salesTotal", { precision: 14, scale: 2 }).default("0").notNull(),
+  purchasesTotal: decimal("purchasesTotal", { precision: 14, scale: 2 }).default("0").notNull(),
+  laborCost: decimal("laborCost", { precision: 14, scale: 2 }).default("0").notNull(),
+  fixedCostShare: decimal("fixedCostShare", { precision: 14, scale: 2 }).default("0").notNull(),
+  profit: decimal("profit", { precision: 14, scale: 2 }).default("0").notNull(),
+  // 매출 항목별 상세
+  salesBreakdown: json("salesBreakdown").$type<Array<{ typeName: string; amount: number }>>(),
+  note: text("note"),
+  closedBy: int("closedBy"),
+  closedAt: timestamp("closedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type DailyClosing = typeof dailyClosings.$inferSelect;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 2: 스케줄 + 일일운영 + 체크리스트
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Employee Contracts (직원 계약 정보) ──────────────────────────────────────
+export const employeeContracts = mysqlTable("employee_contracts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  restaurantId: int("restaurantId").notNull(),
+  wageType: mysqlEnum("wageType", ["hourly", "monthly"]).notNull().default("hourly"),
+  wageAmount: decimal("wageAmount", { precision: 12, scale: 2 }).notNull().default("0"),
+  position: varchar("position", { length: 50 }),
+  contractStart: date("contractStart"),
+  contractEnd: date("contractEnd"),
+  contractNote: text("contractNote"),
+  weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type EmployeeContract = typeof employeeContracts.$inferSelect;
+
+// ─── Employee Leaves (연차/대체휴무) ─────────────────────────────────────────
+export const employeeLeaves = mysqlTable("employee_leaves", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  restaurantId: int("restaurantId").notNull(),
+  year: int("year").notNull(),
+  leaveType: mysqlEnum("leaveType", ["annual", "substitute", "sick", "other"]).notNull().default("annual"),
+  totalDays: decimal("totalDays", { precision: 5, scale: 1 }).notNull().default("0"),
+  usedDays: decimal("usedDays", { precision: 5, scale: 1 }).notNull().default("0"),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type EmployeeLeave = typeof employeeLeaves.$inferSelect;
+
+// ─── Schedules (근무 스케줄) ──────────────────────────────────────────────────
+export const schedules = mysqlTable("schedules", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"),  // NULL = 임시 근로자
+  tempWorkerName: varchar("tempWorkerName", { length: 100 }),
+  tempWageType: mysqlEnum("tempWageType", ["hourly", "daily"]),
+  tempWageAmount: decimal("tempWageAmount", { precision: 10, scale: 2 }),
+  restaurantId: int("restaurantId").notNull(),
+  startTime: timestamp("startTime").notNull(),
+  endTime: timestamp("endTime").notNull(),
+  // draft → published → completed → confirmed, canceled
+  status: mysqlEnum("status", ["draft", "scheduled", "published", "completed", "confirmed", "canceled"]).default("published").notNull(),
+  shiftPreset: mysqlEnum("shiftPreset", ["open", "full", "close", "custom"]).default("custom"),
+  note: text("note"),
+  editReason: text("editReason"),
+  payrollRecheckRequired: boolean("payrollRecheckRequired").default(false).notNull(),
+  createdBy: int("createdBy"),
+  completedBy: int("completedBy"),
+  confirmedBy: int("confirmedBy"),
+  publishedAt: timestamp("publishedAt"),
+  completedAt: timestamp("completedAt"),
+  confirmedAt: timestamp("confirmedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Schedule = typeof schedules.$inferSelect;
+
+// ─── Schedule Change Requests (스케줄 변경 요청) ─────────────────────────────
+export const scheduleChangeRequests = mysqlTable("schedule_change_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  scheduleId: int("scheduleId").notNull(),
+  requestedBy: int("requestedBy").notNull(),
+  restaurantId: int("restaurantId").notNull(),
+  requestType: mysqlEnum("requestType", ["swap", "change", "off"]).notNull().default("change"),
+  reason: text("reason"),
+  requestedStartTime: timestamp("requestedStartTime"),
+  requestedEndTime: timestamp("requestedEndTime"),
+  swapTargetScheduleId: int("swapTargetScheduleId"),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  reviewedBy: int("reviewedBy"),
+  reviewNote: text("reviewNote"),
+  reviewedAt: timestamp("reviewedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ScheduleChangeRequest = typeof scheduleChangeRequests.$inferSelect;
+
+// ─── Daily Operations (오픈/마감 체크) ──────────────────────────────────────────
+export const dailyOperations = mysqlTable("daily_operations", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  operationDate: date("operationDate").notNull(),
+  openCheckedAt: timestamp("openCheckedAt"),
+  openCheckedBy: int("openCheckedBy"),
+  openHeadcount: int("openHeadcount").default(0),
+  openLaborCost: decimal("openLaborCost", { precision: 14, scale: 2 }).default("0"),
+  closeCheckedAt: timestamp("closeCheckedAt"),
+  closeCheckedBy: int("closeCheckedBy"),
+  closeHeadcount: int("closeHeadcount").default(0),
+  closeLaborCost: decimal("closeLaborCost", { precision: 14, scale: 2 }).default("0"),
+  closeNote: text("closeNote"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type DailyOperation = typeof dailyOperations.$inferSelect;
+
+// ─── Daily Sales Detail (일 매출 상세) ───────────────────────────────────────
+export const dailySalesDetail = mysqlTable("daily_sales_detail", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  saleDate: date("saleDate").notNull(),
+  cashAmount: decimal("cashAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+  cardAmount: decimal("cardAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+  receiptCount: int("receiptCount").default(0).notNull(),
+  discountAmount: decimal("discountAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+  otherAmount: decimal("otherAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+  totalAmount: decimal("totalAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+  status: mysqlEnum("status", ["draft", "submitted", "confirmed"]).default("draft").notNull(),
+  confirmedBy: int("confirmedBy"),
+  confirmedAt: timestamp("confirmedAt"),
+  recordedBy: int("recordedBy"),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type DailySalesDetail = typeof dailySalesDetail.$inferSelect;
+
+// ─── Sales Other Items (기타 매출 항목) ─────────────────────────────────────
+export const salesOtherItems = mysqlTable("sales_other_items", {
+  id: int("id").autoincrement().primaryKey(),
+  dailySalesDetailId: int("dailySalesDetailId").notNull(),
+  restaurantId: int("restaurantId").notNull(),
+  itemName: varchar("itemName", { length: 100 }).notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SalesOtherItem = typeof salesOtherItems.$inferSelect;
+
+// ─── Sales Other Item Templates (기타 매출 항목 템플릿) ──────────────────────
+export const salesOtherItemTemplates = mysqlTable("sales_other_item_templates", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  itemName: varchar("itemName", { length: 100 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SalesOtherItemTemplate = typeof salesOtherItemTemplates.$inferSelect;
+
+// ─── Intermediate Sales (중간 매출) ──────────────────────────────────────────
+export const intermediateSales = mysqlTable("intermediate_sales", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  saleDate: date("saleDate").notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+  recordedBy: int("recordedBy"),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type IntermediateSale = typeof intermediateSales.$inferSelect;
+
+// ─── Store Closed Days (매장 휴무일) ───────────────────────────────────────────
+export const storeClosedDays = mysqlTable("store_closed_days", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  closedDate: date("closedDate").notNull(),
+  reason: varchar("reason", { length: 100 }),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type StoreClosedDay = typeof storeClosedDays.$inferSelect;
+
+// ─── Store Weekly Closures (정기 휴무 요일) ─────────────────────────────────
+export const storeWeeklyClosures = mysqlTable("store_weekly_closures", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  weekday: int("weekday").notNull(), // 0=일, 1=월, ...6=토
+  isClosed: boolean("isClosed").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type StoreWeeklyClosure = typeof storeWeeklyClosures.$inferSelect;
+
+// ─── Store Checklist Templates (체크리스트 템플릿) ────────────────────────────
+export const storeChecklistTemplates = mysqlTable("store_checklist_templates", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  checkType: mysqlEnum("checkType", ["open", "order", "cleaning"]).notNull(),
+  itemText: varchar("itemText", { length: 200 }).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type StoreChecklistTemplate = typeof storeChecklistTemplates.$inferSelect;
+
+// ─── Daily Checklist Logs (일별 체크리스트 기록) ────────────────────────────────
+export const dailyChecklistLogs = mysqlTable("daily_checklist_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  logDate: date("logDate").notNull(),
+  checkType: mysqlEnum("checkType", ["open", "order", "cleaning"]).notNull(),
+  checkedItemIds: json("checkedItemIds").$type<number[]>().default([]),
+  noOrderToday: boolean("noOrderToday").default(false).notNull(),
+  completedBy: int("completedBy"),
+  completedAt: timestamp("completedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type DailyChecklistLog = typeof dailyChecklistLogs.$inferSelect;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 1-B: 매입 V2 + 거래처/품목 마스터
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Items (공통 품목 마스터) ─────────────────────────────────────────────────
+export const items = mysqlTable("items", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  itemType: mysqlEnum("itemType", ["product", "service", "misc"]).default("product").notNull(),
+  costingCategory: varchar("costingCategory", { length: 50 }),
+  baseUnit: varchar("baseUnit", { length: 30 }),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Item = typeof items.$inferSelect;
+
+// ─── CounterpartyItems (거래처-품목 매핑) ────────────────────────────────────
+export const counterpartyItems = mysqlTable("counterparty_items", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  counterpartyId: int("counterpartyId").notNull(),
+  itemId: int("itemId").notNull(),
+  supplierItemName: varchar("supplierItemName", { length: 100 }),
+  purchaseUnit: varchar("purchaseUnit", { length: 30 }),
+  conversionToBase: decimal("conversionToBase", { precision: 10, scale: 4 }).default("1"),
+  decimalAllowed: boolean("decimalAllowed").default(false).notNull(),
+  quantityStep: decimal("quantityStep", { precision: 10, scale: 4 }).default("1"),
+  defaultPrice: decimal("defaultPrice", { precision: 14, scale: 2 }),
+  lastPrice: decimal("lastPrice", { precision: 14, scale: 2 }),
+  isPreferred: boolean("isPreferred").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type CounterpartyItem = typeof counterpartyItems.$inferSelect;
+
+// ─── PurchaseOrdersV2 (매입 헤더 v2) ─────────────────────────────────────────
+export const purchaseOrdersV2 = mysqlTable("purchase_orders_v2", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  counterpartyId: int("counterpartyId"),
+  purchaseDate: date("purchaseDate").notNull(),
+  status: mysqlEnum("status", ["received", "ordered"]).default("received").notNull(),
+  note: text("note"),
+  attachmentUrl: text("attachmentUrl"),
+  totalAmount: decimal("totalAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  lastModifiedBy: int("lastModifiedBy"),
+  lastModifiedAt: timestamp("lastModifiedAt"),
+  editHistory: json("editHistory").$type<Array<{ userId: number; userName: string; at: string; summary: string }>>(),
+});
+
+export type PurchaseOrderV2 = typeof purchaseOrdersV2.$inferSelect;
+
+// ─── PurchaseOrderItemsV2 (매입 항목행 v2) ───────────────────────────────────
+export const purchaseOrderItemsV2 = mysqlTable("purchase_order_items_v2", {
+  id: int("id").autoincrement().primaryKey(),
+  purchaseOrderId: int("purchaseOrderId").notNull(),
+  itemId: int("itemId"),
+  counterpartyItemId: int("counterpartyItemId"),
+  rawItemName: varchar("rawItemName", { length: 100 }),
+  itemType: mysqlEnum("itemType", ["product", "service", "misc"]).default("product").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 4 }),
+  unitName: varchar("unitName", { length: 30 }),
+  conversionToBase: decimal("conversionToBase", { precision: 10, scale: 4 }),
+  unitPrice: decimal("unitPrice", { precision: 14, scale: 2 }),
+  lineTotal: decimal("lineTotal", { precision: 14, scale: 2 }).notNull(),
+  costingCategory: varchar("costingCategory", { length: 50 }),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PurchaseOrderItemV2 = typeof purchaseOrderItemsV2.$inferSelect;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 3: 전자계약 + 알림 + 월마감
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Restaurant Contracts (매장 계약 조건) ───────────────────────────────────
+export const restaurantContracts = mysqlTable("restaurant_contracts", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  contractType: mysqlEnum("contractType", ["rent", "commission", "royalty", "investor", "other"]).notNull(),
+  name: varchar("name", { length: 200 }).notNull(),
+  calcType: mysqlEnum("calcType", ["fixed", "ratio"]).notNull().default("fixed"),
+  fixedAmount: decimal("fixedAmount", { precision: 14, scale: 2 }).default("0"),
+  ratioPercent: decimal("ratioPercent", { precision: 6, scale: 3 }).default("0"),
+  startDate: date("startDate"),
+  endDate: date("endDate"),
+  note: text("note"),
+  autoApplyToFixedCost: boolean("autoApplyToFixedCost").default(true).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type RestaurantContract = typeof restaurantContracts.$inferSelect;
+
+// ─── Employment Electronic Contracts (전자 근로계약서) ──────────────────────────
+export const employmentElectronicContracts = mysqlTable("employment_electronic_contracts", {
+  id: int("id").autoincrement().primaryKey(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  restaurantId: int("restaurantId").notNull(),
+  employeeId: int("employeeId"),
+  employeeName: varchar("employeeName", { length: 100 }).notNull(),
+  employeePhone: varchar("employeePhone", { length: 30 }),
+  employeeBirthdate: varchar("employeeBirthdate", { length: 10 }),
+  employeeAddress: text("employeeAddress"),
+  position: varchar("position", { length: 50 }).notNull().default("직원"),
+  contractType: mysqlEnum("contractType", ["permanent", "fixed_term", "part_time", "daily"]).notNull().default("part_time"),
+  contractStart: date("contractStart").notNull(),
+  contractEnd: date("contractEnd"),
+  hasProbation: boolean("hasProbation").default(false).notNull(),
+  probationMonths: int("probationMonths").default(0),
+  workPlace: varchar("workPlace", { length: 200 }),
+  jobDescription: text("jobDescription"),
+  wageType: mysqlEnum("wageType", ["hourly", "monthly"]).notNull().default("hourly"),
+  wageAmount: decimal("wageAmount", { precision: 12, scale: 2 }).notNull(),
+  weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }).notNull().default("40"),
+  workStartTime: varchar("workStartTime", { length: 5 }).default("09:00"),
+  workEndTime: varchar("workEndTime", { length: 5 }).default("18:00"),
+  breakMinutes: int("breakMinutes").default(60),
+  weeklyHoliday: varchar("weeklyHoliday", { length: 20 }).default("일요일"),
+  payDay: int("payDay").default(25),
+  payMethod: mysqlEnum("payMethod", ["bank_transfer", "cash"]).default("bank_transfer"),
+  mealProvided: boolean("mealProvided").default(false).notNull(),
+  mealAllowance: decimal("mealAllowance", { precision: 10, scale: 2 }).default("0"),
+  socialInsurance: boolean("socialInsurance").default(true).notNull(),
+  over5Employees: boolean("over5Employees").default(false).notNull(),
+  nightShiftConsent: boolean("nightShiftConsent").default(false).notNull(),
+  specialTerms: text("specialTerms"),
+  status: mysqlEnum("status", ["draft", "sent", "signed", "expired", "cancelled"]).notNull().default("draft"),
+  sentAt: timestamp("sentAt"),
+  signedAt: timestamp("signedAt"),
+  employeeSignature: text("employeeSignature"),
+  signedIp: varchar("signedIp", { length: 45 }),
+  previousContractId: int("previousContractId"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type EmploymentElectronicContract = typeof employmentElectronicContracts.$inferSelect;
+
+// ─── Notifications (알림) ─────────────────────────────────────────────────────
+export const notifications = mysqlTable("notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  recipientId: int("recipientId"),
+  type: mysqlEnum("type", [
+    "schedule_change", "cost_exceeded", "target_achieved", "general",
+    "schedule_assigned", "schedule_updated", "schedule_deleted",
+  ]).notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  content: text("content"),
+  restaurantId: int("restaurantId"),
+  isRead: boolean("isRead").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Notification = typeof notifications.$inferSelect;
+
+// ─── Monthly Closings (월마감) ───────────────────────────────────────────────
+export const monthlyClosings = mysqlTable("monthly_closings", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  year: int("year").notNull(),
+  month: int("month").notNull(),
+  salesTotal: decimal("salesTotal", { precision: 14, scale: 2 }).default("0").notNull(),
+  purchasesTotal: decimal("purchasesTotal", { precision: 14, scale: 2 }).default("0").notNull(),
+  laborCost: decimal("laborCost", { precision: 14, scale: 2 }).default("0").notNull(),
+  fixedCostsTotal: decimal("fixedCostsTotal", { precision: 14, scale: 2 }).default("0").notNull(),
+  profit: decimal("profit", { precision: 14, scale: 2 }).default("0").notNull(),
+  note: text("note"),
+  closedBy: int("closedBy"),
+  closedAt: timestamp("closedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MonthlyClosing = typeof monthlyClosings.$inferSelect;
+
+// ─── Daily Closing Special Types (매출 특이사항 유형) ─────────
+export const dailyClosingSpecialTypes = mysqlTable("daily_closing_special_types", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  typeName: varchar("typeName", { length: 50 }).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type DailyClosingSpecialType = typeof dailyClosingSpecialTypes.$inferSelect;

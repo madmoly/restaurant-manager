@@ -1,0 +1,537 @@
+import { useState } from "react";
+import { trpc } from "../lib/trpc";
+import { useRestaurant } from "@/contexts/RestaurantContext";
+import { toast } from "sonner";
+import {
+  Plus,
+  Store,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+  Package,
+  Link2,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+const TYPE_OPTIONS = [
+  { value: "supplier", label: "공급업체" },
+  { value: "online", label: "온라인" },
+  { value: "mart", label: "마트" },
+  { value: "repair", label: "수리/AS" },
+  { value: "other", label: "기타" },
+];
+
+const TYPE_LABELS: Record<string, string> = {
+  supplier: "공급업체",
+  online: "온라인",
+  mart: "마트",
+  repair: "수리/AS",
+  other: "기타",
+};
+
+// ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
+
+export default function CounterpartiesPage() {
+  const { selectedRestaurant: current } = useRestaurant();
+  const restaurantId = current?.id ?? 0;
+  const [showAdd, setShowAdd] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  const utils = trpc.useUtils();
+  const { data: list, isLoading } = trpc.counterparties.list.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+
+  const deactivate = trpc.counterparties.deactivate.useMutation({
+    onSuccess() {
+      toast.success("비활성화됨");
+      utils.counterparties.list.invalidate();
+    },
+    onError(err) {
+      toast.error(err.message);
+    },
+  });
+
+  if (!restaurantId) {
+    return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
+  }
+
+  return (
+    <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-foreground">거래처 관리</h1>
+        <Button size="sm" onClick={() => setShowAdd(true)}>
+          <Plus className="w-4 h-4 mr-1" /> 거래처 추가
+        </Button>
+      </div>
+
+      {/* 추가 모달 */}
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-foreground">거래처 추가</h2>
+              <button onClick={() => setShowAdd(false)} className="p-1 rounded hover:bg-accent">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <AddCounterpartyForm
+              restaurantId={restaurantId}
+              onDone={() => {
+                setShowAdd(false);
+                utils.counterparties.list.invalidate();
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 목록 */}
+      {isLoading ? (
+        <div className="text-center py-8 text-muted-foreground">로딩 중...</div>
+      ) : !list?.length ? (
+        <div className="text-center py-12">
+          <Store className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+          <p className="text-sm text-muted-foreground">등록된 거래처가 없습니다</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            거래처를 추가하면 매입 등록 시 선택할 수 있습니다
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {list.map((c: any) => (
+            <div key={c.id} className="border border-border rounded-lg bg-card">
+              <div className="px-4 py-3 flex items-center justify-between">
+                <div
+                  className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                  onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}
+                >
+                  <span className="text-sm font-medium text-foreground">{c.name}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                    {TYPE_LABELS[c.counterpartyType] ?? c.counterpartyType}
+                  </span>
+                  {expandedId === c.id ? (
+                    <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    if (confirm(`${c.name}을(를) 비활성화하시겠습니까?`))
+                      deactivate.mutate({ id: c.id, restaurantId });
+                  }}
+                  className="text-muted-foreground hover:text-destructive p-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* 품목 매핑 패널 */}
+              {expandedId === c.id && (
+                <CounterpartyItemsPanel
+                  restaurantId={restaurantId}
+                  counterpartyId={c.id}
+                  counterpartyName={c.name}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 거래처-품목 매핑 패널 ────────────────────────────────────────────────────
+
+function CounterpartyItemsPanel({
+  restaurantId,
+  counterpartyId,
+  counterpartyName,
+}: {
+  restaurantId: number;
+  counterpartyId: number;
+  counterpartyName: string;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const utils = trpc.useUtils();
+
+  const { data: cpItems, isLoading } = trpc.counterpartyItems.listByCounterparty.useQuery({
+    counterpartyId,
+  });
+
+  const deleteCpItem = trpc.counterpartyItems.delete.useMutation({
+    onSuccess() {
+      toast.success("매핑 삭제됨");
+      utils.counterpartyItems.listByCounterparty.invalidate();
+    },
+    onError(err) {
+      toast.error(err.message);
+    },
+  });
+
+  return (
+    <div className="border-t border-border px-4 pb-3">
+      <div className="flex items-center justify-between mt-2 mb-2">
+        <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+          <Package className="w-3 h-3" /> 등록 품목
+        </span>
+        <button
+          onClick={() => setShowAdd(true)}
+          className="text-xs text-primary hover:underline flex items-center gap-1"
+        >
+          <Link2 className="w-3 h-3" /> 품목 연결
+        </button>
+      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground">로딩 중...</p>
+      ) : !cpItems?.length ? (
+        <p className="text-xs text-muted-foreground py-2">
+          연결된 품목이 없습니다. "품목 연결"로 추가하세요.
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {cpItems.map((ci: any) => (
+            <div
+              key={ci.id}
+              className="flex items-center justify-between text-xs py-1.5 border-b border-border/50 last:border-0"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-medium text-foreground truncate">
+                  {ci.supplierItemName || ci.itemName}
+                </span>
+                {ci.supplierItemName && ci.supplierItemName !== ci.itemName && (
+                  <span className="text-muted-foreground">({ci.itemName})</span>
+                )}
+                {ci.purchaseUnit && (
+                  <span className="text-muted-foreground">{ci.purchaseUnit}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {ci.lastPrice && (
+                  <span className="text-muted-foreground tabular-nums">
+                    ₩{Number(ci.lastPrice).toLocaleString()}
+                  </span>
+                )}
+                {ci.isPreferred && (
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+                    주
+                  </span>
+                )}
+                <button
+                  onClick={() => {
+                    if (confirm("매핑을 삭제하시겠습니까?")) deleteCpItem.mutate({ id: ci.id });
+                  }}
+                  className="text-muted-foreground hover:text-destructive p-0.5"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 품목 연결 모달 */}
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold text-foreground">
+                품목 연결 — {counterpartyName}
+              </h2>
+              <button onClick={() => setShowAdd(false)} className="p-1 rounded hover:bg-accent">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <LinkItemForm
+              restaurantId={restaurantId}
+              counterpartyId={counterpartyId}
+              onDone={() => {
+                setShowAdd(false);
+                utils.counterpartyItems.listByCounterparty.invalidate();
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 품목 연결 폼 ─────────────────────────────────────────────────────────────
+
+function LinkItemForm({
+  restaurantId,
+  counterpartyId,
+  onDone,
+}: {
+  restaurantId: number;
+  counterpartyId: number;
+  onDone: () => void;
+}) {
+  const [itemId, setItemId] = useState<string>("");
+  const [newItemName, setNewItemName] = useState("");
+  const [supplierItemName, setSupplierItemName] = useState("");
+  const [purchaseUnit, setPurchaseUnit] = useState("");
+  const [defaultPrice, setDefaultPrice] = useState("");
+  const [isPreferred, setIsPreferred] = useState(false);
+  const [mode, setMode] = useState<"existing" | "new">("existing");
+
+  const { data: itemList } = trpc.items.list.useQuery({ restaurantId });
+
+  const createItem = trpc.items.create.useMutation();
+  const linkItem = trpc.counterpartyItems.create.useMutation({
+    onSuccess() {
+      toast.success("품목 연결 완료");
+      onDone();
+    },
+    onError(err) {
+      toast.error(err.message);
+    },
+  });
+
+  const handleSubmit = async () => {
+    let targetItemId = Number(itemId);
+
+    // 새 품목 모드면 먼저 품목 생성
+    if (mode === "new" && newItemName) {
+      const result = await createItem.mutateAsync({
+        restaurantId,
+        name: newItemName,
+        itemType: "product",
+      });
+      targetItemId = result.id;
+    }
+
+    if (!targetItemId) {
+      toast.error("품목을 선택하거나 이름을 입력해주세요");
+      return;
+    }
+
+    linkItem.mutate({
+      restaurantId,
+      counterpartyId,
+      itemId: targetItemId,
+      supplierItemName: supplierItemName || undefined,
+      purchaseUnit: purchaseUnit || undefined,
+      defaultPrice: defaultPrice || undefined,
+      isPreferred,
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* 모드 전환 */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setMode("existing")}
+          className={`text-xs px-3 py-1.5 rounded-md border ${
+            mode === "existing"
+              ? "border-primary bg-primary/10 text-primary"
+              : "border-border text-muted-foreground"
+          }`}
+        >
+          기존 품목 선택
+        </button>
+        <button
+          onClick={() => setMode("new")}
+          className={`text-xs px-3 py-1.5 rounded-md border ${
+            mode === "new"
+              ? "border-primary bg-primary/10 text-primary"
+              : "border-border text-muted-foreground"
+          }`}
+        >
+          새 품목 등록
+        </button>
+      </div>
+
+      {mode === "existing" ? (
+        <div>
+          <label className="text-sm font-medium text-foreground">품목 선택</label>
+          <select
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={itemId}
+            onChange={(e) => setItemId(e.target.value)}
+          >
+            <option value="">선택...</option>
+            {(itemList ?? []).map((it: any) => (
+              <option key={it.id} value={String(it.id)}>
+                {it.name} {it.baseUnit ? `(${it.baseUnit})` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : (
+        <div>
+          <label className="text-sm font-medium text-foreground">새 품목명</label>
+          <input
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={newItemName}
+            onChange={(e) => setNewItemName(e.target.value)}
+            placeholder="품목명 입력"
+            autoFocus
+          />
+        </div>
+      )}
+
+      <div>
+        <label className="text-sm font-medium text-foreground">
+          거래처 품목명 (다르면 입력)
+        </label>
+        <input
+          className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          value={supplierItemName}
+          onChange={(e) => setSupplierItemName(e.target.value)}
+          placeholder="선택사항"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-sm font-medium text-foreground">구매 단위</label>
+          <input
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={purchaseUnit}
+            onChange={(e) => setPurchaseUnit(e.target.value)}
+            placeholder="예: 박스, kg"
+          />
+        </div>
+        <div>
+          <label className="text-sm font-medium text-foreground">기본 단가</label>
+          <input
+            type="number"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={defaultPrice}
+            onChange={(e) => setDefaultPrice(e.target.value)}
+            placeholder="원"
+          />
+        </div>
+      </div>
+
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={isPreferred}
+          onChange={(e) => setIsPreferred(e.target.checked)}
+          className="rounded border-input"
+        />
+        <span className="text-sm text-foreground">주거래 품목</span>
+      </label>
+
+      <div className="flex gap-2 pt-2 justify-end">
+        <Button variant="outline" onClick={onDone}>
+          취소
+        </Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={
+            (mode === "existing" && !itemId) ||
+            (mode === "new" && !newItemName) ||
+            linkItem.isPending ||
+            createItem.isPending
+          }
+        >
+          {linkItem.isPending || createItem.isPending ? "연결 중..." : "연결"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── 거래처 추가 폼 ───────────────────────────────────────────────────────────
+
+function AddCounterpartyForm({
+  restaurantId,
+  onDone,
+}: {
+  restaurantId: number;
+  onDone: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState("supplier");
+  const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+
+  const create = trpc.counterparties.create.useMutation({
+    onSuccess() {
+      toast.success("거래처 추가 완료");
+      onDone();
+    },
+    onError(err) {
+      toast.error(err.message);
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="text-sm font-medium text-foreground">거래처명</label>
+        <input
+          className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="거래처명 입력"
+          autoFocus
+        />
+      </div>
+      <div>
+        <label className="text-sm font-medium text-foreground">유형</label>
+        <select
+          className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+        >
+          {TYPE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-sm font-medium text-foreground">담당자명</label>
+          <input
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={contactName}
+            onChange={(e) => setContactName(e.target.value)}
+            placeholder="선택"
+          />
+        </div>
+        <div>
+          <label className="text-sm font-medium text-foreground">연락처</label>
+          <input
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={contactPhone}
+            onChange={(e) => setContactPhone(e.target.value)}
+            placeholder="선택"
+          />
+        </div>
+      </div>
+      <div className="flex gap-2 pt-2 justify-end">
+        <Button variant="outline" onClick={onDone}>
+          취소
+        </Button>
+        <Button
+          onClick={() =>
+            create.mutate({
+              restaurantId,
+              name,
+              counterpartyType: type as any,
+              contactName: contactName || undefined,
+              contactPhone: contactPhone || undefined,
+            })
+          }
+          disabled={!name || create.isPending}
+        >
+          {create.isPending ? "추가 중..." : "추가"}
+        </Button>
+      </div>
+    </div>
+  );
+}

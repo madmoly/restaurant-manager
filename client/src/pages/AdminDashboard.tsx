@@ -1,0 +1,51 @@
+import { trpc } from "../lib/trpc";
+import { useLocation } from "wouter";
+import { Store, Users, TrendingUp } from "lucide-react";
+import { StatCard, Card, PageHeader, EmptyState, Loading, Button } from "@/components/ui/compat";
+
+export default function AdminDashboard() {
+  const { data: restaurants, isLoading } = trpc.restaurants.list.useQuery();
+  const [, setLocation] = useLocation();
+
+  return (
+    <div>
+      <PageHeader
+        title="관리자 대시보드"
+        description="전체 매장 현황"
+      />
+
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <StatCard icon={<Store size={14} />} label="운영 매장" value={isLoading ? "—" : (restaurants?.length ?? 0)} />
+        <StatCard icon={<TrendingUp size={14} />} label="이번 달 총매출" value="—" />
+        <StatCard icon={<Users size={14} />} label="전체 직원" value="—" />
+      </div>
+
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-slate-700">매장 목록</h3>
+        <button onClick={() => setLocation("/restaurants")} className="text-xs text-slate-500 hover:text-slate-700">
+          매장 관리 →
+        </button>
+      </div>
+
+      {isLoading ? <Loading /> : !restaurants?.length ? (
+        <EmptyState
+          icon={<Store size={36} />}
+          title="등록된 매장이 없습니다"
+          action={<Button size="sm" onClick={() => setLocation("/restaurants")}>첫 매장 등록하기</Button>}
+        />
+      ) : (
+        <div className="space-y-2">
+          {restaurants.map((r: any) => (
+            <Card key={r.id} interactive onClick={() => setLocation(`/sales/${r.id}`)} className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-900">{r.name}</p>
+                <p className="text-xs text-slate-400">{r.address || "주소 미등록"}</p>
+              </div>
+              <span className="text-xs text-slate-400">매출 조회 →</span>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
