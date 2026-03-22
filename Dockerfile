@@ -2,7 +2,7 @@ FROM node:20-slim AS deps
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.4.1 --activate
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --prod=false
+RUN pnpm install --no-frozen-lockfile --prod=false
 
 FROM node:20-slim AS builder
 WORKDIR /app
