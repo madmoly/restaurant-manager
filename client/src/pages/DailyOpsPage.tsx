@@ -556,6 +556,7 @@ const UNIT_OPTIONS = ['개', '박스', 'kg', 'g', '리터', 'ml', '팩', '봉', 
 
 interface PurchaseItemRow {
   rawItemName: string;
+  originalName?: string; // OCR 원본 전체명칭
   quantity: string;
   unitName: string;
   unitPrice: string;
@@ -723,13 +724,29 @@ function PurchaseTab({
 
       if (ocrData.items && ocrData.items.length > 0) {
         setPurchaseItems(
-          ocrData.items.map((item: any) => ({
-            rawItemName: item.name || '',
-            quantity: item.quantity || '',
-            unitName: item.unit || '개',
-            unitPrice: item.unitPrice || '',
-            lineTotal: item.lineTotal || '',
-          }))
+          ocrData.items.map((item: any) => {
+            // 합계 검증: 수량×단가 ≠ lineTotal이면 수량×단가로 보정
+            const qty = parseFloat(item.quantity || '0');
+            const price = parseFloat(item.unitPrice || '0');
+            let total = item.lineTotal || '';
+            if (qty > 0 && price > 0) {
+              const calculated = Math.round(qty * price);
+              const parsed = parseFloat(total || '0');
+              if (parsed > 0 && Math.abs(parsed - calculated) / calculated > 0.05) {
+                total = String(calculated);
+              } else if (!parsed) {
+                total = String(calculated);
+              }
+            }
+            return {
+              rawItemName: item.shortName || item.name || '',
+              originalName: item.originalName || item.name || '',
+              quantity: item.quantity || '',
+              unitName: item.unit || '개',
+              unitPrice: item.unitPrice || '',
+              lineTotal: total,
+            };
+          })
         );
         toast.success(`${ocrData.items.length}개 항목이 추출되었습니다. 확인 후 수정하세요.`);
       } else {
@@ -1003,43 +1020,50 @@ function PurchaseTab({
               <div className="space-y-2">
                 <Label className="text-xs">매입 항목</Label>
                 {purchaseItems.map((item, idx) => (
-                  <div key={idx} className={`space-y-1 border rounded-lg p-2.5 ${ocrPreviewUrl ? 'border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10' : 'border-border bg-card/50'}`}>
-                    <div className="flex items-center gap-2">
+                  <div key={idx} className={`space-y-2 border rounded-lg p-3 ${ocrPreviewUrl ? 'border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10' : 'border-border bg-card/50'}`}>
+                    {/* 품명 */}
+                    <div>
                       <Input
                         placeholder="품명"
                         value={item.rawItemName}
                         onChange={(e) => updateItem(idx, 'rawItemName', e.target.value)}
-                        className="flex-1 text-sm h-9"
+                        className="w-full text-sm h-9 font-medium"
                       />
-                      <button
-                        onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))}
-                        className="shrink-0 p-1.5 text-muted-foreground hover:text-red-500"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                      {item.originalName && item.originalName !== item.rawItemName && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5 px-1 truncate">원본: {item.originalName}</p>
+                      )}
                     </div>
+                    {/* 수량 + 단위 */}
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <span className="text-[10px] text-muted-foreground mb-0.5 block">단가</span>
-                        <Input placeholder="0" type="number" value={item.unitPrice} onChange={(e) => updateItem(idx, 'unitPrice', e.target.value)} className="text-sm h-9" />
-                      </div>
                       <div>
                         <span className="text-[10px] text-muted-foreground mb-0.5 block">수량</span>
                         <Input placeholder="0" type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', e.target.value)} className="text-sm h-9" />
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
                       <div>
                         <span className="text-[10px] text-muted-foreground mb-0.5 block">단위</span>
                         <select value={item.unitName} onChange={(e) => updateItem(idx, 'unitName', e.target.value)} className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground">
                           {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
                         </select>
                       </div>
+                    </div>
+                    {/* 단가 + 합계 */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground mb-0.5 block">단가</span>
+                        <Input placeholder="0" type="number" value={item.unitPrice} onChange={(e) => updateItem(idx, 'unitPrice', e.target.value)} className="text-sm h-9" />
+                      </div>
                       <div>
                         <span className="text-[10px] text-muted-foreground mb-0.5 block">합계</span>
-                        <Input placeholder="0" type="number" value={item.lineTotal} onChange={(e) => updateItem(idx, 'lineTotal', e.target.value)} className="text-sm h-9 font-medium" />
+                        <Input placeholder="0" type="number" value={item.lineTotal} onChange={(e) => updateItem(idx, 'lineTotal', e.target.value)} className="text-sm h-9 font-semibold" />
                       </div>
                     </div>
+                    {/* 삭제 */}
+                    <button
+                      onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))}
+                      className="w-full flex items-center justify-center gap-1 text-xs text-red-400 hover:text-red-500 py-1 border border-dashed border-red-200 dark:border-red-800 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" /> 이 항목 삭제
+                    </button>
                   </div>
                 ))}
                 <Button variant="secondary" size="sm" onClick={() => setPurchaseItems([...purchaseItems, emptyPurchaseItem()])} className="w-full">

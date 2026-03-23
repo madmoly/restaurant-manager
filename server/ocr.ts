@@ -79,10 +79,19 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 규칙:
 - 거래처명이 보이면 counterpartyName에 넣으세요
 - 각 품목의 이름, 수량, 단위, 단가, 합계를 추출하세요
-- 품목명은 핵심 이름만 간결하게 추출하세요. 용량/스펙/규격/브랜드 부가정보는 제거합니다.
-  예: "CJ 백설 포도씨유 500ml" → "포도씨유", "오뚜기 진라면 멀티(5입)" → "진라면", "국내산 삼겹살 1등급 냉장" → "삼겹살"
+
+품목명 규칙:
+- shortName: 핵심 품목명만 간결하게 (브랜드/용량/스펙/규격/등급/원산지 제거)
+  예: "CJ 백설 포도씨유 500ml" → "포도씨유", "오뚜기 진라면 멀티(5입)" → "진라면", "국내산 삼겹살 1등급 냉장" → "삼겹살", "롯데 칠성사이다 1.5L PET" → "칠성사이다"
+- originalName: 전표에 적힌 그대로의 전체 명칭
+
+합계 검증 (매우 중요):
+- 반드시 합계 = 수량 × 단가가 맞는지 검증하세요
+- 만약 전표의 합계가 수량×단가와 다르면, 수량×단가로 계산한 값을 lineTotal에 넣으세요
 - 수량/단가가 없으면 빈 문자열로 처리하세요
-- 합계가 없으면 수량 × 단가로 계산하세요
+- 합계만 있고 수량/단가가 없으면 합계를 그대로 사용하세요
+
+기타:
 - 비고/메모가 있으면 note에 넣으세요
 - 글씨가 불명확한 부분은 최선의 추정으로 입력하세요
 
@@ -91,11 +100,12 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
   "counterpartyName": "거래처명 또는 null",
   "items": [
     {
-      "name": "품목명",
+      "shortName": "축약 품목명",
+      "originalName": "전표 원본 전체명칭",
       "quantity": "수량(숫자)",
       "unit": "단위(개,kg,박스 등)",
       "unitPrice": "단가(숫자)",
-      "lineTotal": "합계(숫자)"
+      "lineTotal": "합계(숫자) — 반드시 수량×단가 검증"
     }
   ],
   "note": "비고 또는 null"
@@ -137,7 +147,9 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       counterpartyName: parsed.counterpartyName || null,
       items: Array.isArray(parsed.items)
         ? parsed.items.map((item: any) => ({
-            name: String(item.name || ""),
+            shortName: String(item.shortName || item.name || ""),
+            originalName: String(item.originalName || item.name || ""),
+            name: String(item.shortName || item.name || ""),
             quantity: String(item.quantity || ""),
             unit: String(item.unit || ""),
             unitPrice: String(item.unitPrice || ""),
