@@ -1,32 +1,32 @@
-import { useState, useMemo } from "react";
-import { trpc } from "../lib/trpc";
-import { useRestaurant } from "@/contexts/RestaurantContext";
-import { toast } from "sonner";
+import React, { useState, useEffect } from 'react';
+import { formatDate } from 'date-fns';
+import { trpc } from '../lib/trpc';
+import { useRestaurant } from '@/contexts/RestaurantContext';
+import { resizeImage } from '@/lib/imageResize';
+import { formatDateWithHoliday, getHolidayName } from '@/lib/koreanHolidays';
+import { toast } from 'sonner';
 import {
+  Camera,
+  X,
+  Plus,
+  Check,
+  AlertCircle,
+  Cloud,
+  CloudRain,
   Sun,
-  Moon,
-  CheckSquare,
-  ClipboardList,
-  Truck,
-  Sparkles,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+  Trash2,
+  Clock,
+  CheckCircle,
+  Users,
+} from 'lucide-react';
+import { Button, Card, Input, Badge } from '@/components/ui/index';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 
-// ─── 헬퍼 ────────────────────────────────────────────────────────────────────
-
-function fmtDate(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function fmtTime(d: Date | string | null) {
-  if (!d) return "-";
-  const date = typeof d === "string" ? new Date(d) : d;
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-// ─── 체크리스트 섹션 ──────────────────────────────────────────────────────────
+// ============================================================================
+// CHECKLIST SECTION COMPONENT
+// ============================================================================
 
 function ChecklistSection({
   restaurantId,
@@ -37,249 +37,2104 @@ function ChecklistSection({
 }: {
   restaurantId: number;
   date: string;
-  checkType: "open" | "order" | "cleaning";
+  checkType: 'open' | 'order' | 'cleaning';
   label: string;
   icon: React.ElementType;
 }) {
-  const utils = trpc.useUtils();
+  const [checkedItemIds, setCheckedItemIds] = useState<number[]>([]);
+  const [textValues, setTextValues] = useState<Record<number, string>>({});
+  const [photoValues, setPhotoValues] = useState<Record<number, string>>({});
 
-  const { data: templates = [] } = trpc.storeChecklists.listTemplates.useQuery(
-    { restaurantId, checkType },
-    { enabled: restaurantId > 0 }
-  );
-
-  const { data: log } = trpc.storeChecklists.getLog.useQuery(
-    { restaurantId, logDate: date, checkType },
-    { enabled: restaurantId > 0 }
-  );
-
-  const saveLog = trpc.storeChecklists.saveLog.useMutation({
-    onSuccess() {
-      toast.success(`${label} 저장됨`);
-      utils.storeChecklists.getLog.invalidate();
-    },
-    onError(err) { toast.error(err.message); },
+  const templatesQuery = trpc.storeChecklists.listTemplates.useQuery({
+    restaurantId,
+    checkType,
   });
 
-  const checkedIds = (log?.checkedItemIds as number[]) ?? [];
+  const logQuery = trpc.storeChecklists.getLog.useQuery({
+    restaurantId,
+    logDate: date,
+    checkType,
+  });
 
-  const toggleItem = (itemId: number) => {
-    const newIds = checkedIds.includes(itemId)
-      ? checkedIds.filter((id) => id !== itemId)
-      : [...checkedIds, itemId];
-    saveLog.mutate({
+  const saveLogMutation = trpc.storeChecklists.saveLog.useMutation({
+    onSuccess: () => {
+      toast.success(`${label} 체크리스트가 저장되었습니다.`);
+    },
+    onError: (error: any) => {
+      toast.error(`저장 실패: ${error.message}`);
+    },
+  });
+
+  // Initialize from log data
+  useEffect(() => {
+    if (logQuery.data?.checkedItemIds) {
+      setCheckedItemIds(logQuery.data.checkedItemIds);
+      const newTextValues: Record<number, string> = {};
+      const newPhotoValues: Record<number, string> = {};
+
+      logQuery.data.checkedItems?.forEach((item: any) => {
+        if (item.textValue) newTextValues[item.itemId] = item.textValue;
+        if (item.photoUrl) newPhotoValues[item.itemId] = item.photoUrl;
+      });
+
+      setTextValues(newTextValues);
+      setPhotoValues(newPhotoValues);
+    }
+  }, [logQuery.data]);
+
+  const handleToggleItem = (itemId: number) => {
+    setCheckedItemIds((prev) =>
+      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
+    );
+  };
+
+  const handleTextChange = (itemId: number, value: string) => {
+    setTextValues((prev) => ({ ...prev, [itemId]: value }));
+  };
+
+  const handlePhotoCapture = async (itemId: number, file: File) => {
+    try {
+      const resized = await resizeImage(file, { maxSize: 800 });
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        setPhotoValues((prev) => ({ ...prev, [itemId]: dataUrl }));
+      };
+      reader.readAsDataURL(resized);
+    } catch (error) {
+      toast.error('이미지 처리 실패');
+    }
+  };
+
+  const handleSaveLog = async () => {
+    const updatedCheckedItems = templatesQuery.data
+      ?.filter((item) => checkedItemIds.includes(item.id))
+      .map((item) => ({
+        itemId: item.id,
+        answer: textValues[item.id] || undefined,
+        photoUrl: photoValues[item.id] || undefined,
+      })) || [];
+
+    saveLogMutation.mutate({
       restaurantId,
       logDate: date,
       checkType,
-      checkedItemIds: newIds,
+      checkedItemIds,
+      checkedItems: updatedCheckedItems,
     });
   };
 
-  if (templates.length === 0) {
-    return (
-      <div className="border border-border rounded-lg p-4 bg-card">
-        <div className="flex items-center gap-2 mb-2">
-          <Icon className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm font-semibold text-foreground">{label}</span>
+  const isComplete =
+    templatesQuery.data &&
+    templatesQuery.data.length > 0 &&
+    checkedItemIds.length === templatesQuery.data.length;
+
+  const templates = templatesQuery.data || [];
+
+  return (
+    <Card className="bg-card border-border">
+      <div className="p-4 border-b border-border flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Icon className="w-5 h-5 text-foreground" />
+          <h3 className="font-semibold text-foreground">{label}</h3>
+          {isComplete && (
+            <Badge variant="success">
+              완료
+            </Badge>
+          )}
         </div>
-        <p className="text-xs text-muted-foreground">
-          템플릿이 없습니다. 매장 설정에서 체크리스트 항목을 추가해주세요.
-        </p>
+        <span className="text-sm text-muted-foreground">
+          {checkedItemIds.length} / {templates.length}
+        </span>
       </div>
+
+      <div className="p-4 space-y-3">
+        {templates.length === 0 ? (
+          <p className="text-sm text-muted-foreground">체크리스트 항목이 없습니다.</p>
+        ) : (
+          templates.map((item) => (
+            <div
+              key={item.id}
+              className="border border-border rounded-lg p-3 bg-card/50"
+            >
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  checked={checkedItemIds.includes(item.id)}
+                  onCheckedChange={() => handleToggleItem(item.id)}
+                  className="mt-1"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground">
+                    {item.itemText}
+                  </p>
+
+                  {item.requirementType === 'text_input' && (
+                    <div className="mt-2">
+                      <Input
+                        placeholder="입력"
+                        value={textValues[item.id] || ''}
+                        onChange={(e) => handleTextChange(item.id, e.target.value)}
+                        className="text-xs h-8"
+                      />
+                    </div>
+                  )}
+
+                  {item.requirementType === 'camera_photo' && (
+                    <div className="mt-2">
+                      {photoValues[item.id] ? (
+                        <div className="relative inline-block">
+                          <img
+                            src={photoValues[item.id]}
+                            alt="체크리스트 사진"
+                            className="h-16 w-16 rounded object-cover"
+                          />
+                          <button
+                            onClick={() =>
+                              setPhotoValues((prev) => {
+                                const newValues = { ...prev };
+                                delete newValues[item.id];
+                                return newValues;
+                              })
+                            }
+                            className="absolute top-0 right-0 bg-red-500 rounded-full p-1"
+                          >
+                            <X className="w-3 h-3 text-white" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex items-center gap-2 cursor-pointer text-sm text-blue-600 hover:text-blue-700">
+                          <Camera className="w-4 h-4" />
+                          사진 촬영
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={(e) => {
+                              if (e.target.files?.[0]) {
+                                handlePhotoCapture(item.id, e.target.files[0]);
+                              }
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="p-4 border-t border-border">
+        <Button
+          onClick={handleSaveLog}
+          disabled={saveLogMutation.isPending}
+          className="w-full"
+          variant="secondary"
+        >
+          {saveLogMutation.isPending ? '저장 중...' : '저장'}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+// ============================================================================
+// INFO CARDS
+// ============================================================================
+
+function DateInfoCard({ date }: { date: string }) {
+  const holiday = getHolidayName(date);
+  const dateInfo = formatDateWithHoliday(date);
+
+  return (
+    <Card className="bg-card border-border p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-lg font-semibold text-foreground">
+            {dateInfo.display}
+          </p>
+        </div>
+        {holiday && (
+          <Badge variant="danger">
+            {holiday}
+          </Badge>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function TodayStaffCard({
+  restaurantId,
+  date,
+}: {
+  restaurantId: number;
+  date: string;
+}) {
+  const query = trpc.dailyOps.getTodayStaff.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const staff = query.data?.staff || [];
+  const headcount = query.data?.headcount || 0;
+
+  return (
+    <Card className="bg-card border-border p-4">
+      <h4 className="text-sm font-semibold text-foreground mb-2">금일 출근 인원</h4>
+      <p className="text-lg font-bold text-blue-600 mb-2">{headcount}명</p>
+      {staff.length > 0 && (
+        <div className="space-y-1">
+          {staff.map((s: any) => (
+            <div key={s.userName} className="text-xs text-muted-foreground">
+              {s.userName} ({s.startTime} - {s.endTime})
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function YesterdayClosingCard({
+  restaurantId,
+  date,
+}: {
+  restaurantId: number;
+  date: string;
+}) {
+  const query = trpc.dailyOps.getYesterdaySummary.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const data = query.data;
+
+  if (!data) {
+    return (
+      <Card className="bg-card border-border p-4">
+        <h4 className="text-sm font-semibold text-foreground mb-2">어제 마감 요약</h4>
+        <p className="text-xs text-muted-foreground">어제 데이터 없음</p>
+      </Card>
     );
   }
 
-  const totalItems = templates.length;
-  const checkedCount = templates.filter((t) => checkedIds.includes(t.id)).length;
-  const allDone = checkedCount === totalItems;
+  return (
+    <Card className="bg-card border-border p-4">
+      <h4 className="text-sm font-semibold text-foreground mb-2">어제 마감 요약</h4>
+      <div className="space-y-1 text-xs text-muted-foreground">
+        <div>마감 시간: {data.closeCheckedAt || '-'}</div>
+        <div>매출: ₩{(data.totalSales || 0).toLocaleString()}</div>
+        {data.closeNote && <div>메모: {data.closeNote}</div>}
+      </div>
+    </Card>
+  );
+}
+
+interface WeatherData {
+  current: {
+    temperature_2m: number;
+    weather_code: number;
+  };
+  timezone: string;
+}
+
+function WeatherCard() {
+  const { selectedRestaurant } = useRestaurant();
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedRestaurant?.latitude || !selectedRestaurant?.longitude) {
+      setError('위치 미설정');
+      setLoading(false);
+      return;
+    }
+
+    const fetchWeather = async () => {
+      try {
+        const response = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${selectedRestaurant.latitude}&longitude=${selectedRestaurant.longitude}&current=temperature_2m,weather_code&timezone=Asia/Seoul`
+        );
+        const data = await response.json();
+        setWeather(data);
+        setError(null);
+      } catch (err) {
+        setError('날씨 정보 조회 실패');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchWeather();
+  }, [selectedRestaurant?.latitude, selectedRestaurant?.longitude]);
+
+  const getWeatherIcon = (code: number) => {
+    if (code === 0) return <Sun className="w-6 h-6 text-yellow-500" />;
+    if (code === 1 || code === 2 || code === 3) return <Cloud className="w-6 h-6 text-muted-foreground" />;
+    if ([61, 63, 65, 80, 81, 82].includes(code)) return <CloudRain className="w-6 h-6 text-blue-500" />;
+    return <Cloud className="w-6 h-6 text-muted-foreground" />;
+  };
+
+  const getWeatherDescription = (code: number): string => {
+    const weatherMap: Record<number, string> = {
+      0: '맑음',
+      1: '구름 조금',
+      2: '구름 약간',
+      3: '구름 많음',
+      45: '안개',
+      48: '어린 안개',
+      51: '이슬비 약함',
+      53: '이슬비',
+      55: '이슬비 강함',
+      61: '빗소리 약함',
+      63: '빗소리',
+      65: '빗소리 강함',
+      71: '눈 약함',
+      73: '눈',
+      75: '눈 강함',
+      77: '눈입자',
+      80: '소나기 약함',
+      81: '소나기',
+      82: '소나기 강함',
+      95: '뇌우',
+      96: '뇌우 우박',
+      99: '뇌우 큰 우박',
+    };
+    return weatherMap[code] || '알 수 없음';
+  };
+
+  if (loading) {
+    return (
+      <Card className="bg-card border-border p-4">
+        <h4 className="text-sm font-semibold text-foreground mb-2">오늘 날씨</h4>
+        <p className="text-xs text-muted-foreground">로딩 중...</p>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="bg-card border-border p-4">
+        <h4 className="text-sm font-semibold text-foreground mb-2">오늘 날씨</h4>
+        <p className="text-xs text-muted-foreground">{error}</p>
+      </Card>
+    );
+  }
+
+  if (!weather?.current) {
+    return null;
+  }
+
+  const temp = weather.current.temperature_2m;
+  const code = weather.current.weather_code;
 
   return (
-    <div className={`border rounded-lg p-4 ${allDone ? "border-green-500/50 bg-green-50/50 dark:bg-green-950/20" : "border-border bg-card"}`}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Icon className={`w-4 h-4 ${allDone ? "text-green-600" : "text-muted-foreground"}`} />
-          <span className="text-sm font-semibold text-foreground">{label}</span>
+    <Card className="bg-card border-border p-4">
+      <h4 className="text-sm font-semibold text-foreground mb-2">오늘 날씨</h4>
+      <div className="flex items-center gap-3">
+        {getWeatherIcon(code)}
+        <div>
+          <p className="text-lg font-bold text-foreground">{temp}°C</p>
+          <p className="text-xs text-muted-foreground">{getWeatherDescription(code)}</p>
         </div>
-        <span className={`text-xs font-medium ${allDone ? "text-green-600" : "text-muted-foreground"}`}>
-          {checkedCount}/{totalItems}
-        </span>
       </div>
-      <div className="space-y-1.5">
-        {templates.map((t) => {
-          const checked = checkedIds.includes(t.id);
-          return (
-            <label
-              key={t.id}
-              className="flex items-center gap-2 cursor-pointer group"
-            >
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => toggleItem(t.id)}
-                className="rounded border-input"
-              />
-              <span
-                className={`text-sm ${
-                  checked ? "line-through text-muted-foreground" : "text-foreground"
-                }`}
-              >
-                {t.itemText}
-              </span>
-            </label>
-          );
-        })}
-      </div>
+    </Card>
+  );
+}
+
+function WeekdayAvgSalesCard({
+  restaurantId,
+  date,
+}: {
+  restaurantId: number;
+  date: string;
+}) {
+  const query = trpc.dailyOps.getWeekdayAvgSales.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const data = query.data;
+
+  if (!data) {
+    return (
+      <Card className="bg-card border-border p-4">
+        <h4 className="text-sm font-semibold text-foreground mb-2">요일 평균 매출</h4>
+        <p className="text-xs text-muted-foreground">데이터 없음</p>
+      </Card>
+    );
+  }
+
+  const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+  const dayIndex = new Date(date).getDay();
+  const dayName = dayNames[dayIndex];
+
+  return (
+    <Card className="bg-card border-border p-4">
+      <h4 className="text-sm font-semibold text-foreground mb-2">요일 평균 매출</h4>
+      <p className="text-sm text-muted-foreground">
+        최근 8주 {dayName}요일 평균: <span className="font-bold text-foreground">₩{(data.avg ?? 0).toLocaleString()}</span>
+      </p>
+      <p className="text-xs text-muted-foreground mt-1">({data.count}주 기준)</p>
+    </Card>
+  );
+}
+
+// ============================================================================
+// OPEN TAB
+// ============================================================================
+
+function OpenTab({
+  restaurantId,
+  date,
+}: {
+  restaurantId: number;
+  date: string;
+}) {
+  const operationQuery = trpc.dailyOps.getByDate.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const checkOpenMutation = trpc.dailyOps.checkOpen.useMutation({
+    onSuccess: () => {
+      toast.success('오픈 체크 완료');
+      operationQuery.refetch();
+    },
+    onError: (error: any) => {
+      toast.error(`오픈 체크 실패: ${error.message}`);
+    },
+  });
+
+  const operation = operationQuery.data;
+
+  return (
+    <div className="space-y-4 p-4">
+      <DateInfoCard date={date} />
+      <TodayStaffCard restaurantId={restaurantId} date={date} />
+      <YesterdayClosingCard restaurantId={restaurantId} date={date} />
+      <WeatherCard />
+      <WeekdayAvgSalesCard restaurantId={restaurantId} date={date} />
+
+      <ChecklistSection
+        restaurantId={restaurantId}
+        date={date}
+        checkType="open"
+        label="오픈 체크리스트"
+        icon={Check}
+      />
+
+      <Button
+        onClick={() => {
+          checkOpenMutation.mutate({
+            restaurantId,
+            date,
+          });
+        }}
+        disabled={checkOpenMutation.isPending || !!operation?.openCheckedAt}
+        className="w-full"
+        size="lg"
+      >
+        {operation?.openCheckedAt
+          ? `오픈 완료 (${operation.openCheckedAt})`
+          : '오픈 체크 완료'}
+      </Button>
     </div>
   );
 }
 
-// ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
+// ============================================================================
+// PURCHASE TAB – 일별 매입 관리 (간편모드 + 전표OCR모드)
+// ============================================================================
 
-export default function DailyOpsPage() {
-  const { selectedRestaurant: current } = useRestaurant();
-  const restaurantId = current?.id ?? 0;
+const UNIT_OPTIONS = ['개', '박스', 'kg', 'g', '리터', 'ml', '팩', '봉', '병', '캔', '포', '판', '줄', '묶음', 'EA'];
 
-  const [date, setDate] = useState(new Date());
-  const dateStr = fmtDate(date);
+interface PurchaseItemRow {
+  rawItemName: string;
+  quantity: string;
+  unitName: string;
+  unitPrice: string;
+  lineTotal: string;
+  counterpartyItemId?: number;
+}
+
+function emptyPurchaseItem(): PurchaseItemRow {
+  return { rawItemName: '', quantity: '', unitName: '개', unitPrice: '', lineTotal: '' };
+}
+
+type PurchaseInputMode = 'none' | 'simple' | 'ocr';
+
+function PurchaseTab({
+  restaurantId,
+  date,
+}: {
+  restaurantId: number;
+  date: string;
+}) {
+  const [inputMode, setInputMode] = useState<PurchaseInputMode>('none');
+  const [counterpartyId, setCounterpartyId] = useState<number | undefined>(undefined);
+  const [note, setNote] = useState('');
+  const [purchaseItems, setPurchaseItems] = useState<PurchaseItemRow[]>([emptyPurchaseItem()]);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [attachmentUrl, setAttachmentUrl] = useState<string | undefined>(undefined);
+
+  // OCR 상태
+  const [ocrProcessing, setOcrProcessing] = useState(false);
+  const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
+  const [ocrError, setOcrError] = useState<string | null>(null);
 
   const utils = trpc.useUtils();
 
-  const { data: ops } = trpc.dailyOps.getByDate.useQuery(
-    { restaurantId, date: dateStr },
+  const ordersQuery = trpc.purchasesV2.listByDate.useQuery(
+    { restaurantId, date },
+    { enabled: restaurantId > 0 },
+  );
+
+  const counterpartiesQuery = trpc.counterparties.list.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+
+  const orderItemsQuery = trpc.purchasesV2.getOrderItems.useQuery(
+    { orderId: expandedId! },
+    { enabled: expandedId !== null },
+  );
+
+  // 거래처 선택 시 해당 품목 로드
+  const cpItemsQuery = trpc.counterpartyItems.listByCounterparty.useQuery(
+    { counterpartyId: counterpartyId! },
+    { enabled: counterpartyId !== undefined && counterpartyId > 0 },
+  );
+
+  const createOrder = trpc.purchasesV2.createOrder.useMutation({
+    onSuccess() {
+      toast.success('매입 전표가 등록되었습니다.');
+      utils.purchasesV2.listByDate.invalidate();
+      resetForm();
+    },
+    onError(err: any) { toast.error(`등록 실패: ${err.message}`); },
+  });
+
+  const deleteOrder = trpc.purchasesV2.deleteOrder.useMutation({
+    onSuccess() {
+      toast.success('삭제됨');
+      utils.purchasesV2.listByDate.invalidate();
+      setExpandedId(null);
+    },
+    onError(err: any) { toast.error(`삭제 실패: ${err.message}`); },
+  });
+
+  const resetForm = () => {
+    setInputMode('none');
+    setCounterpartyId(undefined);
+    setNote('');
+    setPurchaseItems([emptyPurchaseItem()]);
+    setAttachmentUrl(undefined);
+    setOcrPreviewUrl(null);
+    setOcrError(null);
+  };
+
+  const updateItem = (idx: number, field: keyof PurchaseItemRow, value: string) => {
+    const newItems = [...purchaseItems];
+    newItems[idx] = { ...newItems[idx], [field]: value };
+    if (field === 'quantity' || field === 'unitPrice') {
+      const qty = parseFloat(newItems[idx].quantity || '0');
+      const price = parseFloat(newItems[idx].unitPrice || '0');
+      if (qty > 0 && price > 0) {
+        newItems[idx].lineTotal = String(Math.round(qty * price));
+      }
+    }
+    setPurchaseItems(newItems);
+  };
+
+  // 거래처 품목 빠른 추가
+  const addFromCpItem = (cpItem: any) => {
+    const newItem: PurchaseItemRow = {
+      rawItemName: cpItem.supplierItemName || cpItem.itemName,
+      quantity: '',
+      unitName: cpItem.purchaseUnit || '개',
+      unitPrice: cpItem.lastPrice || cpItem.defaultPrice || '',
+      lineTotal: '',
+      counterpartyItemId: cpItem.id,
+    };
+    // 빈 항목이 하나뿐이면 교체, 아니면 추가
+    if (purchaseItems.length === 1 && !purchaseItems[0].rawItemName) {
+      setPurchaseItems([newItem]);
+    } else {
+      setPurchaseItems([...purchaseItems, newItem]);
+    }
+  };
+
+  // OCR 사진 업로드 + AI 추출
+  const handleOcrUpload = async (file: File) => {
+    try {
+      setOcrProcessing(true);
+      setOcrError(null);
+
+      // 미리보기 생성
+      const previewReader = new FileReader();
+      previewReader.onload = (e) => setOcrPreviewUrl(e.target?.result as string);
+      previewReader.readAsDataURL(file);
+
+      // 서버 업로드
+      const resized = await resizeImage(file, { maxSize: 1280 });
+      const formData = new FormData();
+      formData.append('photo', resized);
+
+      const uploadRes = await fetch('/api/upload/order-image', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!uploadRes.ok) throw new Error('이미지 업로드 실패');
+      const { url } = await uploadRes.json();
+      setAttachmentUrl(url);
+
+      // AI OCR 추출 요청
+      const ocrRes = await fetch('/api/ocr/extract-purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: url }),
+      });
+
+      if (!ocrRes.ok) {
+        const errData = await ocrRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'OCR 처리 실패');
+      }
+
+      const ocrData = await ocrRes.json();
+
+      // 추출 결과로 폼 프리필
+      if (ocrData.counterpartyName) {
+        // 거래처명 매칭 시도
+        const matched = counterpartiesQuery.data?.find(
+          (cp: any) => cp.name.includes(ocrData.counterpartyName) || ocrData.counterpartyName.includes(cp.name)
+        );
+        if (matched) setCounterpartyId(matched.id);
+      }
+
+      if (ocrData.items && ocrData.items.length > 0) {
+        setPurchaseItems(
+          ocrData.items.map((item: any) => ({
+            rawItemName: item.name || '',
+            quantity: item.quantity || '',
+            unitName: item.unit || '개',
+            unitPrice: item.unitPrice || '',
+            lineTotal: item.lineTotal || '',
+          }))
+        );
+        toast.success(`${ocrData.items.length}개 항목이 추출되었습니다. 확인 후 수정하세요.`);
+      } else {
+        toast.info('항목을 추출하지 못했습니다. 직접 입력해주세요.');
+      }
+
+      if (ocrData.note) setNote(ocrData.note);
+    } catch (error: any) {
+      setOcrError(error.message || 'OCR 처리 중 오류 발생');
+      toast.error(error.message || 'OCR 처리 실패');
+    } finally {
+      setOcrProcessing(false);
+    }
+  };
+
+  const handleCreate = () => {
+    const validItems = purchaseItems.filter(i => i.rawItemName.trim() && parseFloat(i.lineTotal || '0') > 0);
+    if (validItems.length === 0) {
+      toast.error('최소 1개 항목을 입력하세요.');
+      return;
+    }
+    createOrder.mutate({
+      restaurantId,
+      purchaseDate: date,
+      counterpartyId,
+      note: note || undefined,
+      attachmentUrl,
+      items: validItems.map(i => ({
+        rawItemName: i.rawItemName,
+        counterpartyItemId: i.counterpartyItemId,
+        quantity: i.quantity || undefined,
+        unitName: i.unitName || undefined,
+        unitPrice: i.unitPrice || undefined,
+        lineTotal: i.lineTotal,
+      })),
+    });
+  };
+
+  const orders = ordersQuery.data || [];
+  const counterpartiesList = counterpartiesQuery.data || [];
+  const cpItems = cpItemsQuery.data || [];
+  const totalAmount = orders.reduce((sum, o: any) => sum + Number(o.totalAmount || 0), 0);
+  const formTotal = purchaseItems.reduce((sum, i) => sum + parseFloat(i.lineTotal || '0'), 0);
+
+  return (
+    <div className="space-y-4 p-4">
+      {/* ─── 일별 매입 현황 ─── */}
+      <Card className="bg-card border-border p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-foreground">매입 현황</h3>
+          <span className="text-sm font-bold text-foreground">₩{totalAmount.toLocaleString()}</span>
+        </div>
+        {orders.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">등록된 매입 전표가 없습니다</p>
+        ) : (
+          <div className="space-y-2">
+            {orders.map((order: any) => (
+              <div key={order.id} className="border border-border rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-muted/30 transition-colors"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-medium text-foreground truncate">
+                      {order.counterpartyName || '미지정 거래처'}
+                    </span>
+                    {order.status === 'ordered' && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 font-medium">발주</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-foreground tabular-nums">₩{Number(order.totalAmount).toLocaleString()}</span>
+                    <svg className={`w-4 h-4 text-muted-foreground transition-transform ${expandedId === order.id ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </div>
+                </button>
+                {expandedId === order.id && (
+                  <div className="px-3 pb-3 border-t border-border pt-2 space-y-1.5">
+                    {orderItemsQuery.isLoading ? (
+                      <p className="text-xs text-muted-foreground">로딩 중...</p>
+                    ) : (orderItemsQuery.data || []).map((item: any) => (
+                      <div key={item.id} className="flex justify-between text-xs">
+                        <span className="text-foreground">{item.rawItemName || item.itemName || '품목'}</span>
+                        <span className="text-muted-foreground tabular-nums">
+                          {item.quantity && `${item.quantity}${item.unitName ? item.unitName : ''} × `}
+                          ₩{Number(item.lineTotal).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                    {order.note && <p className="text-xs text-muted-foreground mt-1">메모: {order.note}</p>}
+                    <div className="flex justify-end pt-1">
+                      <Button variant="ghost" size="sm" onClick={() => deleteOrder.mutate({ id: order.id })} disabled={deleteOrder.isPending}>
+                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* ─── 입력 모드 선택 ─── */}
+      {inputMode === 'none' && (
+        <div className="grid grid-cols-2 gap-2">
+          <Button onClick={() => setInputMode('simple')} variant="secondary" className="h-12 flex-col gap-0.5">
+            <Plus className="w-4 h-4" />
+            <span className="text-xs">간편 입력</span>
+          </Button>
+          <Button onClick={() => setInputMode('ocr')} variant="secondary" className="h-12 flex-col gap-0.5">
+            <Camera className="w-4 h-4" />
+            <span className="text-xs">전표 촬영 (AI)</span>
+          </Button>
+        </div>
+      )}
+
+      {/* ─── 간편 매입 입력 모드 ─── */}
+      {inputMode === 'simple' && (
+        <Card className="bg-card border-border p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-foreground text-sm">간편 매입 입력</h3>
+            <button onClick={resetForm} className="text-muted-foreground hover:text-foreground">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* 거래처 선택 */}
+          <div>
+            <Label className="text-xs">거래처</Label>
+            <select
+              value={counterpartyId ?? ''}
+              onChange={(e) => setCounterpartyId(e.target.value ? Number(e.target.value) : undefined)}
+              className="mt-1 w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+            >
+              <option value="">미지정</option>
+              {counterpartiesList.map((cp: any) => (
+                <option key={cp.id} value={cp.id}>{cp.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 거래처 품목 빠른선택 (거래처 선택 시) */}
+          {counterpartyId && cpItems.length > 0 && (
+            <div>
+              <Label className="text-xs text-muted-foreground">빠른 품목 추가</Label>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {cpItems.map((cpItem: any) => (
+                  <button
+                    key={cpItem.id}
+                    onClick={() => addFromCpItem(cpItem)}
+                    className="text-xs px-2 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded hover:bg-blue-500/20 transition-colors"
+                  >
+                    {cpItem.supplierItemName || cpItem.itemName}
+                    {cpItem.lastPrice && <span className="ml-1 opacity-70">₩{Number(cpItem.lastPrice).toLocaleString()}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 항목 입력 */}
+          <div className="space-y-2">
+            <Label className="text-xs">매입 항목</Label>
+            {purchaseItems.map((item, idx) => (
+              <div key={idx} className="space-y-1 border border-border rounded-lg p-2.5 bg-card/50">
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    placeholder="품명"
+                    value={item.rawItemName}
+                    onChange={(e) => updateItem(idx, 'rawItemName', e.target.value)}
+                    className="flex-1 text-xs h-8"
+                  />
+                  <button
+                    onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))}
+                    className="shrink-0 p-1 text-muted-foreground hover:text-red-500"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-12 gap-1.5">
+                  <Input
+                    placeholder="수량"
+                    type="number"
+                    value={item.quantity}
+                    onChange={(e) => updateItem(idx, 'quantity', e.target.value)}
+                    className="col-span-3 text-xs h-8"
+                  />
+                  <select
+                    value={item.unitName}
+                    onChange={(e) => updateItem(idx, 'unitName', e.target.value)}
+                    className="col-span-3 h-8 rounded-md border border-border bg-background px-1 text-xs text-foreground"
+                  >
+                    {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                  <Input
+                    placeholder="단가"
+                    type="number"
+                    value={item.unitPrice}
+                    onChange={(e) => updateItem(idx, 'unitPrice', e.target.value)}
+                    className="col-span-3 text-xs h-8"
+                  />
+                  <Input
+                    placeholder="합계"
+                    type="number"
+                    value={item.lineTotal}
+                    onChange={(e) => updateItem(idx, 'lineTotal', e.target.value)}
+                    className="col-span-3 text-xs h-8 font-medium"
+                  />
+                </div>
+              </div>
+            ))}
+            <Button variant="secondary" size="sm" onClick={() => setPurchaseItems([...purchaseItems, emptyPurchaseItem()])} className="w-full">
+              <Plus className="w-3 h-3 mr-1" /> 항목 추가
+            </Button>
+          </div>
+
+          {/* 메모 */}
+          <div>
+            <Label className="text-xs">메모 (선택)</Label>
+            <Input placeholder="메모" value={note} onChange={(e) => setNote(e.target.value)} className="mt-1 text-sm h-8" />
+          </div>
+
+          {/* 합계 + 저장 */}
+          <div className="bg-blue-500/5 p-3 rounded flex justify-between items-center">
+            <span className="text-sm font-medium text-foreground">합계:</span>
+            <span className="font-bold text-blue-600 tabular-nums">₩{formTotal.toLocaleString()}</span>
+          </div>
+
+          <Button onClick={handleCreate} disabled={createOrder.isPending} className="w-full">
+            {createOrder.isPending ? '등록 중...' : '매입 전표 등록'}
+          </Button>
+        </Card>
+      )}
+
+      {/* ─── 전표 촬영 (OCR) 모드 ─── */}
+      {inputMode === 'ocr' && (
+        <Card className="bg-card border-border p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-foreground text-sm">전표 촬영 입력 (AI)</h3>
+            <button onClick={resetForm} className="text-muted-foreground hover:text-foreground">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* 사진 촬영/선택 영역 */}
+          {!ocrPreviewUrl && !ocrProcessing && (
+            <label className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-8 cursor-pointer hover:bg-muted/30 transition-colors">
+              <Camera className="w-10 h-10 text-muted-foreground mb-2" />
+              <p className="text-sm font-medium text-foreground">전표/영수증 촬영</p>
+              <p className="text-xs text-muted-foreground mt-1">사진을 촬영하거나 갤러리에서 선택</p>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={(e) => {
+                  if (e.target.files?.[0]) handleOcrUpload(e.target.files[0]);
+                }}
+                className="hidden"
+              />
+            </label>
+          )}
+
+          {/* OCR 처리 중 */}
+          {ocrProcessing && (
+            <div className="flex flex-col items-center py-8 space-y-3">
+              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-foreground">AI가 전표를 분석하고 있습니다...</p>
+              <p className="text-xs text-muted-foreground">품목, 수량, 단가를 자동 추출합니다</p>
+            </div>
+          )}
+
+          {/* OCR 에러 */}
+          {ocrError && (
+            <div className="bg-red-500/10 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <p className="text-sm text-red-600 dark:text-red-400">{ocrError}</p>
+              <p className="text-xs text-muted-foreground mt-1">API 키가 설정되지 않았거나 서버 오류입니다. 직접 입력으로 전환할 수 있습니다.</p>
+              <div className="flex gap-2 mt-2">
+                <Button size="sm" variant="secondary" onClick={() => { setOcrError(null); setOcrPreviewUrl(null); }}>
+                  다시 촬영
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setInputMode('simple')}>
+                  직접 입력
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* 미리보기 + 추출 결과 편집 */}
+          {ocrPreviewUrl && !ocrProcessing && (
+            <>
+              <div className="relative">
+                <img src={ocrPreviewUrl} alt="전표 이미지" className="w-full rounded-lg border border-border max-h-48 object-contain bg-muted/20" />
+                <button
+                  onClick={() => { setOcrPreviewUrl(null); setAttachmentUrl(undefined); }}
+                  className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+
+              {/* 거래처 선택 */}
+              <div>
+                <Label className="text-xs">거래처 (AI 추출 또는 선택)</Label>
+                <select
+                  value={counterpartyId ?? ''}
+                  onChange={(e) => setCounterpartyId(e.target.value ? Number(e.target.value) : undefined)}
+                  className="mt-1 w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+                >
+                  <option value="">미지정</option>
+                  {counterpartiesList.map((cp: any) => (
+                    <option key={cp.id} value={cp.id}>{cp.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 추출된 항목 편집 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">추출된 항목 (확인 및 수정)</Label>
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-1.5 py-0.5 rounded">AI 추출 — 확인 필요</span>
+                </div>
+                {purchaseItems.map((item, idx) => (
+                  <div key={idx} className="space-y-1 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5 bg-amber-50/30 dark:bg-amber-900/10">
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        placeholder="품명"
+                        value={item.rawItemName}
+                        onChange={(e) => updateItem(idx, 'rawItemName', e.target.value)}
+                        className="flex-1 text-xs h-8"
+                      />
+                      <button onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))} className="shrink-0 p-1 text-muted-foreground hover:text-red-500">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-12 gap-1.5">
+                      <Input placeholder="수량" type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', e.target.value)} className="col-span-3 text-xs h-8" />
+                      <select value={item.unitName} onChange={(e) => updateItem(idx, 'unitName', e.target.value)} className="col-span-3 h-8 rounded-md border border-border bg-background px-1 text-xs text-foreground">
+                        {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                      <Input placeholder="단가" type="number" value={item.unitPrice} onChange={(e) => updateItem(idx, 'unitPrice', e.target.value)} className="col-span-3 text-xs h-8" />
+                      <Input placeholder="합계" type="number" value={item.lineTotal} onChange={(e) => updateItem(idx, 'lineTotal', e.target.value)} className="col-span-3 text-xs h-8 font-medium" />
+                    </div>
+                  </div>
+                ))}
+                <Button variant="secondary" size="sm" onClick={() => setPurchaseItems([...purchaseItems, emptyPurchaseItem()])} className="w-full">
+                  <Plus className="w-3 h-3 mr-1" /> 항목 추가
+                </Button>
+              </div>
+
+              {/* 메모 */}
+              <div>
+                <Label className="text-xs">메모 (선택)</Label>
+                <Input placeholder="메모" value={note} onChange={(e) => setNote(e.target.value)} className="mt-1 text-sm h-8" />
+              </div>
+
+              {/* 합계 + 저장 */}
+              <div className="bg-blue-500/5 p-3 rounded flex justify-between items-center">
+                <span className="text-sm font-medium text-foreground">합계:</span>
+                <span className="font-bold text-blue-600 tabular-nums">₩{formTotal.toLocaleString()}</span>
+              </div>
+
+              <Button onClick={handleCreate} disabled={createOrder.isPending} className="w-full">
+                {createOrder.isPending ? '등록 중...' : '확인 후 매입 전표 등록'}
+              </Button>
+            </>
+          )}
+        </Card>
+      )}
+
+      {/* 발주 체크리스트 (기존 유지) */}
+      <ChecklistSection
+        restaurantId={restaurantId}
+        date={date}
+        checkType="order"
+        label="발주 확인 체크리스트"
+        icon={Check}
+      />
+    </div>
+  );
+}
+
+// ============================================================================
+// MIDDAY TAB
+// ============================================================================
+
+function MiddayTab({
+  restaurantId,
+  date,
+}: {
+  restaurantId: number;
+  date: string;
+}) {
+  const [midAmount, setMidAmount] = useState('');
+  const [midNote, setMidNote] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  const midSalesQuery = trpc.dailyOps.getMidSales.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const orderImagesQuery = trpc.dailyOps.getOrderImages.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const saveMidSalesMutation = trpc.dailyOps.saveMidSales.useMutation({
+    onSuccess: () => {
+      toast.success('중간 매출이 저장되었습니다.');
+      setMidAmount('');
+      setMidNote('');
+      midSalesQuery.refetch();
+    },
+    onError: (error: any) => {
+      toast.error(`저장 실패: ${error.message}`);
+    },
+  });
+
+  const deleteMidSalesMutation = trpc.dailyOps.deleteMidSales.useMutation({
+    onSuccess: () => {
+      toast.success('삭제되었습니다.');
+      midSalesQuery.refetch();
+    },
+    onError: (error: any) => {
+      toast.error(`삭제 실패: ${error.message}`);
+    },
+  });
+
+  const saveOrderImageMutation = trpc.dailyOps.saveOrderImage.useMutation({
+    onSuccess: () => {
+      toast.success('이미지가 저장되었습니다.');
+      orderImagesQuery.refetch();
+    },
+    onError: (error: any) => {
+      toast.error(`저장 실패: ${error.message}`);
+    },
+  });
+
+  const deleteOrderImageMutation = trpc.dailyOps.deleteOrderImage.useMutation({
+    onSuccess: () => {
+      toast.success('삭제되었습니다.');
+      orderImagesQuery.refetch();
+    },
+    onError: (error: any) => {
+      toast.error(`삭제 실패: ${error.message}`);
+    },
+  });
+
+  const handleSaveMidSales = async () => {
+    const amount = parseInt(midAmount, 10);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error('올바른 금액을 입력하세요.');
+      return;
+    }
+
+    saveMidSalesMutation.mutate({
+      restaurantId,
+      date,
+      amount,
+      note: midNote || undefined,
+    });
+  };
+
+  const handleImageUpload = async (file: File) => {
+    try {
+      setUploading(true);
+      const resized = await resizeImage(file, { maxSize: 800 });
+      const formData = new FormData();
+      formData.append('photo', resized);
+
+      const response = await fetch('/api/upload/order-image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('업로드 실패');
+      }
+
+      const { url } = await response.json();
+      saveOrderImageMutation.mutate({
+        restaurantId,
+        date,
+        imageUrl: url,
+      });
+    } catch (error) {
+      toast.error('이미지 업로드 실패');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const midSales = midSalesQuery.data || [];
+  const orderImages = orderImagesQuery.data || [];
+
+  return (
+    <div className="space-y-4 p-4">
+      {/* 중간 매출 */}
+      <Card className="bg-card border-border p-4">
+        <h3 className="font-semibold text-foreground mb-4">중간 매출</h3>
+        <div className="space-y-3 mb-4">
+          <div>
+            <Label htmlFor="mid-amount" className="text-sm">
+              매출액
+            </Label>
+            <Input
+              id="mid-amount"
+              type="number"
+              placeholder="0"
+              value={midAmount}
+              onChange={(e) => setMidAmount(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label htmlFor="mid-note" className="text-sm">
+              메모 (선택)
+            </Label>
+            <Input
+              id="mid-note"
+              placeholder="메모"
+              value={midNote}
+              onChange={(e) => setMidNote(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          <Button
+            onClick={handleSaveMidSales}
+            disabled={saveMidSalesMutation.isPending || !midAmount}
+            className="w-full"
+          >
+            저장
+          </Button>
+        </div>
+
+        {midSales.length > 0 && (
+          <div className="border-t border-border pt-4">
+            <h4 className="text-sm font-medium text-foreground mb-2">저장된 중간 매출</h4>
+            <div className="space-y-2">
+              {midSales.map((sale: any) => (
+                <div
+                  key={sale.id}
+                  className="flex items-center justify-between bg-card/50 border border-border rounded p-2 text-sm"
+                >
+                  <div>
+                    <div className="font-medium text-foreground">
+                      ₩{sale.amount.toLocaleString()}
+                    </div>
+                    {sale.note && (
+                      <div className="text-xs text-muted-foreground">{sale.note}</div>
+                    )}
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(sale.recordedAt).toLocaleTimeString('ko-KR')}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => deleteMidSalesMutation.mutate({ id: sale.id })}
+                    disabled={deleteMidSalesMutation.isPending}
+                  >
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* 발주 이미지 */}
+      <Card className="bg-card border-border p-4">
+        <h3 className="font-semibold text-foreground mb-4">발주 이미지</h3>
+        <div className="mb-4">
+          <label className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-6 cursor-pointer hover:bg-card/50 transition">
+            <Camera className="w-8 h-8 text-muted-foreground mb-2" />
+            <p className="text-sm text-foreground">사진을 선택하세요</p>
+            <p className="text-xs text-muted-foreground">또는 드래그하여 업로드</p>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                if (e.target.files?.[0]) {
+                  handleImageUpload(e.target.files[0]);
+                }
+              }}
+              disabled={uploading}
+              className="hidden"
+            />
+          </label>
+        </div>
+
+        {orderImages.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            {orderImages.map((img: any) => (
+              <div
+                key={img.id}
+                className="relative rounded-lg overflow-hidden bg-muted h-20"
+              >
+                <img
+                  src={img.imageUrl}
+                  alt="발주 이미지"
+                  className="w-full h-full object-cover"
+                />
+                <button
+                  onClick={() => deleteOrderImageMutation.mutate({ id: img.id })}
+                  disabled={deleteOrderImageMutation.isPending}
+                  className="absolute top-1 right-1 bg-red-500 rounded-full p-1"
+                >
+                  <X className="w-3 h-3 text-white" />
+                </button>
+                {img.note && (
+                  <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 truncate">
+                    {img.note}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* 발주 체크리스트 */}
+      <ChecklistSection
+        restaurantId={restaurantId}
+        date={date}
+        checkType="order"
+        label="발주 확인 체크리스트"
+        icon={Check}
+      />
+    </div>
+  );
+}
+
+// ============================================================================
+// CLOSE TAB
+// ============================================================================
+
+interface OtherItem {
+  itemName: string;
+  amount: number;
+}
+
+interface SpecialItem {
+  typeName: string;
+  amount: number;
+  note?: string;
+}
+
+function CloseTab({
+  restaurantId,
+  date,
+}: {
+  restaurantId: number;
+  date: string;
+}) {
+  const [cashAmount, setCashAmount] = useState('');
+  const [cardAmount, setCardAmount] = useState('');
+  const [giftCardAmount, setGiftCardAmount] = useState('');
+  const [transferAmount, setTransferAmount] = useState('');
+  const [otherItems, setOtherItems] = useState<OtherItem[]>([]);
+  const [specialItems, setSpecialItems] = useState<SpecialItem[]>([]);
+  const [closeNote, setCloseNote] = useState('');
+
+  const operationQuery = trpc.dailyOps.getByDate.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const midSalesQuery = trpc.dailyOps.getMidSales.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const purchasesQuery = trpc.dailyOps.getOrderImages.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const salesQuery = trpc.dailyOps.getDailySales.useQuery({
+    restaurantId,
+    date,
+  });
+
+  const templatesQuery = trpc.dailyOps.getOtherItemTemplates.useQuery({
+    restaurantId,
+  });
+
+  const saveSalesMutation = trpc.dailyOps.saveDailySales.useMutation({
+    onSuccess: () => {
+      toast.success('매출이 저장되었습니다.');
+      salesQuery.refetch();
+    },
+    onError: (error: any) => {
+      toast.error(`저장 실패: ${error.message}`);
+    },
+  });
+
+  const checkCloseMutation = trpc.dailyOps.checkClose.useMutation({
+    onSuccess: () => {
+      toast.success('마감 체크 완료');
+      operationQuery.refetch();
+    },
+    onError: (error: any) => {
+      toast.error(`마감 체크 실패: ${error.message}`);
+    },
+  });
+
+  // Initialize from saved sales
+  useEffect(() => {
+    if (salesQuery.data) {
+      setCashAmount(salesQuery.data.cashAmount?.toString() || '');
+      setCardAmount(salesQuery.data.cardAmount?.toString() || '');
+      setGiftCardAmount(salesQuery.data.giftCardAmount?.toString() || '');
+      setTransferAmount(salesQuery.data.transferAmount?.toString() || '');
+      setOtherItems((salesQuery.data.otherItems || []).map((i: any) => ({
+        itemName: i.itemName,
+        amount: typeof i.amount === 'string' ? parseInt(i.amount, 10) : i.amount,
+      })));
+      setSpecialItems((salesQuery.data.specialItems || []).map((i: any) => ({
+        typeName: i.typeName,
+        amount: typeof i.amount === 'string' ? parseInt(i.amount, 10) : i.amount,
+        note: i.note || undefined,
+      })));
+      setCloseNote(salesQuery.data.note || '');
+    }
+  }, [salesQuery.data]);
+
+  const handleSaveSales = async () => {
+    const cash = parseInt(cashAmount || '0', 10);
+    const card = parseInt(cardAmount || '0', 10);
+    const giftCard = parseInt(giftCardAmount || '0', 10);
+    const transfer = parseInt(transferAmount || '0', 10);
+
+    saveSalesMutation.mutate({
+      restaurantId,
+      date,
+      cashAmount: cash,
+      cardAmount: card,
+      giftCardAmount: giftCard,
+      transferAmount: transfer,
+      otherItems,
+      specialItems,
+      note: closeNote || undefined,
+    });
+  };
+
+  const midSalesTotal = (midSalesQuery.data || []).reduce(
+    (sum: number, sale: any) => sum + sale.amount,
+    0
+  );
+
+  const purchaseCount = (purchasesQuery.data || []).length;
+
+  const totalAmount =
+    (parseInt(cashAmount || '0', 10) +
+      parseInt(cardAmount || '0', 10) +
+      parseInt(giftCardAmount || '0', 10) +
+      parseInt(transferAmount || '0', 10) +
+      otherItems.reduce((sum, item) => sum + item.amount, 0));
+
+  const templates = templatesQuery.data || [];
+
+  return (
+    <div className="space-y-4 p-4">
+      {/* 금일 운영 확인 */}
+      <Card className="bg-card border-border p-4">
+        <h3 className="font-semibold text-foreground mb-4">금일 운영 확인</h3>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">오픈 시간:</span>
+            <span className="text-foreground">
+              {operationQuery.data?.openCheckedAt || '미확인'}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">금일 출근 인원:</span>
+            <span className="text-foreground">
+              {operationQuery.data?.openHeadcount || 0}명
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">중간 매출:</span>
+            <span className="text-foreground">₩{midSalesTotal.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">발주 사진 수:</span>
+            <span className="text-foreground">{purchaseCount}장</span>
+          </div>
+        </div>
+      </Card>
+
+      {/* ─── 근무 스케줄 요약 ─── */}
+      <ClosingScheduleSummary restaurantId={restaurantId} date={date} />
+
+      {/* 매출 입력 */}
+      <Card className="bg-card border-border p-4">
+        <h3 className="font-semibold text-foreground mb-4">매출 입력</h3>
+        <div className="space-y-3 mb-4">
+          <div>
+            <Label htmlFor="cash" className="text-sm">
+              현금 매출
+            </Label>
+            <Input
+              id="cash"
+              type="number"
+              placeholder="0"
+              value={cashAmount}
+              onChange={(e) => setCashAmount(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label htmlFor="card" className="text-sm">
+              카드 매출
+            </Label>
+            <Input
+              id="card"
+              type="number"
+              placeholder="0"
+              value={cardAmount}
+              onChange={(e) => setCardAmount(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label htmlFor="giftcard" className="text-sm">
+              상품권 매출
+            </Label>
+            <Input
+              id="giftcard"
+              type="number"
+              placeholder="0"
+              value={giftCardAmount}
+              onChange={(e) => setGiftCardAmount(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label htmlFor="transfer" className="text-sm">
+              계좌이체 매출
+            </Label>
+            <Input
+              id="transfer"
+              type="number"
+              placeholder="0"
+              value={transferAmount}
+              onChange={(e) => setTransferAmount(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+
+          {/* 기타 매출 */}
+          <div className="border-t border-border pt-3">
+            <Label className="text-sm">기타 매출</Label>
+            {otherItems.map((item, idx) => (
+              <div key={idx} className="flex gap-2 mt-2">
+                <Input
+                  placeholder="항목명"
+                  value={item.itemName}
+                  onChange={(e) => {
+                    const newItems = [...otherItems];
+                    newItems[idx].itemName = e.target.value;
+                    setOtherItems(newItems);
+                  }}
+                  className="text-sm h-8"
+                />
+                <Input
+                  type="number"
+                  placeholder="금액"
+                  value={item.amount}
+                  onChange={(e) => {
+                    const newItems = [...otherItems];
+                    newItems[idx].amount = parseInt(e.target.value || '0', 10);
+                    setOtherItems(newItems);
+                  }}
+                  className="text-sm h-8 w-24"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setOtherItems(otherItems.filter((_, i) => i !== idx));
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            ))}
+
+            {templates.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {templates.map((template: any) => (
+                  <button
+                    key={template.id}
+                    onClick={() => {
+                      setOtherItems([
+                        ...otherItems,
+                        { itemName: template.itemName, amount: 0 },
+                      ]);
+                    }}
+                    className="text-xs px-2 py-1 bg-blue-500/10 text-blue-600 border border-blue-200 rounded hover:bg-blue-500/20"
+                  >
+                    + {template.itemName}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setOtherItems([...otherItems, { itemName: '', amount: 0 }])}
+              className="w-full mt-2"
+            >
+              <Plus className="w-4 h-4 mr-2" /> 항목 추가
+            </Button>
+          </div>
+
+          {/* 매출 특이사항 */}
+          <div className="border-t border-border pt-3">
+            <Label className="text-sm">매출 특이사항</Label>
+            <div className="flex gap-2 mt-2 flex-wrap">
+              {['할인', '외상', '미입금', '기타'].map((type) => (
+                <Button
+                  key={type}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setSpecialItems([...specialItems, { typeName: type, amount: 0 }]);
+                  }}
+                >
+                  + {type}
+                </Button>
+              ))}
+            </div>
+
+            {specialItems.map((item, idx) => (
+              <div key={idx} className="flex gap-2 mt-2">
+                <Input
+                  placeholder="유형"
+                  value={item.typeName}
+                  onChange={(e) => {
+                    const newItems = [...specialItems];
+                    newItems[idx].typeName = e.target.value;
+                    setSpecialItems(newItems);
+                  }}
+                  className="text-sm h-8 w-20"
+                />
+                <Input
+                  type="number"
+                  placeholder="금액"
+                  value={item.amount}
+                  onChange={(e) => {
+                    const newItems = [...specialItems];
+                    newItems[idx].amount = parseInt(e.target.value || '0', 10);
+                    setSpecialItems(newItems);
+                  }}
+                  className="text-sm h-8 w-24"
+                />
+                <Input
+                  placeholder="메모"
+                  value={item.note || ''}
+                  onChange={(e) => {
+                    const newItems = [...specialItems];
+                    newItems[idx].note = e.target.value;
+                    setSpecialItems(newItems);
+                  }}
+                  className="text-sm h-8"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSpecialItems(specialItems.filter((_, i) => i !== idx));
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          {/* 메모 */}
+          <div className="border-t border-border pt-3">
+            <Label htmlFor="close-note" className="text-sm">
+              매출 메모
+            </Label>
+            <Textarea
+              id="close-note"
+              placeholder="특이사항, 메모 등"
+              value={closeNote}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCloseNote(e.target.value)}
+              className="mt-1 text-sm h-20"
+            />
+          </div>
+
+          {/* 합계 */}
+          <div className="border-t border-border pt-3 bg-blue-500/5 p-3 rounded">
+            <div className="flex justify-between items-center">
+              <span className="font-semibold text-foreground">합계:</span>
+              <span className="text-lg font-bold text-blue-600">
+                ₩{totalAmount.toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          <Button
+            onClick={handleSaveSales}
+            disabled={saveSalesMutation.isPending}
+            className="w-full"
+          >
+            {saveSalesMutation.isPending ? '저장 중...' : '매출 저장'}
+          </Button>
+        </div>
+      </Card>
+
+      {/* 마감체크리스트 */}
+      <ChecklistSection
+        restaurantId={restaurantId}
+        date={date}
+        checkType="cleaning"
+        label="마감체크리스트"
+        icon={Check}
+      />
+
+      {/* ─── 일마감 손익 요약 ─── */}
+      <ClosingProfitSection restaurantId={restaurantId} date={date} />
+
+      {/* 마감 체크 */}
+      <Button
+        onClick={() => {
+          checkCloseMutation.mutate({
+            restaurantId,
+            date,
+            closeNote: closeNote || undefined,
+          });
+        }}
+        disabled={
+          checkCloseMutation.isPending ||
+          !!operationQuery.data?.closeCheckedAt ||
+          !salesQuery.data
+        }
+        className="w-full"
+        size="lg"
+        variant={operationQuery.data?.closeCheckedAt ? 'secondary' : 'primary'}
+      >
+        {operationQuery.data?.closeCheckedAt
+          ? `마감 완료 (${operationQuery.data.closeCheckedAt})`
+          : '마감 체크 완료'}
+      </Button>
+    </div>
+  );
+}
+
+// ============================================================================
+// CLOSING SCHEDULE SUMMARY – 요약형 (금일운영확인 아래 배치)
+// ============================================================================
+
+const SHIFT_LABELS: Record<string, string> = { open: '오픈', close: '마감', full: '풀타임' };
+
+function fmtTimeShort(d: Date | string) {
+  const date = typeof d === 'string' ? new Date(d) : d;
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; date: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const utils = trpc.useUtils();
+
+  const { data: daySchedules = [], isLoading } = trpc.schedules.getDaySchedules.useQuery(
+    { restaurantId, date },
     { enabled: restaurantId > 0 }
   );
 
-  const checkOpen = trpc.dailyOps.checkOpen.useMutation({
-    onSuccess() {
-      toast.success("오픈 체크 완료");
-      utils.dailyOps.getByDate.invalidate();
+  const completeDay = trpc.schedules.completeDay.useMutation({
+    onSuccess(data: any) {
+      toast.success(`${data.affected}건 근무완료 처리됨`);
+      utils.schedules.getDaySchedules.invalidate();
     },
-    onError(err) { toast.error(err.message); },
+    onError(err: any) { toast.error(err.message); },
   });
 
-  const checkClose = trpc.dailyOps.checkClose.useMutation({
+  const completeOne = trpc.schedules.completeOne.useMutation({
     onSuccess() {
-      toast.success("마감 체크 완료");
-      utils.dailyOps.getByDate.invalidate();
+      toast.success('완료 처리됨');
+      utils.schedules.getDaySchedules.invalidate();
     },
-    onError(err) { toast.error(err.message); },
+    onError(err: any) { toast.error(err.message); },
   });
 
-  const prevDay = () => {
-    const d = new Date(date);
-    d.setDate(d.getDate() - 1);
-    setDate(d);
-  };
-  const nextDay = () => {
-    const d = new Date(date);
-    d.setDate(d.getDate() + 1);
-    setDate(d);
-  };
-  const goToday = () => setDate(new Date());
+  if (isLoading) return null;
 
-  if (!current) {
-    return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
-  }
+  const confirmed = daySchedules.filter((s: any) => s.status === 'confirmed');
+  const completed = daySchedules.filter((s: any) => s.status === 'completed');
+  const draft = daySchedules.filter((s: any) => s.status === 'draft');
+  const total = daySchedules.length;
 
-  const isToday = dateStr === fmtDate(new Date());
+  if (total === 0) return null;
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-2xl mx-auto">
-      {/* 헤더 */}
-      <h1 className="text-xl font-bold text-foreground">일일 운영</h1>
+    <Card className="bg-card border-border p-4 space-y-2">
+      {/* 요약 헤더 (항상 표시) */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between"
+      >
+        <div className="flex items-center gap-2">
+          <Users className="w-4 h-4 text-muted-foreground" />
+          <span className="font-semibold text-foreground text-sm">근무 스케줄</span>
+          <span className="text-xs text-muted-foreground">({total}명)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 text-[10px]">
+            {completed.length > 0 && <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 font-medium">완료 {completed.length}</span>}
+            {confirmed.length > 0 && <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 font-medium">확정 {confirmed.length}</span>}
+            {draft.length > 0 && <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 font-medium">초안 {draft.length}</span>}
+          </div>
+          <svg className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+        </div>
+      </button>
 
-      {/* 날짜 네비게이션 */}
-      <div className="flex items-center justify-center gap-4">
-        <Button variant="ghost" size="icon" onClick={prevDay}>
-          <ChevronLeft className="w-5 h-5" />
-        </Button>
-        <button
-          onClick={goToday}
-          className={`text-sm font-medium ${isToday ? "text-primary" : "text-foreground"} hover:text-primary`}
-        >
-          {date.getFullYear()}년 {date.getMonth() + 1}월 {date.getDate()}일
-          {isToday && " (오늘)"}
-        </button>
-        <Button variant="ghost" size="icon" onClick={nextDay}>
-          <ChevronRight className="w-5 h-5" />
-        </Button>
+      {/* 펼친 상세 (접이식) */}
+      {expanded && (
+        <div className="space-y-2 pt-2 border-t border-border">
+          {confirmed.length > 0 && (
+            <div className="flex justify-end">
+              <button
+                onClick={() => completeDay.mutate({ restaurantId, date })}
+                disabled={completeDay.isPending}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
+              >
+                <CheckCircle className="w-3 h-3" />
+                전체 완료 ({confirmed.length}건)
+              </button>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            {daySchedules.map((s: any) => {
+              const isConfirmed = s.status === 'confirmed';
+              const isCompleted = s.status === 'completed';
+              const isDraft = s.status === 'draft';
+              return (
+                <div
+                  key={s.id}
+                  className={`flex items-center justify-between px-3 py-2 rounded-lg border text-sm ${
+                    isCompleted
+                      ? 'bg-emerald-500/10 border-emerald-200 dark:border-emerald-800'
+                      : isDraft
+                      ? 'bg-muted/30 border-border opacity-60'
+                      : 'bg-card border-border'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    {isCompleted ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    ) : isDraft ? (
+                      <AlertCircle className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    ) : (
+                      <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                    )}
+                    <span className="font-medium text-foreground truncate">
+                      {s.userName ?? s.tempWorkerName ?? '미배정'}
+                      {s.tempWorkerName && <span className="text-orange-500 ml-1 text-xs">(임시)</span>}
+                    </span>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {fmtTimeShort(s.startTime)}~{fmtTimeShort(s.endTime)}
+                      {s.shiftPreset && <span className="ml-1 opacity-70">({SHIFT_LABELS[s.shiftPreset] ?? s.shiftPreset})</span>}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {isCompleted && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 font-medium">완료</span>
+                    )}
+                    {isDraft && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 font-medium">초안</span>
+                    )}
+                    {isConfirmed && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); completeOne.mutate({ id: s.id }); }}
+                        disabled={completeOne.isPending}
+                        className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 font-medium hover:bg-blue-200 dark:hover:bg-blue-800/50 transition-colors"
+                      >
+                        완료처리
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ============================================================================
+// CLOSING PROFIT SECTION – 일마감 손익 요약
+// ============================================================================
+
+function ClosingProfitSection({ restaurantId, date }: { restaurantId: number; date: string }) {
+  const [laborCost, setLaborCost] = useState('0');
+  const [closingNote, setClosingNote] = useState('');
+  const utils = trpc.useUtils();
+
+  const { data: calculated, isLoading: calcLoading } = trpc.dailyClosings.calculateDay.useQuery(
+    { restaurantId, date },
+    { enabled: restaurantId > 0 }
+  );
+
+  const { data: existing } = trpc.dailyClosings.getByDate.useQuery(
+    { restaurantId, date },
+    { enabled: restaurantId > 0 }
+  );
+
+  const dateObj = new Date(date);
+  const daysInMonth = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0).getDate();
+  const { data: fixedTotal } = trpc.fixedCosts.monthlyTotal.useQuery(
+    { restaurantId, year: dateObj.getFullYear(), month: dateObj.getMonth() + 1 },
+    { enabled: restaurantId > 0 }
+  );
+  const dailyFixed = fixedTotal ? Math.round(Number(fixedTotal.total) / daysInMonth) : 0;
+
+  useEffect(() => {
+    if (existing) {
+      setLaborCost(existing.laborCost ?? '0');
+      setClosingNote(existing.note ?? '');
+    } else {
+      setLaborCost('0');
+      setClosingNote('');
+    }
+  }, [existing]);
+
+  const save = trpc.dailyClosings.save.useMutation({
+    onSuccess(data: any) {
+      toast.success(data.updated ? '마감 수정 완료' : '마감 저장 완료');
+      utils.dailyClosings.getByDate.invalidate();
+      utils.dailyClosings.listByMonth.invalidate();
+      utils.dailyClosings.monthlySummary.invalidate();
+    },
+    onError(err: any) { toast.error(err.message); },
+  });
+
+  if (calcLoading) return null;
+
+  const salesTotal = calculated?.salesTotal ?? '0';
+  const purchasesTotal = calculated?.purchasesTotal ?? '0';
+  const profit = Number(salesTotal) - Number(purchasesTotal) - Number(laborCost) - dailyFixed;
+
+  const handleSaveClosing = () => {
+    save.mutate({
+      restaurantId,
+      closingDate: date,
+      salesTotal,
+      purchasesTotal,
+      laborCost,
+      fixedCostShare: String(dailyFixed),
+      profit: String(profit),
+      note: closingNote || undefined,
+    });
+  };
+
+  return (
+    <Card className="bg-card border-border p-4 space-y-3">
+      <h3 className="font-semibold text-foreground text-sm">일마감 손익</h3>
+
+      {existing && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 rounded-lg">
+          <Check className="w-3.5 h-3.5 text-emerald-600" />
+          <span className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">마감 완료됨 — 수정 가능</span>
+        </div>
+      )}
+
+      {/* 자동 집계 */}
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="bg-muted/30 rounded-lg p-2.5">
+          <span className="text-xs text-muted-foreground">매출</span>
+          <div className="font-semibold text-foreground tabular-nums">{Number(salesTotal).toLocaleString()}원</div>
+        </div>
+        <div className="bg-muted/30 rounded-lg p-2.5">
+          <span className="text-xs text-muted-foreground">매입</span>
+          <div className="font-semibold text-foreground tabular-nums">{Number(purchasesTotal).toLocaleString()}원</div>
+        </div>
       </div>
 
-      {/* 오픈/마감 상태 */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* 오픈 체크 */}
-        <div className={`border rounded-lg p-4 ${ops?.openCheckedAt ? "border-amber-500/50 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"}`}>
-          <div className="flex items-center gap-2 mb-2">
-            <Sun className={`w-4 h-4 ${ops?.openCheckedAt ? "text-amber-600" : "text-muted-foreground"}`} />
-            <span className="text-sm font-semibold text-foreground">오픈 체크</span>
-          </div>
-          {ops?.openCheckedAt ? (
-            <div className="text-xs text-muted-foreground space-y-1">
-              <div>체크 시각: {fmtTime(ops.openCheckedAt)}</div>
-              <div>출근 인원: {ops.openHeadcount}명</div>
-            </div>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full mt-2"
-              onClick={() => checkOpen.mutate({ restaurantId, date: dateStr })}
-              disabled={checkOpen.isPending}
-            >
-              오픈 체크하기
-            </Button>
-          )}
-        </div>
+      {/* 인건비 */}
+      <div>
+        <Label className="text-xs">인건비 (원)</Label>
+        <Input
+          type="number"
+          value={laborCost}
+          onChange={(e) => setLaborCost(e.target.value)}
+          className="mt-1 text-sm h-9"
+        />
+      </div>
 
-        {/* 마감 체크 */}
-        <div className={`border rounded-lg p-4 ${ops?.closeCheckedAt ? "border-indigo-500/50 bg-indigo-50/50 dark:bg-indigo-950/20" : "border-border bg-card"}`}>
-          <div className="flex items-center gap-2 mb-2">
-            <Moon className={`w-4 h-4 ${ops?.closeCheckedAt ? "text-indigo-600" : "text-muted-foreground"}`} />
-            <span className="text-sm font-semibold text-foreground">마감 체크</span>
-          </div>
-          {ops?.closeCheckedAt ? (
-            <div className="text-xs text-muted-foreground space-y-1">
-              <div>체크 시각: {fmtTime(ops.closeCheckedAt)}</div>
-              <div>최종 인원: {ops.closeHeadcount}명</div>
-              {ops.closeNote && <div>메모: {ops.closeNote}</div>}
-            </div>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full mt-2"
-              onClick={() => checkClose.mutate({ restaurantId, date: dateStr })}
-              disabled={checkClose.isPending}
-            >
-              마감 체크하기
-            </Button>
-          )}
+      {/* 고정비 */}
+      <div className="text-xs text-muted-foreground">
+        고정비 (일할): {dailyFixed.toLocaleString()}원
+        <span className="ml-1 opacity-70">({Number(fixedTotal?.total ?? 0).toLocaleString()}원 ÷ {daysInMonth}일)</span>
+      </div>
+
+      {/* 손익 */}
+      <div className={`p-3 rounded-lg ${profit >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-muted-foreground">손익</span>
+          <span className={`text-xl font-bold tabular-nums ${profit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600'}`}>
+            {profit >= 0 ? '+' : ''}{profit.toLocaleString()}원
+          </span>
         </div>
       </div>
 
-      {/* 체크리스트 섹션들 */}
-      <div className="space-y-3">
-        <ChecklistSection
-          restaurantId={restaurantId}
-          date={dateStr}
-          checkType="open"
-          label="오픈 체크리스트"
-          icon={ClipboardList}
-        />
-        <ChecklistSection
-          restaurantId={restaurantId}
-          date={dateStr}
-          checkType="order"
-          label="발주 확인"
-          icon={Truck}
-        />
-        <ChecklistSection
-          restaurantId={restaurantId}
-          date={dateStr}
-          checkType="cleaning"
-          label="청소 체크리스트"
-          icon={Sparkles}
-        />
+      {/* 메모 */}
+      <Input
+        value={closingNote}
+        onChange={(e) => setClosingNote(e.target.value)}
+        placeholder="마감 메모 (선택)"
+        className="text-sm h-9"
+      />
+
+      <Button onClick={handleSaveClosing} disabled={save.isPending} className="w-full">
+        {save.isPending ? '저장 중...' : existing ? '마감 수정' : '마감 확정'}
+      </Button>
+    </Card>
+  );
+}
+
+// ============================================================================
+// MAIN PAGE
+// ============================================================================
+
+type TabType = 'open' | 'purchase' | 'midday' | 'close';
+
+export default function DailyOpsPage() {
+  const { selectedRestaurant } = useRestaurant();
+  const [date, setDate] = useState(formatDate(new Date(), 'yyyy-MM-dd'));
+  const [activeTab, setActiveTab] = useState<TabType>('open');
+
+  if (!selectedRestaurant) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <AlertCircle className="w-8 h-8 mr-2 text-red-500" />
+        <p className="text-foreground">매장을 선택해주세요.</p>
+      </div>
+    );
+  }
+
+  const tabs: { key: TabType; label: string }[] = [
+    { key: 'open', label: '오픈' },
+    { key: 'purchase', label: '매입' },
+    { key: 'midday', label: '일간보고' },
+    { key: 'close', label: '마감' },
+  ];
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="max-w-2xl mx-auto">
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border p-4">
+          <h1 className="text-2xl font-bold text-foreground mb-3">
+            {selectedRestaurant.name}
+          </h1>
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="text-sm h-9"
+            />
+          </div>
+        </div>
+
+        {/* Tab Navigation */}
+        <div className="sticky top-[88px] z-10 bg-background/95 backdrop-blur border-b border-border">
+          <div className="max-w-2xl mx-auto px-4">
+            <div className="flex gap-1 overflow-x-auto">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`flex-shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === tab.key
+                      ? 'text-foreground border-blue-600'
+                      : 'text-muted-foreground hover:text-foreground border-transparent'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Tab Content */}
+        <div className="pb-20">
+          {activeTab === 'open' && (
+            <OpenTab restaurantId={selectedRestaurant.id} date={date} />
+          )}
+          {activeTab === 'purchase' && (
+            <PurchaseTab restaurantId={selectedRestaurant.id} date={date} />
+          )}
+          {activeTab === 'midday' && (
+            <MiddayTab restaurantId={selectedRestaurant.id} date={date} />
+          )}
+          {activeTab === 'close' && (
+            <CloseTab restaurantId={selectedRestaurant.id} date={date} />
+          )}
+        </div>
       </div>
     </div>
   );

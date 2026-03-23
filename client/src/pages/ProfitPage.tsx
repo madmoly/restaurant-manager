@@ -58,26 +58,26 @@ export default function ProfitPage() {
       <PageHeader title="수익 분석" description={current?.name} />
 
       <MonthNav year={year} month={month} onPrev={prevMonth} onNext={nextMonth}
-        rightSlot={summary && <span className="text-xs text-slate-400">{summary.closedDays}일 마감 기준</span>}
+        rightSlot={summary && <span className="text-xs text-muted-foreground">{summary.closedDays}일 마감 기준</span>}
       />
 
       {/* 큰 수익 카드 */}
       <Card className={`p-5 mb-5 ${profit >= 0 ? "border-emerald-200" : "border-red-200"}`}>
         <div className="flex items-center gap-2 mb-2">
           {profit >= 0 ? <TrendingUp size={18} className="text-emerald-600" /> : <TrendingDown size={18} className="text-red-500" />}
-          <span className="text-sm font-medium text-slate-500">이번 달 추정 순이익</span>
+          <span className="text-sm font-medium text-muted-foreground">이번 달 추정 순이익</span>
         </div>
         <p className={`text-3xl font-bold tabular-nums ${profit >= 0 ? "text-emerald-700" : "text-red-600"}`}>
           {profit >= 0 ? "+" : ""}{profit.toLocaleString()}
-          <span className="text-sm text-slate-400 ml-1">원</span>
+          <span className="text-sm text-muted-foreground ml-1">원</span>
         </p>
         {sales > 0 && (
-          <p className="text-xs text-slate-400 mt-1">수익률 {profitRatio.toFixed(1)}%</p>
+          <p className="text-xs text-muted-foreground mt-1">수익률 {profitRatio.toFixed(1)}%</p>
         )}
       </Card>
 
       {/* 비용 구성 */}
-      <h3 className="text-sm font-semibold text-slate-700 mb-3">비용 구성</h3>
+      <h3 className="text-sm font-semibold text-foreground mb-3">비용 구성</h3>
       <div className="grid grid-cols-2 gap-3 mb-6">
         <StatCard label="매출" value={sales.toLocaleString()} unit="원" />
         <StatCard label="매입 (식재료비)" value={purchases.toLocaleString()} unit="원" />
@@ -88,7 +88,7 @@ export default function ProfitPage() {
       {/* 비율 분석 */}
       {sales > 0 && (
         <>
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">비율 분석</h3>
+          <h3 className="text-sm font-semibold text-foreground mb-3">비율 분석</h3>
           <Card className="p-4 mb-5">
             <div className="space-y-4">
               <RatioBar label="매출원가율 (매입/매출)" value={costRatio} target={targetCostRatio > 0 ? targetCostRatio : undefined} unit="%" warning={costRatio > 35} />
@@ -102,23 +102,23 @@ export default function ProfitPage() {
       {/* 목표 대비 */}
       {targetSales > 0 && (
         <>
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">월 목표 대비</h3>
+          <h3 className="text-sm font-semibold text-foreground mb-3">월 목표 대비</h3>
           <Card className="p-4">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-slate-500">매출 목표 달성률</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="text-xs text-muted-foreground">매출 목표 달성률</span>
+              <span className="text-sm font-bold text-foreground">
                 {Math.round(sales / targetSales * 100)}%
               </span>
             </div>
-            <div className="w-full bg-slate-100 rounded-full h-3">
+            <div className="w-full bg-muted rounded-full h-3">
               <div
-                className="bg-slate-900 h-3 rounded-full transition-all duration-500"
+                className="bg-primary h-3 rounded-full transition-all duration-500"
                 style={{ width: `${Math.min(Math.round(sales / targetSales * 100), 100)}%` }}
               />
             </div>
             <div className="flex justify-between mt-1.5">
-              <span className="text-xs text-slate-400">{sales.toLocaleString()}원</span>
-              <span className="text-xs text-slate-400">목표 {targetSales.toLocaleString()}원</span>
+              <span className="text-xs text-muted-foreground">{sales.toLocaleString()}원</span>
+              <span className="text-xs text-muted-foreground">목표 {targetSales.toLocaleString()}원</span>
             </div>
           </Card>
         </>
@@ -131,26 +131,26 @@ function RatioBar({ label, value, target, unit, warning, good }: {
   label: string; value: number; target?: number; unit: string; warning?: boolean; good?: boolean;
 }) {
   const barWidth = Math.min(Math.max(value, 0), 100);
-  let color = "bg-slate-400";
+  let color = "bg-muted-foreground";
   if (warning) color = "bg-red-400";
   else if (good) color = "bg-emerald-400";
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-slate-500">{label}</span>
-        <span className={`text-sm font-semibold tabular-nums ${warning ? "text-red-500" : good ? "text-emerald-600" : "text-slate-700"}`}>
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className={`text-sm font-semibold tabular-nums ${warning ? "text-red-500" : good ? "text-emerald-600" : "text-foreground"}`}>
           {value.toFixed(1)}{unit}
           {target !== undefined && (
-            <span className="text-xs text-slate-400 ml-1.5">목표 {target}{unit}</span>
+            <span className="text-xs text-muted-foreground ml-1.5">목표 {target}{unit}</span>
           )}
         </span>
       </div>
-      <div className="w-full bg-slate-100 rounded-full h-2 relative">
+      <div className="w-full bg-muted rounded-full h-2 relative">
         <div className={`${color} h-2 rounded-full transition-all duration-500`} style={{ width: `${barWidth}%` }} />
         {target !== undefined && (
           <div
-            className="absolute top-0 h-2 w-0.5 bg-slate-900"
+            className="absolute top-0 h-2 w-0.5 bg-primary"
             style={{ left: `${Math.min(target, 100)}%` }}
           />
         )}

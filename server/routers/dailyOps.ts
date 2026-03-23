@@ -1,11 +1,23 @@
 import { z } from "zod";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, sum, between, count } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
-import { dailyOperations } from "../../drizzle/schema";
+import {
+  dailyOperations,
+  dailySalesDetail,
+  salesOtherItems,
+  salesOtherItemTemplates,
+  dailySalesSpecialItems,
+  intermediateSales,
+  dailyOrderImages,
+  schedules,
+  users,
+  dailyChecklistLogs,
+  storeChecklistTemplates,
+} from "../../drizzle/schema";
 
 export const dailyOpsRouter = router({
-  /** 오늘 운영 현황 조회 (없으면 null) */
+  /** 오늘 운영 현황 조회 */
   getByDate: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
     .query(async ({ input }) => {
@@ -33,7 +45,6 @@ export const dailyOpsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      // upsert: 있으면 업데이트, 없으면 생성
       const [existing] = await db
         .select()
         .from(dailyOperations)
@@ -116,5 +127,496 @@ export const dailyOpsRouter = router({
         closeNote: input.closeNote,
       } as any);
       return { id: (result as any).insertId };
+    }),
+
+  // ─── 어제 마감 요약 ─────────────────────────────────────────────────────
+  getYesterdaySummary: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      // date의 전일
+      const d = new Date(input.date);
+      d.setDate(d.getDate() - 1);
+      const yesterday = d.toISOString().slice(0, 10);
+
+      const [ops] = await db
+        .select()
+        .from(dailyOperations)
+        .where(
+          and(
+            eq(dailyOperations.restaurantId, input.restaurantId),
+            sql`${dailyOperations.operationDate} = ${yesterday}`
+          )
+        )
+        .limit(1);
+
+      const [sales] = await db
+        .select()
+        .from(dailySalesDetail)
+        .where(
+          and(
+            eq(dailySalesDetail.restaurantId, input.restaurantId),
+            sql`${dailySalesDetail.saleDate} = ${yesterday}`
+          )
+        )
+        .limit(1);
+
+      return {
+        date: yesterday,
+        closeCheckedAt: ops?.closeCheckedAt ?? null,
+        closeNote: ops?.closeNote ?? null,
+        totalSales: sales ? Number(sales.totalAmount) : null,
+        cashAmount: sales ? Number(sales.cashAmount) : null,
+        cardAmount: sales ? Number(sales.cardAmount) : null,
+      };
+    }),
+
+  // ─── 해당 요일 평균 매출 (최근 8주) ──────────────────────────────────────
+  getWeekdayAvgSales: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      const d = new Date(input.date);
+      const dayOfWeek = d.getDay(); // 0=Sun, 6=Sat
+      // 최근 8주 이내 같은 요일의 매출 평균
+      const eightWeeksAgo = new Date(d);
+      eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
+      const startStr = eightWeeksAgo.toISOString().slice(0, 10);
+
+      const rows = await db
+        .select({ total: dailySalesDetail.totalAmount })
+        .from(dailySalesDetail)
+        .where(
+          and(
+            eq(dailySalesDetail.restaurantId, input.restaurantId),
+            sql`${dailySalesDetail.saleDate} >= ${startStr}`,
+            sql`${dailySalesDetail.saleDate} < ${input.date}`,
+            sql`DAYOFWEEK(${dailySalesDetail.saleDate}) = ${dayOfWeek + 1}` // MySQL: 1=Sun
+          )
+        );
+
+      if (rows.length === 0) return { avg: null, count: 0 };
+      const total = rows.reduce((s, r) => s + Number(r.total), 0);
+      return { avg: Math.round(total / rows.length), count: rows.length };
+    }),
+
+  // ─── 금일 출근 인원 (확정 스케줄 기반) ──────────────────────────────────
+  getTodayStaff: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      const rows = await db
+        .select({
+          userName: users.name,
+          startTime: schedules.startTime,
+          endTime: schedules.endTime,
+        })
+        .from(schedules)
+        .leftJoin(users, eq(schedules.userId, users.id))
+        .where(
+          and(
+            eq(schedules.restaurantId, input.restaurantId),
+            sql`DATE(${schedules.startTime}) = ${input.date}`,
+            eq(schedules.status, "confirmed")
+          )
+        );
+
+      return { headcount: rows.length, staff: rows };
+    }),
+
+  // ─── 중간매출 ──────────────────────────────────────────────────────────
+  getMidSales: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      const rows = await db
+        .select()
+        .from(intermediateSales)
+        .where(
+          and(
+            eq(intermediateSales.restaurantId, input.restaurantId),
+            sql`${intermediateSales.saleDate} = ${input.date}`
+          )
+        );
+      return rows;
+    }),
+
+  saveMidSales: managerProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        date: z.string(),
+        amount: z.number(),
+        note: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const [result] = await db.insert(intermediateSales).values({
+        restaurantId: input.restaurantId,
+        saleDate: input.date,
+        amount: String(input.amount),
+        note: input.note,
+        recordedBy: ctx.user.userId,
+      } as any);
+      return { id: (result as any).insertId };
+    }),
+
+  deleteMidSales: managerProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await db.delete(intermediateSales).where(eq(intermediateSales.id, input.id));
+      return { ok: true };
+    }),
+
+  // ─── 발주 이미지 ────────────────────────────────────────────────────────
+  getOrderImages: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      return db
+        .select()
+        .from(dailyOrderImages)
+        .where(
+          and(
+            eq(dailyOrderImages.restaurantId, input.restaurantId),
+            sql`${dailyOrderImages.imageDate} = ${input.date}`
+          )
+        );
+    }),
+
+  saveOrderImage: managerProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        date: z.string(),
+        imageUrl: z.string(),
+        note: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const [result] = await db.insert(dailyOrderImages).values({
+        restaurantId: input.restaurantId,
+        imageDate: input.date,
+        imageUrl: input.imageUrl,
+        note: input.note,
+        uploadedBy: ctx.user.userId,
+      } as any);
+      return { id: (result as any).insertId };
+    }),
+
+  deleteOrderImage: managerProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await db.delete(dailyOrderImages).where(eq(dailyOrderImages.id, input.id));
+      return { ok: true };
+    }),
+
+  // ─── 마감 매출 입력/조회 ─────────────────────────────────────────────────
+  getDailySales: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      const [detail] = await db
+        .select()
+        .from(dailySalesDetail)
+        .where(
+          and(
+            eq(dailySalesDetail.restaurantId, input.restaurantId),
+            sql`${dailySalesDetail.saleDate} = ${input.date}`
+          )
+        )
+        .limit(1);
+
+      if (!detail) return null;
+
+      const otherItems = await db
+        .select()
+        .from(salesOtherItems)
+        .where(eq(salesOtherItems.dailySalesDetailId, detail.id));
+
+      const specialItems = await db
+        .select()
+        .from(dailySalesSpecialItems)
+        .where(eq(dailySalesSpecialItems.dailySalesDetailId, detail.id));
+
+      return { ...detail, otherItems, specialItems };
+    }),
+
+  saveDailySales: managerProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        date: z.string(),
+        cashAmount: z.number(),
+        cardAmount: z.number(),
+        giftCardAmount: z.number().default(0),
+        transferAmount: z.number().default(0),
+        otherItems: z.array(z.object({ itemName: z.string(), amount: z.number() })).default([]),
+        specialItems: z.array(z.object({ typeName: z.string(), amount: z.number(), note: z.string().optional() })).default([]),
+        note: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const otherTotal = input.otherItems.reduce((s, i) => s + i.amount, 0);
+      const specialTotal = input.specialItems.reduce((s, i) => s + i.amount, 0);
+      const totalAmount =
+        input.cashAmount + input.cardAmount + input.giftCardAmount + input.transferAmount + otherTotal;
+
+      // upsert dailySalesDetail
+      const [existing] = await db
+        .select()
+        .from(dailySalesDetail)
+        .where(
+          and(
+            eq(dailySalesDetail.restaurantId, input.restaurantId),
+            sql`${dailySalesDetail.saleDate} = ${input.date}`
+          )
+        )
+        .limit(1);
+
+      let detailId: number;
+      const data = {
+        cashAmount: String(input.cashAmount),
+        cardAmount: String(input.cardAmount),
+        giftCardAmount: String(input.giftCardAmount),
+        transferAmount: String(input.transferAmount),
+        otherAmount: String(otherTotal),
+        discountAmount: String(specialTotal),
+        totalAmount: String(totalAmount),
+        note: input.note,
+        recordedBy: ctx.user.userId,
+        status: "submitted" as const,
+      };
+
+      if (existing) {
+        await db.update(dailySalesDetail).set(data).where(eq(dailySalesDetail.id, existing.id));
+        detailId = existing.id;
+        // 기존 otherItems/specialItems 삭제 후 재입력
+        await db.delete(salesOtherItems).where(eq(salesOtherItems.dailySalesDetailId, detailId));
+        await db.delete(dailySalesSpecialItems).where(eq(dailySalesSpecialItems.dailySalesDetailId, detailId));
+      } else {
+        const [result] = await db.insert(dailySalesDetail).values({
+          restaurantId: input.restaurantId,
+          saleDate: input.date,
+          ...data,
+        } as any);
+        detailId = (result as any).insertId;
+      }
+
+      // 기타 매출 항목
+      for (const item of input.otherItems) {
+        await db.insert(salesOtherItems).values({
+          dailySalesDetailId: detailId,
+          restaurantId: input.restaurantId,
+          itemName: item.itemName,
+          amount: String(item.amount),
+        } as any);
+        // 템플릿 자동 등록 (중복 체크)
+        const [tmpl] = await db
+          .select()
+          .from(salesOtherItemTemplates)
+          .where(
+            and(
+              eq(salesOtherItemTemplates.restaurantId, input.restaurantId),
+              eq(salesOtherItemTemplates.itemName, item.itemName)
+            )
+          )
+          .limit(1);
+        if (!tmpl) {
+          await db.insert(salesOtherItemTemplates).values({
+            restaurantId: input.restaurantId,
+            itemName: item.itemName,
+          } as any);
+        }
+      }
+
+      // 특이사항
+      for (const item of input.specialItems) {
+        await db.insert(dailySalesSpecialItems).values({
+          dailySalesDetailId: detailId,
+          restaurantId: input.restaurantId,
+          typeName: item.typeName,
+          amount: String(item.amount),
+          note: item.note,
+        } as any);
+      }
+
+      return { id: detailId, totalAmount };
+    }),
+
+  // ─── 기타 매출 유형 템플릿 조회 ──────────────────────────────────────────
+  getOtherItemTemplates: protectedProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input }) => {
+      return db
+        .select()
+        .from(salesOtherItemTemplates)
+        .where(eq(salesOtherItemTemplates.restaurantId, input.restaurantId));
+    }),
+
+  // ─── 운영 캘린더 (월간 요약) ──────────────────────────────────────────────
+  getMonthlyCalendar: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
+    .query(async ({ input }) => {
+      const startDate = `${input.year}-${String(input.month).padStart(2, "0")}-01`;
+      const endDate =
+        input.month === 12
+          ? `${input.year + 1}-01-01`
+          : `${input.year}-${String(input.month + 1).padStart(2, "0")}-01`;
+
+      // 일별 운영 현황
+      const ops = await db
+        .select()
+        .from(dailyOperations)
+        .where(
+          and(
+            eq(dailyOperations.restaurantId, input.restaurantId),
+            sql`${dailyOperations.operationDate} >= ${startDate}`,
+            sql`${dailyOperations.operationDate} < ${endDate}`
+          )
+        );
+
+      // 일별 매출
+      const sales = await db
+        .select()
+        .from(dailySalesDetail)
+        .where(
+          and(
+            eq(dailySalesDetail.restaurantId, input.restaurantId),
+            sql`${dailySalesDetail.saleDate} >= ${startDate}`,
+            sql`${dailySalesDetail.saleDate} < ${endDate}`
+          )
+        );
+
+      // ─── 체크리스트 완료 현황 ───
+      const checklistLogs = await db
+        .select()
+        .from(dailyChecklistLogs)
+        .where(
+          and(
+            eq(dailyChecklistLogs.restaurantId, input.restaurantId),
+            sql`${dailyChecklistLogs.logDate} >= ${startDate}`,
+            sql`${dailyChecklistLogs.logDate} < ${endDate}`
+          )
+        );
+
+      // 체크리스트 템플릿 수 (타입별)
+      const templates = await db
+        .select({ checkType: storeChecklistTemplates.checkType, cnt: count() })
+        .from(storeChecklistTemplates)
+        .where(eq(storeChecklistTemplates.restaurantId, input.restaurantId))
+        .groupBy(storeChecklistTemplates.checkType);
+      const templateCounts: Record<string, number> = {};
+      for (const t of templates) {
+        templateCounts[t.checkType] = Number(t.cnt);
+      }
+
+      // 날짜별 체크리스트 완료율 맵
+      const checklistByDate: Record<string, { checked: number; total: number; types: string[] }> = {};
+      for (const log of checklistLogs) {
+        const dateStr = typeof log.logDate === "string"
+          ? log.logDate
+          : (log.logDate as Date).toISOString().slice(0, 10);
+        if (!checklistByDate[dateStr]) {
+          checklistByDate[dateStr] = { checked: 0, total: 0, types: [] };
+        }
+        const checkedCount = (log.checkedItemIds as number[] || []).length;
+        const totalForType = templateCounts[log.checkType] ?? 0;
+        checklistByDate[dateStr].checked += checkedCount;
+        checklistByDate[dateStr].total += totalForType;
+        if (checkedCount >= totalForType && totalForType > 0) {
+          checklistByDate[dateStr].types.push(log.checkType);
+        }
+      }
+
+      // ─── 스케줄 완료 현황 ───
+      const monthSchedules = await db
+        .select({
+          startTime: schedules.startTime,
+          status: schedules.status,
+        })
+        .from(schedules)
+        .where(
+          and(
+            eq(schedules.restaurantId, input.restaurantId),
+            sql`${schedules.startTime} >= ${startDate}`,
+            sql`${schedules.startTime} < ${endDate}`,
+            sql`${schedules.status} IN ('confirmed', 'completed', 'draft')`
+          )
+        );
+
+      const scheduleByDate: Record<string, { total: number; completed: number; confirmed: number }> = {};
+      for (const sch of monthSchedules) {
+        const d = sch.startTime instanceof Date ? sch.startTime : new Date(sch.startTime as string);
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        if (!scheduleByDate[dateStr]) {
+          scheduleByDate[dateStr] = { total: 0, completed: 0, confirmed: 0 };
+        }
+        scheduleByDate[dateStr].total++;
+        if (sch.status === "completed") scheduleByDate[dateStr].completed++;
+        if (sch.status === "confirmed") scheduleByDate[dateStr].confirmed++;
+      }
+
+      // 날짜별 맵 구성
+      const days: Record<
+        string,
+        {
+          date: string;
+          openCheckedAt: string | null;
+          closeCheckedAt: string | null;
+          openHeadcount: number;
+          closeHeadcount: number;
+          totalSales: number;
+          status: "none" | "open" | "closed";
+          checklist: { checked: number; total: number; types: string[] } | null;
+          schedule: { total: number; completed: number; confirmed: number } | null;
+        }
+      > = {};
+
+      const ensureDay = (dateStr: string) => {
+        if (!days[dateStr]) {
+          days[dateStr] = {
+            date: dateStr,
+            openCheckedAt: null,
+            closeCheckedAt: null,
+            openHeadcount: 0,
+            closeHeadcount: 0,
+            totalSales: 0,
+            status: "none",
+            checklist: null,
+            schedule: null,
+          };
+        }
+      };
+
+      for (const op of ops) {
+        const dateStr = typeof op.operationDate === "string"
+          ? op.operationDate
+          : (op.operationDate as Date).toISOString().slice(0, 10);
+        ensureDay(dateStr);
+        days[dateStr].openCheckedAt = op.openCheckedAt ? op.openCheckedAt.toISOString() : null;
+        days[dateStr].closeCheckedAt = op.closeCheckedAt ? op.closeCheckedAt.toISOString() : null;
+        days[dateStr].openHeadcount = op.openHeadcount ?? 0;
+        days[dateStr].closeHeadcount = op.closeHeadcount ?? 0;
+        days[dateStr].status = op.closeCheckedAt ? "closed" : op.openCheckedAt ? "open" : "none";
+      }
+
+      for (const s of sales) {
+        const dateStr = typeof s.saleDate === "string"
+          ? s.saleDate
+          : (s.saleDate as Date).toISOString().slice(0, 10);
+        ensureDay(dateStr);
+        days[dateStr].totalSales = Number(s.totalAmount);
+      }
+
+      // 체크리스트/스케줄 데이터 병합
+      for (const dateStr of Object.keys(checklistByDate)) {
+        ensureDay(dateStr);
+        days[dateStr].checklist = checklistByDate[dateStr];
+      }
+      for (const dateStr of Object.keys(scheduleByDate)) {
+        ensureDay(dateStr);
+        days[dateStr].schedule = scheduleByDate[dateStr];
+      }
+
+      // 월 합계
+      const totalSales = sales.reduce((s, r) => s + Number(r.totalAmount), 0);
+      const closedDays = ops.filter((o) => o.closeCheckedAt).length;
+
+      return { days, totalSales, closedDays };
     }),
 });

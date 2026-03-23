@@ -1,8 +1,15 @@
 import { z } from "zod";
-import { eq, and, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc, gte } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
-import { storeChecklistTemplates, dailyChecklistLogs } from "../../drizzle/schema";
+import { storeChecklistTemplates, dailyChecklistLogs, users } from "../../drizzle/schema";
+import type { CheckedItemData } from "../../drizzle/schema";
+
+const checkedItemSchema = z.object({
+  itemId: z.number(),
+  answer: z.string().optional(),
+  photoUrl: z.string().optional(),
+});
 
 export const storeChecklistsRouter = router({
   // ── 템플릿 관리 ──────────────────────────────────────────────────────────
@@ -28,6 +35,26 @@ export const storeChecklistsRouter = router({
         .orderBy(storeChecklistTemplates.sortOrder);
     }),
 
+  /** 모든 템플릿 조회 (비활성 포함 — 관리용) */
+  listAllTemplates: managerProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        checkType: z.enum(["open", "order", "cleaning"]).optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const conditions = [
+        eq(storeChecklistTemplates.restaurantId, input.restaurantId),
+      ];
+      if (input.checkType) conditions.push(eq(storeChecklistTemplates.checkType, input.checkType) as any);
+      return db
+        .select()
+        .from(storeChecklistTemplates)
+        .where(and(...conditions))
+        .orderBy(storeChecklistTemplates.sortOrder);
+    }),
+
   /** 템플릿 항목 추가 */
   createTemplate: managerProcedure
     .input(
@@ -35,6 +62,7 @@ export const storeChecklistsRouter = router({
         restaurantId: z.number(),
         checkType: z.enum(["open", "order", "cleaning"]),
         itemText: z.string().min(1),
+        requirementType: z.enum(["none", "text_input", "camera_photo"]).default("none"),
         sortOrder: z.number().optional(),
       })
     )
@@ -43,6 +71,7 @@ export const storeChecklistsRouter = router({
         restaurantId: input.restaurantId,
         checkType: input.checkType,
         itemText: input.itemText,
+        requirementType: input.requirementType,
         sortOrder: input.sortOrder ?? 0,
         createdBy: ctx.user.userId,
       });
@@ -55,6 +84,7 @@ export const storeChecklistsRouter = router({
       z.object({
         id: z.number(),
         itemText: z.string().optional(),
+        requirementType: z.enum(["none", "text_input", "camera_photo"]).optional(),
         sortOrder: z.number().optional(),
         isActive: z.boolean().optional(),
       })
@@ -105,7 +135,7 @@ export const storeChecklistsRouter = router({
       return row ?? null;
     }),
 
-  /** 체크리스트 완료 저장 (upsert) */
+  /** 체크리스트 완료 저장 (upsert) — 요구사항 데이터 포함 */
   saveLog: protectedProcedure
     .input(
       z.object({
@@ -113,10 +143,13 @@ export const storeChecklistsRouter = router({
         logDate: z.string(),
         checkType: z.enum(["open", "order", "cleaning"]),
         checkedItemIds: z.array(z.number()),
+        checkedItems: z.array(checkedItemSchema).optional(),
         noOrderToday: z.boolean().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
+      const checkedItems: CheckedItemData[] = input.checkedItems ?? input.checkedItemIds.map((id) => ({ itemId: id }));
+
       const [existing] = await db
         .select()
         .from(dailyChecklistLogs)
@@ -134,6 +167,7 @@ export const storeChecklistsRouter = router({
           .update(dailyChecklistLogs)
           .set({
             checkedItemIds: input.checkedItemIds,
+            checkedItems,
             noOrderToday: input.noOrderToday ?? false,
             completedBy: ctx.user.userId,
             completedAt: new Date(),
@@ -147,9 +181,46 @@ export const storeChecklistsRouter = router({
         logDate: input.logDate,
         checkType: input.checkType,
         checkedItemIds: input.checkedItemIds,
+        checkedItems,
         noOrderToday: input.noOrderToday ?? false,
         completedBy: ctx.user.userId,
       } as any);
       return { id: (result as any).insertId };
+    }),
+
+  /** 날짜 범위별 체크 기록 조회 (점장 이력 확인용) */
+  listLogs: protectedProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        startDate: z.string(),
+        endDate: z.string(),
+        checkType: z.enum(["open", "order", "cleaning"]).optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const conditions = [
+        eq(dailyChecklistLogs.restaurantId, input.restaurantId),
+        gte(dailyChecklistLogs.logDate, new Date(input.startDate)),
+        sql`${dailyChecklistLogs.logDate} <= ${input.endDate}`,
+      ];
+      if (input.checkType) conditions.push(eq(dailyChecklistLogs.checkType, input.checkType) as any);
+
+      return db
+        .select({
+          id: dailyChecklistLogs.id,
+          logDate: dailyChecklistLogs.logDate,
+          checkType: dailyChecklistLogs.checkType,
+          checkedItemIds: dailyChecklistLogs.checkedItemIds,
+          checkedItems: dailyChecklistLogs.checkedItems,
+          noOrderToday: dailyChecklistLogs.noOrderToday,
+          completedBy: dailyChecklistLogs.completedBy,
+          completedByName: users.name,
+          completedAt: dailyChecklistLogs.completedAt,
+        })
+        .from(dailyChecklistLogs)
+        .leftJoin(users, eq(dailyChecklistLogs.completedBy, users.id))
+        .where(and(...conditions))
+        .orderBy(desc(dailyChecklistLogs.logDate));
     }),
 });

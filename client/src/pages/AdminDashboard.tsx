@@ -21,8 +21,8 @@ export default function AdminDashboard() {
       </div>
 
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-slate-700">매장 목록</h3>
-        <button onClick={() => setLocation("/restaurants")} className="text-xs text-slate-500 hover:text-slate-700">
+        <h3 className="text-sm font-semibold text-foreground">매장 목록</h3>
+        <button onClick={() => setLocation("/restaurants")} className="text-xs text-muted-foreground hover:text-foreground">
           매장 관리 →
         </button>
       </div>
@@ -38,10 +38,10 @@ export default function AdminDashboard() {
           {restaurants.map((r: any) => (
             <Card key={r.id} interactive onClick={() => setLocation(`/sales/${r.id}`)} className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-slate-900">{r.name}</p>
-                <p className="text-xs text-slate-400">{r.address || "주소 미등록"}</p>
+                <p className="text-sm font-medium text-foreground">{r.name}</p>
+                <p className="text-xs text-muted-foreground">{r.address || "주소 미등록"}</p>
               </div>
-              <span className="text-xs text-slate-400">매출 조회 →</span>
+              <span className="text-xs text-muted-foreground">매출 조회 →</span>
             </Card>
           ))}
         </div>

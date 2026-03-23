@@ -38,7 +38,7 @@ export default function FixedCostsPage() {
       <PageHeader
         title="고정비 관리"
         description={current?.name}
-        action={<Button icon={<Plus size={16} />} onClick={() => setShowAdd(true)} size="sm">고정비 추가</Button>}
+        action={<Button onClick={() => setShowAdd(true)} size="sm"><Plus size={16} /> 고정비 추가</Button>}
       />
 
       {/* 이번달 고정비 총액 */}
@@ -64,25 +64,25 @@ export default function FixedCostsPage() {
             <Card key={fc.id} className="px-4 py-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <span className="text-sm font-medium text-slate-900">{fc.costName}</span>
+                  <span className="text-sm font-medium text-foreground">{fc.costName}</span>
                   <Badge variant={fc.costType === "monthly" ? "info" : fc.costType === "yearly" ? "warning" : "default"}>
                     {COST_TYPE_LABELS[fc.costType]}
                   </Badge>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-sm font-semibold text-slate-900 tabular-nums">{Number(fc.amount).toLocaleString()}원</span>
+                  <span className="text-sm font-semibold text-foreground tabular-nums">{Number(fc.amount).toLocaleString()}원</span>
                   {fc.costType === "yearly" && (
-                    <span className="text-xs text-slate-400">월 {Math.round(Number(fc.amount) / 12).toLocaleString()}원</span>
+                    <span className="text-xs text-muted-foreground">월 {Math.round(Number(fc.amount) / 12).toLocaleString()}원</span>
                   )}
                   <button
                     onClick={() => { if (confirm(`${fc.costName}을(를) 삭제하시겠습니까?`)) deactivate.mutate({ id: fc.id, restaurantId }); }}
-                    className="text-slate-300 hover:text-red-500 p-1"
+                    className="text-muted-foreground/50 hover:text-red-500 p-1"
                   >
                     <Trash2 size={14} />
                   </button>
                 </div>
               </div>
-              {fc.note && <p className="text-xs text-slate-400 mt-1">{fc.note}</p>}
+              {fc.note && <p className="text-xs text-muted-foreground mt-1">{fc.note}</p>}
             </Card>
           ))}
         </div>

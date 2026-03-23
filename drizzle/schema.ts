@@ -38,6 +38,8 @@ export const restaurants = mysqlTable("restaurants", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 100 }).notNull(),
   address: varchar("address", { length: 255 }),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
   phone: varchar("phone", { length: 30 }),
   monthlyTargetSales: decimal("monthlyTargetSales", { precision: 14, scale: 2 }).default("0"),
   targetLaborRatio: decimal("targetLaborRatio", { precision: 5, scale: 2 }).default("30"),
@@ -245,8 +247,9 @@ export const schedules = mysqlTable("schedules", {
   restaurantId: int("restaurantId").notNull(),
   startTime: timestamp("startTime").notNull(),
   endTime: timestamp("endTime").notNull(),
-  // draft → published → completed → confirmed, canceled
-  status: mysqlEnum("status", ["draft", "scheduled", "published", "completed", "confirmed", "canceled"]).default("published").notNull(),
+  // draft(초안) → confirmed(확정/직원공개) → completed(완료/지출반영), canceled(취소)
+  // DB enum에 published/scheduled 잔존 (하위호환), 신규 코드에서는 사용하지 않음
+  status: mysqlEnum("status", ["draft", "scheduled", "published", "completed", "confirmed", "canceled"]).default("draft").notNull(),
   shiftPreset: mysqlEnum("shiftPreset", ["open", "full", "close", "custom"]).default("custom"),
   note: text("note"),
   editReason: text("editReason"),
@@ -311,6 +314,8 @@ export const dailySalesDetail = mysqlTable("daily_sales_detail", {
   saleDate: date("saleDate").notNull(),
   cashAmount: decimal("cashAmount", { precision: 14, scale: 2 }).default("0").notNull(),
   cardAmount: decimal("cardAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+  giftCardAmount: decimal("giftCardAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+  transferAmount: decimal("transferAmount", { precision: 14, scale: 2 }).default("0").notNull(),
   receiptCount: int("receiptCount").default(0).notNull(),
   discountAmount: decimal("discountAmount", { precision: 14, scale: 2 }).default("0").notNull(),
   otherAmount: decimal("otherAmount", { precision: 14, scale: 2 }).default("0").notNull(),
@@ -392,6 +397,7 @@ export const storeChecklistTemplates = mysqlTable("store_checklist_templates", {
   restaurantId: int("restaurantId").notNull(),
   checkType: mysqlEnum("checkType", ["open", "order", "cleaning"]).notNull(),
   itemText: varchar("itemText", { length: 200 }).notNull(),
+  requirementType: mysqlEnum("requirementType", ["none", "text_input", "camera_photo"]).default("none").notNull(),
   sortOrder: int("sortOrder").default(0).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   createdBy: int("createdBy"),
@@ -401,6 +407,13 @@ export const storeChecklistTemplates = mysqlTable("store_checklist_templates", {
 
 export type StoreChecklistTemplate = typeof storeChecklistTemplates.$inferSelect;
 
+// ─── Checked Item (체크 항목 응답 데이터) ────────────────────────────────────────
+export interface CheckedItemData {
+  itemId: number;
+  answer?: string;       // text_input 요구사항 응답
+  photoUrl?: string;     // camera_photo 요구사항 사진 경로
+}
+
 // ─── Daily Checklist Logs (일별 체크리스트 기록) ────────────────────────────────
 export const dailyChecklistLogs = mysqlTable("daily_checklist_logs", {
   id: int("id").autoincrement().primaryKey(),
@@ -408,6 +421,7 @@ export const dailyChecklistLogs = mysqlTable("daily_checklist_logs", {
   logDate: date("logDate").notNull(),
   checkType: mysqlEnum("checkType", ["open", "order", "cleaning"]).notNull(),
   checkedItemIds: json("checkedItemIds").$type<number[]>().default([]),
+  checkedItems: json("checkedItems").$type<CheckedItemData[]>().default([]),
   noOrderToday: boolean("noOrderToday").default(false).notNull(),
   completedBy: int("completedBy"),
   completedAt: timestamp("completedAt").defaultNow().notNull(),
@@ -416,6 +430,32 @@ export const dailyChecklistLogs = mysqlTable("daily_checklist_logs", {
 });
 
 export type DailyChecklistLog = typeof dailyChecklistLogs.$inferSelect;
+
+// ─── Daily Order Images (일별 발주 이미지) ──────────────────────────────────
+export const dailyOrderImages = mysqlTable("daily_order_images", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  imageDate: date("imageDate").notNull(),
+  imageUrl: text("imageUrl").notNull(),
+  note: varchar("note", { length: 200 }),
+  uploadedBy: int("uploadedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type DailyOrderImage = typeof dailyOrderImages.$inferSelect;
+
+// ─── Daily Sales Special Items (매출 특이사항 — 할인/외상/미입금 등) ────────
+export const dailySalesSpecialItems = mysqlTable("daily_sales_special_items", {
+  id: int("id").autoincrement().primaryKey(),
+  dailySalesDetailId: int("dailySalesDetailId").notNull(),
+  restaurantId: int("restaurantId").notNull(),
+  typeName: varchar("typeName", { length: 50 }).notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type DailySalesSpecialItem = typeof dailySalesSpecialItems.$inferSelect;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Phase 1-B: 매입 V2 + 거래처/품목 마스터

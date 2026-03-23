@@ -50,6 +50,40 @@ async function isClosedDay(restaurantId: number, dateStr: string): Promise<boole
   return !!closure;
 }
 
+/** 동일 매장·날짜에 해당 직원(또는 임시직원)의 스케줄이 이미 있는지 검사 */
+async function hasDuplicateSchedule(
+  restaurantId: number,
+  dateStr: string,
+  opts: { userId?: number | null; tempWorkerName?: string | null; excludeId?: number }
+): Promise<boolean> {
+  const dayStart = new Date(`${dateStr}T00:00:00+09:00`);
+  const dayEnd = new Date(`${dateStr}T23:59:59+09:00`);
+
+  const conditions = [
+    eq(schedules.restaurantId, restaurantId),
+    gte(schedules.startTime, dayStart),
+    sql`${schedules.startTime} <= ${dayEnd}`,
+    sql`${schedules.status} != 'canceled'`,
+  ];
+
+  if (opts.userId) {
+    conditions.push(eq(schedules.userId, opts.userId));
+  } else if (opts.tempWorkerName) {
+    conditions.push(sql`${schedules.tempWorkerName} = ${opts.tempWorkerName}`);
+  }
+
+  if (opts.excludeId) {
+    conditions.push(sql`${schedules.id} != ${opts.excludeId}`);
+  }
+
+  const [existing] = await db
+    .select({ id: schedules.id })
+    .from(schedules)
+    .where(and(...conditions))
+    .limit(1);
+  return !!existing;
+}
+
 // ─── 스케줄 라우터 ──────────────────────────────────────────────────────────
 
 export const schedulesRouter = router({
@@ -112,7 +146,7 @@ export const schedulesRouter = router({
       return rows;
     }),
 
-  /** 스케줄 생성 (배정 시 published) */
+  /** 스케줄 생성 (초안 상태) */
   create: managerProcedure
     .input(
       z.object({
@@ -128,7 +162,9 @@ export const schedulesRouter = router({
       if (await isClosedDay(input.restaurantId, input.workDate)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
       }
-      const now = new Date();
+      if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { userId: input.userId })) {
+        throw new TRPCError({ code: "CONFLICT", message: "해당 직원은 이 날짜에 이미 스케줄이 등록되어 있습니다." });
+      }
       const [result] = await db.insert(schedules).values({
         userId: input.userId,
         restaurantId: input.restaurantId,
@@ -136,8 +172,7 @@ export const schedulesRouter = router({
         endTime: new Date(`${input.workDate}T${input.endTime}:00+09:00`),
         note: input.note,
         createdBy: ctx.user.userId,
-        status: "published",
-        publishedAt: now,
+        status: "draft",
       });
       return { id: (result as any).insertId };
     }),
@@ -160,6 +195,9 @@ export const schedulesRouter = router({
       if (await isClosedDay(input.restaurantId, input.workDate)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
       }
+      if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { tempWorkerName: input.tempWorkerName })) {
+        throw new TRPCError({ code: "CONFLICT", message: `임시직원 "${input.tempWorkerName}"은(는) 이 날짜에 이미 등록되어 있습니다.` });
+      }
       const [result] = await db.insert(schedules).values({
         userId: null as any,
         tempWorkerName: input.tempWorkerName,
@@ -168,10 +206,9 @@ export const schedulesRouter = router({
         restaurantId: input.restaurantId,
         startTime: new Date(`${input.workDate}T${input.startTime}:00+09:00`),
         endTime: new Date(`${input.workDate}T${input.endTime}:00+09:00`),
-        status: "published",
+        status: "draft",
         note: input.note,
         createdBy: ctx.user.userId,
-        publishedAt: new Date(),
       } as any);
       return { id: (result as any).insertId };
     }),
@@ -190,6 +227,9 @@ export const schedulesRouter = router({
     .mutation(async ({ input, ctx }) => {
       if (await isClosedDay(input.restaurantId, input.workDate)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
+      }
+      if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { userId: input.userId })) {
+        throw new TRPCError({ code: "CONFLICT", message: "해당 직원은 이 날짜에 이미 스케줄이 등록되어 있습니다." });
       }
       // 매장 운영시간 조회
       const [rest] = await db
@@ -219,14 +259,13 @@ export const schedulesRouter = router({
         endTime: new Date(`${input.workDate}T${p.end}:00+09:00`),
         note: input.note,
         createdBy: ctx.user.userId,
-        status: "published",
+        status: "draft",
         shiftPreset: input.preset === "fullday" ? "full" : input.preset,
-        publishedAt: new Date(),
       });
       return { id: (result as any).insertId };
     }),
 
-  /** 스케줄 수정 */
+  /** 스케줄 수정 — 상태별 정책 적용 */
   update: managerProcedure
     .input(
       z.object({
@@ -237,16 +276,39 @@ export const schedulesRouter = router({
         endTime: z.string().optional(),
         userId: z.number().optional(),
         status: z
-          .enum(["draft", "published", "completed", "confirmed", "canceled"])
+          .enum(["draft", "completed", "confirmed", "canceled"])
           .optional(),
         note: z.string().optional(),
+        editReason: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
-      const { id, workDate, startTime, endTime, ...rest } = input;
+      const { id, workDate, startTime, endTime, editReason, ...rest } = input;
+
+      // 현재 상태 조회 (정책 분기용)
+      const [current] = await db.select().from(schedules).where(eq(schedules.id, id)).limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "스케줄을 찾을 수 없습니다." });
+
+      // ── 상태별 수정 정책 ──
+      if (current.status === "confirmed" || current.status === "completed") {
+        if (!editReason || editReason.trim().length === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: current.status === "confirmed"
+              ? "확정된 스케줄 수정 시 사유를 입력해야 합니다."
+              : "완료된 스케줄 수정 시 사유를 입력해야 합니다.",
+          });
+        }
+      }
+
       const data: Record<string, unknown> = { ...rest };
       delete data.id;
       delete data.restaurantId;
+      delete data.editReason;
+
+      // 사유 및 정산 재확인 플래그 설정
+      if (editReason) data.editReason = editReason.trim();
+      if (current.status === "completed") data.payrollRecheckRequired = true;
 
       // 날짜 + 시간 조합 처리
       if (workDate && startTime) data.startTime = new Date(`${workDate}T${startTime}:00+09:00`);
@@ -256,15 +318,12 @@ export const schedulesRouter = router({
 
       // 날짜만 변경 (시간 유지)
       if (workDate && !startTime && !endTime) {
-        const [existing] = await db.select().from(schedules).where(eq(schedules.id, id)).limit(1);
-        if (existing) {
-          const oldStart = new Date(existing.startTime);
-          const oldEnd = new Date(existing.endTime);
-          const hStart = `${String(oldStart.getHours()).padStart(2, "0")}:${String(oldStart.getMinutes()).padStart(2, "0")}`;
-          const hEnd = `${String(oldEnd.getHours()).padStart(2, "0")}:${String(oldEnd.getMinutes()).padStart(2, "0")}`;
-          data.startTime = new Date(`${workDate}T${hStart}:00+09:00`);
-          data.endTime = new Date(`${workDate}T${hEnd}:00+09:00`);
-        }
+        const oldStart = new Date(current.startTime);
+        const oldEnd = new Date(current.endTime);
+        const hStart = `${String(oldStart.getHours()).padStart(2, "0")}:${String(oldStart.getMinutes()).padStart(2, "0")}`;
+        const hEnd = `${String(oldEnd.getHours()).padStart(2, "0")}:${String(oldEnd.getMinutes()).padStart(2, "0")}`;
+        data.startTime = new Date(`${workDate}T${hStart}:00+09:00`);
+        data.endTime = new Date(`${workDate}T${hEnd}:00+09:00`);
       }
 
       if (workDate) {
@@ -273,16 +332,54 @@ export const schedulesRouter = router({
         }
       }
 
+      // 날짜 또는 직원이 변경되면 중복 체크
+      if (workDate || input.userId) {
+        const checkDate = workDate ?? toKSTDateString(new Date(current.startTime));
+        const checkUserId = input.userId ?? current.userId;
+        if (checkUserId) {
+          if (await hasDuplicateSchedule(input.restaurantId, checkDate, { userId: checkUserId, excludeId: id })) {
+            throw new TRPCError({ code: "CONFLICT", message: "해당 직원은 이 날짜에 이미 스케줄이 등록되어 있습니다." });
+          }
+        }
+      }
+
       await db.update(schedules).set(data as any).where(eq(schedules.id, id));
-      return { success: true };
+      return { success: true, payrollRecheck: current.status === "completed" };
     }),
 
-  /** 삭제 */
+  /** 삭제 — 상태별 정책 적용 */
   delete: managerProcedure
-    .input(z.object({ id: z.number() }))
+    .input(z.object({ id: z.number(), reason: z.string().optional() }))
     .mutation(async ({ input }) => {
-      await db.delete(schedules).where(eq(schedules.id, input.id));
-      return { success: true };
+      const [current] = await db.select().from(schedules).where(eq(schedules.id, input.id)).limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "스케줄을 찾을 수 없습니다." });
+
+      if (current.status === "draft") {
+        // 초안: 바로 삭제
+        await db.delete(schedules).where(eq(schedules.id, input.id));
+        return { success: true, action: "deleted" as const };
+      }
+
+      // 확정/완료: 사유 필수, 실제 삭제 대신 canceled로 전환 (이력 보존)
+      if (!input.reason || input.reason.trim().length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: current.status === "confirmed"
+            ? "확정된 스케줄 삭제 시 사유를 입력해야 합니다."
+            : "완료된 스케줄 삭제 시 사유를 입력해야 합니다.",
+        });
+      }
+
+      const updateData: Record<string, unknown> = {
+        status: "canceled",
+        editReason: input.reason.trim(),
+      };
+      if (current.status === "completed") {
+        updateData.payrollRecheckRequired = true;
+      }
+
+      await db.update(schedules).set(updateData as any).where(eq(schedules.id, input.id));
+      return { success: true, action: "canceled" as const, payrollRecheck: current.status === "completed" };
     }),
 
   /** 지난주 복사 */
@@ -304,32 +401,57 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             gte(schedules.startTime, prevStart),
             sql`${schedules.startTime} <= ${prevEnd}`,
-            sql`${schedules.status} IN ('draft','published')`
+            eq(schedules.status, "draft")
           )
         );
 
       const diff = 7 * 24 * 3600 * 1000;
-      const inserts = prevSchedules.map((s) => ({
-        userId: s.userId,
-        restaurantId: s.restaurantId,
-        startTime: new Date(new Date(s.startTime).getTime() + diff),
-        endTime: new Date(new Date(s.endTime).getTime() + diff),
-        note: s.note,
-        createdBy: ctx.user.userId,
-        status: "draft" as const,
-      }));
+
+      // 대상 주에 이미 존재하는 스케줄 조회 (중복 필터링용)
+      const targetEnd = new Date(targetStart);
+      targetEnd.setDate(targetEnd.getDate() + 6);
+      targetEnd.setHours(23, 59, 59);
+      const existingTargetWeek = await db
+        .select({ userId: schedules.userId, startTime: schedules.startTime })
+        .from(schedules)
+        .where(
+          and(
+            eq(schedules.restaurantId, input.restaurantId),
+            gte(schedules.startTime, targetStart),
+            sql`${schedules.startTime} <= ${targetEnd}`,
+            sql`${schedules.status} != 'canceled'`
+          )
+        );
+      const existingKeys = new Set(
+        existingTargetWeek.map((e) => `${e.userId}_${toKSTDateString(new Date(e.startTime))}`)
+      );
+
+      const inserts = prevSchedules
+        .map((s) => ({
+          userId: s.userId,
+          restaurantId: s.restaurantId,
+          startTime: new Date(new Date(s.startTime).getTime() + diff),
+          endTime: new Date(new Date(s.endTime).getTime() + diff),
+          note: s.note,
+          createdBy: ctx.user.userId,
+          status: "draft" as const,
+        }))
+        .filter((s) => {
+          const key = `${s.userId}_${toKSTDateString(s.startTime)}`;
+          return !existingKeys.has(key);
+        });
 
       if (inserts.length > 0) await db.insert(schedules).values(inserts);
       return { copied: inserts.length };
     }),
 
-  /** 범위 고지 (draft → published) */
-  publishRange: managerProcedure
+  /** 범위 확정 (draft → confirmed): 직원 공개 + 예상인건비 반영 */
+  confirmRange: managerProcedure
     .input(z.object({ restaurantId: z.number(), from: z.string(), to: z.string() }))
     .mutation(async ({ input }) => {
       await db
         .update(schedules)
-        .set({ status: "published", publishedAt: new Date() })
+        .set({ status: "confirmed", confirmedAt: new Date(), publishedAt: new Date() })
         .where(
           and(
             eq(schedules.restaurantId, input.restaurantId),
@@ -341,7 +463,27 @@ export const schedulesRouter = router({
       return { success: true };
     }),
 
-  /** 범위 완료 (published → completed) */
+  /** 날짜별 확정 (draft → confirmed) */
+  confirmDay: managerProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .mutation(async ({ input }) => {
+      const dayStart = new Date(input.date + "T00:00:00+09:00");
+      const dayEnd = new Date(input.date + "T23:59:59+09:00");
+      const result = await db
+        .update(schedules)
+        .set({ status: "confirmed", confirmedAt: new Date(), publishedAt: new Date() })
+        .where(
+          and(
+            eq(schedules.restaurantId, input.restaurantId),
+            gte(schedules.startTime, dayStart),
+            sql`${schedules.startTime} <= ${dayEnd}`,
+            eq(schedules.status, "draft")
+          )
+        );
+      return { success: true, affected: (result as any)[0]?.affectedRows ?? 0 };
+    }),
+
+  /** 범위 완료 (confirmed → completed): 일마감 확인 후 */
   completeRange: managerProcedure
     .input(z.object({ restaurantId: z.number(), from: z.string(), to: z.string() }))
     .mutation(async ({ input }) => {
@@ -353,39 +495,50 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             gte(schedules.startTime, new Date(input.from)),
             sql`${schedules.startTime} <= ${new Date(input.to)}`,
-            eq(schedules.status, "published")
+            eq(schedules.status, "confirmed")
           )
         );
       return { success: true };
     }),
 
-  /** 범위 인건비 확정 (completed → confirmed) */
-  confirmRange: managerProcedure
-    .input(z.object({ restaurantId: z.number(), from: z.string(), to: z.string() }))
-    .mutation(async ({ input }) => {
-      await db
-        .update(schedules)
-        .set({ status: "confirmed", confirmedAt: new Date() })
+  /** 특정일 스케줄 조회 (일마감 화면용) */
+  getDaySchedules: managerProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      const dayStart = new Date(input.date + "T00:00:00+09:00");
+      const dayEnd = new Date(input.date + "T23:59:59+09:00");
+      return db
+        .select({
+          id: schedules.id,
+          userId: schedules.userId,
+          tempWorkerName: schedules.tempWorkerName,
+          userName: users.name,
+          startTime: schedules.startTime,
+          endTime: schedules.endTime,
+          status: schedules.status,
+          shiftPreset: schedules.shiftPreset,
+          note: schedules.note,
+        })
+        .from(schedules)
+        .leftJoin(users, eq(schedules.userId, users.id))
         .where(
           and(
             eq(schedules.restaurantId, input.restaurantId),
-            gte(schedules.startTime, new Date(input.from)),
-            sql`${schedules.startTime} <= ${new Date(input.to)}`,
-            eq(schedules.status, "completed")
+            gte(schedules.startTime, dayStart),
+            sql`${schedules.startTime} <= ${dayEnd}`,
+            sql`${schedules.status} != 'canceled'`
           )
-        );
-      return { success: true };
+        )
+        .orderBy(schedules.startTime);
     }),
 
-  /** 당일 published → completed */
-  completeToday: managerProcedure
-    .input(z.object({ restaurantId: z.number() }))
+  /** 특정일 confirmed → completed (일마감 연동) */
+  completeDay: managerProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
     .mutation(async ({ input }) => {
-      const nowKST = new Date(Date.now() + 9 * 60 * 60 * 1000);
-      const todayStr = nowKST.toISOString().split("T")[0];
-      const dayStart = new Date(todayStr + "T00:00:00");
-      const dayEnd = new Date(todayStr + "T23:59:59");
-      await db
+      const dayStart = new Date(input.date + "T00:00:00+09:00");
+      const dayEnd = new Date(input.date + "T23:59:59+09:00");
+      const result = await db
         .update(schedules)
         .set({ status: "completed", completedAt: new Date() })
         .where(
@@ -393,9 +546,22 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             gte(schedules.startTime, dayStart),
             sql`${schedules.startTime} <= ${dayEnd}`,
-            eq(schedules.status, "published")
+            eq(schedules.status, "confirmed")
           )
         );
+      return { success: true, affected: (result as any)[0]?.affectedRows ?? 0 };
+    }),
+
+  /** 개별 스케줄 완료 처리 */
+  completeOne: managerProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const [existing] = await db.select({ status: schedules.status }).from(schedules).where(eq(schedules.id, input.id)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      if (existing.status !== "confirmed") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "확정 상태인 스케줄만 완료 처리할 수 있습니다." });
+      }
+      await db.update(schedules).set({ status: "completed", completedAt: new Date() }).where(eq(schedules.id, input.id));
       return { success: true };
     }),
 
@@ -423,7 +589,7 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             gte(schedules.startTime, now),
             sql`${schedules.startTime} <= ${end}`,
-            sql`${schedules.status} IN ('published','confirmed')`
+            eq(schedules.status, "confirmed")
           )
         )
         .orderBy(schedules.startTime);

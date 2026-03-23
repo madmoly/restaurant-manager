@@ -19,8 +19,8 @@ export default function EmployeeDashboard() {
           {myStores.map((s: any) => (
             <Card key={s.restaurant.id} className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-slate-900">{s.restaurant.name}</p>
-                <p className="text-xs text-slate-400">{s.restaurant.address || ""}</p>
+                <p className="text-sm font-medium text-foreground">{s.restaurant.name}</p>
+                <p className="text-xs text-muted-foreground">{s.restaurant.address || ""}</p>
               </div>
               <Badge variant={s.storeRole === "manager" ? "success" : s.storeRole === "sub_manager" ? "info" : "default"}>
                 {s.storeRole === "employee" ? "직원" : s.storeRole === "sub_manager" ? "매니저" : "점장"}
@@ -33,7 +33,7 @@ export default function EmployeeDashboard() {
       )}
 
       <Card className="mt-6 p-4">
-        <p className="text-xs text-slate-400">스케줄 확인, 휴무 신청, 체크리스트는 Phase 2에서 구현됩니다</p>
+        <p className="text-xs text-muted-foreground">스케줄 확인, 휴무 신청, 체크리스트는 Phase 2에서 구현됩니다</p>
       </Card>
     </div>
   );

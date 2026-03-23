@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
-import { router, protectedProcedure, managerProcedure } from "../trpc";
+import { router, publicProcedure, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
-import { employmentElectronicContracts, restaurantContracts } from "../../drizzle/schema";
+import { employmentElectronicContracts, restaurantContracts, restaurants } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 
 export const electronicContractsRouter = router({
@@ -114,17 +114,21 @@ export const electronicContractsRouter = router({
       return row;
     }),
 
-  /** 토큰으로 계약서 조회 (서명 페이지용 — 공개) */
-  getByToken: protectedProcedure
+  /** 토큰으로 계약서 조회 (서명 페이지용 — 비로그인 접근 가능) */
+  getByToken: publicProcedure
     .input(z.object({ token: z.string() }))
     .query(async ({ input }) => {
-      const [row] = await db
-        .select()
+      const rows = await db
+        .select({
+          contract: employmentElectronicContracts,
+          restaurantName: restaurants.name,
+        })
         .from(employmentElectronicContracts)
+        .leftJoin(restaurants, eq(employmentElectronicContracts.restaurantId, restaurants.id))
         .where(eq(employmentElectronicContracts.token, input.token))
         .limit(1);
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "유효하지 않은 링크입니다" });
-      return row;
+      if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "유효하지 않은 링크입니다" });
+      return { ...rows[0].contract, restaurantName: rows[0].restaurantName };
     }),
 
   /** 근로계약서 생성 (초안) */
@@ -148,6 +152,15 @@ export const electronicContractsRouter = router({
         weeklyHoliday: z.string().default("일요일"),
         payDay: z.number().default(25),
         socialInsurance: z.boolean().default(true),
+        over5Employees: z.boolean().default(false),
+        hasProbation: z.boolean().default(false),
+        probationMonths: z.number().default(0),
+        mealProvided: z.boolean().default(false),
+        mealAllowance: z.string().optional(),
+        nightShiftConsent: z.boolean().default(false),
+        payMethod: z.enum(["bank_transfer", "cash"]).default("bank_transfer"),
+        workPlace: z.string().optional(),
+        jobDescription: z.string().optional(),
         specialTerms: z.string().optional(),
       }),
     )
@@ -174,6 +187,15 @@ export const electronicContractsRouter = router({
           weeklyHoliday: input.weeklyHoliday,
           payDay: input.payDay,
           socialInsurance: input.socialInsurance,
+          over5Employees: input.over5Employees,
+          hasProbation: input.hasProbation,
+          probationMonths: input.probationMonths,
+          mealProvided: input.mealProvided,
+          mealAllowance: input.mealAllowance,
+          nightShiftConsent: input.nightShiftConsent,
+          payMethod: input.payMethod,
+          workPlace: input.workPlace,
+          jobDescription: input.jobDescription,
           specialTerms: input.specialTerms,
           status: "draft",
           createdBy: ctx.user.userId,
@@ -186,22 +208,28 @@ export const electronicContractsRouter = router({
   sendContract: managerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
+      const [contract] = await db
+        .select({ token: employmentElectronicContracts.token })
+        .from(employmentElectronicContracts)
+        .where(eq(employmentElectronicContracts.id, input.id))
+        .limit(1);
+      if (!contract) throw new TRPCError({ code: "NOT_FOUND" });
       await db
         .update(employmentElectronicContracts)
         .set({ status: "sent", sentAt: new Date() })
         .where(eq(employmentElectronicContracts.id, input.id));
-      return { ok: true };
+      return { ok: true, token: contract.token };
     }),
 
-  /** 계약서 서명 (상태 → signed) */
-  signContract: protectedProcedure
+  /** 계약서 서명 (상태 → signed, 비로그인 접근 가능) */
+  signContract: publicProcedure
     .input(
       z.object({
         token: z.string(),
         signature: z.string(), // base64 서명 이미지
       }),
     )
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ input }) => {
       const [contract] = await db
         .select()
         .from(employmentElectronicContracts)

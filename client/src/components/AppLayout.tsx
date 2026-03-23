@@ -18,19 +18,21 @@ import { cn } from "@/lib/utils";
 import { ROLE_LABELS, type EffectiveRole } from "@shared/permissions";
 import {
   UtensilsCrossed, LayoutDashboard, Users, Store, TrendingUp,
-  ShoppingCart, LogOut, Menu, X, Sun, Moon, MoreHorizontal,
-  Banknote, Receipt, ClipboardCheck, Wallet, CalendarDays, ClipboardList, UserCog,
+  LogOut, Menu, X, Sun, Moon, MoreHorizontal,
+  Banknote, Receipt, Wallet, CalendarDays, ClipboardList, UserCog,
   Bell, Check,
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
 interface NavItem {
   label: string;
+  labelByRole?: Partial<Record<EffectiveRole, string>>;
   href: string;
   icon: ReactNode;
   mobileIcon: ReactNode;
   roles: EffectiveRole[];
-  mobileTabPriority?: number;
+  /** 역할별 모바일 하단탭 우선순위 (1~4만 탭에 표시, 나머지는 더보기) */
+  mobileTabPriority?: Partial<Record<EffectiveRole, number>>;
 }
 
 interface NavGroup {
@@ -39,6 +41,10 @@ interface NavGroup {
 }
 
 // ─── 카테고리 그룹 정의 ──────────────────────────────────────────────────────
+// 모바일 하단탭 목표:
+//   master/admin: 대시보드(1), 사용자관리(2), 스케줄(3), 수익분석(4)
+//   manager:      대시보드(1), 일일운영(2), 스케줄(3), 분석캘린더(4)
+//   employee:     대시보드(1), 일일운영(2), 스케줄(3)
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "일일 운영",
@@ -48,46 +54,32 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <LayoutDashboard className="h-4 w-4" />,
         mobileIcon: <LayoutDashboard className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "employee"],
-        mobileTabPriority: 1,
-      },
-      {
-        label: "매출", href: "/sales",
-        icon: <Receipt className="h-4 w-4" />,
-        mobileIcon: <Receipt className="h-5 w-5" />,
-        roles: ["manager", "employee"],
-        mobileTabPriority: 2,
-      },
-      {
-        label: "매입", href: "/purchases",
-        icon: <ShoppingCart className="h-4 w-4" />,
-        mobileIcon: <ShoppingCart className="h-5 w-5" />,
-        roles: ["manager", "employee"],
-        mobileTabPriority: 3,
-      },
-      {
-        label: "일마감", href: "/daily-closing",
-        icon: <ClipboardCheck className="h-4 w-4" />,
-        mobileIcon: <ClipboardCheck className="h-5 w-5" />,
-        roles: ["manager"],
-        mobileTabPriority: 4,
-      },
-    ],
-  },
-  {
-    label: "스케줄/운영",
-    items: [
-      {
-        label: "스케줄", href: "/schedule",
-        icon: <CalendarDays className="h-4 w-4" />,
-        mobileIcon: <CalendarDays className="h-5 w-5" />,
-        roles: ["master", "admin", "manager", "employee"],
-        mobileTabPriority: 3,
+        mobileTabPriority: { master: 1, admin: 1, manager: 1, employee: 1 },
       },
       {
         label: "일일 운영", href: "/daily-ops",
         icon: <ClipboardList className="h-4 w-4" />,
         mobileIcon: <ClipboardList className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "employee"],
+        mobileTabPriority: { manager: 2, employee: 2 },
+      },
+      {
+        label: "운영 캘린더", href: "/ops-calendar",
+        icon: <CalendarDays className="h-4 w-4" />,
+        mobileIcon: <CalendarDays className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "employee"],
+      },
+    ],
+  },
+  {
+    label: "인사 관리",
+    items: [
+      {
+        label: "스케줄", href: "/schedule",
+        icon: <CalendarDays className="h-4 w-4" />,
+        mobileIcon: <CalendarDays className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "employee"],
+        mobileTabPriority: { master: 3, admin: 3, manager: 3, employee: 3 },
       },
       {
         label: "직원 관리", href: "/staff",
@@ -101,11 +93,19 @@ const NAV_GROUPS: NavGroup[] = [
     label: "재무 분석",
     items: [
       {
-        label: "수익분석", href: "/profitability",
+        label: "분석캘린더",
+        labelByRole: { master: "수익분석", admin: "수익분석" },
+        href: "/profitability",
         icon: <TrendingUp className="h-4 w-4" />,
         mobileIcon: <TrendingUp className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
-        mobileTabPriority: 5,
+        mobileTabPriority: { master: 4, admin: 4, manager: 4 },
+      },
+      {
+        label: "매출", href: "/sales",
+        icon: <Receipt className="h-4 w-4" />,
+        mobileIcon: <Receipt className="h-5 w-5" />,
+        roles: ["manager", "employee"],
       },
       {
         label: "고정비 관리", href: "/fixed-costs",
@@ -129,13 +129,19 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <Users className="h-4 w-4" />,
         mobileIcon: <Users className="h-5 w-5" />,
         roles: ["master", "admin"],
-        mobileTabPriority: 2,
+        mobileTabPriority: { master: 2, admin: 2 },
       },
       {
         label: "매장 관리", href: "/restaurants",
         icon: <Store className="h-4 w-4" />,
         mobileIcon: <Store className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
+      },
+      {
+        label: "알림", href: "/notifications",
+        icon: <Bell className="h-4 w-4" />,
+        mobileIcon: <Bell className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "employee"],
       },
     ],
   },
@@ -191,10 +197,13 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
     return true;
   });
 
-  // 모바일 하단 탭: priority ≤ 5, 최대 4개
+  // 역할별 라벨 해석 헬퍼
+  const getLabel = (item: NavItem) => item.labelByRole?.[effectiveRole] ?? item.label;
+
+  // 모바일 하단 탭: 역할별 priority가 설정된 항목만, 최대 4개
   const mobileTabItems = visibleNav
-    .filter(n => (n.mobileTabPriority ?? 99) <= 5)
-    .sort((a, b) => (a.mobileTabPriority ?? 99) - (b.mobileTabPriority ?? 99))
+    .filter(n => (n.mobileTabPriority?.[effectiveRole] ?? 99) <= 4)
+    .sort((a, b) => (a.mobileTabPriority?.[effectiveRole] ?? 99) - (b.mobileTabPriority?.[effectiveRole] ?? 99))
     .slice(0, 4);
 
   const mobileTabHrefs = new Set(mobileTabItems.map(n => n.href));
@@ -337,7 +346,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
                         {item.icon}
                       </span>
                       <span className="flex-1 truncate">
-                        {item.href === "/restaurants" && !isAdminLevel ? "내 매장 관리" : item.label}
+                        {item.href === "/restaurants" && !isAdminLevel ? "내 매장 관리" : getLabel(item)}
                       </span>
                     </div>
                   </Link>
@@ -494,7 +503,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
                       "text-[10px] font-medium leading-tight",
                       isActive ? "text-primary" : "text-muted-foreground/70"
                     )}>
-                      {item.label}
+                      {getLabel(item)}
                     </span>
                   </div>
                 </Link>
@@ -552,7 +561,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
                                     onClick={() => setMoreMenuOpen(false)}
                                   >
                                     {item.icon}
-                                    {item.label}
+                                    {getLabel(item)}
                                   </div>
                                 </Link>
                               );

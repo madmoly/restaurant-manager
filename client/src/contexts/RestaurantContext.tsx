@@ -7,6 +7,8 @@ interface Restaurant {
   name: string;
   address?: string | null;
   phone?: string | null;
+  latitude?: string | null;
+  longitude?: string | null;
 }
 
 interface RestaurantContextValue {
@@ -45,12 +47,16 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
         name: r.name,
         address: r.address,
         phone: r.phone,
+        latitude: r.latitude,
+        longitude: r.longitude,
       }))
     : (myStoresQuery.data ?? []).map((s: any) => ({
         id: s.restaurant?.id ?? s.id,
         name: s.restaurant?.name ?? s.name,
         address: s.restaurant?.address ?? s.address,
         phone: s.restaurant?.phone ?? s.phone,
+        latitude: s.restaurant?.latitude ?? s.latitude,
+        longitude: s.restaurant?.longitude ?? s.longitude,
       }));
 
   const isLoading = isAdmin ? allStoresQuery.isLoading : myStoresQuery.isLoading;

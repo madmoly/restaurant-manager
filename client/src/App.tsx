@@ -12,14 +12,15 @@ import EmployeeDashboard from "./pages/EmployeeDashboard";
 import RestaurantsPage from "./pages/RestaurantsPage";
 import SalesPage from "./pages/SalesPage";
 import UsersPage from "./pages/UsersPage";
-import PurchasesPage from "./pages/PurchasesPage";
+
 import CounterpartiesPage from "./pages/CounterpartiesPage";
 import FixedCostsPage from "./pages/FixedCostsPage";
-import DailyClosingPage from "./pages/DailyClosingPage";
 import ProfitPage from "./pages/ProfitPage";
 import SchedulePage from "./pages/SchedulePage";
 import DailyOpsPage from "./pages/DailyOpsPage";
 import StaffPage from "./pages/StaffPage";
+import OpsCalendarPage from "./pages/OpsCalendarPage";
+import ContractSignPage from "./pages/ContractSignPage";
 import AppLayout from "./components/AppLayout";
 
 function RoleRouter() {
@@ -64,12 +65,12 @@ function RoleRouter() {
             <Route path="/restaurants" component={RestaurantsPage} />
             <Route path="/profitability" component={ProfitPage} />
             <Route path="/sales" component={SalesPage} />
-            <Route path="/purchases" component={PurchasesPage} />
+
             <Route path="/counterparties" component={CounterpartiesPage} />
             <Route path="/fixed-costs" component={FixedCostsPage} />
-            <Route path="/daily-closing" component={DailyClosingPage} />
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/daily-ops" component={DailyOpsPage} />
+            <Route path="/ops-calendar" component={OpsCalendarPage} />
             <Route path="/staff" component={StaffPage} />
           </>
         )}
@@ -79,14 +80,14 @@ function RoleRouter() {
           <>
             <Route path="/" component={ManagerDashboard} />
             <Route path="/sales" component={SalesPage} />
-            <Route path="/purchases" component={PurchasesPage} />
+
             <Route path="/counterparties" component={CounterpartiesPage} />
             <Route path="/fixed-costs" component={FixedCostsPage} />
-            <Route path="/daily-closing" component={DailyClosingPage} />
             <Route path="/profitability" component={ProfitPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/daily-ops" component={DailyOpsPage} />
+            <Route path="/ops-calendar" component={OpsCalendarPage} />
             <Route path="/staff" component={StaffPage} />
           </>
         )}
@@ -96,9 +97,10 @@ function RoleRouter() {
           <>
             <Route path="/" component={EmployeeDashboard} />
             <Route path="/sales" component={SalesPage} />
-            <Route path="/purchases" component={PurchasesPage} />
+
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/daily-ops" component={DailyOpsPage} />
+            <Route path="/ops-calendar" component={OpsCalendarPage} />
           </>
         )}
 
@@ -115,6 +117,10 @@ export default function App() {
 
   return (
     <Switch>
+      {/* 전자계약 서명 — 비로그인 접근 가능 */}
+      <Route path="/sign/:token">
+        {(params: { token: string }) => <ContractSignPage token={params.token} />}
+      </Route>
       <Route path="/login">
         {isLoggedIn ? <Redirect to="/" /> : <Login />}
       </Route>

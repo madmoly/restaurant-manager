@@ -49,6 +49,36 @@ export const purchasesV2Router = router({
         .orderBy(desc(purchaseOrdersV2.purchaseDate));
     }),
 
+  /** 일별 매입 전표 목록 */
+  listByDate: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      const dateStr = input.date; // yyyy-MM-dd
+      return db
+        .select({
+          id: purchaseOrdersV2.id,
+          restaurantId: purchaseOrdersV2.restaurantId,
+          counterpartyId: purchaseOrdersV2.counterpartyId,
+          counterpartyName: counterparties.name,
+          purchaseDate: purchaseOrdersV2.purchaseDate,
+          status: purchaseOrdersV2.status,
+          note: purchaseOrdersV2.note,
+          totalAmount: purchaseOrdersV2.totalAmount,
+          createdByName: users.name,
+          createdAt: purchaseOrdersV2.createdAt,
+        })
+        .from(purchaseOrdersV2)
+        .leftJoin(counterparties, eq(purchaseOrdersV2.counterpartyId, counterparties.id))
+        .leftJoin(users, eq(purchaseOrdersV2.createdBy, users.id))
+        .where(
+          and(
+            eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+            sql`DATE(${purchaseOrdersV2.purchaseDate}) = ${dateStr}`,
+          ),
+        )
+        .orderBy(desc(purchaseOrdersV2.createdAt));
+    }),
+
   /** 전표 상세 항목 */
   getOrderItems: protectedProcedure
     .input(z.object({ orderId: z.number() }))

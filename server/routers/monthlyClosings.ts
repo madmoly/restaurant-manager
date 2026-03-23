@@ -96,7 +96,7 @@ export const monthlyClosingsRouter = router({
         .where(
           and(
             eq(fixedCosts.restaurantId, input.restaurantId),
-            eq(fixedCosts.costMonth, monthStr),
+            eq(fixedCosts.effectiveMonth, monthStr),
           ),
         );
       const fixedCostsTotal = Number(fixedRow?.total ?? 0);

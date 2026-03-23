@@ -41,8 +41,8 @@ export default function SalesPage() {
       <PageHeader
         title={`${restaurant?.name ?? ""} 매출`}
         action={
-          <Button icon={<Plus size={16} />} onClick={() => setShowAdd(true)} size="sm">
-            매출 입력
+          <Button onClick={() => setShowAdd(true)} size="sm">
+            <Plus size={16} /> 매출 입력
           </Button>
         }
       />
@@ -53,7 +53,7 @@ export default function SalesPage() {
         onPrev={prevMonth}
         onNext={nextMonth}
         rightSlot={
-          <span className="text-sm font-bold text-slate-900 tabular-nums">
+          <span className="text-sm font-bold text-foreground tabular-nums">
             합계 {Number(monthlyTotal?.total ?? 0).toLocaleString()}원
           </span>
         }
@@ -74,23 +74,23 @@ export default function SalesPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-slate-400">날짜</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-slate-400">금액</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-slate-400 hidden sm:table-cell">메모</th>
+                <tr className="border-b border-border">
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">날짜</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">금액</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground hidden sm:table-cell">메모</th>
                   <th className="w-10"></th>
                 </tr>
               </thead>
               <tbody>
                 {salesList.map((s: any) => (
-                  <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50/50">
-                    <td className="px-4 py-3 text-slate-700 tabular-nums">{String(s.saleDate).slice(5)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-slate-900 tabular-nums">{Number(s.amount).toLocaleString()}원</td>
-                    <td className="px-4 py-3 text-slate-400 hidden sm:table-cell truncate max-w-[200px]">{s.note || "—"}</td>
+                  <tr key={s.id} className="border-b border-border/50 hover:bg-accent/50">
+                    <td className="px-4 py-3 text-foreground tabular-nums">{String(s.saleDate).slice(5)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-foreground tabular-nums">{Number(s.amount).toLocaleString()}원</td>
+                    <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell truncate max-w-[200px]">{s.note || "—"}</td>
                     <td className="px-2">
                       <button
                         onClick={() => { if (confirm("삭제하시겠습니까?")) deleteSale.mutate({ id: s.id, restaurantId }); }}
-                        className="text-slate-300 hover:text-red-500 p-1"
+                        className="text-muted-foreground/50 hover:text-red-500 p-1"
                       >
                         <Trash2 size={14} />
                       </button>

@@ -1,6 +1,6 @@
 import { type ReactNode, type ButtonHTMLAttributes, useState, useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import { cn } from "../lib/utils";
+import { cn } from "../../lib/utils";
 
 // ─── Button ──────────────────────────────────────────────────────────────────
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -13,10 +13,10 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-slate-900 text-white hover:bg-slate-800 active:bg-slate-950 disabled:bg-slate-300",
-  secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:bg-slate-100 disabled:text-slate-300",
-  ghost: "text-slate-600 hover:bg-slate-100 active:bg-slate-200",
-  danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800",
+  primary: "bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80 disabled:opacity-50",
+  secondary: "bg-secondary text-secondary-foreground border border-border hover:bg-accent active:bg-accent/80 disabled:opacity-50",
+  ghost: "text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent/80",
+  danger: "bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/80",
 };
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
@@ -55,8 +55,8 @@ export function Card({ children, className, onClick, interactive }: CardProps) {
     <div
       onClick={onClick}
       className={cn(
-        "bg-white rounded-xl border border-slate-200 overflow-hidden",
-        interactive && "cursor-pointer hover:border-slate-300 hover:shadow-sm transition-all duration-150",
+        "bg-card text-card-foreground rounded-xl border border-border overflow-hidden",
+        interactive && "cursor-pointer hover:border-border/80 hover:shadow-sm transition-all duration-150",
         className
       )}
     >
@@ -78,16 +78,16 @@ interface StatCardProps {
 export function StatCard({ label, value, unit, icon, trend, className }: StatCardProps) {
   return (
     <Card className={cn("p-4", className)}>
-      <div className="flex items-center gap-2 text-slate-500 text-xs mb-2">
+      <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">
         {icon}
         <span>{label}</span>
       </div>
       <div className="flex items-baseline gap-1">
-        <span className="text-2xl font-bold text-slate-900 tabular-nums">{value}</span>
-        {unit && <span className="text-sm text-slate-400">{unit}</span>}
+        <span className="text-2xl font-bold text-foreground tabular-nums">{value}</span>
+        {unit && <span className="text-sm text-muted-foreground">{unit}</span>}
       </div>
       {trend && (
-        <div className={cn("text-xs mt-1 font-medium", trend.value >= 0 ? "text-emerald-600" : "text-red-500")}>
+        <div className={cn("text-xs mt-1 font-medium", trend.value >= 0 ? "text-emerald-500" : "text-red-500")}>
           {trend.value >= 0 ? "+" : ""}{trend.value}%{trend.label ? ` ${trend.label}` : ""}
         </div>
       )}
@@ -106,9 +106,9 @@ interface EmptyStateProps {
 export function EmptyState({ icon, title, description, action }: EmptyStateProps) {
   return (
     <div className="py-16 flex flex-col items-center text-center">
-      {icon && <div className="text-slate-300 mb-3">{icon}</div>}
-      <p className="text-sm font-medium text-slate-500">{title}</p>
-      {description && <p className="text-xs text-slate-400 mt-1 max-w-xs">{description}</p>}
+      {icon && <div className="text-muted-foreground/40 mb-3">{icon}</div>}
+      <p className="text-sm font-medium text-muted-foreground">{title}</p>
+      {description && <p className="text-xs text-muted-foreground/70 mt-1 max-w-xs">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );
@@ -144,13 +144,13 @@ export function Modal({ open, onClose, title, children, maxWidth = "max-w-lg" }:
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
       <div className={cn(
-        "bg-white w-full sm:rounded-xl rounded-t-2xl shadow-2xl animate-in sm:mx-4",
+        "bg-popover text-popover-foreground w-full sm:rounded-xl rounded-t-2xl shadow-2xl animate-in sm:mx-4",
         maxWidth
       )}>
         {title && (
           <div className="flex items-center justify-between px-5 pt-5 pb-0">
-            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 -mr-1">
+            <h3 className="text-base font-semibold text-foreground">{title}</h3>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1 -mr-1 transition-colors">
               <X size={18} />
             </button>
           </div>
@@ -170,17 +170,18 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 export function Input({ label, error, className, ...props }: InputProps) {
   return (
     <div>
-      {label && <label className="block text-xs font-medium text-slate-500 mb-1.5">{label}</label>}
+      {label && <label className="block text-xs font-medium text-muted-foreground mb-1.5">{label}</label>}
       <input
         className={cn(
-          "w-full px-3 py-2.5 border rounded-lg text-sm transition-colors duration-150",
-          "focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400",
-          error ? "border-red-300 bg-red-50" : "border-slate-200 bg-white",
+          "w-full px-3 py-2.5 border rounded-lg text-sm bg-background text-foreground transition-colors duration-150",
+          "focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring",
+          "placeholder:text-muted-foreground/60",
+          error ? "border-destructive bg-destructive/5" : "border-input",
           className
         )}
         {...props}
       />
-      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      {error && <p className="text-xs text-destructive mt-1">{error}</p>}
     </div>
   );
 }
@@ -194,11 +195,11 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
 export function Select({ label, options, className, ...props }: SelectProps) {
   return (
     <div>
-      {label && <label className="block text-xs font-medium text-slate-500 mb-1.5">{label}</label>}
+      {label && <label className="block text-xs font-medium text-muted-foreground mb-1.5">{label}</label>}
       <select
         className={cn(
-          "w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm bg-white",
-          "focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400",
+          "w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background text-foreground",
+          "focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring",
           className
         )}
         {...props}
@@ -213,11 +214,11 @@ export function Select({ label, options, className, ...props }: SelectProps) {
 type BadgeVariant = "default" | "success" | "warning" | "danger" | "info";
 
 const BADGE_VARIANTS: Record<BadgeVariant, string> = {
-  default: "bg-slate-100 text-slate-600",
-  success: "bg-emerald-50 text-emerald-700",
-  warning: "bg-amber-50 text-amber-700",
-  danger: "bg-red-50 text-red-700",
-  info: "bg-sky-50 text-sky-700",
+  default: "bg-muted text-muted-foreground",
+  success: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  warning: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  danger: "bg-red-500/15 text-red-600 dark:text-red-400",
+  info: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
 };
 
 export function Badge({ children, variant = "default" }: { children: ReactNode; variant?: BadgeVariant }) {
@@ -240,11 +241,11 @@ interface MonthNavProps {
 export function MonthNav({ year, month, onPrev, onNext, rightSlot }: MonthNavProps) {
   return (
     <div className="flex items-center gap-2 mb-4">
-      <button onClick={onPrev} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
+      <button onClick={onPrev} className="p-2 rounded-lg hover:bg-accent text-muted-foreground transition-colors">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
-      <span className="text-sm font-semibold text-slate-800 min-w-[100px] text-center">{year}년 {month}월</span>
-      <button onClick={onNext} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
+      <span className="text-sm font-semibold text-foreground min-w-[100px] text-center">{year}년 {month}월</span>
+      <button onClick={onNext} className="p-2 rounded-lg hover:bg-accent text-muted-foreground transition-colors">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
       {rightSlot && <div className="ml-auto">{rightSlot}</div>}
@@ -257,8 +258,8 @@ export function PageHeader({ title, description, action }: { title: string; desc
   return (
     <div className="flex items-start justify-between mb-6">
       <div>
-        <h2 className="text-lg font-bold text-slate-900">{title}</h2>
-        {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
+        <h2 className="text-lg font-bold text-foreground">{title}</h2>
+        {description && <p className="text-sm text-muted-foreground mt-0.5">{description}</p>}
       </div>
       {action}
     </div>
@@ -269,7 +270,7 @@ export function PageHeader({ title, description, action }: { title: string; desc
 export function Loading() {
   return (
     <div className="flex items-center justify-center py-12">
-      <div className="w-5 h-5 border-2 border-slate-200 border-t-slate-600 rounded-full animate-spin" />
+      <div className="w-5 h-5 border-2 border-border border-t-primary rounded-full animate-spin" />
     </div>
   );
 }

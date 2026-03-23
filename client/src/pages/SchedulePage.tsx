@@ -5,26 +5,29 @@ import { toast } from "sonner";
 import {
   ChevronLeft,
   ChevronRight,
-  Plus,
   Copy,
   Send,
-  CheckCircle,
-  Lock,
   Clock,
-  UserPlus,
-  Trash2,
   X,
+  MoreHorizontal,
+  Trash2,
+  Edit3,
+  Sun,
+  Moon,
+  Maximize2,
+  UserPlus,
+  Pencil,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/compat";
 
 // ─── 헬퍼 ────────────────────────────────────────────────────────────────────
 
 function getWeekDates(baseDate: Date): Date[] {
   const d = new Date(baseDate);
-  const day = d.getDay(); // 0=일
+  const day = d.getDay();
   const mon = new Date(d);
-  mon.setDate(d.getDate() - ((day + 6) % 7)); // 이번 주 월요일
+  mon.setDate(d.getDate() - ((day + 6) % 7));
   return Array.from({ length: 7 }, (_, i) => {
     const dd = new Date(mon);
     dd.setDate(mon.getDate() + i);
@@ -43,12 +46,57 @@ function fmtTime(d: Date | string) {
 
 const DAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"];
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  draft: { label: "초안", color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400" },
-  published: { label: "고지", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" },
-  completed: { label: "완료", color: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300" },
-  confirmed: { label: "확정", color: "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300" },
-  canceled: { label: "취소", color: "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400" },
+const STATUS_LABELS: Record<string, { label: string; color: string; bgCard: string }> = {
+  draft: {
+    label: "초안",
+    color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+    bgCard: "border-l-gray-400",
+  },
+  confirmed: {
+    label: "확정",
+    color: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
+    bgCard: "border-l-blue-500",
+  },
+  completed: {
+    label: "완료",
+    color: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
+    bgCard: "border-l-green-500",
+  },
+  canceled: {
+    label: "취소",
+    color: "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400",
+    bgCard: "border-l-red-400",
+  },
+};
+
+const PRESET_LABELS: Record<string, { label: string; icon: typeof Sun }> = {
+  open: { label: "오픈반차", icon: Sun },
+  close: { label: "마감반차", icon: Moon },
+  fullday: { label: "풀타임", icon: Maximize2 },
+};
+
+// ─── 타입 ─────────────────────────────────────────────────────────────────────
+
+type ScheduleItem = {
+  id: number;
+  userId: number | null;
+  tempWorkerName: string | null;
+  tempWageType: string | null;
+  tempWageAmount: string | null;
+  userName: string | null;
+  startTime: string | Date;
+  endTime: string | Date;
+  status: string;
+  shiftPreset: string | null;
+  note: string | null;
+  editReason: string | null;
+  payrollRecheckRequired: boolean | null;
+};
+
+type StaffItem = {
+  userId: number;
+  name: string;
+  storeRole: string;
 };
 
 // ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
@@ -63,9 +111,29 @@ export default function SchedulePage() {
   const weekStart = fmtDate(weekDates[0]);
   const weekEnd = fmtDate(weekDates[6]) + "T23:59:59";
 
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>("");
-  const [addForm, setAddForm] = useState({ userId: 0, startTime: "09:00", endTime: "18:00", note: "" });
+  // ─── 모달 상태 ─────────────────────────────
+  type AssignStep = "employee" | "preset" | "custom-time" | "temp-worker";
+  const [assignDate, setAssignDate] = useState<string | null>(null);
+  const [assignStep, setAssignStep] = useState<AssignStep>("employee");
+  const [assignUserId, setAssignUserId] = useState<number>(0);
+  const [assignUserName, setAssignUserName] = useState<string>("");
+  const [customTime, setCustomTime] = useState({ startTime: "09:00", endTime: "18:00", note: "" });
+
+  // 임시근로자 입력
+  const [tempForm, setTempForm] = useState({
+    name: "",
+    wageType: "hourly" as "hourly" | "daily",
+    wageAmount: "",
+    startTime: "09:00",
+    endTime: "18:00",
+    note: "",
+  });
+
+  const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
+  const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "" });
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  const [showBulkMenu, setShowBulkMenu] = useState(false);
 
   const utils = trpc.useUtils();
 
@@ -74,23 +142,68 @@ export default function SchedulePage() {
     { enabled: restaurantId > 0 }
   );
 
-  // 매장 직원 목록
   const { data: staffList = [] } = trpc.restaurants.getStaff.useQuery(
     { restaurantId },
     { enabled: restaurantId > 0 }
-  );
+  ) as { data: StaffItem[] };
+
+  // ─── Mutations ─────────────────────────────
+  const quickAssign = trpc.schedules.quickAssign.useMutation({
+    onSuccess() {
+      toast.success("스케줄 등록됨");
+      closeAssignModal();
+      invalidate();
+    },
+    onError(err) { toast.error(err.message); },
+  });
 
   const createSchedule = trpc.schedules.create.useMutation({
     onSuccess() {
-      toast.success("스케줄 추가됨");
-      setShowAddModal(false);
+      toast.success("스케줄 등록됨");
+      closeAssignModal();
+      invalidate();
+    },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const createTempWorker = trpc.schedules.createTempWorker.useMutation({
+    onSuccess() {
+      toast.success("임시근로자 스케줄 등록됨");
+      closeAssignModal();
+      invalidate();
+    },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const updateSchedule = trpc.schedules.update.useMutation({
+    onSuccess(data: any) {
+      if (data.payrollRecheck) {
+        toast.warning("수정됨 — 완료 스케줄 변경으로 정산 재확인 필요");
+      } else {
+        toast.success("수정됨");
+      }
+      setEditSchedule(null);
+      setDeleteConfirm(false);
       invalidate();
     },
     onError(err) { toast.error(err.message); },
   });
 
   const deleteSchedule = trpc.schedules.delete.useMutation({
-    onSuccess() { toast.success("삭제됨"); invalidate(); },
+    onSuccess(data: any) {
+      if (data.action === "canceled") {
+        if (data.payrollRecheck) {
+          toast.warning("취소됨 — 완료 스케줄 취소로 정산 재확인 필요");
+        } else {
+          toast.success("스케줄이 취소 처리되었습니다");
+        }
+      } else {
+        toast.success("삭제됨");
+      }
+      setEditSchedule(null);
+      setDeleteConfirm(false);
+      invalidate();
+    },
     onError(err) { toast.error(err.message); },
   });
 
@@ -102,18 +215,13 @@ export default function SchedulePage() {
     onError(err) { toast.error(err.message); },
   });
 
-  const publishRange = trpc.schedules.publishRange.useMutation({
-    onSuccess() { toast.success("고지 완료"); invalidate(); },
-    onError(err) { toast.error(err.message); },
-  });
-
-  const completeRange = trpc.schedules.completeRange.useMutation({
-    onSuccess() { toast.success("근무완료 처리됨"); invalidate(); },
-    onError(err) { toast.error(err.message); },
-  });
-
   const confirmRange = trpc.schedules.confirmRange.useMutation({
-    onSuccess() { toast.success("인건비 확정됨"); invalidate(); },
+    onSuccess() { toast.success("확정 완료 (직원 공개 + 예상인건비 반영)"); invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const confirmDay = trpc.schedules.confirmDay.useMutation({
+    onSuccess(data: any) { toast.success(`${data.affected}건 확정됨`); invalidate(); },
     onError(err) { toast.error(err.message); },
   });
 
@@ -121,11 +229,11 @@ export default function SchedulePage() {
     utils.schedules.listByRestaurant.invalidate();
   };
 
-  // 날짜별 스케줄 그룹핑
+  // ─── 날짜별 스케줄 그룹핑 ─────────────────
   const scheduleByDate = useMemo(() => {
-    const map = new Map<string, typeof scheduleList>();
+    const map = new Map<string, ScheduleItem[]>();
     weekDates.forEach((d) => map.set(fmtDate(d), []));
-    scheduleList.forEach((s) => {
+    (scheduleList as ScheduleItem[]).forEach((s) => {
       const key = fmtDate(new Date(s.startTime));
       const list = map.get(key);
       if (list) list.push(s);
@@ -133,7 +241,13 @@ export default function SchedulePage() {
     return map;
   }, [scheduleList, weekDates]);
 
-  // 주 이동
+  const assignedUserIds = useMemo(() => {
+    if (!assignDate) return new Set<number>();
+    const daySchedules = scheduleByDate.get(assignDate) ?? [];
+    return new Set(daySchedules.filter((s) => s.userId && s.status !== "canceled").map((s) => s.userId!));
+  }, [assignDate, scheduleByDate]);
+
+  // ─── 주 이동 ──────────────────────────────
   const prevWeek = () => {
     const d = new Date(baseDate);
     d.setDate(d.getDate() - 7);
@@ -146,6 +260,103 @@ export default function SchedulePage() {
   };
   const goThisWeek = () => setBaseDate(new Date());
 
+  // ─── 모달 헬퍼 ────────────────────────────
+  const openAssignModal = (dateStr: string) => {
+    setAssignDate(dateStr);
+    setAssignStep("employee");
+    setAssignUserId(0);
+    setAssignUserName("");
+    setCustomTime({ startTime: "09:00", endTime: "18:00", note: "" });
+    setTempForm({ name: "", wageType: "hourly", wageAmount: "", startTime: "09:00", endTime: "18:00", note: "" });
+  };
+  const closeAssignModal = () => {
+    setAssignDate(null);
+    setAssignStep("employee");
+  };
+
+  const selectEmployee = (userId: number, name: string) => {
+    setAssignUserId(userId);
+    setAssignUserName(name);
+    setAssignStep("preset");
+  };
+
+  const handleQuickAssign = (preset: "open" | "fullday" | "close") => {
+    if (!assignDate || !assignUserId) return;
+    quickAssign.mutate({
+      restaurantId,
+      userId: assignUserId,
+      workDate: assignDate,
+      preset,
+    });
+  };
+
+  const handleCustomTimeAssign = () => {
+    if (!assignDate || !assignUserId) return;
+    createSchedule.mutate({
+      restaurantId,
+      userId: assignUserId,
+      workDate: assignDate,
+      startTime: customTime.startTime,
+      endTime: customTime.endTime,
+      note: customTime.note || undefined,
+    });
+  };
+
+  const handleTempWorkerAssign = () => {
+    if (!assignDate || !tempForm.name.trim()) {
+      toast.error("이름을 입력해주세요");
+      return;
+    }
+    createTempWorker.mutate({
+      restaurantId,
+      tempWorkerName: tempForm.name.trim(),
+      workDate: assignDate!,
+      startTime: tempForm.startTime,
+      endTime: tempForm.endTime,
+      wageType: tempForm.wageType,
+      wageAmount: tempForm.wageAmount ? Number(tempForm.wageAmount) : undefined,
+      note: tempForm.note || undefined,
+    });
+  };
+
+  const openEditModal = (schedule: ScheduleItem) => {
+    setEditSchedule(schedule);
+    setEditForm({
+      startTime: fmtTime(schedule.startTime),
+      endTime: fmtTime(schedule.endTime),
+      note: schedule.note ?? "",
+      editReason: "",
+    });
+    setDeleteConfirm(false);
+  };
+
+  const handleUpdate = () => {
+    if (!editSchedule) return;
+    const dateStr = fmtDate(new Date(editSchedule.startTime));
+    updateSchedule.mutate({
+      id: editSchedule.id,
+      restaurantId,
+      workDate: dateStr,
+      startTime: editForm.startTime,
+      endTime: editForm.endTime,
+      note: editForm.note || undefined,
+      editReason: editForm.editReason || undefined,
+    });
+  };
+
+  const handleDelete = () => {
+    if (!editSchedule) return;
+    const needsReason = editSchedule.status === "confirmed" || editSchedule.status === "completed";
+    if (needsReason && !deleteConfirm) {
+      setDeleteConfirm(true);
+      return;
+    }
+    deleteSchedule.mutate({
+      id: editSchedule.id,
+      reason: editForm.editReason || undefined,
+    });
+  };
+
   if (!current) {
     return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
   }
@@ -153,63 +364,61 @@ export default function SchedulePage() {
   const today = fmtDate(new Date());
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
-      {/* 헤더 */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-xl font-bold text-foreground">스케줄 관리</h1>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => copyWeek.mutate({ restaurantId, targetWeekStart: weekStart })}
-            disabled={copyWeek.isPending}
-          >
-            <Copy className="w-4 h-4 mr-1" /> 지난주 복사
+    <div className="p-3 md:p-6 space-y-3 max-w-4xl mx-auto">
+      {/* ─── 헤더 ──────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-bold text-foreground">스케줄 관리</h1>
+        <div className="relative">
+          <Button variant="outline" size="sm" onClick={() => setShowBulkMenu(!showBulkMenu)}>
+            <MoreHorizontal className="w-4 h-4" />
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => publishRange.mutate({ restaurantId, from: weekStart, to: weekEnd })}
-            disabled={publishRange.isPending}
-          >
-            <Send className="w-4 h-4 mr-1" /> 전체 고지
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => completeRange.mutate({ restaurantId, from: weekStart, to: weekEnd })}
-            disabled={completeRange.isPending}
-          >
-            <CheckCircle className="w-4 h-4 mr-1" /> 전체 완료
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => confirmRange.mutate({ restaurantId, from: weekStart, to: weekEnd })}
-            disabled={confirmRange.isPending}
-          >
-            <Lock className="w-4 h-4 mr-1" /> 전체 확정
-          </Button>
+          {showBulkMenu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowBulkMenu(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-lg shadow-lg py-1 w-44">
+                <button
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
+                  onClick={() => { copyWeek.mutate({ restaurantId, targetWeekStart: weekStart }); setShowBulkMenu(false); }}
+                >
+                  <Copy className="w-4 h-4" /> 지난주 복사
+                </button>
+                <button
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
+                  onClick={() => { confirmRange.mutate({ restaurantId, from: weekStart, to: weekEnd }); setShowBulkMenu(false); }}
+                >
+                  <Send className="w-4 h-4" /> 전체 확정
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {/* 주 네비게이션 */}
-      <div className="flex items-center justify-center gap-4">
-        <Button variant="ghost" size="icon" onClick={prevWeek}>
+      {/* ─── 주 네비게이션 ─────────────────────── */}
+      <div className="flex items-center justify-center gap-3">
+        <Button variant="ghost" size="icon" onClick={prevWeek} className="h-8 w-8">
           <ChevronLeft className="w-5 h-5" />
         </Button>
-        <button
-          onClick={goThisWeek}
-          className="text-sm font-medium text-foreground hover:text-primary"
-        >
+        <button onClick={goThisWeek} className="text-sm font-medium text-foreground hover:text-primary">
           {weekDates[0].getMonth() + 1}월 {weekDates[0].getDate()}일 ~ {weekDates[6].getMonth() + 1}월 {weekDates[6].getDate()}일
         </button>
-        <Button variant="ghost" size="icon" onClick={nextWeek}>
+        <Button variant="ghost" size="icon" onClick={nextWeek} className="h-8 w-8">
           <ChevronRight className="w-5 h-5" />
         </Button>
       </div>
 
-      {/* 주간 그리드 */}
+      {/* ─── 상태 흐름 범례 ────────────────────── */}
+      <div className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground">
+        <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800">초안</span>
+        <span>→</span>
+        <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">확정</span>
+        <span className="text-[9px]">(직원공개·예상인건비)</span>
+        <span>→</span>
+        <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300">완료</span>
+        <span className="text-[9px]">(리포트·지출반영)</span>
+      </div>
+
+      {/* ─── 주간 그리드 ───────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
         {weekDates.map((date, i) => {
           const dateStr = fmtDate(date);
@@ -220,7 +429,7 @@ export default function SchedulePage() {
           return (
             <div
               key={dateStr}
-              className={`border rounded-lg min-h-[140px] p-2 ${
+              className={`border rounded-lg min-h-[100px] md:min-h-[140px] p-2 ${
                 isToday
                   ? "border-primary bg-primary/5"
                   : isWeekend
@@ -228,165 +437,500 @@ export default function SchedulePage() {
                   : "border-border bg-card"
               }`}
             >
-              {/* 날짜 헤더 */}
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-1.5">
                 <span
                   className={`text-xs font-semibold ${
                     isToday ? "text-primary" : isWeekend ? "text-red-500" : "text-muted-foreground"
                   }`}
                 >
                   {DAY_NAMES[i]} {date.getDate()}일
+                  {daySchedules.length > 0 && (
+                    <span className="ml-1 text-[10px] font-normal">({daySchedules.length}명)</span>
+                  )}
                 </span>
-                <button
-                  onClick={() => {
-                    setSelectedDate(dateStr);
-                    setAddForm({ userId: 0, startTime: "09:00", endTime: "18:00", note: "" });
-                    setShowAddModal(true);
-                  }}
-                  className="p-0.5 rounded hover:bg-accent"
-                >
-                  <Plus className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
+                {daySchedules.some((s) => s.status === "draft") && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); confirmDay.mutate({ restaurantId, date: dateStr }); }}
+                    disabled={confirmDay.isPending}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/50 transition-colors"
+                  >
+                    확정
+                  </button>
+                )}
               </div>
 
-              {/* 스케줄 카드 */}
               <div className="space-y-1">
                 {daySchedules.map((s) => {
                   const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.draft;
+                  const presetInfo = s.shiftPreset ? PRESET_LABELS[s.shiftPreset === "full" ? "fullday" : s.shiftPreset] : null;
                   return (
-                    <div
+                    <button
                       key={s.id}
-                      className="group relative p-1.5 rounded bg-background border border-border/50 text-xs"
+                      onClick={() => openEditModal(s)}
+                      className={`w-full text-left p-1.5 rounded bg-background border-l-2 ${st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-medium text-foreground truncate">
                           {s.userName ?? s.tempWorkerName ?? "미배정"}
+                          {s.tempWorkerName && <span className="text-orange-500 ml-1">(임시)</span>}
                         </span>
-                        <span className={`px-1 py-0.5 rounded text-[10px] font-medium ${st.color}`}>
+                        <span className={`px-1 py-0.5 rounded text-[10px] font-medium shrink-0 ${st.color}`}>
                           {st.label}
                         </span>
                       </div>
                       <div className="text-muted-foreground flex items-center gap-1 mt-0.5">
-                        <Clock className="w-3 h-3" />
-                        {fmtTime(s.startTime)} ~ {fmtTime(s.endTime)}
+                        <Clock className="w-3 h-3 shrink-0" />
+                        <span>
+                          {fmtTime(s.startTime)}~{fmtTime(s.endTime)}
+                          {presetInfo && <span className="ml-1 opacity-60">({presetInfo.label})</span>}
+                        </span>
                       </div>
-                      {s.note && (
-                        <div className="text-muted-foreground truncate mt-0.5">{s.note}</div>
-                      )}
-                      {/* 삭제 버튼 */}
-                      <button
-                        onClick={() => {
-                          if (confirm("삭제하시겠습니까?")) deleteSchedule.mutate({ id: s.id });
-                        }}
-                        className="absolute top-1 right-1 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 transition-opacity"
-                      >
-                        <Trash2 className="w-3 h-3 text-destructive" />
-                      </button>
-                    </div>
+                    </button>
                   );
                 })}
-                {daySchedules.length === 0 && (
-                  <div className="text-center text-[10px] text-muted-foreground py-2">-</div>
-                )}
               </div>
+
+              <button
+                onClick={() => openAssignModal(dateStr)}
+                className="w-full mt-1 py-2 rounded border border-dashed border-border/60 text-[11px] text-muted-foreground hover:bg-accent/30 active:bg-accent/50 transition-colors"
+              >
+                + 직원 배정
+              </button>
             </div>
           );
         })}
       </div>
 
-      {/* 스케줄 추가 모달 */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-foreground">스케줄 추가</h2>
-              <button onClick={() => setShowAddModal(false)} className="p-1 rounded hover:bg-accent">
+      {isLoading && (
+        <div className="text-center py-8 text-muted-foreground">로딩 중...</div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          직원 배정 바텀시트
+          ═══════════════════════════════════════════════════════════════════════ */}
+      {assignDate && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={closeAssignModal} />
+          <div className="relative z-10 bg-card border-t md:border border-border rounded-t-2xl md:rounded-xl shadow-xl w-full max-w-md md:mx-4 max-h-[75vh] flex flex-col">
+            {/* 핸들바 (모바일) */}
+            <div className="flex justify-center pt-2 md:hidden">
+              <div className="w-10 h-1 rounded-full bg-border" />
+            </div>
+
+            <div className="flex items-center justify-between p-4 pb-2">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">
+                  {assignStep === "employee" && "직원 선택"}
+                  {assignStep === "preset" && `${assignUserName} — 근무유형`}
+                  {assignStep === "custom-time" && `${assignUserName} — 시간 직접입력`}
+                  {assignStep === "temp-worker" && "임시근로자 등록"}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">{assignDate}</p>
+              </div>
+              <button onClick={closeAssignModal} className="p-1.5 rounded-full hover:bg-accent">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="text-sm text-muted-foreground mb-4">{selectedDate}</div>
+            {/* ─── Step 1: 직원 목록 ─── */}
+            {assignStep === "employee" && (
+              <div className="overflow-y-auto flex-1 px-4 pb-4">
+                {staffList.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">등록된 직원이 없습니다</p>
+                ) : (
+                  <div className="space-y-1">
+                    {(staffList as StaffItem[]).map((staff) => {
+                      const isAssigned = assignedUserIds.has(staff.userId);
+                      const roleLabel =
+                        staff.storeRole === "store_manager" ? "점장"
+                          : staff.storeRole === "manager" ? "매니저"
+                          : "직원";
+                      return (
+                        <button
+                          key={staff.userId}
+                          disabled={isAssigned}
+                          onClick={() => selectEmployee(staff.userId, staff.name)}
+                          className={`w-full flex items-center justify-between p-3 rounded-lg text-sm transition-colors ${
+                            isAssigned
+                              ? "opacity-40 cursor-not-allowed bg-muted/30"
+                              : "hover:bg-accent active:bg-accent/70"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
+                              {staff.name.charAt(0)}
+                            </div>
+                            <div className="text-left">
+                              <span className="font-medium text-foreground">{staff.name}</span>
+                              <span className="text-xs text-muted-foreground ml-2">{roleLabel}</span>
+                            </div>
+                          </div>
+                          {isAssigned && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-muted text-muted-foreground">배정됨</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium text-foreground">직원</label>
-                <select
-                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={addForm.userId}
-                  onChange={(e) => setAddForm({ ...addForm, userId: Number(e.target.value) })}
+                {/* 임시근로자 추가 버튼 */}
+                <div className="mt-3 pt-3 border-t border-border">
+                  <button
+                    onClick={() => setAssignStep("temp-worker")}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg text-sm hover:bg-accent active:bg-accent/70 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
+                      <UserPlus className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                    </div>
+                    <div className="text-left">
+                      <span className="font-medium text-foreground">임시근로자 추가</span>
+                      <span className="text-xs text-muted-foreground ml-2">급구/일용직</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ─── Step 2: 프리셋 선택 ─── */}
+            {assignStep === "preset" && (
+              <div className="px-4 pb-6 space-y-2 overflow-y-auto flex-1">
+                <button
+                  onClick={() => setAssignStep("employee")}
+                  className="text-xs text-muted-foreground hover:text-foreground mb-2 flex items-center gap-1"
                 >
-                  <option value={0}>선택...</option>
-                  {staffList.map((s: any) => (
-                    <option key={s.userId} value={s.userId}>
-                      {s.name} ({s.storeRole === "store_manager" ? "점장" : s.storeRole === "manager" ? "매니저" : "직원"})
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <ChevronLeft className="w-3 h-3" /> 직원 다시 선택
+                </button>
+                {(["fullday", "open", "close"] as const).map((preset) => {
+                  const info = PRESET_LABELS[preset];
+                  const Icon = info.icon;
+                  return (
+                    <button
+                      key={preset}
+                      onClick={() => handleQuickAssign(preset)}
+                      disabled={quickAssign.isPending}
+                      className="w-full flex items-center gap-3 p-4 rounded-lg border border-border hover:bg-accent active:bg-accent/70 transition-colors"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Icon className="w-5 h-5 text-primary" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-medium text-foreground text-sm">{info.label}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {preset === "fullday" && "영업시간 전체 근무"}
+                          {preset === "open" && "오픈 ~ 중간시간"}
+                          {preset === "close" && "중간시간 ~ 마감"}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
 
-              <div className="grid grid-cols-2 gap-3">
+                {/* 시간 직접입력 */}
+                <button
+                  onClick={() => setAssignStep("custom-time")}
+                  className="w-full flex items-center gap-3 p-4 rounded-lg border border-dashed border-border hover:bg-accent active:bg-accent/70 transition-colors"
+                >
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                    <Pencil className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                  <div className="text-left">
+                    <div className="font-medium text-foreground text-sm">시간 직접입력</div>
+                    <div className="text-xs text-muted-foreground">출퇴근 시간 수동 설정</div>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* ─── Step 2b: 시간 직접입력 ─── */}
+            {assignStep === "custom-time" && (
+              <div className="px-4 pb-6 space-y-3 overflow-y-auto flex-1">
+                <button
+                  onClick={() => setAssignStep("preset")}
+                  className="text-xs text-muted-foreground hover:text-foreground mb-1 flex items-center gap-1"
+                >
+                  <ChevronLeft className="w-3 h-3" /> 근무유형 선택
+                </button>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">시작</label>
+                    <input
+                      type="time"
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={customTime.startTime}
+                      onChange={(e) => setCustomTime({ ...customTime, startTime: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">종료</label>
+                    <input
+                      type="time"
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={customTime.endTime}
+                      onChange={(e) => setCustomTime({ ...customTime, endTime: e.target.value })}
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="text-sm font-medium text-foreground">시작</label>
+                  <label className="text-xs font-medium text-muted-foreground">메모</label>
                   <input
-                    type="time"
+                    type="text"
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    value={addForm.startTime}
-                    onChange={(e) => setAddForm({ ...addForm, startTime: e.target.value })}
+                    value={customTime.note}
+                    onChange={(e) => setCustomTime({ ...customTime, note: e.target.value })}
+                    placeholder="선택 사항"
                   />
                 </div>
+
+                <Button
+                  className="w-full"
+                  onClick={handleCustomTimeAssign}
+                  disabled={createSchedule.isPending}
+                >
+                  등록
+                </Button>
+              </div>
+            )}
+
+            {/* ─── Step: 임시근로자 입력 ─── */}
+            {assignStep === "temp-worker" && (
+              <div className="px-4 pb-6 space-y-3 overflow-y-auto flex-1">
+                <button
+                  onClick={() => setAssignStep("employee")}
+                  className="text-xs text-muted-foreground hover:text-foreground mb-1 flex items-center gap-1"
+                >
+                  <ChevronLeft className="w-3 h-3" /> 직원 선택
+                </button>
+
                 <div>
-                  <label className="text-sm font-medium text-foreground">종료</label>
+                  <label className="text-xs font-medium text-muted-foreground">이름 *</label>
                   <input
-                    type="time"
+                    type="text"
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    value={addForm.endTime}
-                    onChange={(e) => setAddForm({ ...addForm, endTime: e.target.value })}
+                    value={tempForm.name}
+                    onChange={(e) => setTempForm({ ...tempForm, name: e.target.value })}
+                    placeholder="근로자 이름"
+                    autoFocus
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="text-sm font-medium text-foreground">메모</label>
-                <input
-                  type="text"
-                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={addForm.note}
-                  onChange={(e) => setAddForm({ ...addForm, note: e.target.value })}
-                  placeholder="선택 사항"
-                />
-              </div>
-            </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">급여 유형</label>
+                  <div className="mt-1 flex gap-2">
+                    <button
+                      onClick={() => setTempForm({ ...tempForm, wageType: "hourly" })}
+                      className={`flex-1 py-2 rounded-md border text-sm font-medium transition-colors ${
+                        tempForm.wageType === "hourly"
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:bg-accent"
+                      }`}
+                    >
+                      시급
+                    </button>
+                    <button
+                      onClick={() => setTempForm({ ...tempForm, wageType: "daily" })}
+                      className={`flex-1 py-2 rounded-md border text-sm font-medium transition-colors ${
+                        tempForm.wageType === "daily"
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:bg-accent"
+                      }`}
+                    >
+                      일급
+                    </button>
+                  </div>
+                </div>
 
-            <div className="mt-6 flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowAddModal(false)}>
-                취소
-              </Button>
-              <Button
-                onClick={() => {
-                  if (!addForm.userId) {
-                    toast.error("직원을 선택해주세요");
-                    return;
-                  }
-                  createSchedule.mutate({
-                    restaurantId,
-                    userId: addForm.userId,
-                    workDate: selectedDate,
-                    startTime: addForm.startTime,
-                    endTime: addForm.endTime,
-                    note: addForm.note || undefined,
-                  });
-                }}
-                disabled={createSchedule.isPending}
-              >
-                추가
-              </Button>
-            </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">
+                    금액 ({tempForm.wageType === "hourly" ? "시급" : "일급"})
+                  </label>
+                  <div className="mt-1 relative">
+                    <input
+                      type="number"
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm pr-8"
+                      value={tempForm.wageAmount}
+                      onChange={(e) => setTempForm({ ...tempForm, wageAmount: e.target.value })}
+                      placeholder={tempForm.wageType === "hourly" ? "예: 10030" : "예: 80000"}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">원</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">시작</label>
+                    <input
+                      type="time"
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={tempForm.startTime}
+                      onChange={(e) => setTempForm({ ...tempForm, startTime: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">종료</label>
+                    <input
+                      type="time"
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={tempForm.endTime}
+                      onChange={(e) => setTempForm({ ...tempForm, endTime: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">메모</label>
+                  <input
+                    type="text"
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={tempForm.note}
+                    onChange={(e) => setTempForm({ ...tempForm, note: e.target.value })}
+                    placeholder="선택 사항"
+                  />
+                </div>
+
+                <Button
+                  className="w-full"
+                  onClick={handleTempWorkerAssign}
+                  disabled={createTempWorker.isPending || !tempForm.name.trim()}
+                >
+                  임시근로자 등록
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {isLoading && (
-        <div className="text-center py-8 text-muted-foreground">로딩 중...</div>
+      {/* ═══════════════════════════════════════════════════════════════════════
+          스케줄 수정/삭제 모달
+          ═══════════════════════════════════════════════════════════════════════ */}
+      {editSchedule && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setEditSchedule(null)} />
+          <div className="relative z-10 bg-card border-t md:border border-border rounded-t-2xl md:rounded-xl shadow-xl w-full max-w-md md:mx-4">
+            <div className="flex justify-center pt-2 md:hidden">
+              <div className="w-10 h-1 rounded-full bg-border" />
+            </div>
+
+            <div className="flex items-center justify-between p-4 pb-2">
+              <div>
+                <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+                  <Edit3 className="w-4 h-4" />
+                  {editSchedule.userName ?? editSchedule.tempWorkerName ?? "미배정"}
+                  {editSchedule.tempWorkerName && <span className="text-xs text-orange-500">(임시)</span>}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {fmtDate(new Date(editSchedule.startTime))} · {
+                    (STATUS_LABELS[editSchedule.status] ?? STATUS_LABELS.draft).label
+                  }
+                </p>
+              </div>
+              <button onClick={() => setEditSchedule(null)} className="p-1.5 rounded-full hover:bg-accent">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-4 pb-4 space-y-3">
+              {/* 상태별 경고 배너 */}
+              {editSchedule.status === "confirmed" && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-200 dark:border-amber-800">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                  <div className="text-xs text-amber-700 dark:text-amber-400">
+                    <span className="font-semibold">확정된 스케줄</span> — 수정/삭제 시 사유 입력이 필요하며, 직원에게 변경 사항이 반영됩니다.
+                  </div>
+                </div>
+              )}
+              {editSchedule.status === "completed" && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-200 dark:border-red-800">
+                  <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                  <div className="text-xs text-red-700 dark:text-red-400">
+                    <span className="font-semibold">완료된 스케줄</span> — 수정/삭제 시 사유 입력이 필요하며, 정산 재확인이 발생합니다.
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">시작</label>
+                  <input
+                    type="time"
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={editForm.startTime}
+                    onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">종료</label>
+                  <input
+                    type="time"
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={editForm.endTime}
+                    onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">메모</label>
+                <input
+                  type="text"
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={editForm.note}
+                  onChange={(e) => setEditForm({ ...editForm, note: e.target.value })}
+                  placeholder="선택 사항"
+                />
+              </div>
+
+              {/* 사유 입력 — confirmed/completed 상태에서만 표시 */}
+              {(editSchedule.status === "confirmed" || editSchedule.status === "completed") && (
+                <div>
+                  <label className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                    변경 사유 *
+                  </label>
+                  <input
+                    type="text"
+                    className="mt-1 w-full rounded-md border border-amber-300 dark:border-amber-700 bg-background px-3 py-2 text-sm focus:ring-amber-500"
+                    value={editForm.editReason}
+                    onChange={(e) => setEditForm({ ...editForm, editReason: e.target.value })}
+                    placeholder="수정/삭제 사유를 입력하세요"
+                  />
+                </div>
+              )}
+
+              {/* 삭제 확인 단계 (confirmed/completed) */}
+              {deleteConfirm && (
+                <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-300 dark:border-red-800 text-xs text-red-700 dark:text-red-400">
+                  {editSchedule.status === "completed"
+                    ? "완료된 스케줄을 취소하면 정산에 영향을 줍니다. 사유를 입력 후 다시 삭제를 눌러주세요."
+                    : "확정된 스케줄을 취소합니다. 사유를 입력 후 다시 삭제를 눌러주세요."}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="flex-1"
+                  onClick={handleDelete}
+                  disabled={deleteSchedule.isPending}
+                >
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  {deleteConfirm ? "삭제 확인" : editSchedule.status === "draft" ? "삭제" : "취소 처리"}
+                </Button>
+                <Button
+                  size="sm"
+                  className="flex-1"
+                  onClick={handleUpdate}
+                  disabled={updateSchedule.isPending}
+                >
+                  저장
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -28,7 +28,7 @@ export const usersRouter = router({
       username: z.string().min(2),
       password: z.string().min(4),
       name: z.string().min(1),
-      role: z.enum(["admin", "user"]).default("user"),
+      role: z.enum(["master", "admin", "manager", "employee"]).default("employee"),
       email: z.string().email().optional(),
       phone: z.string().optional(),
     }))

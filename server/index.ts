@@ -5,9 +5,19 @@ import { appRouter } from "./routers/index";
 import { createContext } from "./trpc";
 import path from "path";
 import fs from "fs";
+import { uploadRouter, UPLOAD_ROOT, startCleanupScheduler } from "./upload";
+import { ocrRouter } from "./ocr";
 
 const app = express();
 app.use(express.json());
+
+// ─── 파일 업로드 라우터 + 정적 서빙 ──────────────────────────────────────────
+app.use("/api/upload", uploadRouter);
+app.use("/api/ocr", ocrRouter);
+app.use("/uploads", express.static(UPLOAD_ROOT));
+
+// ─── 체크리스트 사진 2주 자동삭제 스케줄러 ───────────────────────────────────
+startCleanupScheduler();
 
 // ─── DB 초기화 (1회용) ────────────────────────────────────────────────────────
 app.get("/api/init", async (_req, res) => {
@@ -279,4 +289,4 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const port = parseInt(process.env.PORT || "3000");
-app.listen(port, () => console.log(`Server running on http://localhost:${port}/`));
+app.listen(port, "0.0.0.0", () => console.log(`Server running on http://localhost:${port}/`));
