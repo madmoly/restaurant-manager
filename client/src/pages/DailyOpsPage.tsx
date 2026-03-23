@@ -567,7 +567,7 @@ function emptyPurchaseItem(): PurchaseItemRow {
   return { rawItemName: '', quantity: '', unitName: '개', unitPrice: '', lineTotal: '' };
 }
 
-type PurchaseInputMode = 'none' | 'simple' | 'ocr';
+type PurchaseInputMode = 'none' | 'input';
 
 function PurchaseTab({
   restaurantId,
@@ -577,6 +577,8 @@ function PurchaseTab({
   date: string;
 }) {
   const [inputMode, setInputMode] = useState<PurchaseInputMode>('none');
+  const [simpleMode, setSimpleMode] = useState(false);
+  const [simpleTotalAmount, setSimpleTotalAmount] = useState('');
   const [counterpartyId, setCounterpartyId] = useState<number | undefined>(undefined);
   const [note, setNote] = useState('');
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemRow[]>([emptyPurchaseItem()]);
@@ -631,6 +633,8 @@ function PurchaseTab({
 
   const resetForm = () => {
     setInputMode('none');
+    setSimpleMode(false);
+    setSimpleTotalAmount('');
     setCounterpartyId(undefined);
     setNote('');
     setPurchaseItems([emptyPurchaseItem()]);
@@ -742,6 +746,27 @@ function PurchaseTab({
   };
 
   const handleCreate = () => {
+    if (simpleMode) {
+      const total = parseFloat(simpleTotalAmount || '0');
+      if (total <= 0) {
+        toast.error('금액을 입력하세요.');
+        return;
+      }
+      createOrder.mutate({
+        restaurantId,
+        purchaseDate: date,
+        counterpartyId,
+        note: note || undefined,
+        attachmentUrl,
+        items: [{
+          rawItemName: counterpartyId
+            ? (counterpartiesQuery.data?.find((cp: any) => cp.id === counterpartyId)?.name || '매입')
+            : '매입',
+          lineTotal: simpleTotalAmount,
+        }],
+      });
+      return;
+    }
     const validItems = purchaseItems.filter(i => i.rawItemName.trim() && parseFloat(i.lineTotal || '0') > 0);
     if (validItems.length === 0) {
       toast.error('최소 1개 항목을 입력하세요.');
@@ -828,31 +853,97 @@ function PurchaseTab({
         )}
       </Card>
 
-      {/* ─── 입력 모드 선택 ─── */}
+      {/* ─── 매입 입력 버튼 ─── */}
       {inputMode === 'none' && (
-        <div className="grid grid-cols-2 gap-2">
-          <Button onClick={() => setInputMode('simple')} variant="secondary" className="h-12 flex-col gap-0.5">
-            <Plus className="w-4 h-4" />
-            <span className="text-xs">간편 입력</span>
-          </Button>
-          <Button onClick={() => setInputMode('ocr')} variant="secondary" className="h-12 flex-col gap-0.5">
-            <Camera className="w-4 h-4" />
-            <span className="text-xs">전표 촬영 (AI)</span>
-          </Button>
-        </div>
+        <Button onClick={() => setInputMode('input')} variant="secondary" className="w-full h-12 flex gap-2">
+          <Plus className="w-4 h-4" />
+          <span className="text-sm font-medium">매입 입력</span>
+        </Button>
       )}
 
-      {/* ─── 간편 매입 입력 모드 ─── */}
-      {inputMode === 'simple' && (
+      {/* ─── 통합 매입 입력 ─── */}
+      {inputMode === 'input' && (
         <Card className="bg-card border-border p-4 space-y-3">
+          {/* 헤더: 제목 + 간편입력 토글 + 닫기 */}
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-foreground text-sm">간편 매입 입력</h3>
-            <button onClick={resetForm} className="text-muted-foreground hover:text-foreground">
-              <X className="w-4 h-4" />
-            </button>
+            <h3 className="font-semibold text-foreground text-sm">매입 입력</h3>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <span className="text-xs text-muted-foreground">간편입력</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={simpleMode}
+                  onClick={() => setSimpleMode(!simpleMode)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${simpleMode ? 'bg-blue-600' : 'bg-muted'}`}
+                >
+                  <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${simpleMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                </button>
+              </label>
+              <button onClick={resetForm} className="text-muted-foreground hover:text-foreground">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          {/* 거래처 선택 */}
+          {/* 전표 촬영 영역 (항상 표시) */}
+          {!ocrPreviewUrl && !ocrProcessing && (
+            <label className="flex items-center justify-center gap-2 border border-dashed border-border rounded-lg p-3 cursor-pointer hover:bg-muted/30 transition-colors">
+              <Camera className="w-5 h-5 text-muted-foreground" />
+              <div>
+                <p className="text-xs font-medium text-foreground">전표/영수증 촬영</p>
+                <p className="text-[10px] text-muted-foreground">사진 업로드 시 AI가 자동 입력합니다</p>
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={(e) => {
+                  if (e.target.files?.[0]) {
+                    if (simpleMode) setSimpleMode(false);
+                    handleOcrUpload(e.target.files[0]);
+                  }
+                }}
+                className="hidden"
+              />
+            </label>
+          )}
+
+          {/* OCR 처리 중 */}
+          {ocrProcessing && (
+            <div className="flex flex-col items-center py-6 space-y-2">
+              <div className="w-7 h-7 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-foreground">AI가 전표를 분석 중...</p>
+              <p className="text-[10px] text-muted-foreground">품목, 수량, 단가를 자동 추출합니다</p>
+            </div>
+          )}
+
+          {/* OCR 에러 */}
+          {ocrError && (
+            <div className="bg-red-500/10 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <p className="text-sm text-red-600 dark:text-red-400">{ocrError}</p>
+              <p className="text-xs text-muted-foreground mt-1">API 키가 설정되지 않았거나 서버 오류입니다.</p>
+              <Button size="sm" variant="secondary" className="mt-2" onClick={() => { setOcrError(null); setOcrPreviewUrl(null); }}>
+                다시 촬영
+              </Button>
+            </div>
+          )}
+
+          {/* OCR 미리보기 이미지 */}
+          {ocrPreviewUrl && !ocrProcessing && (
+            <div className="relative">
+              <img src={ocrPreviewUrl} alt="전표 이미지" className="w-full rounded-lg border border-border max-h-40 object-contain bg-muted/20" />
+              <button
+                onClick={() => { setOcrPreviewUrl(null); setAttachmentUrl(undefined); }}
+                className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
+              >
+                <X className="w-3 h-3" />
+              </button>
+              <span className="absolute bottom-2 left-2 text-[10px] text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-1.5 py-0.5 rounded">AI 추출 — 확인 필요</span>
+            </div>
+          )}
+
+          {/* 거래처 선택 (항상 표시) */}
           <div>
             <Label className="text-xs">거래처</Label>
             <select
@@ -867,188 +958,45 @@ function PurchaseTab({
             </select>
           </div>
 
-          {/* 거래처 품목 빠른선택 (거래처 선택 시) */}
-          {counterpartyId && cpItems.length > 0 && (
+          {/* ── 간편입력 모드: 금액만 ── */}
+          {simpleMode ? (
             <div>
-              <Label className="text-xs text-muted-foreground">빠른 품목 추가</Label>
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {cpItems.map((cpItem: any) => (
-                  <button
-                    key={cpItem.id}
-                    onClick={() => addFromCpItem(cpItem)}
-                    className="text-xs px-2 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded hover:bg-blue-500/20 transition-colors"
-                  >
-                    {cpItem.supplierItemName || cpItem.itemName}
-                    {cpItem.lastPrice && <span className="ml-1 opacity-70">₩{Number(cpItem.lastPrice).toLocaleString()}</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 항목 입력 */}
-          <div className="space-y-2">
-            <Label className="text-xs">매입 항목</Label>
-            {purchaseItems.map((item, idx) => (
-              <div key={idx} className="space-y-1 border border-border rounded-lg p-2.5 bg-card/50">
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    placeholder="품명"
-                    value={item.rawItemName}
-                    onChange={(e) => updateItem(idx, 'rawItemName', e.target.value)}
-                    className="flex-1 text-xs h-8"
-                  />
-                  <button
-                    onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))}
-                    className="shrink-0 p-1 text-muted-foreground hover:text-red-500"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-12 gap-1.5">
-                  <Input
-                    placeholder="수량"
-                    type="number"
-                    value={item.quantity}
-                    onChange={(e) => updateItem(idx, 'quantity', e.target.value)}
-                    className="col-span-3 text-xs h-8"
-                  />
-                  <select
-                    value={item.unitName}
-                    onChange={(e) => updateItem(idx, 'unitName', e.target.value)}
-                    className="col-span-3 h-8 rounded-md border border-border bg-background px-1 text-xs text-foreground"
-                  >
-                    {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                  <Input
-                    placeholder="단가"
-                    type="number"
-                    value={item.unitPrice}
-                    onChange={(e) => updateItem(idx, 'unitPrice', e.target.value)}
-                    className="col-span-3 text-xs h-8"
-                  />
-                  <Input
-                    placeholder="합계"
-                    type="number"
-                    value={item.lineTotal}
-                    onChange={(e) => updateItem(idx, 'lineTotal', e.target.value)}
-                    className="col-span-3 text-xs h-8 font-medium"
-                  />
-                </div>
-              </div>
-            ))}
-            <Button variant="secondary" size="sm" onClick={() => setPurchaseItems([...purchaseItems, emptyPurchaseItem()])} className="w-full">
-              <Plus className="w-3 h-3 mr-1" /> 항목 추가
-            </Button>
-          </div>
-
-          {/* 메모 */}
-          <div>
-            <Label className="text-xs">메모 (선택)</Label>
-            <Input placeholder="메모" value={note} onChange={(e) => setNote(e.target.value)} className="mt-1 text-sm h-8" />
-          </div>
-
-          {/* 합계 + 저장 */}
-          <div className="bg-blue-500/5 p-3 rounded flex justify-between items-center">
-            <span className="text-sm font-medium text-foreground">합계:</span>
-            <span className="font-bold text-blue-600 tabular-nums">₩{formTotal.toLocaleString()}</span>
-          </div>
-
-          <Button onClick={handleCreate} disabled={createOrder.isPending} className="w-full">
-            {createOrder.isPending ? '등록 중...' : '매입 전표 등록'}
-          </Button>
-        </Card>
-      )}
-
-      {/* ─── 전표 촬영 (OCR) 모드 ─── */}
-      {inputMode === 'ocr' && (
-        <Card className="bg-card border-border p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-foreground text-sm">전표 촬영 입력 (AI)</h3>
-            <button onClick={resetForm} className="text-muted-foreground hover:text-foreground">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* 사진 촬영/선택 영역 */}
-          {!ocrPreviewUrl && !ocrProcessing && (
-            <label className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-8 cursor-pointer hover:bg-muted/30 transition-colors">
-              <Camera className="w-10 h-10 text-muted-foreground mb-2" />
-              <p className="text-sm font-medium text-foreground">전표/영수증 촬영</p>
-              <p className="text-xs text-muted-foreground mt-1">사진을 촬영하거나 갤러리에서 선택</p>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={(e) => {
-                  if (e.target.files?.[0]) handleOcrUpload(e.target.files[0]);
-                }}
-                className="hidden"
+              <Label className="text-xs">매입 금액</Label>
+              <Input
+                placeholder="총 금액 입력"
+                type="number"
+                value={simpleTotalAmount}
+                onChange={(e) => setSimpleTotalAmount(e.target.value)}
+                className="mt-1 text-sm h-10 text-right font-medium"
+                autoFocus
               />
-            </label>
-          )}
-
-          {/* OCR 처리 중 */}
-          {ocrProcessing && (
-            <div className="flex flex-col items-center py-8 space-y-3">
-              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm text-foreground">AI가 전표를 분석하고 있습니다...</p>
-              <p className="text-xs text-muted-foreground">품목, 수량, 단가를 자동 추출합니다</p>
             </div>
-          )}
-
-          {/* OCR 에러 */}
-          {ocrError && (
-            <div className="bg-red-500/10 border border-red-200 dark:border-red-800 rounded-lg p-3">
-              <p className="text-sm text-red-600 dark:text-red-400">{ocrError}</p>
-              <p className="text-xs text-muted-foreground mt-1">API 키가 설정되지 않았거나 서버 오류입니다. 직접 입력으로 전환할 수 있습니다.</p>
-              <div className="flex gap-2 mt-2">
-                <Button size="sm" variant="secondary" onClick={() => { setOcrError(null); setOcrPreviewUrl(null); }}>
-                  다시 촬영
-                </Button>
-                <Button size="sm" variant="secondary" onClick={() => setInputMode('simple')}>
-                  직접 입력
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* 미리보기 + 추출 결과 편집 */}
-          {ocrPreviewUrl && !ocrProcessing && (
+          ) : (
             <>
-              <div className="relative">
-                <img src={ocrPreviewUrl} alt="전표 이미지" className="w-full rounded-lg border border-border max-h-48 object-contain bg-muted/20" />
-                <button
-                  onClick={() => { setOcrPreviewUrl(null); setAttachmentUrl(undefined); }}
-                  className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-
-              {/* 거래처 선택 */}
-              <div>
-                <Label className="text-xs">거래처 (AI 추출 또는 선택)</Label>
-                <select
-                  value={counterpartyId ?? ''}
-                  onChange={(e) => setCounterpartyId(e.target.value ? Number(e.target.value) : undefined)}
-                  className="mt-1 w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
-                >
-                  <option value="">미지정</option>
-                  {counterpartiesList.map((cp: any) => (
-                    <option key={cp.id} value={cp.id}>{cp.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 추출된 항목 편집 */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs">추출된 항목 (확인 및 수정)</Label>
-                  <span className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-1.5 py-0.5 rounded">AI 추출 — 확인 필요</span>
+              {/* 거래처 품목 빠른선택 */}
+              {counterpartyId && cpItems.length > 0 && (
+                <div>
+                  <Label className="text-xs text-muted-foreground">빠른 품목 추가</Label>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {cpItems.map((cpItem: any) => (
+                      <button
+                        key={cpItem.id}
+                        onClick={() => addFromCpItem(cpItem)}
+                        className="text-xs px-2 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded hover:bg-blue-500/20 transition-colors"
+                      >
+                        {cpItem.supplierItemName || cpItem.itemName}
+                        {cpItem.lastPrice && <span className="ml-1 opacity-70">₩{Number(cpItem.lastPrice).toLocaleString()}</span>}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+              )}
+
+              {/* 항목 입력 */}
+              <div className="space-y-2">
+                <Label className="text-xs">매입 항목</Label>
                 {purchaseItems.map((item, idx) => (
-                  <div key={idx} className="space-y-1 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5 bg-amber-50/30 dark:bg-amber-900/10">
+                  <div key={idx} className={`space-y-1 border rounded-lg p-2.5 ${ocrPreviewUrl ? 'border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10' : 'border-border bg-card/50'}`}>
                     <div className="flex items-center gap-1.5">
                       <Input
                         placeholder="품명"
@@ -1056,7 +1004,10 @@ function PurchaseTab({
                         onChange={(e) => updateItem(idx, 'rawItemName', e.target.value)}
                         className="flex-1 text-xs h-8"
                       />
-                      <button onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))} className="shrink-0 p-1 text-muted-foreground hover:text-red-500">
+                      <button
+                        onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))}
+                        className="shrink-0 p-1 text-muted-foreground hover:text-red-500"
+                      >
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -1074,24 +1025,26 @@ function PurchaseTab({
                   <Plus className="w-3 h-3 mr-1" /> 항목 추가
                 </Button>
               </div>
-
-              {/* 메모 */}
-              <div>
-                <Label className="text-xs">메모 (선택)</Label>
-                <Input placeholder="메모" value={note} onChange={(e) => setNote(e.target.value)} className="mt-1 text-sm h-8" />
-              </div>
-
-              {/* 합계 + 저장 */}
-              <div className="bg-blue-500/5 p-3 rounded flex justify-between items-center">
-                <span className="text-sm font-medium text-foreground">합계:</span>
-                <span className="font-bold text-blue-600 tabular-nums">₩{formTotal.toLocaleString()}</span>
-              </div>
-
-              <Button onClick={handleCreate} disabled={createOrder.isPending} className="w-full">
-                {createOrder.isPending ? '등록 중...' : '확인 후 매입 전표 등록'}
-              </Button>
             </>
           )}
+
+          {/* 메모 */}
+          <div>
+            <Label className="text-xs">메모 (선택)</Label>
+            <Input placeholder="메모" value={note} onChange={(e) => setNote(e.target.value)} className="mt-1 text-sm h-8" />
+          </div>
+
+          {/* 합계 + 저장 */}
+          <div className="bg-blue-500/5 p-3 rounded flex justify-between items-center">
+            <span className="text-sm font-medium text-foreground">합계:</span>
+            <span className="font-bold text-blue-600 tabular-nums">
+              ₩{simpleMode ? (parseFloat(simpleTotalAmount || '0')).toLocaleString() : formTotal.toLocaleString()}
+            </span>
+          </div>
+
+          <Button onClick={handleCreate} disabled={createOrder.isPending} className="w-full">
+            {createOrder.isPending ? '등록 중...' : '매입 전표 등록'}
+          </Button>
         </Card>
       )}
 
