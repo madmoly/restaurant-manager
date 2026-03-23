@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation } from "wouter";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Loader2, UtensilsCrossed, Lock, User, Zap } from "lucide-react";
+import { Loader2, UtensilsCrossed, Lock, User, Zap, Download, Smartphone } from "lucide-react";
 
 // 테스트 계정 목록 (seed.ts 기준)
 const DEMO_ACCOUNTS = [
@@ -54,6 +54,35 @@ export default function Login() {
   const { login } = useAuth();
   const [, setLocation] = useLocation();
 
+  // PWA 설치
+  const deferredPrompt = useRef<any>(null);
+  const [canInstall, setCanInstall] = useState(false);
+  const [isIosSafari, setIsIosSafari] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+
+  useEffect(() => {
+    // 이미 설치된 상태인지 확인
+    const standalone = window.matchMedia('(display-mode: standalone)').matches
+      || (navigator as any).standalone === true;
+    setIsStandalone(standalone);
+
+    // iOS Safari 감지 (beforeinstallprompt 미지원)
+    const ua = navigator.userAgent;
+    const isIos = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|Chrome/.test(ua);
+    if (isIos && isSafari && !standalone) {
+      setIsIosSafari(true);
+    }
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      deferredPrompt.current = e;
+      setCanInstall(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess(data) {
       login(data.token, data.user);
@@ -66,6 +95,17 @@ export default function Login() {
       setLoadingAccount(null);
     },
   });
+
+  const handleInstall = async () => {
+    if (!deferredPrompt.current) return;
+    deferredPrompt.current.prompt();
+    const result = await deferredPrompt.current.userChoice;
+    if (result.outcome === 'accepted') {
+      setCanInstall(false);
+      toast.success('앱이 설치되었습니다');
+    }
+    deferredPrompt.current = null;
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,6 +194,31 @@ export default function Login() {
               </form>
             </CardContent>
           </Card>
+
+          {/* PWA 앱 설치 */}
+          {!isStandalone && (canInstall || isIosSafari) && (
+            <div className="mt-4 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 backdrop-blur-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <Smartphone className="h-4 w-4 text-emerald-400" />
+                <span className="text-sm font-semibold text-emerald-300">앱으로 설치</span>
+              </div>
+              {canInstall ? (
+                <Button
+                  onClick={handleInstall}
+                  variant="outline"
+                  className="w-full h-9 text-sm border-emerald-500/40 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30 hover:text-white"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  홈 화면에 추가
+                </Button>
+              ) : isIosSafari ? (
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Safari 하단의 <span className="inline-block px-1 py-0.5 bg-slate-700/60 rounded text-emerald-300 font-medium">공유 ↑</span> 버튼 →{" "}
+                  <span className="text-emerald-300 font-medium">홈 화면에 추가</span>를 선택하세요
+                </p>
+              ) : null}
+            </div>
+          )}
 
           <p className="text-center text-slate-500 text-xs mt-4">
             계정 문의는 관리자에게 연락하세요
