@@ -888,11 +888,18 @@ function PurchaseTab({
 
           {/* 전표 촬영 영역 (항상 표시) */}
           {!ocrPreviewUrl && !ocrProcessing && (
-            <label className="flex items-center justify-center gap-2 border border-dashed border-border rounded-lg p-3 cursor-pointer hover:bg-muted/30 transition-colors">
-              <Camera className="w-5 h-5 text-muted-foreground" />
-              <div>
-                <p className="text-xs font-medium text-foreground">전표/영수증 촬영</p>
-                <p className="text-[10px] text-muted-foreground">사진 업로드 시 AI가 자동 입력합니다</p>
+            <label className="flex flex-col items-center border border-dashed border-border rounded-lg p-3 cursor-pointer hover:bg-muted/30 transition-colors">
+              <div className="flex items-center gap-2">
+                <Camera className="w-5 h-5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs font-medium text-foreground">전표/영수증 촬영</p>
+                  <p className="text-[10px] text-muted-foreground">사진 업로드 시 AI가 자동 입력합니다</p>
+                </div>
+              </div>
+              <div className="mt-2 w-full bg-muted/30 rounded px-2.5 py-1.5 space-y-0.5">
+                <p className="text-[10px] text-muted-foreground leading-relaxed">• 한 번에 전표 1장만 촬영해주세요</p>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">• 거래처, 품목명, 단가, 수량, 합계가 잘 보이게 찍어주세요</p>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">• 그림자나 빛 반사를 피해주세요</p>
               </div>
               <input
                 type="file"
