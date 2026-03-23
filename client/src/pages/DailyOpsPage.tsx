@@ -1019,11 +1019,11 @@ function PurchaseTab({
                       </button>
                     </div>
                     <div className="grid grid-cols-12 gap-1.5">
+                      <Input placeholder="단가" type="number" value={item.unitPrice} onChange={(e) => updateItem(idx, 'unitPrice', e.target.value)} className="col-span-3 text-xs h-8" />
                       <Input placeholder="수량" type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', e.target.value)} className="col-span-3 text-xs h-8" />
                       <select value={item.unitName} onChange={(e) => updateItem(idx, 'unitName', e.target.value)} className="col-span-3 h-8 rounded-md border border-border bg-background px-1 text-xs text-foreground">
                         {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
                       </select>
-                      <Input placeholder="단가" type="number" value={item.unitPrice} onChange={(e) => updateItem(idx, 'unitPrice', e.target.value)} className="col-span-3 text-xs h-8" />
                       <Input placeholder="합계" type="number" value={item.lineTotal} onChange={(e) => updateItem(idx, 'lineTotal', e.target.value)} className="col-span-3 text-xs h-8 font-medium" />
                     </div>
                   </div>
