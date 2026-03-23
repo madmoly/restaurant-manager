@@ -1004,27 +1004,41 @@ function PurchaseTab({
                 <Label className="text-xs">매입 항목</Label>
                 {purchaseItems.map((item, idx) => (
                   <div key={idx} className={`space-y-1 border rounded-lg p-2.5 ${ocrPreviewUrl ? 'border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10' : 'border-border bg-card/50'}`}>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-2">
                       <Input
                         placeholder="품명"
                         value={item.rawItemName}
                         onChange={(e) => updateItem(idx, 'rawItemName', e.target.value)}
-                        className="flex-1 text-xs h-8"
+                        className="flex-1 text-sm h-9"
                       />
                       <button
                         onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))}
-                        className="shrink-0 p-1 text-muted-foreground hover:text-red-500"
+                        className="shrink-0 p-1.5 text-muted-foreground hover:text-red-500"
                       >
-                        <X className="w-3.5 h-3.5" />
+                        <X className="w-4 h-4" />
                       </button>
                     </div>
-                    <div className="grid grid-cols-12 gap-1.5">
-                      <Input placeholder="단가" type="number" value={item.unitPrice} onChange={(e) => updateItem(idx, 'unitPrice', e.target.value)} className="col-span-3 text-xs h-8" />
-                      <Input placeholder="수량" type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', e.target.value)} className="col-span-3 text-xs h-8" />
-                      <select value={item.unitName} onChange={(e) => updateItem(idx, 'unitName', e.target.value)} className="col-span-3 h-8 rounded-md border border-border bg-background px-1 text-xs text-foreground">
-                        {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
-                      </select>
-                      <Input placeholder="합계" type="number" value={item.lineTotal} onChange={(e) => updateItem(idx, 'lineTotal', e.target.value)} className="col-span-3 text-xs h-8 font-medium" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground mb-0.5 block">단가</span>
+                        <Input placeholder="0" type="number" value={item.unitPrice} onChange={(e) => updateItem(idx, 'unitPrice', e.target.value)} className="text-sm h-9" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground mb-0.5 block">수량</span>
+                        <Input placeholder="0" type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', e.target.value)} className="text-sm h-9" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground mb-0.5 block">단위</span>
+                        <select value={item.unitName} onChange={(e) => updateItem(idx, 'unitName', e.target.value)} className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground">
+                          {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground mb-0.5 block">합계</span>
+                        <Input placeholder="0" type="number" value={item.lineTotal} onChange={(e) => updateItem(idx, 'lineTotal', e.target.value)} className="text-sm h-9 font-medium" />
+                      </div>
                     </div>
                   </div>
                 ))}
