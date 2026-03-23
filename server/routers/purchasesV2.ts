@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, gte, desc, sql } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import {
@@ -282,5 +282,207 @@ export const purchasesV2Router = router({
         .where(eq(purchaseOrderItemsV2.purchaseOrderId, input.id));
       await db.delete(purchaseOrdersV2).where(eq(purchaseOrdersV2.id, input.id));
       return { ok: true };
+    }),
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 매입 분석 API
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** 품목별 거래처 가격비교: 동일 품목을 납품하는 거래처들의 최근 단가 비교 */
+  itemPriceComparison: protectedProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input }) => {
+      const rows = await db.execute(sql`
+        SELECT
+          oi.rawItemName,
+          c.id AS counterpartyId,
+          c.name AS counterpartyName,
+          oi.unitPrice,
+          oi.unitName,
+          o.purchaseDate,
+          oi.quantity
+        FROM purchase_order_items_v2 oi
+        JOIN purchase_orders_v2 o ON oi.purchaseOrderId = o.id
+        LEFT JOIN counterparties c ON o.counterpartyId = c.id
+        WHERE o.restaurantId = ${input.restaurantId}
+          AND oi.rawItemName IS NOT NULL
+          AND oi.rawItemName != ''
+          AND oi.unitPrice IS NOT NULL
+          AND oi.unitPrice != '0'
+        ORDER BY oi.rawItemName, o.purchaseDate DESC
+      `);
+      // Group by item name → list of supplier prices
+      const map = new Map<string, any[]>();
+      for (const row of rows[0] as any[]) {
+        const key = row.rawItemName;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push({
+          counterpartyId: row.counterpartyId,
+          counterpartyName: row.counterpartyName || '미지정',
+          unitPrice: row.unitPrice,
+          unitName: row.unitName,
+          purchaseDate: row.purchaseDate,
+          quantity: row.quantity,
+        });
+      }
+      // Only items with 2+ suppliers
+      const result: any[] = [];
+      for (const [itemName, entries] of map) {
+        const uniqueSuppliers = new Set(entries.map((e: any) => e.counterpartyId));
+        if (uniqueSuppliers.size >= 2) {
+          // Latest price per supplier
+          const latestBySupplier = new Map<number, any>();
+          for (const e of entries) {
+            if (!latestBySupplier.has(e.counterpartyId)) {
+              latestBySupplier.set(e.counterpartyId, e);
+            }
+          }
+          result.push({
+            itemName,
+            suppliers: Array.from(latestBySupplier.values()),
+          });
+        }
+      }
+      // Also include single-supplier items for reference
+      for (const [itemName, entries] of map) {
+        const uniqueSuppliers = new Set(entries.map((e: any) => e.counterpartyId));
+        if (uniqueSuppliers.size === 1) {
+          result.push({
+            itemName,
+            suppliers: [entries[0]],
+          });
+        }
+      }
+      return result;
+    }),
+
+  /** 시기별 품목 단가 추이: 특정 기간 내 품목의 단가 변화 */
+  itemPriceTrend: protectedProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      months: z.number().default(6),
+    }))
+    .query(async ({ input }) => {
+      const rows = await db.execute(sql`
+        SELECT
+          oi.rawItemName,
+          c.name AS counterpartyName,
+          oi.unitPrice,
+          oi.unitName,
+          DATE_FORMAT(o.purchaseDate, '%Y-%m') AS yearMonth,
+          o.purchaseDate
+        FROM purchase_order_items_v2 oi
+        JOIN purchase_orders_v2 o ON oi.purchaseOrderId = o.id
+        LEFT JOIN counterparties c ON o.counterpartyId = c.id
+        WHERE o.restaurantId = ${input.restaurantId}
+          AND oi.rawItemName IS NOT NULL
+          AND oi.rawItemName != ''
+          AND oi.unitPrice IS NOT NULL
+          AND oi.unitPrice != '0'
+          AND o.purchaseDate >= DATE_SUB(CURDATE(), INTERVAL ${input.months} MONTH)
+        ORDER BY oi.rawItemName, o.purchaseDate ASC
+      `);
+      // Group by item → chronological price points
+      const map = new Map<string, any[]>();
+      for (const row of rows[0] as any[]) {
+        const key = row.rawItemName;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push({
+          counterpartyName: row.counterpartyName || '미지정',
+          unitPrice: Number(row.unitPrice),
+          unitName: row.unitName,
+          yearMonth: row.yearMonth,
+          purchaseDate: row.purchaseDate,
+        });
+      }
+      return Array.from(map.entries()).map(([itemName, points]) => ({
+        itemName,
+        points,
+        minPrice: Math.min(...points.map((p: any) => p.unitPrice)),
+        maxPrice: Math.max(...points.map((p: any) => p.unitPrice)),
+        latestPrice: points[points.length - 1]?.unitPrice ?? 0,
+      }));
+    }),
+
+  /** 거래처별 매입/발주 금액 분석 */
+  counterpartyAmountAnalysis: protectedProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      months: z.number().default(3),
+    }))
+    .query(async ({ input }) => {
+      const rows = await db.execute(sql`
+        SELECT
+          o.counterpartyId,
+          c.name AS counterpartyName,
+          o.status,
+          COUNT(*) AS orderCount,
+          SUM(CAST(o.totalAmount AS DECIMAL(14,2))) AS totalAmount,
+          DATE_FORMAT(o.purchaseDate, '%Y-%m') AS yearMonth
+        FROM purchase_orders_v2 o
+        LEFT JOIN counterparties c ON o.counterpartyId = c.id
+        WHERE o.restaurantId = ${input.restaurantId}
+          AND o.purchaseDate >= DATE_SUB(CURDATE(), INTERVAL ${input.months} MONTH)
+        GROUP BY o.counterpartyId, c.name, o.status, DATE_FORMAT(o.purchaseDate, '%Y-%m')
+        ORDER BY c.name, DATE_FORMAT(o.purchaseDate, '%Y-%m')
+      `);
+      // Group by counterparty
+      const map = new Map<string, any>();
+      for (const row of rows[0] as any[]) {
+        const key = row.counterpartyName || '미지정';
+        if (!map.has(key)) {
+          map.set(key, {
+            counterpartyId: row.counterpartyId,
+            counterpartyName: key,
+            totalReceived: 0,
+            totalOrdered: 0,
+            receivedCount: 0,
+            orderedCount: 0,
+            monthly: [],
+          });
+        }
+        const entry = map.get(key)!;
+        const amount = Number(row.totalAmount || 0);
+        const count = Number(row.orderCount || 0);
+        if (row.status === 'received') {
+          entry.totalReceived += amount;
+          entry.receivedCount += count;
+        } else {
+          entry.totalOrdered += amount;
+          entry.orderedCount += count;
+        }
+        entry.monthly.push({
+          yearMonth: row.yearMonth,
+          status: row.status,
+          amount,
+          count,
+        });
+      }
+      return Array.from(map.values()).sort((a, b) => (b.totalReceived + b.totalOrdered) - (a.totalReceived + a.totalOrdered));
+    }),
+
+  /** 미입고 발주 전표 목록 */
+  pendingOrders: protectedProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input }) => {
+      return db
+        .select({
+          id: purchaseOrdersV2.id,
+          counterpartyId: purchaseOrdersV2.counterpartyId,
+          counterpartyName: counterparties.name,
+          purchaseDate: purchaseOrdersV2.purchaseDate,
+          totalAmount: purchaseOrdersV2.totalAmount,
+          note: purchaseOrdersV2.note,
+          createdAt: purchaseOrdersV2.createdAt,
+        })
+        .from(purchaseOrdersV2)
+        .leftJoin(counterparties, eq(purchaseOrdersV2.counterpartyId, counterparties.id))
+        .where(
+          and(
+            eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+            eq(purchaseOrdersV2.status, "ordered"),
+          ),
+        )
+        .orderBy(desc(purchaseOrdersV2.purchaseDate));
     }),
 });

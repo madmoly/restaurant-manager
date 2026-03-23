@@ -114,10 +114,10 @@ const NAV_GROUPS: NavGroup[] = [
         roles: ["manager"],
       },
       {
-        label: "거래처", href: "/counterparties",
+        label: "매입 관리", href: "/purchase-management",
         icon: <Wallet className="h-4 w-4" />,
         mobileIcon: <Wallet className="h-5 w-5" />,
-        roles: ["manager"],
+        roles: ["master", "admin", "manager"],
       },
     ],
   },

@@ -14,6 +14,7 @@ import SalesPage from "./pages/SalesPage";
 import UsersPage from "./pages/UsersPage";
 
 import CounterpartiesPage from "./pages/CounterpartiesPage";
+import PurchaseManagementPage from "./pages/PurchaseManagementPage";
 import FixedCostsPage from "./pages/FixedCostsPage";
 import ProfitPage from "./pages/ProfitPage";
 import SchedulePage from "./pages/SchedulePage";
@@ -67,6 +68,7 @@ function RoleRouter() {
             <Route path="/sales" component={SalesPage} />
 
             <Route path="/counterparties" component={CounterpartiesPage} />
+            <Route path="/purchase-management" component={PurchaseManagementPage} />
             <Route path="/fixed-costs" component={FixedCostsPage} />
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/daily-ops" component={DailyOpsPage} />
@@ -82,6 +84,7 @@ function RoleRouter() {
             <Route path="/sales" component={SalesPage} />
 
             <Route path="/counterparties" component={CounterpartiesPage} />
+            <Route path="/purchase-management" component={PurchaseManagementPage} />
             <Route path="/fixed-costs" component={FixedCostsPage} />
             <Route path="/profitability" component={ProfitPage} />
             <Route path="/restaurants" component={RestaurantsPage} />

@@ -570,6 +570,54 @@ function emptyPurchaseItem(): PurchaseItemRow {
 
 type PurchaseInputMode = 'none' | 'input';
 
+function PendingOrdersBanner({ restaurantId }: { restaurantId: number }) {
+  const pendingQuery = trpc.purchasesV2.pendingOrders.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const utils = trpc.useUtils();
+  const updateOrder = trpc.purchasesV2.updateOrder.useMutation({
+    onSuccess() {
+      toast.success('입고 처리 완료');
+      pendingQuery.refetch();
+      utils.purchasesV2.listByDate.invalidate();
+    },
+  });
+
+  const pending = pendingQuery.data || [];
+  if (pending.length === 0) return null;
+
+  return (
+    <Card className="bg-amber-50/50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800 p-3 space-y-2">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">미입고 발주 {pending.length}건</span>
+      </div>
+      {pending.map((order: any) => (
+        <div key={order.id} className="flex items-center justify-between text-xs">
+          <div className="min-w-0">
+            <span className="text-foreground font-medium">{order.counterpartyName || '미지정'}</span>
+            <span className="text-muted-foreground ml-1.5">₩{Number(order.totalAmount).toLocaleString()}</span>
+            <span className="text-muted-foreground ml-1.5">
+              {typeof order.purchaseDate === 'string'
+                ? order.purchaseDate.substring(0, 10)
+                : new Date(order.purchaseDate).toISOString().substring(0, 10)}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-[10px] h-6 px-2 gap-0.5 border-green-300 text-green-600 hover:bg-green-50 dark:border-green-700 dark:text-green-400"
+            onClick={() => updateOrder.mutate({ id: order.id, status: 'received' })}
+            disabled={updateOrder.isPending}
+          >
+            <Check className="w-2.5 h-2.5" /> 입고
+          </Button>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 function PurchaseTab({
   restaurantId,
   date,
@@ -580,6 +628,7 @@ function PurchaseTab({
   const [inputMode, setInputMode] = useState<PurchaseInputMode>('none');
   const [simpleMode, setSimpleMode] = useState(false);
   const [simpleTotalAmount, setSimpleTotalAmount] = useState('');
+  const [orderStatus, setOrderStatus] = useState<'received' | 'ordered'>('received');
   const [counterpartyId, setCounterpartyId] = useState<number | undefined>(undefined);
   const [note, setNote] = useState('');
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemRow[]>([emptyPurchaseItem()]);
@@ -636,6 +685,7 @@ function PurchaseTab({
     setInputMode('none');
     setSimpleMode(false);
     setSimpleTotalAmount('');
+    setOrderStatus('received');
     setCounterpartyId(undefined);
     setNote('');
     setPurchaseItems([emptyPurchaseItem()]);
@@ -773,6 +823,7 @@ function PurchaseTab({
         restaurantId,
         purchaseDate: date,
         counterpartyId,
+        status: orderStatus,
         note: note || undefined,
         attachmentUrl,
         items: [{
@@ -793,6 +844,7 @@ function PurchaseTab({
       restaurantId,
       purchaseDate: date,
       counterpartyId,
+      status: orderStatus,
       note: note || undefined,
       attachmentUrl,
       items: validItems.map(i => ({
@@ -1087,11 +1139,40 @@ function PurchaseTab({
             </span>
           </div>
 
+          {/* 발주/입고 상태 선택 */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setOrderStatus('received')}
+              className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                orderStatus === 'received'
+                  ? 'bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-700 text-green-700 dark:text-green-400'
+                  : 'bg-muted/20 border-border text-muted-foreground'
+              }`}
+            >
+              입고 (매입완료)
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrderStatus('ordered')}
+              className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                orderStatus === 'ordered'
+                  ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400'
+                  : 'bg-muted/20 border-border text-muted-foreground'
+              }`}
+            >
+              발주 (미입고)
+            </button>
+          </div>
+
           <Button onClick={handleCreate} disabled={createOrder.isPending} className="w-full">
-            {createOrder.isPending ? '등록 중...' : '매입 전표 등록'}
+            {createOrder.isPending ? '등록 중...' : orderStatus === 'ordered' ? '발주 전표 등록' : '매입 전표 등록'}
           </Button>
         </Card>
       )}
+
+      {/* 미입고 발주 전표 (있을 경우 표시) */}
+      <PendingOrdersBanner restaurantId={restaurantId} />
 
       {/* 발주 체크리스트 (기존 유지) */}
       <ChecklistSection
