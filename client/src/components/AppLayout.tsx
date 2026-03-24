@@ -20,7 +20,7 @@ import {
   UtensilsCrossed, LayoutDashboard, Users, Store, TrendingUp,
   LogOut, Menu, X, Sun, Moon, MoreHorizontal,
   Banknote, Receipt, Wallet, CalendarDays, ClipboardList, UserCog,
-  Bell, Check, Building2,
+  Bell, Check,
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -41,21 +41,36 @@ interface NavGroup {
 }
 
 // ─── 카테고리 그룹 정의 ──────────────────────────────────────────────────────
-// 모바일 하단탭 목표:
-//   master/admin: 대시보드(1), 사용자관리(2), 스케줄(3), 수익분석(4)
-//   manager:      대시보드(1), 일일운영(2), 스케줄(3), 분석캘린더(4)
-//   employee:     대시보드(1), 일일운영(2), 스케줄(3)
+// ─── 모바일 하단탭 목표 ───────────────────────────────────────────────────
+//   master(개발자):  시스템(1), 사업현황(2), 사용자관리(3), 수익분석(4)
+//   admin(대표):     대시보드(1), 매장관리(2), 스케줄(3), 수익분석(4)
+//   manager(점장):   대시보드(1), 일일운영(2), 스케줄(3), 분석캘린더(4)
+//   employee(직원):  대시보드(1), 일일운영(2), 스케줄(3)
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: "일일 운영",
+    label: "메인",
     items: [
       {
-        label: "대시보드", href: "/",
+        label: "시스템 관리",
+        labelByRole: { admin: "사업 현황", manager: "대시보드", employee: "대시보드" },
+        href: "/",
         icon: <LayoutDashboard className="h-4 w-4" />,
         mobileIcon: <LayoutDashboard className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "employee"],
         mobileTabPriority: { master: 1, admin: 1, manager: 1, employee: 1 },
       },
+      {
+        label: "사업 현황", href: "/business",
+        icon: <TrendingUp className="h-4 w-4" />,
+        mobileIcon: <TrendingUp className="h-5 w-5" />,
+        roles: ["master"],
+        mobileTabPriority: { master: 2 },
+      },
+    ],
+  },
+  {
+    label: "일일 운영",
+    items: [
       {
         label: "일일 운영", href: "/daily-ops",
         icon: <ClipboardList className="h-4 w-4" />,
@@ -69,12 +84,6 @@ const NAV_GROUPS: NavGroup[] = [
         mobileIcon: <CalendarDays className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
       },
-      {
-        label: "내 매장 업무관리", href: "/task-management",
-        icon: <ClipboardList className="h-4 w-4" />,
-        mobileIcon: <ClipboardList className="h-5 w-5" />,
-        roles: ["master", "admin", "manager"],
-      },
     ],
   },
   {
@@ -85,18 +94,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <CalendarDays className="h-4 w-4" />,
         mobileIcon: <CalendarDays className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "employee"],
-        mobileTabPriority: { master: 3, admin: 3, manager: 3, employee: 3 },
+        mobileTabPriority: { admin: 3, manager: 3, employee: 3 },
       },
       {
         label: "직원 관리", href: "/staff",
         icon: <UserCog className="h-4 w-4" />,
         mobileIcon: <UserCog className="h-5 w-5" />,
-        roles: ["master", "admin", "manager"],
-      },
-      {
-        label: "인건비 정산", href: "/labor-cost",
-        icon: <Wallet className="h-4 w-4" />,
-        mobileIcon: <Wallet className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
       },
     ],
@@ -105,18 +108,25 @@ const NAV_GROUPS: NavGroup[] = [
     label: "재무 분석",
     items: [
       {
-        label: "매출캘린더",
+        label: "수익 분석",
+        labelByRole: { manager: "분석캘린더" },
         href: "/profitability",
         icon: <TrendingUp className="h-4 w-4" />,
         mobileIcon: <TrendingUp className="h-5 w-5" />,
-        roles: ["master", "admin", "manager", "employee"],
-        mobileTabPriority: { master: 4, admin: 4, manager: 4 },
+        roles: ["master", "admin", "manager"],
+        mobileTabPriority: { admin: 4, manager: 4, master: 4 },
+      },
+      {
+        label: "매출", href: "/sales",
+        icon: <Receipt className="h-4 w-4" />,
+        mobileIcon: <Receipt className="h-5 w-5" />,
+        roles: ["manager", "employee"],
       },
       {
         label: "고정비 관리", href: "/fixed-costs",
         icon: <Banknote className="h-4 w-4" />,
         mobileIcon: <Banknote className="h-5 w-5" />,
-        roles: ["manager"],
+        roles: ["master", "admin", "manager"],
       },
       {
         label: "매입 관리", href: "/purchase-management",
@@ -133,20 +143,15 @@ const NAV_GROUPS: NavGroup[] = [
         label: "사용자 관리", href: "/users",
         icon: <Users className="h-4 w-4" />,
         mobileIcon: <Users className="h-5 w-5" />,
-        roles: ["master", "admin"],
-        mobileTabPriority: { master: 2, admin: 2 },
+        roles: ["master"],
+        mobileTabPriority: { master: 3 },
       },
       {
         label: "매장 관리", href: "/restaurants",
         icon: <Store className="h-4 w-4" />,
         mobileIcon: <Store className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
-      },
-      {
-        label: "알림", href: "/notifications",
-        icon: <Bell className="h-4 w-4" />,
-        mobileIcon: <Bell className="h-5 w-5" />,
-        roles: ["master", "admin", "manager", "employee"],
+        mobileTabPriority: { admin: 2 },
       },
     ],
   },

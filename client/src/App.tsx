@@ -6,6 +6,7 @@ import { getEffectiveRole } from "@shared/permissions";
 import { Loader2 } from "lucide-react";
 
 import Login from "./pages/Login";
+import MasterDashboard from "./pages/MasterDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import ManagerDashboard from "./pages/ManagerDashboard";
 import EmployeeDashboard from "./pages/EmployeeDashboard";
@@ -60,11 +61,30 @@ function RoleRouter() {
   return (
     <AppLayout effectiveRole={effectiveRole}>
       <Switch>
-        {/* master/admin */}
-        {(effectiveRole === "master" || effectiveRole === "admin") && (
+        {/* 개발자(master): 시스템 대시보드 + 전체 접근 */}
+        {effectiveRole === "master" && (
+          <>
+            <Route path="/" component={MasterDashboard} />
+            <Route path="/business" component={AdminDashboard} />
+            <Route path="/users" component={UsersPage} />
+            <Route path="/restaurants" component={RestaurantsPage} />
+            <Route path="/profitability" component={ProfitPage} />
+            <Route path="/sales" component={SalesPage} />
+
+            <Route path="/counterparties" component={CounterpartiesPage} />
+            <Route path="/purchase-management" component={PurchaseManagementPage} />
+            <Route path="/fixed-costs" component={FixedCostsPage} />
+            <Route path="/schedule" component={SchedulePage} />
+            <Route path="/daily-ops" component={DailyOpsPage} />
+            <Route path="/ops-calendar" component={OpsCalendarPage} />
+            <Route path="/staff" component={StaffPage} />
+          </>
+        )}
+
+        {/* 대표(admin): 사업 대시보드 + 사업 관련 접근 */}
+        {effectiveRole === "admin" && (
           <>
             <Route path="/" component={AdminDashboard} />
-            <Route path="/users" component={UsersPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
             <Route path="/profitability" component={ProfitPage} />
             <Route path="/sales" component={SalesPage} />

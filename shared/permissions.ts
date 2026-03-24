@@ -63,9 +63,14 @@ export function isManagerLevel(effectiveRole: string): boolean {
   return hasMinRole(effectiveRole, "manager");
 }
 
-/** 관리자(admin 이상) 여부 */
+/** 대표(admin) 이상 여부 */
 export function isAdminLevel(effectiveRole: string): boolean {
   return hasMinRole(effectiveRole, "admin");
+}
+
+/** 개발자(master) 여부 */
+export function isMasterLevel(effectiveRole: string): boolean {
+  return effectiveRole === "master";
 }
 
 /** 급여/인건비 접근 가능 (store_manager만, 또는 admin 이상) */
@@ -82,8 +87,8 @@ export function canManageStaff(effectiveRole: string, storeRole?: string | null)
 
 /** 역할 표시 라벨 */
 export const ROLE_LABELS: Record<string, string> = {
-  master: "마스터",
-  admin: "관리자",
+  master: "개발자",
+  admin: "대표",
   manager: "점장",
   store_manager: "점장",
   employee: "직원",

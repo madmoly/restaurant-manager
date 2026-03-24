@@ -24,6 +24,7 @@ import { notificationsRouter } from "./notifications";
 import { electronicContractsRouter } from "./electronicContracts";
 import { leaveRequestsRouter } from "./leaveRequests";
 import { errorLogsRouter } from "./errorLogs";
+import { adminRouter } from "./admin";
 
 export const appRouter = router({
   auth: authRouter,
@@ -51,6 +52,7 @@ export const appRouter = router({
   electronicContracts: electronicContractsRouter,
   leaveRequests: leaveRequestsRouter,
   errorLogs: errorLogsRouter,
+  admin: adminRouter,
 });
 
 export type AppRouter = typeof appRouter;
