@@ -13,14 +13,14 @@ import { Loader2, UtensilsCrossed, Lock, User, Zap, Download, Smartphone } from 
 // 테스트 계정 목록 (seed.ts 기준)
 const DEMO_ACCOUNTS = [
   {
-    group: "관리자",
+    group: "대표",
     color: "bg-violet-600",
     textColor: "text-violet-400",
     borderColor: "border-violet-500/30",
     bgLight: "bg-violet-500/10 hover:bg-violet-500/20",
     accounts: [
-      { label: "마스터", username: "master", password: "1111", badge: "master", badgeColor: "bg-violet-500/20 text-violet-300" },
-      { label: "관리자", username: "admin", password: "1111", badge: "admin", badgeColor: "bg-blue-500/20 text-blue-300" },
+      { label: "개발자", username: "master", password: "1111", badge: "master", badgeColor: "bg-violet-500/20 text-violet-300" },
+      { label: "대표", username: "admin", password: "1111", badge: "admin", badgeColor: "bg-blue-500/20 text-blue-300" },
     ],
   },
   {

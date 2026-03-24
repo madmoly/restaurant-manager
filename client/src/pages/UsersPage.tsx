@@ -44,7 +44,7 @@ export default function UsersPage() {
                   <td className="px-4 py-2.5 text-muted-foreground">@{u.username}</td>
                   <td className="px-4 py-2.5">
                     <span className={`text-xs px-2 py-0.5 rounded ${u.role === "admin" ? "bg-purple-500/15 text-purple-600 dark:text-purple-400" : "bg-muted text-muted-foreground"}`}>
-                      {u.role === "admin" ? "관리자" : "일반"}
+                      {u.role === "admin" ? "대표" : "일반"}
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-muted-foreground">{u.phone || u.email || "—"}</td>
@@ -85,9 +85,9 @@ function CreateUserForm({ onDone }: { onDone: () => void }) {
       </div>
       <select value={role} onChange={(e) => setRole(e.target.value as any)} className="px-3 py-2 border border-input rounded-lg text-sm bg-background text-foreground">
         <option value="employee">직원</option>
-        <option value="manager">매니저</option>
-        <option value="admin">관리자</option>
-        <option value="master">마스터</option>
+        <option value="manager">매장관리자</option>
+        <option value="admin">대표</option>
+        <option value="master">개발자</option>
       </select>
       <div className="flex gap-2">
         <button onClick={() => create.mutate({ username, password, name, role, phone })} disabled={!username || !password || !name} className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded-lg hover:bg-primary/90 disabled:opacity-50">생성</button>

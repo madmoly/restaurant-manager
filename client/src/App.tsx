@@ -102,7 +102,7 @@ function RoleRouter() {
           </>
         )}
 
-        {/* manager (점장/매니저) */}
+        {/* manager (점장/매니져) */}
         {effectiveRole === "manager" && (
           <>
             <Route path="/" component={ManagerDashboard} />

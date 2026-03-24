@@ -12,8 +12,8 @@
  *   - restaurant_users.role (매장 내 역할): 매장별로 부여
  *     가능한 값: "owner" | "supervisor" | "staff"
  *     - owner = 점장 (매장 전권: 재무+인사+운영)
- *     - supervisor = 부점장 (운영 실행권, 인사 일부 제한)
- *     - staff = 스태프 (실행만)
+ *     - supervisor = 매니져 (운영 실행권, 인사 일부 제한)
+ *     - staff = 직원 (실행만)
  *
  * effectiveRole 계산 규칙:
  *   1. users.role이 master/admin이면 → 그대로 (전역 우선)
@@ -21,7 +21,7 @@
  *      - "owner" 또는 "supervisor" → "manager"로 상향
  *      - "staff" 또는 null → "staff"
  *
- * 점장(owner) vs 부점장(supervisor) 권한 차이 (3개만):
+ * 점장(owner) vs 매니져(supervisor) 권한 차이 (3개만):
  *   - 근로계약서 생성/발송: owner만
  *   - 인건비 정산 조회: owner만
  *   - 소속회사 변경: owner만
@@ -51,7 +51,7 @@ export function getEffectiveRole(
   if (systemRole === "master" || systemRole === "admin") {
     return systemRole as EffectiveRole;
   }
-  // 매장 내 역할이 점장/부점장이면 manager로 상향
+  // 매장 내 역할이 점장/매니져이면 manager로 상향
   // 레거시 호환: store_manager, manager도 인식
   if (storeRole === "owner" || storeRole === "supervisor" ||
       storeRole === "store_manager" || storeRole === "manager") {
@@ -66,7 +66,7 @@ export function hasMinRole(effectiveRole: string, minRole: string): boolean {
   return (ROLE_LEVEL[effectiveRole] ?? 0) >= (ROLE_LEVEL[minRole] ?? 99);
 }
 
-/** 매장 관리자(점장/부점장 이상) 여부 */
+/** 매장 관리자(점장/매니져 이상) 여부 */
 export function isManagerLevel(effectiveRole: string): boolean {
   return hasMinRole(effectiveRole, "manager");
 }
@@ -104,8 +104,8 @@ export const ROLE_LABELS: Record<string, string> = {
   admin: "대표",
   manager: "매장관리자",
   owner: "점장",
-  supervisor: "부점장",
-  staff: "스태프",
+  supervisor: "매니져",
+  staff: "직원",
   // 레거시 호환
   store_manager: "점장",
   employee: "직원",
@@ -115,8 +115,8 @@ export const ROLE_LABELS: Record<string, string> = {
 /** 매장 내 역할 라벨 */
 export const STORE_ROLE_LABELS: Record<string, string> = {
   owner: "점장",
-  supervisor: "부점장",
-  staff: "스태프",
+  supervisor: "매니져",
+  staff: "직원",
   // 레거시 호환
   store_manager: "점장",
   manager: "매니저",

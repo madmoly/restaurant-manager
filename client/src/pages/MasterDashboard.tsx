@@ -94,7 +94,7 @@ export default function MasterDashboard() {
           <div className="space-y-3">
             <RoleRow label="대표 (admin)" count={u?.admins ?? 0} color="bg-blue-500" total={u?.total ?? 1} />
             <RoleRow label="점장 (owner)" count={u?.managers ?? 0} color="bg-emerald-500" total={u?.total ?? 1} />
-            <RoleRow label="스태프 (staff)" count={u?.employees ?? 0} color="bg-slate-500" total={u?.total ?? 1} />
+            <RoleRow label="직원 (staff)" count={u?.employees ?? 0} color="bg-slate-500" total={u?.total ?? 1} />
           </div>
         </Card>
 

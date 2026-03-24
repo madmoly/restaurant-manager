@@ -432,7 +432,7 @@ app.get("/api/init", async (_req, res) => {
     const pw = await bcrypt.hash("1111", 10);
 
     const seedUsers = [
-      { username: "admin", name: "관리자", role: "admin" },
+      { username: "admin", name: "대표", role: "admin" },
       { username: "manager1", name: "박점장", role: "user" },
       { username: "manager2", name: "이점장", role: "user" },
       { username: "staff1", name: "김직원", role: "user" },

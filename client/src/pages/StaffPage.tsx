@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button";
 
 const STORE_ROLE_LABELS: Record<string, string> = {
   owner: "점장",
-  supervisor: "부점장",
-  staff: "스태프",
+  supervisor: "매니져",
+  staff: "직원",
   store_manager: "점장",  // 레거시
   manager: "매니저",      // 레거시
   employee: "직원",       // 레거시
@@ -257,8 +257,8 @@ export default function StaffPage() {
                           onChange={(e) => updateRole.mutate({ restaurantId, userId: s.userId, role: e.target.value as any })}
                         >
                           <option value="owner">점장</option>
-                        <option value="supervisor">부점장</option>
-                          <option value="staff">스태프</option>
+                        <option value="supervisor">매니져</option>
+                          <option value="staff">직원</option>
                         </select>
                       </div>
                     )}
@@ -568,8 +568,8 @@ function AddStaffModal({ restaurantId, allUsers, existingStaff, onAdd, onClose, 
             <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={role} onChange={(e) => setRole(e.target.value)}>
               <option value="owner">점장</option>
-                        <option value="supervisor">부점장</option>
-              <option value="staff">스태프</option>
+                        <option value="supervisor">매니져</option>
+              <option value="staff">직원</option>
             </select>
           </div>
         </div>

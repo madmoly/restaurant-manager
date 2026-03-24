@@ -170,8 +170,8 @@ function StaffSection({ restaurantId }: { restaurantId: number }) {
               <div className="flex items-center gap-2">
                 <select value={s.storeRole} onChange={(e) => updateRole.mutate({ restaurantId, userId: s.userId, role: e.target.value as any })} className="text-xs border border-input rounded px-2 py-1 bg-background text-foreground">
                   <option value="owner">점장</option>
-                  <option value="supervisor">부점장</option>
-                  <option value="staff">스태프</option>
+                  <option value="supervisor">매니져</option>
+                  <option value="staff">직원</option>
                 </select>
                 <button onClick={() => removeStaff.mutate({ restaurantId, userId: s.userId })} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
               </div>
@@ -189,8 +189,8 @@ function StaffSection({ restaurantId }: { restaurantId: number }) {
           </select>
           <select value={addRole} onChange={(e) => setAddRole(e.target.value as any)} className="text-xs border border-input rounded px-2 py-1.5 bg-background text-foreground">
             <option value="owner">점장</option>
-            <option value="supervisor">부점장</option>
-            <option value="staff">스태프</option>
+            <option value="supervisor">매니져</option>
+            <option value="staff">직원</option>
           </select>
           <button onClick={() => addUserId && addStaff.mutate({ restaurantId, userId: Number(addUserId), role: addRole })} disabled={!addUserId} className="flex items-center gap-1 px-2.5 py-1.5 bg-muted text-foreground text-xs rounded hover:bg-accent disabled:opacity-50">
             <UserPlus size={12} /> 배정

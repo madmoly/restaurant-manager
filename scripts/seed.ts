@@ -16,9 +16,9 @@ console.log("🌱 Seeding all phases...\n");
 // ═══════════════════════════════════════════════════════════════════
 console.log("── Phase 0: Users / Restaurants ──");
 
-await db.insert(schema.users).values({ username: "master", passwordHash: pw, name: "마스터", role: "master", phone: "01056695407" })
+await db.insert(schema.users).values({ username: "master", passwordHash: pw, name: "개발자", role: "master", phone: "01056695407" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw, role: "master" } });
-await db.insert(schema.users).values({ username: "admin", passwordHash: pw, name: "관리자", role: "admin", phone: "01012345678" })
+await db.insert(schema.users).values({ username: "admin", passwordHash: pw, name: "대표", role: "admin", phone: "01012345678" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw, role: "admin" } });
 await db.insert(schema.users).values({ username: "manager1", passwordHash: pw, name: "박점장", role: "staff", phone: "01011112222" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw } });
@@ -498,8 +498,8 @@ console.log("  ✅ DailyClosings(~6)");
 // ═══════════════════════════════════════════════════════════════════
 console.log("\n🎉 Seed complete!\n");
 console.log("계정 정보 (비밀번호 모두 1111):");
-console.log("  master  — 마스터 (시스템 최고관리자)");
-console.log("  admin   — 관리자");
+console.log("  master  — 개발자 (시스템 최고관리자)");
+console.log("  admin   — 대표");
 console.log("  manager1 — 박점장 (천호점 점장)");
 console.log("  manager2 — 이점장 (강남점 점장)");
 console.log("  staff1  — 김직원 (천호점 홀)");

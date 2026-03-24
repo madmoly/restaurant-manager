@@ -32,7 +32,7 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
 
 /**
  * manager 이상 (master/admin + 매장 owner/supervisor)
- * 점장·부점장 공통 권한
+ * 점장·매니져 공통 권한
  */
 export const managerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   const level = ROLE_LEVEL[ctx.user.role] ?? 0;
@@ -49,7 +49,7 @@ export const managerProcedure = protectedProcedure.use(async ({ ctx, next }) => 
            r.role === "store_manager" || r.role === "manager" // 레거시 호환
   );
   if (!hasStoreAuth) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "점장/부점장 이상 권한이 필요합니다" });
+    throw new TRPCError({ code: "FORBIDDEN", message: "점장/매니져 이상 권한이 필요합니다" });
   }
   return next({ ctx });
 });
@@ -80,7 +80,7 @@ export const ownerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
 export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   const level = ROLE_LEVEL[ctx.user.role] ?? 0;
   if (level < ROLE_LEVEL.admin) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "관리자 권한이 필요합니다" });
+    throw new TRPCError({ code: "FORBIDDEN", message: "대표 이상 권한이 필요합니다" });
   }
   return next({ ctx });
 });
@@ -88,7 +88,7 @@ export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 /** master 전용 */
 export const masterProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "master") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "총괄관리자 권한이 필요합니다" });
+    throw new TRPCError({ code: "FORBIDDEN", message: "개발자 권한이 필요합니다" });
   }
   return next({ ctx });
 });
