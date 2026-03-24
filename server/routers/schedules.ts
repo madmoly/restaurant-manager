@@ -9,6 +9,8 @@ import {
   restaurants,
   storeClosedDays,
   storeWeeklyClosures,
+  restaurantUsers,
+  employeeContracts,
 } from "../../drizzle/schema";
 
 // ─── 헬퍼 함수 ──────────────────────────────────────────────────────────────
@@ -631,5 +633,95 @@ export const schedulesRouter = router({
         )
         .orderBy(schedules.startTime);
       return rows;
+    }),
+
+  /** 소속회사별 인건비 정산 조회 */
+  laborCostByCompany: managerProcedure
+    .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
+    .query(async ({ input }) => {
+      const monthStr = String(input.month).padStart(2, "0");
+      const from = new Date(`${input.year}-${monthStr}-01T00:00:00`);
+      const toDate = new Date(input.year, input.month, 1);
+
+      // 완료/확정 스케줄 + 직원 정보 + 소속회사 + 시급 조인
+      const rows = await db
+        .select({
+          userId: schedules.userId,
+          userName: users.name,
+          startTime: schedules.startTime,
+          endTime: schedules.endTime,
+          status: schedules.status,
+          tempWorkerName: schedules.tempWorkerName,
+          tempWageType: schedules.tempWageType,
+          tempWageAmount: schedules.tempWageAmount,
+          affiliatedCompany: restaurantUsers.affiliatedCompany,
+          wageType: employeeContracts.wageType,
+          wageAmount: employeeContracts.wageAmount,
+        })
+        .from(schedules)
+        .leftJoin(users, eq(schedules.userId, users.id))
+        .leftJoin(restaurantUsers, and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, schedules.userId)
+        ))
+        .leftJoin(employeeContracts, and(
+          eq(employeeContracts.userId, schedules.userId),
+          eq(employeeContracts.restaurantId, input.restaurantId),
+          eq(employeeContracts.isActive, true)
+        ))
+        .where(
+          and(
+            eq(schedules.restaurantId, input.restaurantId),
+            gte(schedules.startTime, from),
+            sql`${schedules.startTime} < ${toDate}`,
+            sql`${schedules.status} IN ('completed','confirmed')`
+          )
+        )
+        .orderBy(schedules.startTime);
+
+      // 소속회사별 그룹핑
+      const companyMap: Record<string, {
+        company: string;
+        employees: Record<string, { name: string; totalHours: number; totalWage: number; shifts: number }>;
+        totalHours: number;
+        totalWage: number;
+      }> = {};
+
+      for (const r of rows) {
+        const company = (r.affiliatedCompany ?? "미지정").trim() || "미지정";
+        const name = r.userName ?? r.tempWorkerName ?? "미지정";
+        const empKey = r.userId ? String(r.userId) : `temp_${name}`;
+
+        if (!companyMap[company]) {
+          companyMap[company] = { company, employees: {}, totalHours: 0, totalWage: 0 };
+        }
+        if (!companyMap[company].employees[empKey]) {
+          companyMap[company].employees[empKey] = { name, totalHours: 0, totalWage: 0, shifts: 0 };
+        }
+
+        const hours = (new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 3600000;
+        let wage = 0;
+        if (r.tempWageType === "hourly" && r.tempWageAmount) {
+          wage = hours * Number(r.tempWageAmount);
+        } else if (r.tempWageType === "daily" && r.tempWageAmount) {
+          wage = Number(r.tempWageAmount);
+        } else if (r.wageType === "hourly" && r.wageAmount) {
+          wage = hours * Number(r.wageAmount);
+        } else if (r.wageType === "monthly" && r.wageAmount) {
+          // 월급제: 근무일수 비례 (간이 계산)
+          wage = 0; // 월급은 별도 처리
+        }
+
+        companyMap[company].employees[empKey].totalHours += hours;
+        companyMap[company].employees[empKey].totalWage += wage;
+        companyMap[company].employees[empKey].shifts++;
+        companyMap[company].totalHours += hours;
+        companyMap[company].totalWage += wage;
+      }
+
+      return Object.values(companyMap).map(c => ({
+        ...c,
+        employees: Object.values(c.employees),
+      }));
     }),
 });

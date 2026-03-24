@@ -60,10 +60,15 @@ export const storeChecklistsRouter = router({
     .input(
       z.object({
         restaurantId: z.number(),
-        checkType: z.enum(["open", "order", "cleaning"]),
+        checkType: z.enum(["open", "order", "cleaning"]).default("open"),
         itemText: z.string().min(1),
         requirementType: z.enum(["none", "text_input", "camera_photo"]).default("none"),
         sortOrder: z.number().optional(),
+        tags: z.array(z.string()).optional(),
+        repeatType: z.enum(["none", "daily", "weekly"]).optional(),
+        repeatDays: z.array(z.number()).optional(),
+        specificDate: z.string().optional(),
+        isHighlight: z.boolean().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -73,8 +78,13 @@ export const storeChecklistsRouter = router({
         itemText: input.itemText,
         requirementType: input.requirementType,
         sortOrder: input.sortOrder ?? 0,
+        tags: input.tags ?? [],
+        repeatType: input.repeatType ?? "none",
+        repeatDays: input.repeatDays ?? [],
+        specificDate: input.specificDate ?? null,
+        isHighlight: input.isHighlight ?? false,
         createdBy: ctx.user.userId,
-      });
+      } as any);
       return { id: (result as any).insertId };
     }),
 
@@ -87,6 +97,11 @@ export const storeChecklistsRouter = router({
         requirementType: z.enum(["none", "text_input", "camera_photo"]).optional(),
         sortOrder: z.number().optional(),
         isActive: z.boolean().optional(),
+        tags: z.array(z.string()).optional(),
+        repeatType: z.enum(["none", "daily", "weekly"]).optional(),
+        repeatDays: z.array(z.number()).optional(),
+        specificDate: z.string().nullable().optional(),
+        isHighlight: z.boolean().optional(),
       })
     )
     .mutation(async ({ input }) => {

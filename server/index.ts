@@ -85,6 +85,21 @@ app.use(express.json());
     // employment_electronic_contracts 소속회사
     await addColumnIfNotExists("employment_electronic_contracts", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");
 
+    // 체크리스트 개편: 태그 + 반복/특정날짜 컬럼
+    await addColumnIfNotExists("store_checklist_templates", "tags", "JSON DEFAULT NULL");
+    await addColumnIfNotExists("store_checklist_templates", "repeatType", "ENUM('none','daily','weekly') DEFAULT 'none'");
+    await addColumnIfNotExists("store_checklist_templates", "repeatDays", "JSON DEFAULT NULL");
+    await addColumnIfNotExists("store_checklist_templates", "specificDate", "DATE DEFAULT NULL");
+    await addColumnIfNotExists("store_checklist_templates", "isHighlight", "BOOLEAN DEFAULT FALSE");
+
+    // notifications type ENUM 확장 (health_cert_expiry 추가)
+    try {
+      await conn.query(`ALTER TABLE notifications MODIFY COLUMN type ENUM('schedule_change','cost_exceeded','target_achieved','general','schedule_assigned','schedule_updated','schedule_deleted','health_cert_expiry') NOT NULL`);
+      console.log("[migrate] notifications.type ENUM updated");
+    } catch (e: any) {
+      if (!e.message.includes("Duplicate")) console.log("[migrate] notifications type:", e.message);
+    }
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {
@@ -147,6 +162,87 @@ app.use("/uploads", express.static(UPLOAD_ROOT));
 
 // ─── 체크리스트 사진 2주 자동삭제 스케줄러 ───────────────────────────────────
 startCleanupScheduler();
+
+// ─── 보건증 만료 자동 알림 스케줄러 (매일 09:00 체크) ─────────────────────────
+(async () => {
+  const checkHealthCerts = async () => {
+    try {
+      const mysql2 = await import("mysql2/promise");
+      const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
+
+      // 30일 이내 만료 예정 사용자 조회 (이미 알림 보낸 건 제외 - 7일에 1회)
+      const [rows] = await conn.query(`
+        SELECT u.id, u.name, u.healthCertExpiry, ru.restaurantId
+        FROM users u
+        JOIN restaurant_users ru ON ru.userId = u.id
+        WHERE u.healthCertExpiry IS NOT NULL
+          AND u.healthCertExpiry <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+          AND u.healthCertExpiry >= CURDATE()
+          AND u.isActive = TRUE
+          AND NOT EXISTS (
+            SELECT 1 FROM notifications n
+            WHERE n.recipientId = u.id
+              AND n.type = 'health_cert_expiry'
+              AND n.createdAt >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+          )
+      `) as any[];
+
+      for (const row of rows) {
+        const daysLeft = Math.ceil((new Date(row.healthCertExpiry).getTime() - Date.now()) / 86400000);
+        const title = daysLeft <= 0
+          ? `보건증이 만료되었습니다`
+          : `보건증 만료 ${daysLeft}일 전`;
+        const content = `${row.name}님의 보건증이 ${row.healthCertExpiry}에 만료됩니다. 갱신이 필요합니다.`;
+
+        // 본인에게 알림
+        await conn.query(
+          `INSERT INTO notifications (recipientId, type, title, content, restaurantId) VALUES (?, 'health_cert_expiry', ?, ?, ?)`,
+          [row.id, title, content, row.restaurantId]
+        );
+
+        // 매장 매니저/점장에게도 알림
+        const [managers] = await conn.query(`
+          SELECT ru2.userId FROM restaurant_users ru2
+          WHERE ru2.restaurantId = ? AND ru2.role IN ('store_manager', 'manager') AND ru2.userId != ?
+        `, [row.restaurantId, row.id]) as any[];
+
+        for (const mgr of managers) {
+          await conn.query(
+            `INSERT INTO notifications (recipientId, type, title, content, restaurantId) VALUES (?, 'health_cert_expiry', ?, ?, ?)`,
+            [mgr.userId, `${row.name} 보건증 만료 ${daysLeft}일 전`, content, row.restaurantId]
+          );
+        }
+      }
+
+      // admin에게도 전체 만료 요약 (만료 임박자 있을 때만)
+      if (rows.length > 0) {
+        const [admins] = await conn.query(`SELECT id FROM users WHERE role IN ('master','admin') AND isActive = TRUE`) as any[];
+        const summary = rows.map((r: any) => r.name).slice(0, 5).join(', ');
+        for (const admin of admins) {
+          // 오늘 이미 보낸 건 스킵
+          const [existing] = await conn.query(`
+            SELECT 1 FROM notifications WHERE recipientId = ? AND type = 'health_cert_expiry' AND createdAt >= CURDATE() LIMIT 1
+          `, [admin.id]) as any[];
+          if (existing.length === 0) {
+            await conn.query(
+              `INSERT INTO notifications (recipientId, type, title, content) VALUES (?, 'health_cert_expiry', ?, ?)`,
+              [admin.id, `보건증 만료 임박 ${rows.length}명`, `${summary} 등 ${rows.length}명의 보건증이 30일 이내 만료 예정입니다.`]
+            );
+          }
+        }
+      }
+
+      await conn.end();
+      if (rows.length > 0) console.log(`[health-cert] ${rows.length}명 만료 알림 발송`);
+    } catch (e: any) {
+      console.error("[health-cert] cron error:", e.message);
+    }
+  };
+
+  // 서버 시작 시 1회 + 24시간마다 반복
+  setTimeout(checkHealthCerts, 10000); // 서버 시작 10초 후
+  setInterval(checkHealthCerts, 24 * 60 * 60 * 1000); // 매일
+})();
 
 // ─── DB 초기화 (1회용) ────────────────────────────────────────────────────────
 app.get("/api/init", async (_req, res) => {

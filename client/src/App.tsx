@@ -21,6 +21,8 @@ import SchedulePage from "./pages/SchedulePage";
 import DailyOpsPage from "./pages/DailyOpsPage";
 import StaffPage from "./pages/StaffPage";
 import OpsCalendarPage from "./pages/OpsCalendarPage";
+import TaskManagementPage from "./pages/TaskManagementPage";
+import LaborCostPage from "./pages/LaborCostPage";
 import ContractSignPage from "./pages/ContractSignPage";
 import AppLayout from "./components/AppLayout";
 
@@ -66,6 +68,7 @@ function RoleRouter() {
             <Route path="/restaurants" component={RestaurantsPage} />
             <Route path="/profitability" component={ProfitPage} />
             <Route path="/sales" component={SalesPage} />
+            <Route path="/daily-closing" component={SalesPage} />
 
             <Route path="/counterparties" component={CounterpartiesPage} />
             <Route path="/purchase-management" component={PurchaseManagementPage} />
@@ -73,6 +76,8 @@ function RoleRouter() {
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/daily-ops" component={DailyOpsPage} />
             <Route path="/ops-calendar" component={OpsCalendarPage} />
+            <Route path="/task-management" component={TaskManagementPage} />
+            <Route path="/labor-cost" component={LaborCostPage} />
             <Route path="/staff" component={StaffPage} />
           </>
         )}
@@ -91,6 +96,8 @@ function RoleRouter() {
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/daily-ops" component={DailyOpsPage} />
             <Route path="/ops-calendar" component={OpsCalendarPage} />
+            <Route path="/task-management" component={TaskManagementPage} />
+            <Route path="/labor-cost" component={LaborCostPage} />
             <Route path="/staff" component={StaffPage} />
           </>
         )}
@@ -102,6 +109,7 @@ function RoleRouter() {
             <Route path="/daily-ops" component={DailyOpsPage} />
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/sales" component={SalesPage} />
+            <Route path="/profitability" component={ProfitPage} />
             <Route path="/purchase-management" component={PurchaseManagementPage} />
           </>
         )}

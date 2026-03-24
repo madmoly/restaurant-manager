@@ -20,7 +20,7 @@ import {
   UtensilsCrossed, LayoutDashboard, Users, Store, TrendingUp,
   LogOut, Menu, X, Sun, Moon, MoreHorizontal,
   Banknote, Receipt, Wallet, CalendarDays, ClipboardList, UserCog,
-  Bell, Check,
+  Bell, Check, Building2,
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -69,6 +69,12 @@ const NAV_GROUPS: NavGroup[] = [
         mobileIcon: <CalendarDays className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
       },
+      {
+        label: "내 매장 업무관리", href: "/task-management",
+        icon: <ClipboardList className="h-4 w-4" />,
+        mobileIcon: <ClipboardList className="h-5 w-5" />,
+        roles: ["master", "admin", "manager"],
+      },
     ],
   },
   {
@@ -87,25 +93,24 @@ const NAV_GROUPS: NavGroup[] = [
         mobileIcon: <UserCog className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
       },
+      {
+        label: "인건비 정산", href: "/labor-cost",
+        icon: <Wallet className="h-4 w-4" />,
+        mobileIcon: <Wallet className="h-5 w-5" />,
+        roles: ["master", "admin", "manager"],
+      },
     ],
   },
   {
     label: "재무 분석",
     items: [
       {
-        label: "분석캘린더",
-        labelByRole: { master: "수익분석", admin: "수익분석" },
+        label: "매출캘린더",
         href: "/profitability",
         icon: <TrendingUp className="h-4 w-4" />,
         mobileIcon: <TrendingUp className="h-5 w-5" />,
-        roles: ["master", "admin", "manager"],
+        roles: ["master", "admin", "manager", "employee"],
         mobileTabPriority: { master: 4, admin: 4, manager: 4 },
-      },
-      {
-        label: "매출", href: "/sales",
-        icon: <Receipt className="h-4 w-4" />,
-        mobileIcon: <Receipt className="h-5 w-5" />,
-        roles: ["manager", "employee"],
       },
       {
         label: "고정비 관리", href: "/fixed-costs",

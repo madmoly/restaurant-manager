@@ -14,6 +14,9 @@ import {
   users,
   dailyChecklistLogs,
   storeChecklistTemplates,
+  purchaseOrdersV2,
+  purchaseOrderItemsV2,
+  counterparties,
 } from "../../drizzle/schema";
 
 export const dailyOpsRouter = router({
@@ -618,5 +621,79 @@ export const dailyOpsRouter = router({
       const closedDays = ops.filter((o) => o.closeCheckedAt).length;
 
       return { days, totalSales, closedDays };
+    }),
+
+  // ─── 일별 상세 (운영캘린더 우측 패널용) ──────────────────────────────────
+  getDayDetail: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      // 1. 일일운영 상태
+      const [ops] = await db.select().from(dailyOperations)
+        .where(and(eq(dailyOperations.restaurantId, input.restaurantId), sql`${dailyOperations.operationDate} = ${input.date}`))
+        .limit(1);
+
+      // 2. 매출 상세
+      const [salesDetail] = await db.select().from(dailySalesDetail)
+        .where(and(eq(dailySalesDetail.restaurantId, input.restaurantId), sql`${dailySalesDetail.saleDate} = ${input.date}`))
+        .limit(1);
+
+      // 3. 스케줄 목록
+      const scheduleRows = await db
+        .select({ id: schedules.id, userName: users.name, startTime: schedules.startTime, endTime: schedules.endTime, status: schedules.status, shiftPreset: schedules.shiftPreset, tempWorkerName: schedules.tempWorkerName })
+        .from(schedules)
+        .leftJoin(users, eq(schedules.userId, users.id))
+        .where(and(eq(schedules.restaurantId, input.restaurantId), sql`DATE(${schedules.startTime}) = ${input.date}`, sql`${schedules.status} != 'canceled'`));
+
+      // 4. 매입 목록
+      const purchaseRows = await db
+        .select({ id: purchaseOrdersV2.id, counterpartyName: counterparties.name, totalAmount: purchaseOrdersV2.totalAmount, status: purchaseOrdersV2.status, note: purchaseOrdersV2.note })
+        .from(purchaseOrdersV2)
+        .leftJoin(counterparties, eq(purchaseOrdersV2.counterpartyId, counterparties.id))
+        .where(and(eq(purchaseOrdersV2.restaurantId, input.restaurantId), sql`${purchaseOrdersV2.purchaseDate} = ${input.date}`));
+
+      // 5. 체크리스트 로그
+      const checklistLogs = await db.select().from(dailyChecklistLogs)
+        .where(and(eq(dailyChecklistLogs.restaurantId, input.restaurantId), sql`${dailyChecklistLogs.logDate} = ${input.date}`));
+
+      // 6. 중간매출
+      const midSales = await db.select().from(intermediateSales)
+        .where(and(eq(intermediateSales.restaurantId, input.restaurantId), sql`${intermediateSales.saleDate} = ${input.date}`));
+
+      return {
+        operation: ops ?? null,
+        sales: salesDetail ? {
+          totalAmount: Number(salesDetail.totalAmount),
+          cashAmount: Number(salesDetail.cashAmount),
+          cardAmount: Number(salesDetail.cardAmount),
+          giftCardAmount: Number(salesDetail.giftCardAmount),
+          transferAmount: Number(salesDetail.transferAmount),
+          otherAmount: Number(salesDetail.otherAmount),
+          status: salesDetail.status,
+          note: salesDetail.note,
+        } : null,
+        schedules: scheduleRows.map(s => ({
+          id: s.id,
+          name: s.userName ?? s.tempWorkerName ?? "미지정",
+          startTime: s.startTime,
+          endTime: s.endTime,
+          status: s.status,
+          shiftPreset: s.shiftPreset,
+        })),
+        purchases: purchaseRows.map(p => ({
+          id: p.id,
+          counterparty: p.counterpartyName ?? "미지정",
+          amount: Number(p.totalAmount),
+          status: p.status,
+          note: p.note,
+        })),
+        checklists: checklistLogs.map(c => ({
+          checkType: c.checkType,
+          checkedCount: (c.checkedItemIds as number[] || []).length,
+          noOrderToday: c.noOrderToday,
+          completedAt: c.completedAt,
+        })),
+        midSalesTotal: midSales.reduce((s, m) => s + Number(m.amount), 0),
+        purchaseTotal: purchaseRows.reduce((s, p) => s + Number(p.totalAmount), 0),
+      };
     }),
 });

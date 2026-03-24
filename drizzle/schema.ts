@@ -421,6 +421,12 @@ export const storeChecklistTemplates = mysqlTable("store_checklist_templates", {
   requirementType: mysqlEnum("requirementType", ["none", "text_input", "camera_photo"]).default("none").notNull(),
   sortOrder: int("sortOrder").default(0).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
+  // 업무관리 개편: 태그 + 반복/특정날짜
+  tags: json("tags").$type<string[]>().default([]),
+  repeatType: mysqlEnum("repeatType", ["none", "daily", "weekly"]).default("none"),
+  repeatDays: json("repeatDays").$type<number[]>().default([]),  // 0=일~6=토
+  specificDate: date("specificDate"),
+  isHighlight: boolean("isHighlight").default(false),
   createdBy: int("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -636,6 +642,7 @@ export const notifications = mysqlTable("notifications", {
   type: mysqlEnum("type", [
     "schedule_change", "cost_exceeded", "target_achieved", "general",
     "schedule_assigned", "schedule_updated", "schedule_deleted",
+    "health_cert_expiry",
   ]).notNull(),
   title: varchar("title", { length: 200 }).notNull(),
   content: text("content"),
