@@ -23,7 +23,7 @@ import {
   // 새롭게 개편된 직관적인 프리미엄 아이콘 세트
   LayoutGrid, Activity, CalendarRange, ListChecks, Clock,
   UsersRound, Coins, BarChart3, Receipt, ShoppingCart, ShieldCheck,
-  Store, BellRing
+  Store, BellRing, Bell
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
