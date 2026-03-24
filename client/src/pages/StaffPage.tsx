@@ -13,8 +13,10 @@ import { Button } from "@/components/ui/button";
 const STORE_ROLE_LABELS: Record<string, string> = {
   owner: "점장",
   supervisor: "부점장",
-  manager: "매니저",
-  employee: "직원",
+  staff: "스태프",
+  store_manager: "점장",  // 레거시
+  manager: "매니저",      // 레거시
+  employee: "직원",       // 레거시
 };
 
 // ─── 보건증 만료일 계산 헬퍼 ──────────────────────────────────────────────────
@@ -36,6 +38,8 @@ export default function StaffPage() {
   const { selectedRestaurant: current } = useRestaurant();
   const restaurantId = current?.id ?? 0;
   const isAdmin = user?.role === "admin" || user?.role === "master";
+  const isOwnerOrAdmin = isAdmin || current?.storeRole === "owner";
+  const isOwnerOrAdmin = isAdmin || current?.storeRole === "owner";
 
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [showContractForm, setShowContractForm] = useState(false);
@@ -165,8 +169,8 @@ export default function StaffPage() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-xl font-bold text-foreground">직원 관리</h1>
         <div className="flex gap-2">
-          {/* 관리자만 계약서 작성 버튼 표시 */}
-          {isAdmin && (
+          {/* 점장 이상 계약서 작성 가능 */}
+          {isOwnerOrAdmin && (
             <Button size="sm" variant="outline" onClick={() => setShowContractForm(true)}>
               <FileText className="w-4 h-4 mr-1" /> 계약서 작성
             </Button>
@@ -373,8 +377,8 @@ export default function StaffPage() {
         </div>
       )}
 
-      {/* 근로계약서 목록 — 관리자만 표시 */}
-      {isAdmin && contracts && contracts.length > 0 && (
+      {/* 근로계약서 목록 — 점장 이상 표시 */}
+      {isOwnerOrAdmin && contracts && contracts.length > 0 && (
         <div className="mt-6">
           <h2 className="text-lg font-semibold text-foreground mb-3">근로계약서</h2>
           <div className="space-y-2">

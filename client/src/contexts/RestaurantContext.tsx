@@ -9,6 +9,7 @@ interface Restaurant {
   phone?: string | null;
   latitude?: string | null;
   longitude?: string | null;
+  storeRole?: string | null;
 }
 
 interface RestaurantContextValue {
@@ -57,6 +58,7 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
         phone: s.restaurant?.phone ?? s.phone,
         latitude: s.restaurant?.latitude ?? s.latitude,
         longitude: s.restaurant?.longitude ?? s.longitude,
+        storeRole: s.storeRole ?? null,
       }));
 
   const isLoading = isAdmin ? allStoresQuery.isLoading : myStoresQuery.isLoading;
