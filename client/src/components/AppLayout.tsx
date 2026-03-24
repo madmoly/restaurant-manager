@@ -73,7 +73,7 @@ const NAV_GROUPS: NavGroup[] = [
         roles: ["master", "admin", "manager"],
       },
       {
-        label: "내 매장 업무관리", href: "/task-management",
+        label: "체크리스트 설정", href: "/task-management",
         icon: <ListChecks className="h-4 w-4" />,
         mobileIcon: <ListChecks className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
@@ -96,17 +96,17 @@ const NAV_GROUPS: NavGroup[] = [
         mobileIcon: <UsersRound className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
       },
-      {
-        label: "인건비 정산", href: "/labor-cost",
-        icon: <Coins className="h-4 w-4" />,
-        mobileIcon: <Coins className="h-5 w-5" />,
-        roles: ["master", "admin", "manager"],
-      },
     ],
   },
   {
     label: "재무 분석",
     items: [
+      {
+        label: "인건비 정산", href: "/labor-cost",
+        icon: <Coins className="h-4 w-4" />,
+        mobileIcon: <Coins className="h-5 w-5" />,
+        roles: ["master", "admin"],
+      },
       {
         label: "매출캘린더",
         href: "/profitability",
