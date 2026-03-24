@@ -99,11 +99,10 @@ function RoleRouter() {
         {effectiveRole === "employee" && (
           <>
             <Route path="/" component={EmployeeDashboard} />
-            <Route path="/sales" component={SalesPage} />
-
-            <Route path="/schedule" component={SchedulePage} />
             <Route path="/daily-ops" component={DailyOpsPage} />
-            <Route path="/ops-calendar" component={OpsCalendarPage} />
+            <Route path="/schedule" component={SchedulePage} />
+            <Route path="/sales" component={SalesPage} />
+            <Route path="/purchase-management" component={PurchaseManagementPage} />
           </>
         )}
 

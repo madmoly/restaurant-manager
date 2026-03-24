@@ -11,6 +11,36 @@ import { ocrRouter } from "./ocr";
 const app = express();
 app.use(express.json());
 
+// ─── 자동 마이그레이션: 신규 테이블 생성 ──────────────────────────────────────
+(async () => {
+  try {
+    const mysql2 = await import("mysql2/promise");
+    const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS leave_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        userId INT NOT NULL,
+        restaurantId INT NOT NULL,
+        leaveDate DATE NOT NULL,
+        leaveType ENUM('dayoff','half_morning','half_evening') NOT NULL DEFAULT 'dayoff',
+        reason TEXT,
+        status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+        reviewedBy INT,
+        reviewNote TEXT,
+        reviewedAt TIMESTAMP NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_leave_user (userId, restaurantId),
+        INDEX idx_leave_date (leaveDate, restaurantId)
+      )
+    `);
+    await conn.end();
+    console.log("[migrate] leave_requests table ensured");
+  } catch (e: any) {
+    console.error("[migrate] leave_requests error:", e.message);
+  }
+})();
+
 // ─── 파일 업로드 라우터 + 정적 서빙 ──────────────────────────────────────────
 app.use("/api/upload", uploadRouter);
 app.use("/api/ocr", ocrRouter);

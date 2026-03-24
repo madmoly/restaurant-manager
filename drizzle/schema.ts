@@ -287,6 +287,24 @@ export const scheduleChangeRequests = mysqlTable("schedule_change_requests", {
 
 export type ScheduleChangeRequest = typeof scheduleChangeRequests.$inferSelect;
 
+// ─── Leave Requests (휴무/반차 사전 신청) ────────────────────────────────────────
+export const leaveRequests = mysqlTable("leave_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  restaurantId: int("restaurantId").notNull(),
+  leaveDate: date("leaveDate").notNull(),
+  leaveType: mysqlEnum("leaveType", ["dayoff", "half_morning", "half_evening"]).notNull().default("dayoff"),
+  reason: text("reason"),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  reviewedBy: int("reviewedBy"),
+  reviewNote: text("reviewNote"),
+  reviewedAt: timestamp("reviewedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type LeaveRequest = typeof leaveRequests.$inferSelect;
+
 // ─── Daily Operations (오픈/마감 체크) ──────────────────────────────────────────
 export const dailyOperations = mysqlTable("daily_operations", {
   id: int("id").autoincrement().primaryKey(),
