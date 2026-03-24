@@ -100,8 +100,8 @@ export function canManageStaff(effectiveRole: string, storeRole?: string | null)
 
 /** 역할 표시 라벨 */
 export const ROLE_LABELS: Record<string, string> = {
-  master: "총괄관리자",
-  admin: "관리자",
+  master: "개발자",
+  admin: "대표",
   manager: "매장관리자",
   owner: "점장",
   supervisor: "부점장",
