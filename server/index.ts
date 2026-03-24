@@ -85,6 +85,18 @@ app.use(express.json());
     // employment_electronic_contracts 소속회사
     await addColumnIfNotExists("employment_electronic_contracts", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");
 
+    // ─── 역할 체계 재정의: store_manager→owner, manager→supervisor, employee→staff ───
+    try {
+      await conn.query(`ALTER TABLE restaurant_users MODIFY COLUMN role ENUM('manager','sub_manager','employee','store_manager','owner','supervisor','staff') NOT NULL DEFAULT 'staff'`);
+      // 기존 데이터 변환
+      await conn.query(`UPDATE restaurant_users SET role = 'owner' WHERE role = 'store_manager'`);
+      await conn.query(`UPDATE restaurant_users SET role = 'supervisor' WHERE role IN ('manager', 'sub_manager')`);
+      await conn.query(`UPDATE restaurant_users SET role = 'staff' WHERE role = 'employee'`);
+      console.log("[migrate] restaurant_users.role updated to new naming");
+    } catch (e: any) {
+      if (!e.message.includes("Duplicate")) console.log("[migrate] role rename:", e.message);
+    }
+
     // 체크리스트 개편: 태그 + 반복/특정날짜 컬럼
     await addColumnIfNotExists("store_checklist_templates", "tags", "JSON DEFAULT NULL");
     await addColumnIfNotExists("store_checklist_templates", "repeatType", "ENUM('none','daily','weekly') DEFAULT 'none'");
@@ -203,7 +215,7 @@ startCleanupScheduler();
         // 매장 매니저/점장에게도 알림
         const [managers] = await conn.query(`
           SELECT ru2.userId FROM restaurant_users ru2
-          WHERE ru2.restaurantId = ? AND ru2.role IN ('store_manager', 'manager') AND ru2.userId != ?
+          WHERE ru2.restaurantId = ? AND ru2.role IN ('owner', 'supervisor', 'store_manager', 'manager') AND ru2.userId != ?
         `, [row.restaurantId, row.id]) as any[];
 
         for (const mgr of managers) {
@@ -447,10 +459,10 @@ app.get("/api/init", async (_req, res) => {
     const findId = (un: string) => users.find((u: any) => u.username === un)?.id;
 
     const assignments = [
-      { restaurantId: 1, userId: findId("manager1"), role: "manager" },
-      { restaurantId: 2, userId: findId("manager2"), role: "manager" },
-      { restaurantId: 1, userId: findId("staff1"), role: "employee" },
-      { restaurantId: 2, userId: findId("staff2"), role: "employee" },
+      { restaurantId: 1, userId: findId("manager1"), role: "owner" },
+      { restaurantId: 2, userId: findId("manager2"), role: "owner" },
+      { restaurantId: 1, userId: findId("staff1"), role: "staff" },
+      { restaurantId: 2, userId: findId("staff2"), role: "staff" },
     ];
 
     for (const a of assignments) {

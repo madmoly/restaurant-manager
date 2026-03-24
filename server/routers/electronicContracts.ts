@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
-import { router, publicProcedure, protectedProcedure, managerProcedure } from "../trpc";
+import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
 import { employmentElectronicContracts, restaurantContracts, restaurants } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
@@ -132,7 +132,7 @@ export const electronicContractsRouter = router({
     }),
 
   /** 근로계약서 생성 (초안) */
-  createEmploymentContract: managerProcedure
+  createEmploymentContract: ownerProcedure
     .input(
       z.object({
         restaurantId: z.number(),
@@ -207,7 +207,7 @@ export const electronicContractsRouter = router({
     }),
 
   /** 계약서 발송 (상태 → sent) */
-  sendContract: managerProcedure
+  sendContract: ownerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const [contract] = await db

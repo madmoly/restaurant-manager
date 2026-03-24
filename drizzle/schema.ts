@@ -69,8 +69,8 @@ export const restaurantUsers = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     restaurantId: int("restaurantId").notNull(),
     userId: int("userId").notNull(),
-    // 매장 내 역할: store_manager(점장), manager(매니저), employee(직원)
-    role: mysqlEnum("role", ["store_manager", "manager", "employee"]).notNull().default("employee"),
+    // 매장 내 역할: owner(점장), supervisor(부점장), staff(스태프)
+  role: mysqlEnum("role", ["owner", "supervisor", "staff", "store_manager", "manager", "employee"]).notNull().default("staff"),
     affiliatedCompany: varchar("affiliatedCompany", { length: 100 }),
     roleChangedAt: timestamp("roleChangedAt"),
     roleChangedBy: int("roleChangedBy"),

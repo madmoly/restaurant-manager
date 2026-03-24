@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
-import { router, protectedProcedure, adminProcedure } from "../trpc";
+import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
 import { restaurants, restaurantUsers, users } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
@@ -108,7 +108,7 @@ export const restaurantsRouter = router({
     }),
 
   /** 직원 소속회사 변경 */
-  updateStaffCompany: protectedProcedure
+  updateStaffCompany: ownerProcedure
     .input(z.object({
       restaurantId: z.number(),
       userId: z.number(),

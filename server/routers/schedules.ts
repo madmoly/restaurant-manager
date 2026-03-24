@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, and, gte, sql, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure, managerProcedure } from "../trpc";
+import { router, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
 import {
   schedules,
@@ -635,8 +635,8 @@ export const schedulesRouter = router({
       return rows;
     }),
 
-  /** 소속회사별 인건비 정산 조회 */
-  laborCostByCompany: managerProcedure
+  /** 소속회사별 인건비 정산 조회 (점장 이상만) */
+  laborCostByCompany: ownerProcedure
     .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
     .query(async ({ input }) => {
       const monthStr = String(input.month).padStart(2, "0");

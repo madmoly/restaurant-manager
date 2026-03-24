@@ -16,11 +16,14 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { ROLE_LABELS, type EffectiveRole } from "@shared/permissions";
-import {
-  UtensilsCrossed, LayoutDashboard, Users, Store, TrendingUp,
-  LogOut, Menu, X, Sun, Moon, MoreHorizontal,
-  Banknote, Receipt, Wallet, CalendarDays, ClipboardList, UserCog,
-  Bell, Check, Building2,
+import { 
+  UtensilsCrossed, LogOut, Menu, X, Sun, Moon, MoreHorizontal,
+  Check, Building2,
+  
+  // 새롭게 개편된 직관적인 프리미엄 아이콘 세트
+  LayoutGrid, Activity, CalendarRange, ListChecks, Clock,
+  UsersRound, Coins, BarChart3, Receipt, ShoppingCart, ShieldCheck,
+  Store, BellRing
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -51,28 +54,28 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       {
         label: "대시보드", href: "/",
-        icon: <LayoutDashboard className="h-4 w-4" />,
-        mobileIcon: <LayoutDashboard className="h-5 w-5" />,
-        roles: ["master", "admin", "manager", "employee"],
-        mobileTabPriority: { master: 1, admin: 1, manager: 1, employee: 1 },
+        icon: <LayoutGrid className="h-4 w-4" />,
+        mobileIcon: <LayoutGrid className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "staff"],
+        mobileTabPriority: { master: 1, admin: 1, manager: 1, staff: 1 },
       },
       {
         label: "일일 운영", href: "/daily-ops",
-        icon: <ClipboardList className="h-4 w-4" />,
-        mobileIcon: <ClipboardList className="h-5 w-5" />,
-        roles: ["master", "admin", "manager", "employee"],
-        mobileTabPriority: { manager: 2, employee: 2 },
+        icon: <Activity className="h-4 w-4" />,
+        mobileIcon: <Activity className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "staff"],
+        mobileTabPriority: { manager: 2, staff: 2 },
       },
       {
         label: "운영 캘린더", href: "/ops-calendar",
-        icon: <CalendarDays className="h-4 w-4" />,
-        mobileIcon: <CalendarDays className="h-5 w-5" />,
+        icon: <CalendarRange className="h-4 w-4" />,
+        mobileIcon: <CalendarRange className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
       },
       {
         label: "내 매장 업무관리", href: "/task-management",
-        icon: <ClipboardList className="h-4 w-4" />,
-        mobileIcon: <ClipboardList className="h-5 w-5" />,
+        icon: <ListChecks className="h-4 w-4" />,
+        mobileIcon: <ListChecks className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
       },
     ],
@@ -82,21 +85,21 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       {
         label: "스케줄", href: "/schedule",
-        icon: <CalendarDays className="h-4 w-4" />,
-        mobileIcon: <CalendarDays className="h-5 w-5" />,
-        roles: ["master", "admin", "manager", "employee"],
-        mobileTabPriority: { master: 3, admin: 3, manager: 3, employee: 3 },
+        icon: <Clock className="h-4 w-4" />,
+        mobileIcon: <Clock className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "staff"],
+        mobileTabPriority: { master: 3, admin: 3, manager: 3, staff: 3 },
       },
       {
         label: "직원 관리", href: "/staff",
-        icon: <UserCog className="h-4 w-4" />,
-        mobileIcon: <UserCog className="h-5 w-5" />,
+        icon: <UsersRound className="h-4 w-4" />,
+        mobileIcon: <UsersRound className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
       },
       {
         label: "인건비 정산", href: "/labor-cost",
-        icon: <Wallet className="h-4 w-4" />,
-        mobileIcon: <Wallet className="h-5 w-5" />,
+        icon: <Coins className="h-4 w-4" />,
+        mobileIcon: <Coins className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
       },
     ],
@@ -107,22 +110,22 @@ const NAV_GROUPS: NavGroup[] = [
       {
         label: "매출캘린더",
         href: "/profitability",
-        icon: <TrendingUp className="h-4 w-4" />,
-        mobileIcon: <TrendingUp className="h-5 w-5" />,
-        roles: ["master", "admin", "manager", "employee"],
+        icon: <BarChart3 className="h-4 w-4" />,
+        mobileIcon: <BarChart3 className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "staff"],
         mobileTabPriority: { master: 4, admin: 4, manager: 4 },
       },
       {
         label: "고정비 관리", href: "/fixed-costs",
-        icon: <Banknote className="h-4 w-4" />,
-        mobileIcon: <Banknote className="h-5 w-5" />,
+        icon: <Receipt className="h-4 w-4" />,
+        mobileIcon: <Receipt className="h-5 w-5" />,
         roles: ["manager"],
       },
       {
         label: "매입 관리", href: "/purchase-management",
-        icon: <Wallet className="h-4 w-4" />,
-        mobileIcon: <Wallet className="h-5 w-5" />,
-        roles: ["master", "admin", "manager", "employee"],
+        icon: <ShoppingCart className="h-4 w-4" />,
+        mobileIcon: <ShoppingCart className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "staff"],
       },
     ],
   },
@@ -131,8 +134,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       {
         label: "사용자 관리", href: "/users",
-        icon: <Users className="h-4 w-4" />,
-        mobileIcon: <Users className="h-5 w-5" />,
+        icon: <ShieldCheck className="h-4 w-4" />,
+        mobileIcon: <ShieldCheck className="h-5 w-5" />,
         roles: ["master", "admin"],
         mobileTabPriority: { master: 2, admin: 2 },
       },
@@ -144,9 +147,9 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         label: "알림", href: "/notifications",
-        icon: <Bell className="h-4 w-4" />,
-        mobileIcon: <Bell className="h-5 w-5" />,
-        roles: ["master", "admin", "manager", "employee"],
+        icon: <BellRing className="h-4 w-4" />,
+        mobileIcon: <BellRing className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "staff"],
       },
     ],
   },
@@ -159,7 +162,7 @@ const ROLE_COLORS: Record<string, string> = {
   master: "bg-purple-500/20 text-purple-300 border-purple-500/30",
   admin: "bg-blue-500/20 text-blue-300 border-blue-500/30",
   manager: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-  employee: "bg-slate-500/20 text-slate-300 border-slate-500/30",
+  staff: "bg-slate-500/20 text-slate-300 border-slate-500/30",
 };
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -377,24 +380,24 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
   );
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      {/* 데스크탑 사이드바 */}
-      <aside className="hidden lg:flex w-56 shrink-0 flex-col bg-sidebar border-r border-sidebar-border">
+    <div className="flex h-screen bg-background overflow-hidden selection:bg-primary/20">
+      {/* 데스크탑 사이드바 (투명한 글래스 사양) */}
+      <aside className="hidden lg:flex w-[240px] shrink-0 flex-col bg-sidebar/60 backdrop-blur-3xl border-r border-sidebar-border shadow-2xl z-10 transition-all duration-300">
         <SidebarInner />
       </aside>
 
       {/* 모바일 사이드바 오버레이 */}
       {sidebarOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
+        <div className="lg:hidden fixed inset-0 z-[60] flex">
           <div
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
             onClick={() => setSidebarOpen(false)}
           />
-          <aside className="relative w-64 max-w-[85vw] bg-sidebar flex flex-col shadow-2xl animate-in slide-in-from-left duration-200">
+          <aside className="relative w-72 max-w-[85vw] glass-panel bg-sidebar/95 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300">
             <Button
               variant="ghost"
               size="icon"
-              className="absolute top-3 right-3 text-sidebar-foreground/50 hover:text-sidebar-foreground z-10 h-8 w-8"
+              className="absolute top-4 right-4 text-sidebar-foreground/50 hover:text-foreground z-10 h-8 w-8 rounded-full bg-background/10 backdrop-blur-md"
               onClick={() => setSidebarOpen(false)}
             >
               <X className="h-4 w-4" />
@@ -405,34 +408,34 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
       )}
 
       {/* 메인 콘텐츠 */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* 상단 헤더 */}
-        <header className="shrink-0 h-14 flex items-center gap-3 px-3 lg:px-5 border-b border-border bg-background/80 backdrop-blur-sm">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        {/* 상단 헤더 (블러 글래스) */}
+        <header className="shrink-0 h-16 flex items-center gap-3 px-4 lg:px-6 border-b border-border/50 bg-background/60 backdrop-blur-xl z-20 shadow-[0_1px_10px_rgb(0,0,0,0.02)] sticky top-0 transition-all duration-300">
           <Button
             variant="ghost"
             size="icon"
-            className="lg:hidden h-9 w-9 shrink-0"
+            className="lg:hidden h-10 w-10 shrink-0 hover:bg-white/10 rounded-xl"
             onClick={() => setSidebarOpen(true)}
           >
             <Menu className="h-5 w-5" />
           </Button>
 
           {/* 로고 (모바일 전용) */}
-          <div className="lg:hidden flex items-center gap-2 shrink-0">
-            <div className="flex items-center justify-center w-7 h-7 bg-primary rounded-lg">
+          <div className="lg:hidden flex items-center gap-2 shrink-0 animate-in-up">
+            <div className="flex items-center justify-center w-8 h-8 bg-gradient-to-br from-primary to-primary/80 rounded-xl shadow-lg shadow-primary/30">
               <UtensilsCrossed className="h-4 w-4 text-primary-foreground" />
             </div>
           </div>
 
           <div className="flex-1 min-w-0" />
 
-          <div className="flex items-center gap-1">
-            {/* 다크모드 토글 (데스크탑 헤더) */}
+          <div className="flex items-center gap-2">
+            {/* 다크모드 토글 */}
             {toggleTheme && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="hidden lg:flex h-8 w-8 text-muted-foreground hover:text-foreground"
+                className="hidden lg:flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-xl transition-all"
                 onClick={toggleTheme}
                 title={theme === "dark" ? "라이트 모드" : "다크 모드"}
               >
@@ -446,30 +449,30 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
             {/* 유저 드롭다운 */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-9 w-9">
-                  <Avatar className="h-7 w-7 ring-2 ring-primary/20">
+                <Button variant="ghost" className="h-10 w-10 rounded-xl hover:bg-accent/50 p-0 border border-border/20 shadow-sm overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5">
+                  <Avatar className="h-full w-full">
                     <AvatarFallback className="bg-primary/20 text-primary text-xs font-bold">
                       {(user.name ?? user.username ?? "?").charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                <div className="px-2 py-2">
-                  <p className="text-sm font-semibold">{user.name ?? user.username}</p>
-                  <p className="text-xs text-muted-foreground">{ROLE_LABELS[effectiveRole] ?? effectiveRole}</p>
+              <DropdownMenuContent align="end" className="w-56 glass-panel rounded-xl p-2 animate-in fade-in slide-in-from-top-2 border-border/50">
+                <div className="px-3 py-2.5">
+                  <p className="text-sm font-bold text-foreground">{user.name ?? user.username}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{ROLE_LABELS[effectiveRole] ?? effectiveRole}</p>
                 </div>
-                <DropdownMenuSeparator />
+                <DropdownMenuSeparator className="bg-border/30" />
                 {toggleTheme && (
                   <>
-                    <DropdownMenuItem onClick={toggleTheme}>
+                    <DropdownMenuItem onClick={toggleTheme} className="rounded-lg cursor-pointer my-1 transition-all hover:bg-primary/10 hover:text-primary">
                       {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
                       {theme === "dark" ? "라이트 모드" : "다크 모드"}
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
+                    <DropdownMenuSeparator className="bg-border/30" />
                   </>
                 )}
-                <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive rounded-lg cursor-pointer my-1 font-medium transition-all hover:bg-destructive/10">
                   <LogOut className="mr-2 h-4 w-4" />
                   로그아웃
                 </DropdownMenuItem>
@@ -479,33 +482,36 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
         </header>
 
         {/* 페이지 콘텐츠 */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="pb-20 lg:pb-0">
+        <main className="flex-1 overflow-y-auto relative z-0">
+          <div className="pb-24 lg:pb-8 pt-4 lg:pt-6 h-full">
             {children}
           </div>
         </main>
 
-        {/* 모바일 하단 탭 네비게이션 */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border safe-area-bottom">
-          <div className="flex items-stretch justify-around h-16">
+        {/* 모바일 하단 플로팅 탭 네비게이션 */}
+        <nav className="lg:hidden fixed bottom-4 inset-x-4 z-50 safe-area-bottom pointer-events-none">
+          <div className="glass-panel bg-card/85 rounded-2xl p-1.5 shadow-2xl flex items-stretch justify-around h-[68px] pointer-events-auto border border-border/50 backdrop-blur-2xl">
             {mobileTabItems.map((item) => {
               const isActive = location === item.href;
               return (
                 <Link key={item.href} href={item.href} className="flex-1">
                   <div
                     className={cn(
-                      "flex flex-col items-center justify-center gap-0.5 h-full px-1 transition-all duration-150",
-                      isActive ? "text-primary" : "text-muted-foreground"
+                      "flex flex-col items-center justify-center gap-1 h-full px-1 rounded-xl transition-all duration-300",
+                      isActive ? "text-primary" : "text-muted-foreground hover:bg-foreground/5"
                     )}
                   >
                     <div className={cn(
-                      "relative flex items-center justify-center w-10 h-6 rounded-full transition-all duration-150",
-                      isActive && "bg-primary/15"
+                      "relative flex items-center justify-center w-12 h-7 rounded-full transition-all duration-500",
+                      isActive ? "bg-primary/20 scale-110" : "scale-100"
                     )}>
                       {item.mobileIcon}
+                      {isActive && (
+                        <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping opacity-20" />
+                      )}
                     </div>
                     <span className={cn(
-                      "text-[10px] font-medium leading-tight",
+                      "text-[10px] font-bold tracking-wide transition-all duration-300",
                       isActive ? "text-primary" : "text-muted-foreground/70"
                     )}>
                       {getLabel(item)}
@@ -520,25 +526,25 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
               <div className="flex-1 relative">
                 <button
                   className={cn(
-                    "flex flex-col items-center justify-center gap-0.5 h-full w-full px-1 transition-all duration-150",
-                    moreMenuOpen ? "text-primary" : "text-muted-foreground"
+                    "flex flex-col items-center justify-center gap-1 h-full w-full px-1 rounded-xl transition-all duration-300",
+                    moreMenuOpen ? "text-primary" : "text-muted-foreground hover:bg-foreground/5"
                   )}
                   onClick={() => setMoreMenuOpen(v => !v)}
                 >
                   <div className={cn(
-                    "flex items-center justify-center w-10 h-6 rounded-full transition-all duration-150",
-                    moreMenuOpen && "bg-primary/15"
+                    "flex items-center justify-center w-12 h-7 rounded-full transition-all duration-500",
+                    moreMenuOpen ? "bg-primary/20 scale-110" : "scale-100"
                   )}>
                     <MoreHorizontal className="h-5 w-5" />
                   </div>
-                  <span className="text-[10px] font-medium leading-tight text-muted-foreground/70">더보기</span>
+                  <span className="text-[10px] font-bold tracking-wide text-muted-foreground/70">더보기</span>
                 </button>
 
-                {/* 더보기 팝업 — 카테고리 그룹핑 */}
+                {/* 더보기 팝업 — 글래스모피즘 */}
                 {moreMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setMoreMenuOpen(false)} />
-                    <div className="absolute bottom-full right-0 mb-2 w-52 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden">
+                    <div className="absolute bottom-full right-0 mb-4 w-56 glass-panel rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-5 border-border/50">
                       {(() => {
                         const moreHrefs = new Set(moreItems.map(i => i.href));
                         const moreGroups = visibleGroups
@@ -546,31 +552,33 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
                           .filter(g => g.items.length > 0);
                         return moreGroups.map((group, gi) => (
                           <div key={group.label}>
-                            {gi > 0 && <div className="h-px bg-border mx-2" />}
-                            <div className="px-3 pt-2 pb-0.5">
-                              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                            {gi > 0 && <div className="h-px bg-border/30 mx-3 my-1" />}
+                            <div className="px-4 pt-3 pb-1">
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
                                 {group.label}
                               </p>
                             </div>
-                            {group.items.map((item) => {
-                              const active = location === item.href;
-                              return (
-                                <Link key={item.href} href={item.href}>
-                                  <div
-                                    className={cn(
-                                      "flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-colors",
-                                      active
-                                        ? "bg-primary/10 text-primary"
-                                        : "text-foreground hover:bg-accent"
-                                    )}
-                                    onClick={() => setMoreMenuOpen(false)}
-                                  >
-                                    {item.icon}
-                                    {getLabel(item)}
-                                  </div>
-                                </Link>
-                              );
-                            })}
+                            <div className="p-1 space-y-0.5">
+                              {group.items.map((item) => {
+                                const active = location === item.href;
+                                return (
+                                  <Link key={item.href} href={item.href}>
+                                    <div
+                                      className={cn(
+                                        "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
+                                        active
+                                          ? "bg-primary/15 text-primary"
+                                          : "text-foreground hover:bg-foreground/5 hover:translate-x-1"
+                                      )}
+                                      onClick={() => setMoreMenuOpen(false)}
+                                    >
+                                      <span className={active ? "text-primary" : "text-muted-foreground"}>{item.icon}</span>
+                                      {getLabel(item)}
+                                    </div>
+                                  </Link>
+                                );
+                              })}
+                            </div>
                           </div>
                         ));
                       })()}

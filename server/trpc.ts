@@ -31,10 +31,8 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
 });
 
 /**
- * manager 이상 (master/admin/manager + 매장 store_manager/manager)
- *
- * 시스템 역할이 manager 미만이더라도, restaurant_users 테이블에서
- * store_manager 또는 manager 역할을 보유하고 있으면 통과시킨다.
+ * manager 이상 (master/admin + 매장 owner/supervisor)
+ * 점장·부점장 공통 권한
  */
 export const managerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   const level = ROLE_LEVEL[ctx.user.role] ?? 0;
@@ -46,11 +44,34 @@ export const managerProcedure = protectedProcedure.use(async ({ ctx, next }) => 
     .select({ role: restaurantUsers.role })
     .from(restaurantUsers)
     .where(eq(restaurantUsers.userId, ctx.user.userId));
-  const isStoreManager = storeRoles.some(
-    (r) => r.role === "store_manager" || r.role === "manager"
+  const hasStoreAuth = storeRoles.some(
+    (r) => r.role === "owner" || r.role === "supervisor" ||
+           r.role === "store_manager" || r.role === "manager" // 레거시 호환
   );
-  if (!isStoreManager) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "매니저 이상 권한이 필요합니다" });
+  if (!hasStoreAuth) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "점장/부점장 이상 권한이 필요합니다" });
+  }
+  return next({ ctx });
+});
+
+/**
+ * owner 이상 (master/admin + 매장 owner만)
+ * 점장 전용 권한: 인건비 정산, 근로계약서, 소속회사 변경
+ */
+export const ownerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  const level = ROLE_LEVEL[ctx.user.role] ?? 0;
+  if (level >= ROLE_LEVEL.admin) {
+    return next({ ctx });
+  }
+  const storeRoles = await db
+    .select({ role: restaurantUsers.role })
+    .from(restaurantUsers)
+    .where(eq(restaurantUsers.userId, ctx.user.userId));
+  const isOwner = storeRoles.some(
+    (r) => r.role === "owner" || r.role === "store_manager" // 레거시 호환
+  );
+  if (!isOwner) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "점장 이상 권한이 필요합니다" });
   }
   return next({ ctx });
 });
@@ -60,6 +81,14 @@ export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   const level = ROLE_LEVEL[ctx.user.role] ?? 0;
   if (level < ROLE_LEVEL.admin) {
     throw new TRPCError({ code: "FORBIDDEN", message: "관리자 권한이 필요합니다" });
+  }
+  return next({ ctx });
+});
+
+/** master 전용 */
+export const masterProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "master") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "총괄관리자 권한이 필요합니다" });
   }
   return next({ ctx });
 });

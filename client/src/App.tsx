@@ -102,8 +102,8 @@ function RoleRouter() {
           </>
         )}
 
-        {/* employee */}
-        {effectiveRole === "employee" && (
+        {/* staff */}
+        {effectiveRole === "staff" && (
           <>
             <Route path="/" component={EmployeeDashboard} />
             <Route path="/daily-ops" component={DailyOpsPage} />
