@@ -1,182 +1,374 @@
-# 앱 개발 업무지침
+# 331매장관리 (Restaurant Manager) — 프로젝트 문서
 
-## 0. 목적
-이 앱의 모든 작업은 임의 수정이 아니라, 비즈니스 도메인에 맞는 구조적 개선과 검증 가능한 구현을 목표로 한다.
-모든 작업은 탐색, 계획, 승인, 구현, 검증 순서를 따른다.
+## 배포 환경
 
----
+- **프로덕션 URL**: Railway 자동 배포 (GitHub main 브랜치 push → 자동 빌드/배포)
+- **GitHub**: https://github.com/madmoly/restaurant-manager.git
+- **DB**: MySQL 8 on Railway (`DATABASE_URL` in `.env`)
+- **AI OCR**: Anthropic Claude Vision API (`ANTHROPIC_API_KEY` in `.env`)
+- **로컬 개발 환경 없음**: Railway 프로덕션 직접 배포 (테스트 = 프로덕션)
+- **빌드 명령**: `pnpm run build` → Vite(클라이언트) + esbuild(서버)
+- **시작 명령**: `NODE_ENV=production node dist/index.js`
 
-## 1. 비즈니스 도메인 정의 및 용어 정리
+## 기술 스택
 
-- 작업을 시작하기 전에 먼저 이 앱의 비즈니스 도메인을 명확히 정리한다.
-- 도메인 내 핵심 개념, 사용자 역할, 주요 객체, 상태값, 화면 명칭, 지표 명칭을 정의한다.
-- 같은 의미의 용어가 여러 이름으로 섞이지 않게 표준 용어를 정한다.
-- 이후 설계, 코드, UI, 문서, 테스트에서 동일한 용어만 사용한다.
+| 레이어 | 기술 |
+|--------|------|
+| Frontend | React 19 + Vite 7 + TailwindCSS 4 + shadcn/ui + wouter (라우팅) |
+| Backend | Express + tRPC v11 + Drizzle ORM |
+| Database | MySQL 8 (Railway) |
+| Auth | JWT (jose) + bcryptjs, 쿠키 기반 세션 |
+| OCR | Anthropic Claude Vision API (`claude-sonnet-4-20250514`) |
+| PWA | manifest.json + service worker + beforeinstallprompt |
 
-### 완료 조건
-- 도메인 설명이 존재한다.
-- 핵심 엔티티/역할/상태/지표 용어가 정리되어 있다.
-- 혼용되는 용어가 없는지 확인되었다.
+## 프로젝트 구조
 
----
+```
+restaurant-manager/
+├── client/                    # 프론트엔드
+│   ├── index.html             # PWA 메타태그 + SW 등록
+│   └── src/
+│       ├── App.tsx            # 라우팅 (wouter, 역할별 분기)
+│       ├── components/
+│       │   ├── AppLayout.tsx  # 사이드바/모바일탭 네비게이션
+│       │   └── ui/            # shadcn/ui 컴포넌트
+│       ├── contexts/
+│       │   ├── RestaurantContext.tsx
+│       │   └── ThemeContext.tsx
+│       ├── hooks/
+│       │   └── useAuth.ts
+│       ├── lib/
+│       │   ├── trpc.ts        # tRPC 클라이언트 설정
+│       │   └── utils.ts
+│       └── pages/             # 페이지 컴포넌트 (아래 상세)
+├── server/
+│   ├── index.ts               # Express 앱 진입점 + 자동 마이그레이션
+│   ├── trpc.ts                # tRPC 컨텍스트 + 프로시저 정의
+│   ├── auth.ts                # JWT 토큰 생성/검증
+│   ├── db.ts                  # Drizzle DB 연결
+│   ├── ocr.ts                 # OCR 엔드포인트 (/api/ocr/*)
+│   ├── upload.ts              # 파일 업로드 (/api/upload)
+│   └── routers/               # tRPC 라우터 (아래 상세)
+├── drizzle/
+│   └── schema.ts              # 전체 DB 스키마 (34 테이블)
+├── shared/
+│   └── permissions.ts         # 역할/권한 모델 (서버+클라이언트 공유)
+├── public/                    # PWA 정적 파일 (manifest.json, sw.js, icons/)
+└── .env                       # DATABASE_URL, ANTHROPIC_API_KEY
+```
 
-## 2. 작업 전 탐색 의무
+## 권한 모델
 
-- 작업 지시를 받으면 바로 수정하지 말고 먼저 현재 구조를 탐색한다.
-- 탐색 범위에는 다음이 포함되어야 한다.
-  - 관련 화면
-  - 관련 컴포넌트
-  - 관련 데이터 구조
-  - 상태 흐름
-  - 권한 처리
-  - 기존 패턴
-  - 영향받는 파일 범위
-- 탐색 없이 바로 구현에 들어가면 안 된다.
+### 시스템 역할 (users.role)
+- `master` (레벨4): 최고 관리자
+- `admin` (레벨3): 관리자
+- `manager` (레벨2): 매니저급 (거의 사용 안 함, 매장 역할로 대체)
+- `user` (레벨1): 일반 사용자
 
-### 완료 조건
-- 어떤 파일과 화면이 영향을 받는지 식별했다.
-- 기존 구조와 충돌 가능성이 정리되었다.
-- 현재 구현 방식과 제약사항이 파악되었다.
+### 매장 역할 (restaurant_users.role)
+- `store_manager`: 점장
+- `manager`: 매니저
+- `employee`: 직원
 
----
+### 유효 역할 (effectiveRole) 계산
+1. `users.role`이 master/admin → 그대로 사용
+2. 아니면 `restaurant_users.role` 확인:
+   - store_manager/manager → effectiveRole = "manager"
+   - employee/null → effectiveRole = "employee"
 
-## 3. 작업 계획 수립 후 진행
+### tRPC 프로시저 레벨
+- `publicProcedure`: 비로그인 접근 가능
+- `protectedProcedure`: 로그인 필요
+- `managerProcedure`: manager 이상 (시스템 역할 OR 매장 역할 검사)
+- `adminProcedure`: admin 이상 (시스템 역할만 검사)
 
-- 탐색이 끝나면 바로 작업하지 말고 먼저 작업 계획을 수립한다.
-- 작업 계획에는 반드시 다음이 포함되어야 한다.
-  1. 작업 목적
-  2. 수정 대상
-  3. 변경 이유
-  4. 예상 영향 범위
-  5. 리스크
-  6. 검증 방법
-- 계획이 현재 요구사항에 적합한지 확인받은 후에만 구현을 진행한다.
-- 확인되지 않은 계획으로 임의 구현하지 않는다.
+## 페이지 & 라우팅
 
-### 완료 조건
-- 작업 목적과 범위가 문서화되었다.
-- 변경 파일 또는 변경 지점이 명시되었다.
-- 사용자 확인 또는 승인 이후에만 작업이 시작된다.
+| 경로 | 페이지 | 접근 역할 |
+|------|--------|-----------|
+| `/` | AdminDashboard / ManagerDashboard / EmployeeDashboard | 역할별 분기 |
+| `/users` | UsersPage (사용자 관리) | master, admin |
+| `/restaurants` | RestaurantsPage (매장 관리) | master, admin, manager |
+| `/sales` | SalesPage (매출) | manager, employee |
+| `/profitability` | ProfitPage (수익분석/분석캘린더) | master, admin, manager |
+| `/counterparties` | CounterpartiesPage (거래처) | master, admin, manager |
+| `/purchase-management` | PurchaseManagementPage (매입) | 전체 |
+| `/fixed-costs` | FixedCostsPage (고정비) | manager |
+| `/schedule` | SchedulePage (스케줄+휴무신청) | 전체 |
+| `/daily-ops` | DailyOpsPage (일일운영) | 전체 |
+| `/ops-calendar` | OpsCalendarPage (운영캘린더) | master, admin, manager |
+| `/staff` | StaffPage (직원관리) | master, admin, manager |
+| `/sign/:token` | ContractSignPage (전자서명) | 비로그인 접근 |
 
----
+## DB 테이블 (34개)
 
-## 4. 자기검증 수단을 계획 단계에 포함
+### 핵심 테이블
+| 변수명 | DB 테이블명 | 설명 |
+|--------|------------|------|
+| users | users | 사용자 (username, passwordHash, name, email, phone, role, healthCertUrl, healthCertExpiry) |
+| restaurants | restaurants | 매장 (name, address, monthlyTargetSales, targetLaborRatio, targetCostRatio, openTime, closeTime) |
+| restaurantUsers | restaurant_users | 매장-사용자 배정 (restaurantId, userId, role, affiliatedCompany) |
 
-- 모든 작업 계획에는 자기검증 수단이 반드시 포함되어야 한다.
-- 자기검증 수단은 가능한 한 아래 항목을 포함한다.
-  - 테스트 코드 또는 수동 테스트 절차
-  - 기대 결과
-  - 실제 결과 비교 기준
-  - UI 작업의 경우 스크린샷 비교
-  - 데이터 처리 작업의 경우 입력/출력 예시
-  - 권한 작업의 경우 역할별 검증
-- 검증 수단이 없는 작업 계획은 미완성으로 본다.
+### 매출/마감
+| 변수명 | DB 테이블명 | 설명 |
+|--------|------------|------|
+| sales | sales | 매출 기록 |
+| dailyClosings | daily_closings | 일일 마감 |
+| dailyClosingSalesTypes | daily_closing_sales_types | 마감 매출 유형 |
+| dailyClosingSpecialTypes | daily_closing_special_types | 특별 매출 유형 |
+| monthlyClosings | monthly_closings | 월간 마감 |
+| dailySalesDetail | daily_sales_detail | 일별 매출 상세 |
+| salesOtherItems | sales_other_items | 기타 매출 항목 |
+| salesOtherItemTemplates | sales_other_item_templates | 기타 매출 템플릿 |
+| intermediateSales | intermediate_sales | 중간 매출 기록 |
+| dailySalesSpecialItems | daily_sales_special_items | 특별 매출 항목 |
 
-### 완료 조건
-- 테스트 또는 검증 절차가 계획에 포함되었다.
-- 기대 결과가 문장으로 명시되었다.
-- UI 변경 시 비교 기준이 정의되었다.
+### 매입/거래처
+| 변수명 | DB 테이블명 | 설명 |
+|--------|------------|------|
+| counterparties | counterparties | 거래처 |
+| items | items | 품목 마스터 |
+| counterpartyItems | counterparty_items | 거래처별 품목 |
+| purchaseOrders | purchase_orders | 매입 발주 (레거시) |
+| purchaseOrderItems | purchase_order_items | 매입 발주 품목 (레거시) |
+| purchaseOrdersV2 | purchase_orders_v2 | 매입 발주 v2 (현재 사용) |
+| purchaseOrderItemsV2 | purchase_order_items_v2 | 매입 발주 품목 v2 |
+| fixedCosts | fixed_costs | 고정비 |
 
----
+### 인사/스케줄
+| 변수명 | DB 테이블명 | 설명 |
+|--------|------------|------|
+| schedules | schedules | 근무 스케줄 |
+| scheduleChangeRequests | schedule_change_requests | 스케줄 변경 요청 |
+| leaveRequests | leave_requests | 휴무 신청 (dayoff/half_morning/half_evening, 5일전 제한) |
+| employeeContracts | employee_contracts | 직원 근로계약 |
+| employeeLeaves | employee_leaves | 직원 휴가 기록 |
 
-## 5. 작업 전 todo.md 작성 의무
+### 운영
+| 변수명 | DB 테이블명 | 설명 |
+|--------|------------|------|
+| dailyOperations | daily_operations | 일일 운영 기록 (오픈/마감 체크) |
+| storeChecklistTemplates | store_checklist_templates | 체크리스트 템플릿 |
+| dailyChecklistLogs | daily_checklist_logs | 체크리스트 실행 로그 |
+| dailyOrderImages | daily_order_images | 발주서 이미지 (OCR) |
+| storeClosedDays | store_closed_days | 매장 휴무일 |
+| storeWeeklyClosures | store_weekly_closures | 매장 정기 휴무 |
 
-- 구현 전에 반드시 `todo.md`를 작성한다.
-- `todo.md`에는 이번 작업에서 수행할 세부 작업을 체크리스트 형태로 기록한다.
-- 각 항목은 완료 여부를 판단할 수 있게 구체적으로 작성한다.
-- `todo.md`를 공유하고 어떤 작업을 수행할지 먼저 확인받은 후에만 구현한다.
+### 계약/알림
+| 변수명 | DB 테이블명 | 설명 |
+|--------|------------|------|
+| restaurantContracts | restaurant_contracts | 매장 계약 조건 (임대/수수료/로열티) |
+| employmentElectronicContracts | employment_electronic_contracts | 전자 근로계약서 (토큰 서명, affiliatedCompany 포함) |
+| notifications | notifications | 알림 (type, title, content, isRead) |
 
-### todo.md 작성 원칙
-- 항목은 작게 나눈다.
-- 각 항목은 결과 기준이 있어야 한다.
-- 모호한 표현 대신 확인 가능한 표현을 사용한다.
+## tRPC API 전체 목록
 
-### 예시
-- [ ] 관련 파일 및 영향 범위 탐색
-- [ ] 용어 혼용 여부 확인
-- [ ] 수정 계획 작성
-- [ ] 승인 후 구현
-- [ ] 테스트 수행
-- [ ] 스크린샷 비교
-- [ ] todo 누락 확인
-- [ ] 최종 자체 검증
+### auth (인증)
+- `auth.me` (public) — 현재 로그인 사용자 정보
+- `auth.login` (public) — 로그인
+- `auth.logout` (public) — 로그아웃
+- `auth.changePassword` (protected) — 비밀번호 변경
 
-### 완료 조건
-- `todo.md`가 작성되었다.
-- 작업 항목별 완료 기준이 들어 있다.
-- 확인받기 전에는 구현하지 않았다.
+### users (사용자 관리)
+- `users.list` (admin) — 전체 사용자 목록
+- `users.get` (protected) — 사용자 상세
+- `users.create` (admin) — 사용자 생성
+- `users.update` (admin) — 사용자 수정
+- `users.updateStaffCredentials` (manager) — 직원 ID/PW/이름/연락처 수정
+- `users.updateHealthCert` (manager) — 보건증 URL/만료일 업데이트
 
----
+### restaurants (매장 관리)
+- `restaurants.list` (protected) — 매장 목록
+- `restaurants.listMine` (protected) — 내 매장 목록
+- `restaurants.get` (protected) — 매장 상세
+- `restaurants.getMyStoreRole` (protected) — 현재 매장 내 내 역할
+- `restaurants.create` (admin) — 매장 생성
+- `restaurants.update` (protected) — 매장 수정
+- `restaurants.getStaff` (protected) — 매장 직원 목록 (healthCertUrl, healthCertExpiry, affiliatedCompany 포함)
+- `restaurants.addStaff` (protected) — 직원 매장 배정
+- `restaurants.updateStaffCompany` (protected) — 직원 소속회사 변경
+- `restaurants.updateStaffRole` (admin) — 직원 역할 변경 (admin 전용)
+- `restaurants.removeStaff` (protected) — 직원 매장 제거
 
-## 6. 구현 규칙
+### sales (매출)
+- `sales.listByMonth` (protected) — 월별 매출
+- `sales.listByDate` (protected) — 일별 매출
+- `sales.monthlyTotal` (protected) — 월간 합계
+- `sales.create` (protected) — 매출 등록
+- `sales.update` (protected) — 매출 수정
+- `sales.delete` (protected) — 매출 삭제
 
-- 승인된 계획 범위 안에서만 구현한다.
-- 기존 구조와 패턴을 우선 존중한다.
-- 필요성이 입증되지 않은 새 추상화, 새 라이브러리, 새 패턴 도입을 지양한다.
-- 작업 도중 범위가 달라지면 즉시 계획과 todo를 갱신한다.
-- 확인되지 않은 요구사항을 임의로 추가하지 않는다.
+### counterparties (거래처)
+- `counterparties.list` (protected) — 거래처 목록
+- `counterparties.create` (protected) — 거래처 생성
+- `counterparties.update` (protected) — 거래처 수정
+- `counterparties.deactivate` (protected) — 거래처 비활성화
 
-### 완료 조건
-- 구현 범위가 승인된 계획과 일치한다.
-- 변경 이유 없는 구조 확장이 없다.
-- 계획 외 변경이 발생했다면 문서에 반영되었다.
+### purchasesV2 (매입 v2 — 현재 사용)
+- `purchasesV2.listOrdersByMonth` (protected) — 월별 발주 목록
+- `purchasesV2.listByDate` (protected) — 일별 발주
+- `purchasesV2.getOrderItems` (protected) — 발주 품목 상세
+- `purchasesV2.getRecentOrdersByCounterparty` (protected) — 거래처별 최근 발주
+- `purchasesV2.createOrder` (protected) — 발주 생성
+- `purchasesV2.updateOrder` (protected) — 발주 수정
+- `purchasesV2.deleteOrder` (manager) — 발주 삭제
+- `purchasesV2.itemPriceComparison` (protected) — 품목 가격 비교
+- `purchasesV2.itemPriceTrend` (protected) — 품목 가격 추이
+- `purchasesV2.counterpartyAmountAnalysis` (protected) — 거래처별 매입 분석
+- `purchasesV2.pendingOrders` (protected) — 미입고 발주 목록
 
----
+### fixedCosts (고정비)
+- `fixedCosts.list` / `monthlyTotal` / `create` / `update` / `deactivate` (protected)
 
-## 7. 작업 이후 todo 순회 및 누락 점검
+### dailyClosings (일일 마감)
+- `dailyClosings.listSalesTypes` / `createSalesType` (protected)
+- `dailyClosings.getByDate` / `listByMonth` (protected)
+- `dailyClosings.calculateDay` / `save` / `monthlySummary` (protected)
 
-- 구현이 끝나면 `todo.md`를 처음부터 다시 순회한다.
-- 체크되지 않은 항목, 부분 완료 항목, 검증되지 않은 항목이 있는지 확인한다.
-- 누락된 작업이 있으면 종료하지 말고 보완한다.
-- “대충 됨” 상태로 마무리하지 않는다.
+### schedules (스케줄)
+- `schedules.listByRestaurant` (protected) — 매장 스케줄 목록 (from/to 필수)
+- `schedules.listByUser` (protected) — 내 스케줄
+- `schedules.create` / `createTempWorker` / `quickAssign` (manager)
+- `schedules.update` / `delete` (manager)
+- `schedules.copyPreviousWeek` (manager) — 전주 스케줄 복사
+- `schedules.confirmRange` / `confirmDay` (manager) — 스케줄 확정
+- `schedules.completeRange` / `completeDay` / `completeOne` (manager) — 근무 완료 처리
+- `schedules.getDaySchedules` (manager) — 특정 일 스케줄
+- `schedules.getUpcoming7Days` (protected) — 향후 7일 스케줄
+- `schedules.listPast` (manager) — 과거 스케줄
 
-### 완료 조건
-- 모든 todo 항목의 상태가 정리되었다.
-- 누락 항목이 없거나, 남은 항목이 있으면 명시되었다.
-- 미완료 항목은 이유와 후속 조치가 적혀 있다.
+### leaveRequests (휴무 신청)
+- `leaveRequests.listMine` (protected) — 내 휴무 신청 목록
+- `leaveRequests.list` (manager) — 전체 목록 (상태 필터)
+- `leaveRequests.create` (protected) — 휴무 신청 (최소 5일 전)
+- `leaveRequests.review` (manager) — 승인/거절
+- `leaveRequests.cancel` (protected) — 신청 취소
+- `leaveRequests.pendingCount` (manager) — 대기 건수
 
----
+### dailyOps (일일 운영)
+- `dailyOps.getByDate` (protected) — 일일 운영 현황 (오픈/마감 체크 상태)
+- `dailyOps.checkOpen` / `checkClose` (manager) — 오픈/마감 체크
+- `dailyOps.getYesterdaySummary` / `getWeekdayAvgSales` (protected) — 전일 요약, 요일 평균
+- `dailyOps.getTodayStaff` (protected) — 오늘 근무자
+- `dailyOps.getMidSales` / `saveMidSales` / `deleteMidSales` — 중간 매출
+- `dailyOps.getOrderImages` / `saveOrderImage` / `deleteOrderImage` — 발주서 이미지(OCR)
+- `dailyOps.getDailySales` / `saveDailySales` — 일매출 등록
+- `dailyOps.getOtherItemTemplates` (protected) — 기타 항목 템플릿
+- `dailyOps.getMonthlyCalendar` (protected) — 월간 운영 캘린더
 
-## 8. 작업 말미 자체 검증 의무
+### storeChecklists (체크리스트)
+- `storeChecklists.listTemplates` / `listAllTemplates` — 템플릿 조회
+- `storeChecklists.createTemplate` / `updateTemplate` / `deleteTemplate` (manager)
+- `storeChecklists.getLog` / `saveLog` / `listLogs` (protected)
 
-- 작업이 끝나면 반드시 변경한 코드를 자체 검증한다.
-- 자체 검증에는 아래가 포함되어야 한다.
-  - 코드 흐름 검토
-  - 예외 처리 누락 확인
-  - 타입/상태/권한 문제 확인
-  - 테스트 실행 또는 수동 테스트
-  - UI 변경 시 시각적 일관성 확인
-  - 기존 기능 회귀 여부 확인
-- 검증하지 않은 코드는 완료로 간주하지 않는다.
+### storeClosures (휴무 관리)
+- `storeClosures.listByMonth` / `create` / `delete` — 휴무일
+- `storeClosures.getWeeklyClosures` / `setWeeklyClosures` — 정기 휴무
 
-### 완료 조건
-- 변경 코드에 대한 검증 결과가 기록되었다.
-- 기대 결과와 실제 결과를 비교했다.
-- 회귀 가능성이 점검되었다.
+### electronicContracts (전자계약)
+- `electronicContracts.listRestaurantContracts` (protected) — 매장 계약 조건 목록
+- `electronicContracts.createRestaurantContract` / `updateRestaurantContract` (manager)
+- `electronicContracts.listEmploymentContracts` (protected) — 근로계약서 목록
+- `electronicContracts.getEmploymentContract` (protected) — 계약서 상세
+- `electronicContracts.getByToken` (public) — 토큰으로 계약서 조회 (서명 페이지용)
+- `electronicContracts.createEmploymentContract` (manager) — 계약서 생성 (affiliatedCompany 포함)
+- `electronicContracts.sendContract` (manager) — 계약서 발송
+- `electronicContracts.signContract` (public) — 계약서 서명
 
----
+### notifications (알림)
+- `notifications.listMine` / `unreadCount` / `markRead` / `markAllRead` / `create` (protected)
 
-## 9. 작업 결과 보고 형식
+### 기타
+- `items.list` / `create` / `searchSimilar` / `update` — 품목 마스터
+- `counterpartyItems.*` — 거래처별 품목 CRUD
+- `pricing.*` — 가격 이력 조회
+- `monthlyClosings.get` / `listByYear` / `close` — 월간 마감
+- `purchases.*` — 매입 v1 (레거시, purchasesV2 사용 권장)
+- `scheduleChangeRequests.*` — 스케줄 변경 요청 (list/listMine/create/review)
 
-모든 작업 결과는 아래 형식으로 정리한다.
+## REST API (tRPC 외)
 
-1. 작업 목적
-2. 탐색 결과
-3. 작업 계획
-4. 수정 내용
-5. 테스트 및 검증 결과
-6. 스크린샷 비교 결과
-7. 남은 리스크
-8. todo 최종 점검 결과
+| 엔드포인트 | 메서드 | 설명 |
+|-----------|--------|------|
+| `/api/upload` | POST | 이미지/파일 업로드 (multer, FormData) → `{ url }` 반환 |
+| `/api/ocr/receipt` | POST | 영수증/발주서 OCR → JSON 파싱 (품목명, 수량, 단가 등) |
+| `/api/ocr/extract-health-cert` | POST | 보건증 OCR → `{ name, issueDate, expiryDate }` |
+| `/uploads/*` | GET | 업로드 파일 정적 서빙 |
+| `/api/init` | GET | DB 초기화 + 시드 데이터 (개발/리셋 전용) |
 
----
+## 자동 마이그레이션
 
-## 10. 금지사항
+`server/index.ts` 시작 시 자동 실행:
+- `CREATE TABLE IF NOT EXISTS leave_requests ...`
+- `ALTER TABLE users ADD COLUMN IF NOT EXISTS healthCertUrl/healthCertExpiry`
+- `ALTER TABLE restaurant_users ADD COLUMN IF NOT EXISTS affiliatedCompany`
+- `ALTER TABLE employment_electronic_contracts ADD COLUMN IF NOT EXISTS affiliatedCompany`
 
-- 탐색 없이 바로 구현 금지
-- 계획 없이 바로 수정 금지
-- todo.md 없이 작업 시작 금지
-- 승인 전 구현 금지
-- 검증 없는 완료 선언 금지
-- 용어 혼용 상태로 설계 진행 금지
-- 영향 범위 파악 없이 구조 변경 금지
+새 컬럼/테이블 추가 시 이 패턴으로 마이그레이션 추가:
+```typescript
+await conn.query(`
+  ALTER TABLE 테이블명
+    ADD COLUMN IF NOT EXISTS 컬럼명 타입 DEFAULT NULL
+`).catch(() => {}); // 이미 존재하면 무시
+```
+
+## 네비게이션 구조 (AppLayout.tsx)
+
+모바일 하단 탭 (역할별):
+- **admin/master**: 대시보드(1), 사용자관리(2), 스케줄(3), 수익분석(4) + 더보기
+- **manager**: 대시보드(1), 일일운영(2), 스케줄(3), 분석캘린더(4) + 더보기
+- **employee**: 대시보드(1), 일일운영(2), 스케줄(3) + 더보기
+
+데스크탑 사이드바 그룹:
+1. 일일 운영: 대시보드, 일일운영, 운영캘린더
+2. 인사 관리: 스케줄, 직원관리
+3. 재무 분석: 분석캘린더/수익분석, 매출, 고정비, 매입관리
+4. 시스템: 사용자관리, 매장관리, 알림
+
+## 개발 컨벤션
+
+### 파일 I/O
+- Desktop Commander MCP의 `node:local` 프로세스 또는 `write_file`/`edit_block` 사용
+- `read_file`은 메타데이터만 반환 → `type` 명령 또는 `start_process`로 내용 읽기
+- Windows 경로: `C:/Users/madmo/Documents/Claude/Projects/restaurant-manager/`
+
+### Git 커밋
+- CMD에서 한글 커밋 메시지는 인코딩 문제 발생 → `.commitmsg` 파일에 쓴 후 `git commit --file=.commitmsg` 사용
+- `main` 브랜치 직접 push → Railway 자동 배포
+
+### 새 기능 추가 패턴
+1. **스키마**: `drizzle/schema.ts`에 테이블/컬럼 추가
+2. **마이그레이션**: `server/index.ts` 자동 마이그레이션 섹션에 ALTER TABLE 추가
+3. **라우터**: `server/routers/`에 tRPC 라우터 생성 → `server/routers/index.ts`에 등록
+4. **페이지**: `client/src/pages/`에 컴포넌트 생성 → `App.tsx` 라우트 + `AppLayout.tsx` 네비 추가
+
+### 빌드 & 배포
+```bash
+# 로컬 빌드 확인
+npx vite build          # 프론트엔드 빌드 확인
+npx tsc --noEmit        # 타입 체크 (기존 에러 일부 있음, 신규 에러만 확인)
+
+# 배포
+git add -A && git commit --file=.commitmsg && git push origin main
+# Railway가 자동 빌드/배포
+```
+
+### 테스트 계정 (시드 데이터)
+- admin / 1111 (관리자)
+- manager1 / 1111 (점장 - 테스트 천호점)
+- manager2 / 1111 (점장 - 테스트 강남점)
+- staff1, staff2 / 1111 (직원)
+
+## 미완료 / 진행 예정 작업
+
+### 직원관리 후속
+- [ ] 보건증 만료 도래 시 자동 알림 (notifications 테이블 연동, cron/스케줄러)
+- [ ] 소속회사별 인건비 정산 조회 화면
+
+### 체크리스트 개편 (요청됨, 미착수)
+- [ ] "매장관리 > 체크리스트관리" → "내 매장 업무관리"로 명칭 변경, 네비게이션바 이동
+- [ ] 체크리스트 속성에 반복(주 몇회/언제) vs 특정 날짜(강조) 구분 추가
+- [ ] 오픈/발주/마감 분리 제거 → 속성/태그로 통합
+
+### 네비 통합 (요청됨, 미착수)
+- [ ] 매출 + 분석캘린더 → "매출캘린더"로 통합
