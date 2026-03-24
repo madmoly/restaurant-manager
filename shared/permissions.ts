@@ -82,6 +82,12 @@ export function isOwnerLevel(effectiveRole: string, storeRole?: string | null): 
   return storeRole === "owner" || storeRole === "store_manager"; // 레거시 호환
 }
 
+/** master 전용 권한 체크 */
+export function isMasterLevel(role: EffectiveRole): boolean {
+  return role === "master";
+}
+
+
 /** 급여/인건비 접근 가능 (owner만, 또는 admin 이상) */
 export function canAccessPayroll(effectiveRole: string, storeRole?: string | null): boolean {
   return isOwnerLevel(effectiveRole, storeRole);
