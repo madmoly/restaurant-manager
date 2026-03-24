@@ -1,0 +1,88 @@
+import { z } from "zod";
+import { desc, eq, and, gte, lte, sql } from "drizzle-orm";
+import { router, publicProcedure, adminProcedure } from "../trpc";
+import { db } from "../db";
+import { errorLogs } from "../../drizzle/schema";
+
+export const errorLogsRouter = router({
+  /** 에러 기록 — 비로그인도 가능 (앱 크래시 시) */
+  report: publicProcedure
+    .input(z.object({
+      errorType: z.enum(["client", "api", "render", "network"]).default("client"),
+      message: z.string().max(2000),
+      stack: z.string().max(5000).optional(),
+      url: z.string().max(500).optional(),
+      userAgent: z.string().max(500).optional(),
+      metadata: z.record(z.any()).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await db.insert(errorLogs).values({
+        userId: ctx.user?.userId ?? null,
+        errorType: input.errorType,
+        message: input.message,
+        stack: input.stack,
+        url: input.url,
+        userAgent: input.userAgent,
+        metadata: input.metadata,
+      });
+      return { ok: true };
+    }),
+
+  /** 에러 목록 조회 — admin 전용 */
+  list: adminProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+      errorType: z.enum(["client", "api", "render", "network"]).optional(),
+      from: z.string().optional(),
+      to: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const conditions = [];
+      if (input.errorType) conditions.push(eq(errorLogs.errorType, input.errorType));
+      if (input.from) conditions.push(gte(errorLogs.createdAt, new Date(input.from)));
+      if (input.to) conditions.push(lte(errorLogs.createdAt, new Date(input.to)));
+
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [rows, countResult] = await Promise.all([
+        db.select().from(errorLogs)
+          .where(where)
+          .orderBy(desc(errorLogs.createdAt))
+          .limit(input.limit)
+          .offset(input.offset),
+        db.select({ count: sql<number>`COUNT(*)` }).from(errorLogs).where(where),
+      ]);
+
+      return { rows, total: countResult[0]?.count ?? 0 };
+    }),
+
+  /** 최근 에러 요약 — admin 대시보드용 */
+  recentSummary: adminProcedure.query(async () => {
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [day, week] = await Promise.all([
+      db.select({ count: sql<number>`COUNT(*)` }).from(errorLogs)
+        .where(gte(errorLogs.createdAt, oneDayAgo)),
+      db.select({ count: sql<number>`COUNT(*)` }).from(errorLogs)
+        .where(gte(errorLogs.createdAt, oneWeekAgo)),
+    ]);
+
+    // 타입별 분포 (최근 7일)
+    const byType = await db
+      .select({
+        errorType: errorLogs.errorType,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(errorLogs)
+      .where(gte(errorLogs.createdAt, oneWeekAgo))
+      .groupBy(errorLogs.errorType);
+
+    return {
+      last24h: day[0]?.count ?? 0,
+      last7d: week[0]?.count ?? 0,
+      byType,
+    };
+  }),
+});

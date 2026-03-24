@@ -23,6 +23,7 @@ import { monthlyClosingsRouter } from "./monthlyClosings";
 import { notificationsRouter } from "./notifications";
 import { electronicContractsRouter } from "./electronicContracts";
 import { leaveRequestsRouter } from "./leaveRequests";
+import { errorLogsRouter } from "./errorLogs";
 
 export const appRouter = router({
   auth: authRouter,
@@ -49,6 +50,7 @@ export const appRouter = router({
   notifications: notificationsRouter,
   electronicContracts: electronicContractsRouter,
   leaveRequests: leaveRequestsRouter,
+  errorLogs: errorLogsRouter,
 });
 
 export type AppRouter = typeof appRouter;

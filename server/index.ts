@@ -11,11 +11,25 @@ import { ocrRouter } from "./ocr";
 const app = express();
 app.use(express.json());
 
-// ─── 자동 마이그레이션: 신규 테이블 생성 ──────────────────────────────────────
+// ─── 자동 마이그레이션: 신규 테이블/컬럼 ──────────────────────────────────────
 (async () => {
   try {
     const mysql2 = await import("mysql2/promise");
     const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
+
+    // 헬퍼: 컬럼 존재 여부 확인 후 추가
+    const addColumnIfNotExists = async (table: string, column: string, definition: string) => {
+      const [rows] = await conn.query(
+        `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+        [table, column]
+      ) as any[];
+      if (rows[0].cnt === 0) {
+        await conn.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+        console.log(`[migrate] added ${table}.${column}`);
+      }
+    };
+
+    // leave_requests 테이블
     await conn.query(`
       CREATE TABLE IF NOT EXISTS leave_requests (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -34,31 +48,97 @@ app.use(express.json());
         INDEX idx_leave_date (leaveDate, restaurantId)
       )
     `);
-    // users 테이블에 보건증 컬럼 추가
-    await conn.query(`
-      ALTER TABLE users
-        ADD COLUMN IF NOT EXISTS healthCertUrl VARCHAR(500) DEFAULT NULL,
-        ADD COLUMN IF NOT EXISTS healthCertExpiry DATE DEFAULT NULL
-    `).catch(() => {}); // 이미 존재하면 무시
 
-    // restaurant_users에 소속회사 컬럼 추가
+    // error_logs 테이블 (에러 자동 수집)
     await conn.query(`
-      ALTER TABLE restaurant_users
-        ADD COLUMN IF NOT EXISTS affiliatedCompany VARCHAR(100) DEFAULT NULL
-    `).catch(() => {}); // 이미 존재하면 무시
+      CREATE TABLE IF NOT EXISTS error_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        userId INT,
+        restaurantId INT,
+        errorType VARCHAR(50) NOT NULL DEFAULT 'client',
+        message TEXT NOT NULL,
+        stack TEXT,
+        url VARCHAR(500),
+        userAgent VARCHAR(500),
+        metadata JSON,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_error_created (createdAt),
+        INDEX idx_error_type (errorType)
+      )
+    `);
 
-    // employment_electronic_contracts에 소속회사 컬럼 추가
-    await conn.query(`
-      ALTER TABLE employment_electronic_contracts
-        ADD COLUMN IF NOT EXISTS affiliatedCompany VARCHAR(100) DEFAULT NULL
-    `).catch(() => {}); // 이미 존재하면 무시
+    // users.role ENUM 확장: 'user' → 'master','admin','manager','employee' 모두 포함
+    try {
+      await conn.query(`ALTER TABLE users MODIFY COLUMN role ENUM('master','admin','manager','employee','user') NOT NULL DEFAULT 'employee'`);
+      console.log("[migrate] users.role ENUM updated");
+    } catch (e: any) {
+      if (!e.message.includes("Duplicate")) console.log("[migrate] role ENUM:", e.message);
+    }
+
+    // users 테이블 컬럼 추가
+    await addColumnIfNotExists("users", "healthCertUrl", "VARCHAR(500) DEFAULT NULL");
+    await addColumnIfNotExists("users", "healthCertExpiry", "DATE DEFAULT NULL");
+
+    // restaurant_users 소속회사
+    await addColumnIfNotExists("restaurant_users", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");
+
+    // employment_electronic_contracts 소속회사
+    await addColumnIfNotExists("employment_electronic_contracts", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");
 
     await conn.end();
-    console.log("[migrate] leave_requests + healthCert + affiliatedCompany ensured");
+    console.log("[migrate] all migrations complete");
   } catch (e: any) {
     console.error("[migrate] error:", e.message);
   }
 })();
+
+// ─── 에러 수집 REST 엔드포인트 (tRPC 의존 없음) ──────────────────────────────
+app.post("/api/error-report", async (req, res) => {
+  try {
+    const { errors } = req.body as { errors: Array<{
+      errorType?: string; message: string; stack?: string; url?: string; metadata?: any;
+    }> };
+    if (!Array.isArray(errors) || errors.length === 0) return res.json({ ok: true });
+
+    const mysql2 = await import("mysql2/promise");
+    const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
+
+    // 쿠키에서 userId 추출 시도
+    let userId: number | null = null;
+    try {
+      const { parse: parseCookie } = await import("cookie");
+      const { verifyToken } = await import("./auth");
+      const cookies = parseCookie(req.headers.cookie || "");
+      const token = cookies["session"];
+      if (token) {
+        const payload = await verifyToken(token);
+        userId = payload?.userId ?? null;
+      }
+    } catch {}
+
+    const userAgent = req.headers["user-agent"]?.slice(0, 500);
+
+    for (const err of errors.slice(0, 20)) {
+      await conn.query(
+        `INSERT INTO error_logs (userId, errorType, message, stack, url, userAgent, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          (err.errorType || "client").slice(0, 50),
+          (err.message || "unknown").slice(0, 2000),
+          err.stack?.slice(0, 5000) || null,
+          err.url?.slice(0, 500) || null,
+          userAgent || null,
+          err.metadata ? JSON.stringify(err.metadata) : null,
+        ]
+      );
+    }
+    await conn.end();
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error("[error-report]", e.message);
+    res.json({ ok: false });
+  }
+});
 
 // ─── 파일 업로드 라우터 + 정적 서빙 ──────────────────────────────────────────
 app.use("/api/upload", uploadRouter);

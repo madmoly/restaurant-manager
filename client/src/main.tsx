@@ -7,11 +7,23 @@ import { AuthProvider } from "./hooks/useAuth";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { Toaster } from "@/components/ui/sonner";
 import App from "./App";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { initErrorReporter, reportApiError } from "@/lib/errorReporter";
 import "./index.css";
+
+// 글로벌 에러 수집 초기화
+initErrorReporter();
 
 function Root() {
   const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
+    defaultOptions: {
+      queries: { retry: 1, refetchOnWindowFocus: false },
+      mutations: {
+        onError: (error: any) => {
+          reportApiError(error?.message || "mutation error", { path: error?.data?.path });
+        },
+      },
+    },
   }));
 
   const [trpcClient] = useState(() =>
@@ -33,7 +45,9 @@ function Root() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <ThemeProvider defaultTheme="dark" switchable>
-            <App />
+            <ErrorBoundary>
+              <App />
+            </ErrorBoundary>
             <Toaster position="top-right" richColors />
           </ThemeProvider>
         </AuthProvider>

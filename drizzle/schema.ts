@@ -677,3 +677,18 @@ export const dailyClosingSpecialTypes = mysqlTable("daily_closing_special_types"
 });
 
 export type DailyClosingSpecialType = typeof dailyClosingSpecialTypes.$inferSelect;
+
+// ─── 에러 로그 ────────────────────────────────────────────────────────────────
+export const errorLogs = mysqlTable("error_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"),
+  restaurantId: int("restaurantId"),
+  errorType: varchar("errorType", { length: 50 }).notNull().default("client"),
+  message: text("message").notNull(),
+  stack: text("stack"),
+  url: varchar("url", { length: 500 }),
+  userAgent: varchar("userAgent", { length: 500 }),
+  metadata: json("metadata"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ErrorLog = typeof errorLogs.$inferSelect;

@@ -359,6 +359,28 @@ git add -A && git commit --file=.commitmsg && git push origin main
 - manager2 / 1111 (점장 - 테스트 강남점)
 - staff1, staff2 / 1111 (직원)
 
+## 에러 자동 수집 시스템
+
+### 수집 경로
+1. **window.onerror** — JS 런타임 에러 자동 캡처
+2. **window.onunhandledrejection** — Promise 미처리 거부 자동 캡처
+3. **React ErrorBoundary** — 렌더링 에러 캡처 + 사용자에게 복구 UI 표시
+4. **tRPC mutation onError** — API 호출 실패 자동 캡처
+5. **수동 보고** — `reportApiError(message, metadata)` 호출
+
+### 아키텍처
+- 클라이언트: `client/src/lib/errorReporter.ts` (큐 + 2초 배치 + 중복 방지)
+- 전송: `POST /api/error-report` (REST, tRPC 의존 없음 → tRPC 자체 장애 시에도 동작)
+- 저장: `error_logs` 테이블 (errorType, message, stack, url, userAgent, metadata)
+- 조회: `errorLogs.list` (admin), `errorLogs.recentSummary` (admin 대시보드)
+- UI: AdminDashboard에 24h/7d 에러 카운트 + 타입별 분포 표시
+
+### errorType 분류
+- `client`: JS 런타임 에러, Promise 거부
+- `render`: React 컴포넌트 렌더링 에러
+- `api`: tRPC/API 호출 실패
+- `network`: 네트워크 오류
+
 ## 미완료 / 진행 예정 작업
 
 ### 직원관리 후속
