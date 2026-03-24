@@ -58,7 +58,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 2000,
+      max_tokens: 4096,
       messages: [
         {
           role: "user",
@@ -95,7 +95,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 - 비고/메모가 있으면 note에 넣으세요
 - 글씨가 불명확한 부분은 최선의 추정으로 입력하세요
 
-반드시 아래 JSON 형식만 반환하세요 (다른 텍스트 없이):
+반드시 아래 JSON 형식만 반환하세요. 마크다운 코드블록(\`\`\`)으로 감싸지 마세요. 순수 JSON만 출력:
 {
   "counterpartyName": "거래처명 또는 null",
   "items": [
@@ -125,15 +125,44 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
     let parsed: any;
     try {
-      // JSON 블록이 ```json ... ``` 으로 감싸져 있을 수 있음
       let jsonStr = textContent.text.trim();
-      const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch) {
-        jsonStr = jsonMatch[1].trim();
+
+      // 마크다운 코드펜스 제거 (닫는 ``` 없는 경우도 처리)
+      const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (fenceMatch) {
+        jsonStr = fenceMatch[1].trim();
+      } else if (jsonStr.startsWith("```")) {
+        // 닫는 ```가 없는 경우 (응답 잘림) — 접두사만 제거
+        jsonStr = jsonStr.replace(/^```(?:json)?\s*/, "").trim();
       }
-      parsed = JSON.parse(jsonStr);
-    } catch {
-      // JSON 파싱 실패 시 원본 텍스트 반환
+
+      // JSON이 잘린 경우 복구 시도: 마지막 완전한 item까지만 파싱
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch {
+        // 잘린 JSON 복구: 마지막 완전한 }를 찾아서 배열/객체 닫기
+        const lastCompleteItem = jsonStr.lastIndexOf("}");
+        if (lastCompleteItem > 0) {
+          let truncated = jsonStr.substring(0, lastCompleteItem + 1);
+          // items 배열이 열려있으면 닫기
+          const openBrackets = (truncated.match(/\[/g) || []).length;
+          const closeBrackets = (truncated.match(/\]/g) || []).length;
+          for (let i = 0; i < openBrackets - closeBrackets; i++) {
+            truncated += "]";
+          }
+          // 최상위 객체가 열려있으면 닫기
+          const openBraces = (truncated.match(/\{/g) || []).length;
+          const closeBraces = (truncated.match(/\}/g) || []).length;
+          for (let i = 0; i < openBraces - closeBraces; i++) {
+            truncated += "}";
+          }
+          parsed = JSON.parse(truncated);
+        } else {
+          throw new Error("복구 불가");
+        }
+      }
+    } catch (parseErr: any) {
+      // JSON 파싱 완전 실패 시 원본 텍스트 반환
       res.status(200).json({
         counterpartyName: null,
         items: [],
