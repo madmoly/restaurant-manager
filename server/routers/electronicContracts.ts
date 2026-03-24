@@ -162,6 +162,7 @@ export const electronicContractsRouter = router({
         workPlace: z.string().optional(),
         jobDescription: z.string().optional(),
         specialTerms: z.string().optional(),
+        affiliatedCompany: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -197,6 +198,7 @@ export const electronicContractsRouter = router({
           workPlace: input.workPlace,
           jobDescription: input.jobDescription,
           specialTerms: input.specialTerms,
+          affiliatedCompany: input.affiliatedCompany,
           status: "draft",
           createdBy: ctx.user.userId,
         })

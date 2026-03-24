@@ -196,3 +196,93 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * POST /api/ocr/extract-health-cert
+ * Body: { imageUrl: string }
+ * 보건증 이미지에서 갱신 기간(유효기간) 추출
+ */
+ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      res.status(500).json({ error: "ANTHROPIC_API_KEY 미설정" });
+      return;
+    }
+
+    const { imageUrl } = req.body;
+    if (!imageUrl || typeof imageUrl !== "string") {
+      res.status(400).json({ error: "imageUrl이 필요합니다" });
+      return;
+    }
+
+    const relativePath = imageUrl.replace(/^\/uploads\//, "");
+    const filePath = path.join(UPLOAD_ROOT, relativePath);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: "이미지 파일을 찾을 수 없습니다" });
+      return;
+    }
+
+    const imageBuffer = fs.readFileSync(filePath);
+    const base64Image = imageBuffer.toString("base64");
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+      ".png": "image/png", ".webp": "image/webp",
+    };
+    const mediaType = mimeMap[ext] || "image/jpeg";
+
+    const anthropic = new Anthropic({ apiKey });
+    const message = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1024,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: { type: "base64", media_type: mediaType as any, data: base64Image },
+          },
+          {
+            type: "text",
+            text: `이 이미지는 보건증(건강진단결과서)입니다.
+다음 정보를 추출해주세요:
+- 성명
+- 유효기간 종료일 (보건증은 보통 발급일로부터 1년)
+
+반드시 아래 JSON 형식만 반환하세요. 마크다운 코드블록으로 감싸지 마세요:
+{
+  "name": "성명",
+  "issueDate": "발급일 YYYY-MM-DD 또는 null",
+  "expiryDate": "유효기간 종료일 YYYY-MM-DD"
+}
+
+유효기간 종료일이 명시되어 있지 않으면 발급일 + 1년으로 계산하세요.
+발급일도 없으면 expiryDate를 null로 반환하세요.`,
+          },
+        ],
+      }],
+    });
+
+    const textContent = message.content.find((c) => c.type === "text");
+    if (!textContent || textContent.type !== "text") {
+      res.status(500).json({ error: "AI 응답 없음" });
+      return;
+    }
+
+    let jsonStr = textContent.text.trim();
+    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) jsonStr = fenceMatch[1].trim();
+    else if (jsonStr.startsWith("```")) jsonStr = jsonStr.replace(/^```(?:json)?\s*/, "").trim();
+
+    const parsed = JSON.parse(jsonStr);
+    res.json({
+      name: parsed.name || null,
+      issueDate: parsed.issueDate || null,
+      expiryDate: parsed.expiryDate || null,
+    });
+  } catch (err: any) {
+    console.error("[OCR] extract-health-cert error:", err);
+    res.status(500).json({ error: `보건증 분석 오류: ${err.message}` });
+  }
+});

@@ -34,10 +34,29 @@ app.use(express.json());
         INDEX idx_leave_date (leaveDate, restaurantId)
       )
     `);
+    // users 테이블에 보건증 컬럼 추가
+    await conn.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS healthCertUrl VARCHAR(500) DEFAULT NULL,
+        ADD COLUMN IF NOT EXISTS healthCertExpiry DATE DEFAULT NULL
+    `).catch(() => {}); // 이미 존재하면 무시
+
+    // restaurant_users에 소속회사 컬럼 추가
+    await conn.query(`
+      ALTER TABLE restaurant_users
+        ADD COLUMN IF NOT EXISTS affiliatedCompany VARCHAR(100) DEFAULT NULL
+    `).catch(() => {}); // 이미 존재하면 무시
+
+    // employment_electronic_contracts에 소속회사 컬럼 추가
+    await conn.query(`
+      ALTER TABLE employment_electronic_contracts
+        ADD COLUMN IF NOT EXISTS affiliatedCompany VARCHAR(100) DEFAULT NULL
+    `).catch(() => {}); // 이미 존재하면 무시
+
     await conn.end();
-    console.log("[migrate] leave_requests table ensured");
+    console.log("[migrate] leave_requests + healthCert + affiliatedCompany ensured");
   } catch (e: any) {
-    console.error("[migrate] leave_requests error:", e.message);
+    console.error("[migrate] error:", e.message);
   }
 })();
 

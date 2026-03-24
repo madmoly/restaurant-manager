@@ -83,6 +83,9 @@ export const restaurantsRouter = router({
           name: users.name,
           phone: users.phone,
           storeRole: restaurantUsers.role,
+          healthCertUrl: users.healthCertUrl,
+          healthCertExpiry: users.healthCertExpiry,
+          affiliatedCompany: restaurantUsers.affiliatedCompany,
           createdAt: restaurantUsers.createdAt,
         })
         .from(restaurantUsers)
@@ -104,8 +107,26 @@ export const restaurantsRouter = router({
       return { ok: true };
     }),
 
-  /** 직원 역할 변경 (승격/강등) */
-  updateStaffRole: protectedProcedure
+  /** 직원 소속회사 변경 */
+  updateStaffCompany: protectedProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      userId: z.number(),
+      affiliatedCompany: z.string().nullable(),
+    }))
+    .mutation(async ({ input }) => {
+      await db
+        .update(restaurantUsers)
+        .set({ affiliatedCompany: input.affiliatedCompany })
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId)
+        ));
+      return { ok: true };
+    }),
+
+  /** 직원 역할 변경 (승격/강등) — admin/master만 가능 */
+  updateStaffRole: adminProcedure
     .input(z.object({
       restaurantId: z.number(),
       userId: z.number(),
