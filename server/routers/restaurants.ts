@@ -98,7 +98,7 @@ export const restaurantsRouter = router({
     .input(z.object({
       restaurantId: z.number(),
       userId: z.number(),
-      role: z.enum(["store_manager", "manager", "employee"]).default("employee"),
+      role: z.enum(["owner", "supervisor", "staff", "store_manager", "manager", "employee"]).default("staff"),
     }))
     .mutation(async ({ input }) => {
       await db.insert(restaurantUsers).values(input).onDuplicateKeyUpdate({
@@ -130,7 +130,7 @@ export const restaurantsRouter = router({
     .input(z.object({
       restaurantId: z.number(),
       userId: z.number(),
-      role: z.enum(["store_manager", "manager", "employee"]),
+      role: z.enum(["owner", "supervisor", "staff", "store_manager", "manager", "employee"]),
     }))
     .mutation(async ({ input }) => {
       await db

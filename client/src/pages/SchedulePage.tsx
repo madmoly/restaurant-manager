@@ -751,9 +751,9 @@ export default function SchedulePage() {
                     {(staffList as StaffItem[]).map((staff) => {
                       const isAssigned = assignedUserIds.has(staff.userId);
                       const roleLabel =
-                        staff.storeRole === "store_manager" ? "점장"
-                          : staff.storeRole === "manager" ? "매니저"
-                          : "직원";
+                        staff.storeRole === "owner" || staff.storeRole === "store_manager" ? "점장"
+                          : staff.storeRole === "supervisor" || staff.storeRole === "manager" ? "부점장"
+                          : "스태프";
                       return (
                         <button
                           key={staff.userId}

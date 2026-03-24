@@ -138,7 +138,7 @@ function StaffSection({ restaurantId }: { restaurantId: number }) {
   const { data: staff, isLoading } = trpc.restaurants.getStaff.useQuery({ restaurantId });
   const { data: allUsers } = trpc.users.list.useQuery(undefined, { retry: false });
   const [addUserId, setAddUserId] = useState("");
-  const [addRole, setAddRole] = useState<"manager" | "store_manager" | "employee">("employee");
+  const [addRole, setAddRole] = useState<"owner" | "supervisor" | "staff">("staff");
 
   const addStaff = trpc.restaurants.addStaff.useMutation({
     onSuccess() { toast.success("직원이 배정되었습니다"); utils.restaurants.getStaff.invalidate({ restaurantId }); setAddUserId(""); },
@@ -169,9 +169,9 @@ function StaffSection({ restaurantId }: { restaurantId: number }) {
               </div>
               <div className="flex items-center gap-2">
                 <select value={s.storeRole} onChange={(e) => updateRole.mutate({ restaurantId, userId: s.userId, role: e.target.value as any })} className="text-xs border border-input rounded px-2 py-1 bg-background text-foreground">
-                  <option value="store_manager">점장</option>
-                  <option value="manager">매니저</option>
-                  <option value="employee">직원</option>
+                  <option value="owner">점장</option>
+                  <option value="supervisor">부점장</option>
+                  <option value="staff">스태프</option>
                 </select>
                 <button onClick={() => removeStaff.mutate({ restaurantId, userId: s.userId })} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
               </div>
@@ -188,9 +188,9 @@ function StaffSection({ restaurantId }: { restaurantId: number }) {
             ))}
           </select>
           <select value={addRole} onChange={(e) => setAddRole(e.target.value as any)} className="text-xs border border-input rounded px-2 py-1.5 bg-background text-foreground">
-            <option value="store_manager">점장</option>
-            <option value="manager">매니저</option>
-            <option value="employee">직원</option>
+            <option value="owner">점장</option>
+            <option value="supervisor">부점장</option>
+            <option value="staff">스태프</option>
           </select>
           <button onClick={() => addUserId && addStaff.mutate({ restaurantId, userId: Number(addUserId), role: addRole })} disabled={!addUserId} className="flex items-center gap-1 px-2.5 py-1.5 bg-muted text-foreground text-xs rounded hover:bg-accent disabled:opacity-50">
             <UserPlus size={12} /> 배정

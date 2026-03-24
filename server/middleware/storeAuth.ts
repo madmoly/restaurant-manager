@@ -53,8 +53,8 @@ export async function requireStoreManager(
 
   const { storeRole } = await verifyStoreAccess(userId, systemRole, restaurantId, true);
 
-  if (storeRole !== "store_manager" && storeRole !== "manager") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "매니저 이상의 권한이 필요합니다" });
+  if (storeRole !== "owner" && storeRole !== "supervisor" && storeRole !== "store_manager" && storeRole !== "manager") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "점장/부점장 이상의 권한이 필요합니다" });
   }
 
   return { storeRole };

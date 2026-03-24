@@ -20,17 +20,17 @@ await db.insert(schema.users).values({ username: "master", passwordHash: pw, nam
   .onDuplicateKeyUpdate({ set: { passwordHash: pw, role: "master" } });
 await db.insert(schema.users).values({ username: "admin", passwordHash: pw, name: "관리자", role: "admin", phone: "01012345678" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw, role: "admin" } });
-await db.insert(schema.users).values({ username: "manager1", passwordHash: pw, name: "박점장", role: "employee", phone: "01011112222" })
+await db.insert(schema.users).values({ username: "manager1", passwordHash: pw, name: "박점장", role: "staff", phone: "01011112222" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw } });
-await db.insert(schema.users).values({ username: "manager2", passwordHash: pw, name: "이점장", role: "employee", phone: "01033334444" })
+await db.insert(schema.users).values({ username: "manager2", passwordHash: pw, name: "이점장", role: "staff", phone: "01033334444" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw } });
-await db.insert(schema.users).values({ username: "staff1", passwordHash: pw, name: "김직원", role: "employee", phone: "01055556666" })
+await db.insert(schema.users).values({ username: "staff1", passwordHash: pw, name: "김직원", role: "staff", phone: "01055556666" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw } });
-await db.insert(schema.users).values({ username: "staff2", passwordHash: pw, name: "이직원", role: "employee", phone: "01077778888" })
+await db.insert(schema.users).values({ username: "staff2", passwordHash: pw, name: "이직원", role: "staff", phone: "01077778888" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw } });
-await db.insert(schema.users).values({ username: "staff3", passwordHash: pw, name: "최알바", role: "employee", phone: "01099990000" })
+await db.insert(schema.users).values({ username: "staff3", passwordHash: pw, name: "최알바", role: "staff", phone: "01099990000" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw } });
-await db.insert(schema.users).values({ username: "staff4", passwordHash: pw, name: "정알바", role: "employee", phone: "01011223344" })
+await db.insert(schema.users).values({ username: "staff4", passwordHash: pw, name: "정알바", role: "staff", phone: "01011223344" })
   .onDuplicateKeyUpdate({ set: { passwordHash: pw } });
 
 // user IDs: 1=master, 2=admin, 3=manager1(박점장), 4=manager2(이점장),
@@ -49,20 +49,20 @@ await db.insert(schema.restaurants).values({
 // restaurant IDs: 1=천호점, 2=강남점
 
 // 천호점 배정
-await db.insert(schema.restaurantUsers).values({ restaurantId: 1, userId: 3, role: "store_manager" })
-  .onDuplicateKeyUpdate({ set: { role: "store_manager" } });
-await db.insert(schema.restaurantUsers).values({ restaurantId: 1, userId: 5, role: "employee" })
-  .onDuplicateKeyUpdate({ set: { role: "employee" } });
-await db.insert(schema.restaurantUsers).values({ restaurantId: 1, userId: 7, role: "employee" })
-  .onDuplicateKeyUpdate({ set: { role: "employee" } });
+await db.insert(schema.restaurantUsers).values({ restaurantId: 1, userId: 3, role: "owner" })
+  .onDuplicateKeyUpdate({ set: { role: "owner" } });
+await db.insert(schema.restaurantUsers).values({ restaurantId: 1, userId: 5, role: "staff" })
+  .onDuplicateKeyUpdate({ set: { role: "staff" } });
+await db.insert(schema.restaurantUsers).values({ restaurantId: 1, userId: 7, role: "staff" })
+  .onDuplicateKeyUpdate({ set: { role: "staff" } });
 
 // 강남점 배정
-await db.insert(schema.restaurantUsers).values({ restaurantId: 2, userId: 4, role: "store_manager" })
-  .onDuplicateKeyUpdate({ set: { role: "store_manager" } });
-await db.insert(schema.restaurantUsers).values({ restaurantId: 2, userId: 6, role: "employee" })
-  .onDuplicateKeyUpdate({ set: { role: "employee" } });
-await db.insert(schema.restaurantUsers).values({ restaurantId: 2, userId: 8, role: "employee" })
-  .onDuplicateKeyUpdate({ set: { role: "employee" } });
+await db.insert(schema.restaurantUsers).values({ restaurantId: 2, userId: 4, role: "owner" })
+  .onDuplicateKeyUpdate({ set: { role: "owner" } });
+await db.insert(schema.restaurantUsers).values({ restaurantId: 2, userId: 6, role: "staff" })
+  .onDuplicateKeyUpdate({ set: { role: "staff" } });
+await db.insert(schema.restaurantUsers).values({ restaurantId: 2, userId: 8, role: "staff" })
+  .onDuplicateKeyUpdate({ set: { role: "staff" } });
 
 console.log("  ✅ Users(8), Restaurants(2), RestaurantUsers(6)");
 

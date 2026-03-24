@@ -254,7 +254,6 @@ export default function StaffPage() {
                         >
                           <option value="owner">점장</option>
                         <option value="supervisor">부점장</option>
-                          <option value="manager">매니저</option>
                           <option value="staff">스태프</option>
                         </select>
                       </div>
@@ -566,7 +565,6 @@ function AddStaffModal({ restaurantId, allUsers, existingStaff, onAdd, onClose, 
               value={role} onChange={(e) => setRole(e.target.value)}>
               <option value="owner">점장</option>
                         <option value="supervisor">부점장</option>
-              <option value="manager">매니저</option>
               <option value="staff">스태프</option>
             </select>
           </div>
