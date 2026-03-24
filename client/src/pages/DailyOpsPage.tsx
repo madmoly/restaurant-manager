@@ -1171,9 +1171,6 @@ function PurchaseTab({
         </Card>
       )}
 
-      {/* 미입고 발주 전표 (있을 경우 표시) */}
-      <PendingOrdersBanner restaurantId={restaurantId} />
-
       {/* 발주 체크리스트 (기존 유지) */}
       <ChecklistSection
         restaurantId={restaurantId}
@@ -1182,6 +1179,9 @@ function PurchaseTab({
         label="발주 확인 체크리스트"
         icon={Check}
       />
+
+      {/* 미입고 발주 전표 요약 (매입탭 최하단) */}
+      <PendingOrdersBanner restaurantId={restaurantId} />
     </div>
   );
 }
