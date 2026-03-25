@@ -10,11 +10,12 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const STORE_ROLE_LABELS: Record<string, string> = {h
+const STORE_ROLE_LABELS: Record<string, string> = {
   owner: "점장",
   supervisor: "매니져",
+  staff: "직원",
   store_manager: "점장",  // 레거시
-  manager: "매니저",      // 레거시
+  manager: "매니져",      // 레거시
   employee: "직원",       // 레거시
 };
 
