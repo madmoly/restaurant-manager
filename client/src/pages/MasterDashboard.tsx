@@ -6,7 +6,8 @@ import {
   ChevronRight, AlertCircle, CheckCircle2, UserCheck,
   Database, TrendingUp, DollarSign,
 } from "lucide-react";
-import { Card, StatCard, PageHeader, Loading } from "@/components/ui/compat";
+import { Card, StatCard, PageHeader } from "@/components/ui/compat";
+import { DashboardSkeleton } from "@/components/ui/skeletons";
 import { ROLE_LABELS } from "@shared/permissions";
 
 // ─── 포맷 헬퍼 ─────────────────────────────────────────────────────────────
@@ -32,7 +33,7 @@ export default function MasterDashboard() {
   const { data: notifications } = trpc.notifications.listMine.useQuery({ limit: 5 });
 
   const isLoading = loadingSys || loadingBiz;
-  if (isLoading) return <Loading />;
+  if (isLoading) return <DashboardSkeleton />;
 
   const u = sysStatus?.users;
   const s = sysStatus?.stores;

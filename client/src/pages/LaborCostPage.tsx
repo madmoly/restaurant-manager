@@ -6,6 +6,7 @@ import {
   ChevronDown, ChevronUp, FileText, Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
 
 function fmtWon(n: number) {
   return Math.round(n).toLocaleString();
@@ -125,7 +126,7 @@ export default function LaborCostPage() {
 
       {/* 회사별 카드 */}
       {isLoading ? (
-        <div className="text-center py-8 text-muted-foreground text-sm">로딩 중...</div>
+        <CompanyCardListSkeleton />
       ) : !data || data.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground text-sm">해당 월 스케줄 데이터가 없습니다</div>
       ) : (

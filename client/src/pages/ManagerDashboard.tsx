@@ -1,7 +1,8 @@
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { Card, EmptyState, Loading } from "@/components/ui/compat";
+import { Card, EmptyState } from "@/components/ui/compat";
+import { DashboardSkeleton } from "@/components/ui/skeletons";
 import {
   Store, TrendingUp, TrendingDown, Users, CheckCircle2, XCircle,
   Clock, ShoppingCart, Receipt, CalendarDays, Bell, ChevronRight,
@@ -51,7 +52,7 @@ export default function ManagerDashboard() {
   // ─── 알림 ────────────────────────────────────────────────────────────────
   const { data: notifications } = trpc.notifications.listMine.useQuery({ limit: 5 });
 
-  if (storesLoading) return <Loading />;
+  if (storesLoading) return <DashboardSkeleton />;
 
   if (!current) {
     return (

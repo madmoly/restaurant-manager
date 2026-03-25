@@ -2,8 +2,9 @@ import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download } from "lucide-react";
-import { Card, MonthNav, PageHeader, EmptyState, Loading } from "@/components/ui/compat";
+import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
+import { ProfitPageSkeleton } from "@/components/ui/skeletons";
 
 type CostCategory = "sales" | "purchases" | "labor" | "fixed" | null;
 
@@ -54,7 +55,7 @@ export default function ProfitPage() {
   const { data: restaurant } = trpc.restaurants.get.useQuery({ id: restaurantId }, { enabled: restaurantId > 0 });
 
   if (!restaurantId) return <EmptyState icon={<TrendingUp size={40} />} title="매장을 선택해주세요" />;
-  if (isLoading) return <Loading />;
+  if (isLoading) return <ProfitPageSkeleton />;
 
   const sales = Number(salesTotal?.total ?? 0);
   const purchases = Number(purchaseTotal?.total ?? 0);

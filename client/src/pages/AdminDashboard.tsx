@@ -6,7 +6,8 @@ import {
   AlertTriangle, CheckCircle,
   Wallet, Receipt, Bell, ChevronRight, BarChart3,
 } from "lucide-react";
-import { Card, StatCard, PageHeader, Loading } from "@/components/ui/compat";
+import { Card, StatCard, PageHeader } from "@/components/ui/compat";
+import { DashboardSkeleton } from "@/components/ui/skeletons";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -87,7 +88,7 @@ export default function AdminDashboard() {
   const recentNotifs = (notifications ?? []).slice(0, 5);
   const unreadCount = recentNotifs.filter((n: any) => !n.isRead).length;
 
-  if (isLoading) return <Loading />;
+  if (isLoading) return <DashboardSkeleton />;
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
