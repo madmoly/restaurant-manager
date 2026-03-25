@@ -461,10 +461,25 @@ export const dailyOpsRouter = router({
           ? `${input.year + 1}-01-01`
           : `${input.year}-${String(input.month + 1).padStart(2, "0")}-01`;
 
-      // 일별 운영 현황
+      // 일별 운영 현황 (마감자 이름 포함)
       const ops = await db
-        .select()
+        .select({
+          id: dailyOperations.id,
+          restaurantId: dailyOperations.restaurantId,
+          operationDate: dailyOperations.operationDate,
+          openCheckedAt: dailyOperations.openCheckedAt,
+          openCheckedBy: dailyOperations.openCheckedBy,
+          openHeadcount: dailyOperations.openHeadcount,
+          openLaborCost: dailyOperations.openLaborCost,
+          closeCheckedAt: dailyOperations.closeCheckedAt,
+          closeCheckedBy: dailyOperations.closeCheckedBy,
+          closeHeadcount: dailyOperations.closeHeadcount,
+          closeLaborCost: dailyOperations.closeLaborCost,
+          closeNote: dailyOperations.closeNote,
+          closedByName: users.name,
+        })
         .from(dailyOperations)
+        .leftJoin(users, eq(dailyOperations.closeCheckedBy, users.id))
         .where(
           and(
             eq(dailyOperations.restaurantId, input.restaurantId),
@@ -565,6 +580,7 @@ export const dailyOpsRouter = router({
           closeHeadcount: number;
           totalSales: number;
           status: "none" | "open" | "closed";
+          closedByName: string | null;
           checklist: { checked: number; total: number; types: string[] } | null;
           schedule: { total: number; completed: number; confirmed: number } | null;
         }
@@ -580,6 +596,7 @@ export const dailyOpsRouter = router({
             closeHeadcount: 0,
             totalSales: 0,
             status: "none",
+            closedByName: null,
             checklist: null,
             schedule: null,
           };
@@ -596,6 +613,7 @@ export const dailyOpsRouter = router({
         days[dateStr].openHeadcount = op.openHeadcount ?? 0;
         days[dateStr].closeHeadcount = op.closeHeadcount ?? 0;
         days[dateStr].status = op.closeCheckedAt ? "closed" : op.openCheckedAt ? "open" : "none";
+        days[dateStr].closedByName = op.closedByName ?? null;
       }
 
       for (const s of sales) {
@@ -628,9 +646,17 @@ export const dailyOpsRouter = router({
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
     .query(async ({ input }) => {
       // 1. 일일운영 상태
-      const [ops] = await db.select().from(dailyOperations)
+      // 마감자 이름 포함 조회
+      const opsRows = await db
+        .select({
+          op: dailyOperations,
+          closedByName: users.name,
+        })
+        .from(dailyOperations)
+        .leftJoin(users, eq(dailyOperations.closeCheckedBy, users.id))
         .where(and(eq(dailyOperations.restaurantId, input.restaurantId), sql`${dailyOperations.operationDate} = ${input.date}`))
         .limit(1);
+      const ops = opsRows[0] ? { ...opsRows[0].op, closedByName: opsRows[0].closedByName } : null;
 
       // 2. 매출 상세
       const [salesDetail] = await db.select().from(dailySalesDetail)

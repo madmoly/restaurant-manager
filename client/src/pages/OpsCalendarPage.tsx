@@ -83,7 +83,7 @@ function DayDetailPanel({ restaurantId, date, onClose }: {
                   {data.operation?.closeCheckedAt ? (
                     <span className="text-emerald-600 font-medium flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3" />
-                      {fmtTime(data.operation.closeCheckedAt)} · {data.operation.closeHeadcount ?? 0}명
+                      {fmtTime(data.operation.closeCheckedAt)} · {data.operation.closeHeadcount ?? 0}명{data.operation.closedByName ? ` · ${data.operation.closedByName}` : ""}
                     </span>
                   ) : <span className="text-muted-foreground/50">미완료</span>}
                 </div>
@@ -329,6 +329,11 @@ export default function OpsCalendarPage() {
                       {!isFuture && dayData && <StatusIcon className={`w-3 h-3 ${statusColor}`} />}
                     </div>
                     {holiday && <div className="text-[9px] text-red-400 truncate leading-tight">{holiday}</div>}
+                    {dayData?.closedByName && (
+                      <div className="text-[9px] text-green-600 dark:text-green-400 truncate leading-tight">
+                        {dayData.closedByName}
+                      </div>
+                    )}
                     {dayData && dayData.totalSales > 0 && (
                       <div className="text-[10px] font-medium text-foreground mt-0.5 flex items-center gap-0.5">
                         <TrendingUp className="w-2.5 h-2.5 text-emerald-500 shrink-0" />
