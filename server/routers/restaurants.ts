@@ -125,14 +125,29 @@ export const restaurantsRouter = router({
       return { ok: true };
     }),
 
-  /** 직원 역할 변경 (승격/강등) — admin/master만 가능 */
-  updateStaffRole: adminProcedure
+  /** 직원 역할 변경 (승격/강등) — master 또는 해당 매장 점장(owner)만 가능 */
+  updateStaffRole: protectedProcedure
     .input(z.object({
       restaurantId: z.number(),
       userId: z.number(),
       role: z.enum(["owner", "supervisor", "staff", "store_manager", "manager", "employee"]),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // master(개발자)는 항상 가능
+      if (ctx.user.role !== "master") {
+        // 해당 매장의 owner(점장)인지 확인
+        const [ru] = await db
+          .select({ role: restaurantUsers.role })
+          .from(restaurantUsers)
+          .where(and(
+            eq(restaurantUsers.restaurantId, input.restaurantId),
+            eq(restaurantUsers.userId, ctx.user.userId)
+          ))
+          .limit(1);
+        if (!ru || (ru.role !== "owner" && ru.role !== "store_manager")) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "점장 권한이 필요합니다" });
+        }
+      }
       await db
         .update(restaurantUsers)
         .set({ role: input.role })

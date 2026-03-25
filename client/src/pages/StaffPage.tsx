@@ -39,6 +39,7 @@ export default function StaffPage() {
   const restaurantId = current?.id ?? 0;
   const isAdmin = user?.role === "admin" || user?.role === "master";
   const isOwnerOrAdmin = isAdmin || current?.storeRole === "owner";
+  const canChangeRole = user?.role === "master" || current?.storeRole === "owner";
 
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [showContractForm, setShowContractForm] = useState(false);
@@ -247,7 +248,7 @@ export default function StaffPage() {
                 {isExpanded && (
                   <div className="border-t border-border px-4 py-3 space-y-3 bg-muted/30">
                     {/* 역할 변경 (admin만) */}
-                    {isAdmin && (
+                    {canChangeRole && (
                       <div className="flex items-center gap-3">
                         <label className="text-xs font-medium text-muted-foreground w-16">역할</label>
                         <select
