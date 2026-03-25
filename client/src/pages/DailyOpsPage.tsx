@@ -25,6 +25,56 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 
 // ============================================================================
+// CHECK TYPE LABELS
+// ============================================================================
+const CHECK_TYPE_LABELS: Record<string, string> = {
+  open: '오픈',
+  order: '발주',
+  cleaning: '마감',
+  hygiene: '위생',
+  inventory: '재고',
+  other: '기타',
+};
+
+// ============================================================================
+// TAB CHECKLISTS — 탭별로 모든 관련 체크리스트 섹션 렌더링
+// ============================================================================
+function TabChecklists({
+  restaurantId,
+  date,
+  targetTab,
+}: {
+  restaurantId: number;
+  date: string;
+  targetTab: 'open' | 'purchase' | 'midday' | 'close';
+}) {
+  const checkTypesQuery = trpc.storeChecklists.getCheckTypesForTab.useQuery({
+    restaurantId,
+    targetTab,
+  });
+
+  const checkTypes = checkTypesQuery.data ?? [];
+
+  if (checkTypesQuery.isLoading) return null;
+  if (checkTypes.length === 0) return null;
+
+  return (
+    <>
+      {checkTypes.map((ct) => (
+        <ChecklistSection
+          key={ct}
+          restaurantId={restaurantId}
+          date={date}
+          checkType={ct as any}
+          label={`${CHECK_TYPE_LABELS[ct] ?? ct} 체크리스트`}
+          icon={Check}
+        />
+      ))}
+    </>
+  );
+}
+
+// ============================================================================
 // CHECKLIST SECTION COMPONENT
 // ============================================================================
 
@@ -37,7 +87,7 @@ function ChecklistSection({
 }: {
   restaurantId: number;
   date: string;
-  checkType: 'open' | 'order' | 'cleaning';
+  checkType: 'open' | 'order' | 'cleaning' | 'hygiene' | 'inventory' | 'other';
   label: string;
   icon: React.ElementType;
 }) {
@@ -521,12 +571,10 @@ function OpenTab({
       <WeatherCard />
       <WeekdayAvgSalesCard restaurantId={restaurantId} date={date} />
 
-      <ChecklistSection
+      <TabChecklists
         restaurantId={restaurantId}
         date={date}
-        checkType="open"
-        label="오픈 체크리스트"
-        icon={Check}
+        targetTab="open"
       />
 
       <Button
@@ -1171,13 +1219,11 @@ function PurchaseTab({
         </Card>
       )}
 
-      {/* 발주 체크리스트 (기존 유지) */}
-      <ChecklistSection
+      {/* 매입 탭 체크리스트 */}
+      <TabChecklists
         restaurantId={restaurantId}
         date={date}
-        checkType="order"
-        label="발주 확인 체크리스트"
-        icon={Check}
+        targetTab="purchase"
       />
 
       {/* 미입고 발주 전표 요약 (매입탭 최하단) */}
@@ -1302,6 +1348,13 @@ function MiddayTab({
 
   return (
     <div className="space-y-4 p-4">
+      {/* 일간보고 탭 체크리스트 */}
+      <TabChecklists
+        restaurantId={restaurantId}
+        date={date}
+        targetTab="midday"
+      />
+
       {/* 중간 매출 */}
       <Card className="bg-card border-border p-4">
         <h3 className="font-semibold text-foreground mb-4">중간 매출</h3>
@@ -1427,13 +1480,11 @@ function MiddayTab({
         )}
       </Card>
 
-      {/* 발주 체크리스트 */}
-      <ChecklistSection
+      {/* 매입 탭 체크리스트 */}
+      <TabChecklists
         restaurantId={restaurantId}
         date={date}
-        checkType="order"
-        label="발주 확인 체크리스트"
-        icon={Check}
+        targetTab="purchase"
       />
     </div>
   );
@@ -1822,13 +1873,11 @@ function CloseTab({
         </div>
       </Card>
 
-      {/* 마감체크리스트 */}
-      <ChecklistSection
+      {/* 마감 탭 체크리스트 */}
+      <TabChecklists
         restaurantId={restaurantId}
         date={date}
-        checkType="cleaning"
-        label="마감체크리스트"
-        icon={Check}
+        targetTab="close"
       />
 
       {/* ─── 일마감 손익 요약 ─── */}

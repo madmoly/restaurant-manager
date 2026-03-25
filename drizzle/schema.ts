@@ -416,7 +416,9 @@ export type StoreWeeklyClosure = typeof storeWeeklyClosures.$inferSelect;
 export const storeChecklistTemplates = mysqlTable("store_checklist_templates", {
   id: int("id").autoincrement().primaryKey(),
   restaurantId: int("restaurantId").notNull(),
-  checkType: mysqlEnum("checkType", ["open", "order", "cleaning"]).notNull(),
+  checkType: mysqlEnum("checkType", ["open", "order", "cleaning", "hygiene", "inventory", "other"]).notNull(),
+  // 일일운영 탭 매핑: open→오픈, purchase→매입, midday→일간보고, close→마감
+  targetTab: varchar("targetTab", { length: 20 }).default("open").notNull(),
   itemText: varchar("itemText", { length: 200 }).notNull(),
   requirementType: mysqlEnum("requirementType", ["none", "text_input", "camera_photo"]).default("none").notNull(),
   sortOrder: int("sortOrder").default(0).notNull(),
@@ -446,7 +448,7 @@ export const dailyChecklistLogs = mysqlTable("daily_checklist_logs", {
   id: int("id").autoincrement().primaryKey(),
   restaurantId: int("restaurantId").notNull(),
   logDate: date("logDate").notNull(),
-  checkType: mysqlEnum("checkType", ["open", "order", "cleaning"]).notNull(),
+  checkType: mysqlEnum("checkType", ["open", "order", "cleaning", "hygiene", "inventory", "other"]).notNull(),
   checkedItemIds: json("checkedItemIds").$type<number[]>().default([]),
   checkedItems: json("checkedItems").$type<CheckedItemData[]>().default([]),
   noOrderToday: boolean("noOrderToday").default(false).notNull(),
