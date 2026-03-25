@@ -569,6 +569,29 @@ export const dailyOpsRouter = router({
         if (sch.status === "confirmed") scheduleByDate[dateStr].confirmed++;
       }
 
+      // ─── 일별 매입 합계 ───
+      const monthPurchases = await db
+        .select({
+          purchaseDate: purchaseOrdersV2.purchaseDate,
+          totalAmount: purchaseOrdersV2.totalAmount,
+        })
+        .from(purchaseOrdersV2)
+        .where(
+          and(
+            eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+            sql`${purchaseOrdersV2.purchaseDate} >= ${startDate}`,
+            sql`${purchaseOrdersV2.purchaseDate} < ${endDate}`
+          )
+        );
+
+      const purchaseByDate: Record<string, number> = {};
+      for (const p of monthPurchases) {
+        const dateStr = typeof p.purchaseDate === "string"
+          ? p.purchaseDate
+          : (p.purchaseDate as Date).toISOString().slice(0, 10);
+        purchaseByDate[dateStr] = (purchaseByDate[dateStr] ?? 0) + Number(p.totalAmount);
+      }
+
       // 날짜별 맵 구성
       const days: Record<
         string,
@@ -579,6 +602,7 @@ export const dailyOpsRouter = router({
           openHeadcount: number;
           closeHeadcount: number;
           totalSales: number;
+          totalPurchases: number;
           status: "none" | "open" | "closed";
           closedByName: string | null;
           checklist: { checked: number; total: number; types: string[] } | null;
@@ -595,6 +619,7 @@ export const dailyOpsRouter = router({
             openHeadcount: 0,
             closeHeadcount: 0,
             totalSales: 0,
+            totalPurchases: 0,
             status: "none",
             closedByName: null,
             checklist: null,
@@ -634,11 +659,18 @@ export const dailyOpsRouter = router({
         days[dateStr].schedule = scheduleByDate[dateStr];
       }
 
+      // 매입 데이터 병합
+      for (const dateStr of Object.keys(purchaseByDate)) {
+        ensureDay(dateStr);
+        days[dateStr].totalPurchases = purchaseByDate[dateStr];
+      }
+
       // 월 합계
       const totalSales = sales.reduce((s, r) => s + Number(r.totalAmount), 0);
+      const totalPurchases = monthPurchases.reduce((s, p) => s + Number(p.totalAmount), 0);
       const closedDays = ops.filter((o) => o.closeCheckedAt).length;
 
-      return { days, totalSales, closedDays };
+      return { days, totalSales, totalPurchases, closedDays };
     }),
 
   // ─── 일별 상세 (운영캘린더 우측 패널용) ──────────────────────────────────
