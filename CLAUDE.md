@@ -66,15 +66,32 @@ restaurant-manager/
 - `user` (레벨1): 일반 사용자
 
 ### 매장 역할 (restaurant_users.role)
-- `store_manager`: 점장
-- `manager`: 매니저
-- `employee`: 직원
+- `owner`: 점장
+- `supervisor`: 매니져
+- `staff`: 직원
+- 레거시 매핑: `store_manager`→점장, `manager`→매니져, `employee`→직원
 
 ### 유효 역할 (effectiveRole) 계산
-1. `users.role`이 master/admin → 그대로 사용
+1. `users.role`이 master/admin → 그대로 사용 (master=개발자, admin=대표)
 2. 아니면 `restaurant_users.role` 확인:
-   - store_manager/manager → effectiveRole = "manager"
-   - employee/null → effectiveRole = "employee"
+   - owner → effectiveRole = "owner" (점장)
+   - supervisor → effectiveRole = "supervisor" (매니져)
+   - staff/null → effectiveRole = "staff" (직원)
+
+### 역할 계층 (높→낮)
+```
+master(개발자) > admin(대표) > owner(점장) > supervisor(매니져) > staff(직원)
+```
+
+### 한글 라벨 매핑 (StaffPage.tsx STORE_ROLE_LABELS)
+| DB 값 | 한글 라벨 | 비고 |
+|--------|-----------|------|
+| owner | 점장 | 현재 사용 |
+| supervisor | 매니져 | 현재 사용 |
+| staff | 직원 | 현재 사용 |
+| store_manager | 점장 | 레거시 |
+| manager | 매니져 | 레거시 |
+| employee | 직원 | 레거시 |
 
 ### tRPC 프로시저 레벨
 - `publicProcedure`: 비로그인 접근 가능
