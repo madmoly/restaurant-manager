@@ -657,6 +657,9 @@ export const schedulesRouter = router({
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           wageType: employeeContracts.wageType,
           wageAmount: employeeContracts.wageAmount,
+          position: employeeContracts.position,
+          contractStart: employeeContracts.contractStart,
+          contractEnd: employeeContracts.contractEnd,
         })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
@@ -682,7 +685,11 @@ export const schedulesRouter = router({
       // 소속회사별 그룹핑
       const companyMap: Record<string, {
         company: string;
-        employees: Record<string, { name: string; totalHours: number; totalWage: number; shifts: number }>;
+        employees: Record<string, {
+          name: string; totalHours: number; totalWage: number; shifts: number;
+          wageType: string | null; wageAmount: string | null;
+          position: string | null; contractStart: string | null; contractEnd: string | null;
+        }>;
         totalHours: number;
         totalWage: number;
       }> = {};
@@ -696,7 +703,14 @@ export const schedulesRouter = router({
           companyMap[company] = { company, employees: {}, totalHours: 0, totalWage: 0 };
         }
         if (!companyMap[company].employees[empKey]) {
-          companyMap[company].employees[empKey] = { name, totalHours: 0, totalWage: 0, shifts: 0 };
+          companyMap[company].employees[empKey] = {
+            name, totalHours: 0, totalWage: 0, shifts: 0,
+            wageType: r.wageType ?? (r.tempWageType ?? null),
+            wageAmount: r.wageAmount ?? (r.tempWageAmount ?? null),
+            position: r.position ?? null,
+            contractStart: r.contractStart ?? null,
+            contractEnd: r.contractEnd ?? null,
+          };
         }
 
         const hours = (new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 3600000;

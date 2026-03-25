@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
-import { TrendingUp, TrendingDown } from "lucide-react";
-import { Card, StatCard, MonthNav, PageHeader, EmptyState, Loading } from "@/components/ui/compat";
+import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download } from "lucide-react";
+import { Card, MonthNav, PageHeader, EmptyState, Loading } from "@/components/ui/compat";
+import { Button } from "@/components/ui/button";
+
+type CostCategory = "sales" | "purchases" | "labor" | "fixed" | null;
 
 export default function ProfitPage() {
   const { selectedRestaurant: current } = useRestaurant();
@@ -11,6 +14,7 @@ export default function ProfitPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
+  const [expandedCategory, setExpandedCategory] = useState<CostCategory>(null);
 
   const prevMonth = () => { if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1); };
@@ -32,6 +36,20 @@ export default function ProfitPage() {
     { enabled: restaurantId > 0 }
   );
 
+  // 드릴다운 상세 데이터
+  const { data: salesList } = trpc.sales.listByMonth.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 && expandedCategory === "sales" }
+  );
+  const { data: purchaseList } = trpc.purchases.listByMonth.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 && expandedCategory === "purchases" }
+  );
+  const { data: closingList } = trpc.dailyClosings.listByMonth.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 && expandedCategory === "labor" }
+  );
+
   // Restaurant target 정보
   const { data: restaurant } = trpc.restaurants.get.useQuery({ id: restaurantId }, { enabled: restaurantId > 0 });
 
@@ -43,7 +61,6 @@ export default function ProfitPage() {
   const fixed = Number(fixedTotal?.total ?? 0);
   const labor = Number(summary?.laborCost ?? 0);
   const profit = sales - purchases - labor - fixed;
-  const profitFromClosings = Number(summary?.profit ?? 0);
 
   const costRatio = sales > 0 ? (purchases / sales * 100) : 0;
   const laborRatio = sales > 0 ? (labor / sales * 100) : 0;
@@ -53,9 +70,51 @@ export default function ProfitPage() {
   const targetCostRatio = Number(restaurant?.targetCostRatio ?? 80);
   const targetLaborRatio = Number(restaurant?.targetLaborRatio ?? 30);
 
+  const fixedBreakdown = fixedTotal?.breakdown ?? [];
+
+  const toggleCategory = (cat: CostCategory) => {
+    setExpandedCategory(prev => prev === cat ? null : cat);
+  };
+
+  // 엑셀 다운로드
+  const handleExport = () => {
+    const rows = [
+      ["항목", "금액(원)", "비율(%)"],
+      ["매출", sales, "100.0"],
+      ["매입 (식재료비)", purchases, costRatio.toFixed(1)],
+      ["인건비", labor, laborRatio.toFixed(1)],
+      ["고정비", fixed, sales > 0 ? (fixed / sales * 100).toFixed(1) : "0.0"],
+      ["순이익", profit, profitRatio.toFixed(1)],
+      [],
+      ["고정비 내역"],
+      ["항목", "금액(원)", "유형"],
+      ...fixedBreakdown.map(b => [b.name, b.amount, b.type === "monthly" ? "월납" : b.type === "yearly" ? "연납(÷12)" : "일시"]),
+    ];
+
+    // CSV 생성
+    const csvContent = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const BOM = "\uFEFF";
+    const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `수익분석_${year}년${month}월_${current?.name ?? ""}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div>
-      <PageHeader title="수익 분석" description={current?.name} />
+      <PageHeader
+        title="수익 분석"
+        description={current?.name}
+        action={
+          <Button variant="outline" size="sm" onClick={handleExport} className="gap-1.5">
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">엑셀 내보내기</span>
+          </Button>
+        }
+      />
 
       <MonthNav year={year} month={month} onPrev={prevMonth} onNext={nextMonth}
         rightSlot={summary && <span className="text-xs text-muted-foreground">{summary.closedDays}일 마감 기준</span>}
@@ -76,13 +135,91 @@ export default function ProfitPage() {
         )}
       </Card>
 
-      {/* 비용 구성 */}
+      {/* 비용 구성 — 클릭 가능 */}
       <h3 className="text-sm font-semibold text-foreground mb-3">비용 구성</h3>
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <StatCard label="매출" value={sales.toLocaleString()} unit="원" />
-        <StatCard label="매입 (식재료비)" value={purchases.toLocaleString()} unit="원" />
-        <StatCard label="인건비 (마감 기준)" value={labor.toLocaleString()} unit="원" />
-        <StatCard label="고정비" value={fixed.toLocaleString()} unit="원" />
+      <p className="text-[11px] text-muted-foreground mb-2">항목을 눌러 상세 내역을 확인하세요</p>
+
+      <div className="space-y-2 mb-6">
+        <CostCard
+          label="매출"
+          value={sales}
+          expanded={expandedCategory === "sales"}
+          onToggle={() => toggleCategory("sales")}
+        >
+          {salesList && salesList.length > 0 ? (
+            <DetailTable
+              headers={["날짜", "금액", "비고"]}
+              rows={salesList.map(s => [
+                fmtDate(s.saleDate),
+                `₩${Number(s.amount).toLocaleString()}`,
+                s.note ?? "",
+              ])}
+            />
+          ) : (
+            <p className="text-xs text-muted-foreground py-2">매출 데이터가 없습니다</p>
+          )}
+        </CostCard>
+
+        <CostCard
+          label="매입 (식재료비)"
+          value={purchases}
+          expanded={expandedCategory === "purchases"}
+          onToggle={() => toggleCategory("purchases")}
+        >
+          {purchaseList && purchaseList.length > 0 ? (
+            <DetailTable
+              headers={["날짜", "거래처", "금액"]}
+              rows={purchaseList.map(p => [
+                fmtDate(p.purchaseDate),
+                (p as any).counterpartyName ?? "-",
+                `₩${Number(p.totalAmount).toLocaleString()}`,
+              ])}
+            />
+          ) : (
+            <p className="text-xs text-muted-foreground py-2">매입 데이터가 없습니다</p>
+          )}
+        </CostCard>
+
+        <CostCard
+          label="인건비 (마감 기준)"
+          value={labor}
+          expanded={expandedCategory === "labor"}
+          onToggle={() => toggleCategory("labor")}
+        >
+          {closingList && closingList.length > 0 ? (
+            <DetailTable
+              headers={["날짜", "인건비"]}
+              rows={closingList
+                .filter(c => Number(c.laborCost) > 0)
+                .map(c => [
+                  fmtDate(c.closingDate),
+                  `₩${Number(c.laborCost).toLocaleString()}`,
+                ])}
+            />
+          ) : (
+            <p className="text-xs text-muted-foreground py-2">일마감 인건비 데이터가 없습니다</p>
+          )}
+        </CostCard>
+
+        <CostCard
+          label="고정비"
+          value={fixed}
+          expanded={expandedCategory === "fixed"}
+          onToggle={() => toggleCategory("fixed")}
+        >
+          {fixedBreakdown.length > 0 ? (
+            <DetailTable
+              headers={["항목", "유형", "금액"]}
+              rows={fixedBreakdown.map(b => [
+                b.name,
+                b.type === "monthly" ? "월납" : b.type === "yearly" ? "연납(÷12)" : "일시",
+                `₩${b.amount.toLocaleString()}`,
+              ])}
+            />
+          ) : (
+            <p className="text-xs text-muted-foreground py-2">고정비 항목이 없습니다</p>
+          )}
+        </CostCard>
       </div>
 
       {/* 비율 분석 */}
@@ -127,6 +264,65 @@ export default function ProfitPage() {
   );
 }
 
+// ── 비용 카드 (드릴다운 지원) ──────────────────────────────────────────────────
+function CostCard({ label, value, expanded, onToggle, children }: {
+  label: string; value: number; expanded: boolean; onToggle: () => void; children: React.ReactNode;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div
+        className="flex items-center justify-between p-4 cursor-pointer hover:bg-accent/50 transition-colors"
+        onClick={onToggle}
+      >
+        <div>
+          <div className="text-xs text-muted-foreground">{label}</div>
+          <div className="text-lg font-bold text-foreground tabular-nums mt-0.5">
+            {value.toLocaleString()}<span className="text-xs text-muted-foreground ml-1">원</span>
+          </div>
+        </div>
+        {expanded
+          ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
+          : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+        }
+      </div>
+      {expanded && (
+        <div className="border-t border-border px-4 py-3 bg-muted/30 max-h-64 overflow-y-auto">
+          {children}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ── 상세 테이블 ───────────────────────────────────────────────────────────────
+function DetailTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+  return (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="border-b border-border/50">
+          {headers.map((h, i) => (
+            <th key={i} className={`py-1.5 font-medium text-muted-foreground ${i === 0 ? "text-left" : "text-right"}`}>
+              {h}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, ri) => (
+          <tr key={ri} className="border-b border-border/30 last:border-0">
+            {row.map((cell, ci) => (
+              <td key={ci} className={`py-1.5 text-foreground ${ci === 0 ? "text-left" : "text-right"}`}>
+                {cell}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// ── 비율 바 ──────────────────────────────────────────────────────────────────
 function RatioBar({ label, value, target, unit, warning, good }: {
   label: string; value: number; target?: number; unit: string; warning?: boolean; good?: boolean;
 }) {
@@ -157,4 +353,10 @@ function RatioBar({ label, value, target, unit, warning, good }: {
       </div>
     </div>
   );
+}
+
+// ── 날짜 포맷 ──────────────────────────────────────────────────────────────────
+function fmtDate(d: string | Date) {
+  const date = typeof d === "string" ? new Date(d) : d;
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }

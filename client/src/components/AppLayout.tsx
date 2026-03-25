@@ -105,7 +105,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: "인건비 정산", href: "/labor-cost",
         icon: <Coins className="h-4 w-4" />,
         mobileIcon: <Coins className="h-5 w-5" />,
-        roles: ["master", "admin"],
+        roles: ["master", "admin", "manager"],
       },
       {
         label: "매출캘린더",

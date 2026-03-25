@@ -3,12 +3,27 @@ import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   ChevronLeft, ChevronRight, Building2, Users, Clock, Wallet,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, FileText, Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 function fmtWon(n: number) {
   return Math.round(n).toLocaleString();
+}
+
+function fmtDate(d: string | null) {
+  if (!d) return "-";
+  const date = new Date(d);
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function wageLabel(type: string | null, amount: string | null) {
+  if (!type || !amount) return "-";
+  const val = Number(amount).toLocaleString();
+  if (type === "hourly") return `시급 ₩${val}`;
+  if (type === "monthly") return `월급 ₩${val}`;
+  if (type === "daily") return `일급 ₩${val}`;
+  return `₩${val}`;
 }
 
 export default function LaborCostPage() {
@@ -33,13 +48,54 @@ export default function LaborCostPage() {
 
   if (!restaurantId) return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
 
+  // CSV 내보내기
+  const handleExport = () => {
+    if (!data) return;
+    const rows: (string | number)[][] = [
+      ["소속회사", "이름", "직위", "급여유형", "급여액", "출근횟수", "총근무시간", "인건비(원)", "계약시작", "계약종료"],
+    ];
+    for (const company of data) {
+      for (const emp of company.employees) {
+        rows.push([
+          company.company,
+          emp.name,
+          emp.position ?? "-",
+          emp.wageType === "hourly" ? "시급" : emp.wageType === "monthly" ? "월급" : emp.wageType === "daily" ? "일급" : "-",
+          emp.wageAmount ? Number(emp.wageAmount) : 0,
+          emp.shifts,
+          Number(emp.totalHours.toFixed(1)),
+          Math.round(emp.totalWage),
+          emp.contractStart ?? "-",
+          emp.contractEnd ?? "-",
+        ]);
+      }
+    }
+    const csvContent = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const BOM = "\uFEFF";
+    const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `인건비정산_${year}년${month}월_${current?.name ?? ""}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
           <Building2 className="w-5 h-5" /> 인건비 정산
         </h1>
-        <span className="text-xs text-muted-foreground">{current?.name}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{current?.name}</span>
+          {data && data.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handleExport} className="gap-1">
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">내보내기</span>
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* 월 네비게이션 */}
@@ -100,6 +156,7 @@ export default function LaborCostPage() {
                       <thead>
                         <tr className="bg-muted/50">
                           <th className="text-left px-4 py-2 font-medium text-muted-foreground">이름</th>
+                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">급여</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">출근</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">시간</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">인건비</th>
@@ -107,8 +164,22 @@ export default function LaborCostPage() {
                       </thead>
                       <tbody>
                         {company.employees.map((emp, i) => (
-                          <tr key={i} className="border-t border-border/50">
-                            <td className="px-4 py-2 font-medium text-foreground">{emp.name}</td>
+                          <tr key={i} className="border-t border-border/50 group">
+                            <td className="px-4 py-2">
+                              <div className="font-medium text-foreground">{emp.name}</div>
+                              {emp.position && (
+                                <div className="text-[10px] text-muted-foreground">{emp.position}</div>
+                              )}
+                            </td>
+                            <td className="px-4 py-2">
+                              <div className="text-muted-foreground">{wageLabel(emp.wageType, emp.wageAmount)}</div>
+                              {(emp.contractStart || emp.contractEnd) && (
+                                <div className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                  <FileText className="w-2.5 h-2.5 inline" />
+                                  {fmtDate(emp.contractStart)}~{fmtDate(emp.contractEnd)}
+                                </div>
+                              )}
+                            </td>
                             <td className="px-4 py-2 text-right text-muted-foreground">{emp.shifts}회</td>
                             <td className="px-4 py-2 text-right text-muted-foreground">{emp.totalHours.toFixed(1)}h</td>
                             <td className="px-4 py-2 text-right font-medium text-foreground">₩{fmtWon(emp.totalWage)}</td>
