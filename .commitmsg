@@ -1,1 +1,1 @@
-초대코드 시스템 + 비밀번호 강제변경 플로우 구현 - restaurant_invites 테이블/마이그레이션 추가 - invites 라우터 (생성/검증/자가등록/목록/삭제) - /join/:code 공개 자가등록 페이지 - StaffPage 초대코드 관리 UI - mustChangePassword 강제변경 플로우 (로그인→변경페이지→메인) - 비밀번호 초기화 시 mustChangePassword 자동 설정  
+점장 초대를 대표(admin) 이상만 가능하도록 권한 분리 - invite_role ENUM에 owner 추가 (스키마+마이그레이션) - generate 엔드포인트에서 owner 초대 시 admin 이상 권한 체크 - StaffPage에서 admin일 때만 점장 옵션 표시  

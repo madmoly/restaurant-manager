@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { eq, and, isNull } from "drizzle-orm";
 import { router, publicProcedure, managerProcedure } from "../trpc";
+import { ROLE_LEVEL } from "@shared/permissions";
 import { db } from "../db";
 import { restaurantInvites, users, restaurantUsers, restaurants } from "../../drizzle/schema";
 import { hashPassword, createToken } from "../auth";
@@ -11,15 +13,36 @@ function generateInviteCode(): string {
   return crypto.randomBytes(4).toString("base64url").slice(0, 6).toUpperCase();
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  owner: "점장",
+  supervisor: "매니져",
+  staff: "직원",
+};
+
 export const invitesRouter = router({
-  /** 초대코드 생성 (점장/매니져 이상) */
+  /**
+   * 초대코드 생성
+   * - staff/supervisor: 점장/매니져 이상 (managerProcedure)
+   * - owner: admin/master만 가능 (런타임 체크)
+   */
   generate: managerProcedure
     .input(z.object({
       restaurantId: z.number(),
-      role: z.enum(["staff", "supervisor"]).default("staff"),
+      role: z.enum(["staff", "supervisor", "owner"]).default("staff"),
       expiresInHours: z.number().min(1).max(168).default(48), // 최대 7일
     }))
     .mutation(async ({ input, ctx }) => {
+      // owner 초대는 admin 이상만
+      if (input.role === "owner") {
+        const level = ROLE_LEVEL[ctx.user.role] ?? 0;
+        if (level < ROLE_LEVEL.admin) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "점장 초대는 대표 이상 권한이 필요합니다",
+          });
+        }
+      }
+
       const code = generateInviteCode();
       const expiresAt = new Date(Date.now() + input.expiresInHours * 60 * 60 * 1000);
 
@@ -66,7 +89,7 @@ export const invitesRouter = router({
       const [restaurant] = await db.select({ name: restaurants.name })
         .from(restaurants).where(eq(restaurants.id, invite.restaurantId)).limit(1);
 
-      const roleLabel = invite.role === "supervisor" ? "매니져" : "직원";
+      const roleLabel = ROLE_LABELS[invite.role] ?? invite.role;
 
       return {
         valid: true as const,

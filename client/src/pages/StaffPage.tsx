@@ -51,7 +51,7 @@ export default function StaffPage() {
   const utils = trpc.useUtils();
 
   // 초대코드
-  const [inviteRole, setInviteRole] = useState<"staff" | "supervisor">("staff");
+  const [inviteRole, setInviteRole] = useState<"staff" | "supervisor" | "owner">("staff");
   const { data: inviteList } = trpc.invites.list.useQuery(
     { restaurantId },
     { enabled: restaurantId > 0 && showInviteSection },
@@ -213,10 +213,11 @@ export default function StaffPage() {
               <select
                 className="text-xs rounded-md border border-input bg-background px-2 py-1"
                 value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as "staff" | "supervisor")}
+                onChange={(e) => setInviteRole(e.target.value as "staff" | "supervisor" | "owner")}
               >
                 <option value="staff">직원</option>
                 <option value="supervisor">매니져</option>
+                {isAdmin && <option value="owner">점장</option>}
               </select>
               <Button
                 size="sm"
@@ -244,7 +245,7 @@ export default function StaffPage() {
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       <span className="font-mono font-bold">{inv.code}</span>
                       <span className="text-muted-foreground">
-                        {inv.role === "supervisor" ? "매니져" : "직원"}
+                        {inv.role === "owner" ? "점장" : inv.role === "supervisor" ? "매니져" : "직원"}
                       </span>
                       {inv.isUsed && <span className="text-green-600 dark:text-green-400">사용됨 ({inv.usedByName})</span>}
                       {!inv.isUsed && inv.isExpired && <span className="text-muted-foreground">만료</span>}

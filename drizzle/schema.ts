@@ -765,7 +765,7 @@ export const restaurantInvites = mysqlTable("restaurant_invites", {
   id: int("id").autoincrement().primaryKey(),
   restaurantId: int("restaurantId").notNull(),
   code: varchar("code", { length: 20 }).notNull().unique(),
-  role: mysqlEnum("invite_role", ["staff", "supervisor"]).notNull().default("staff"),
+  role: mysqlEnum("invite_role", ["staff", "supervisor", "owner"]).notNull().default("staff"),
   createdBy: int("createdBy").notNull(),
   usedBy: int("usedBy"),
   usedAt: timestamp("usedAt"),

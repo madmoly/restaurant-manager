@@ -246,7 +246,7 @@ app.use(express.json());
         id INT AUTO_INCREMENT PRIMARY KEY,
         restaurantId INT NOT NULL,
         code VARCHAR(20) NOT NULL UNIQUE,
-        invite_role ENUM('staff','supervisor') NOT NULL DEFAULT 'staff',
+        invite_role ENUM('staff','supervisor','owner') NOT NULL DEFAULT 'staff',
         createdBy INT NOT NULL,
         usedBy INT,
         usedAt TIMESTAMP NULL,
@@ -256,6 +256,13 @@ app.use(express.json());
         INDEX idx_invite_restaurant (restaurantId)
       )
     `);
+
+    // invite_role ENUM 확장 (owner 추가)
+    try {
+      await conn.query(`ALTER TABLE restaurant_invites MODIFY COLUMN invite_role ENUM('staff','supervisor','owner') NOT NULL DEFAULT 'staff'`);
+    } catch (e: any) {
+      if (!e.message.includes("Duplicate")) console.log("[migrate] invite_role enum:", e.message);
+    }
 
     await conn.end();
     console.log("[migrate] all migrations complete");
