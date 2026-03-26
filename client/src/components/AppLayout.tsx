@@ -140,7 +140,7 @@ const NAV_GROUPS: NavGroup[] = [
         mobileTabPriority: { master: 2, admin: 2 },
       },
       {
-        label: "매장 관리", href: "/restaurants",
+        label: "매장 정보", href: "/restaurants",
         icon: <Store className="h-4 w-4" />,
         mobileIcon: <Store className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
@@ -354,7 +354,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
                         {item.icon}
                       </span>
                       <span className="flex-1 truncate">
-                        {item.href === "/restaurants" && !isAdminLevel ? "내 매장 관리" : getLabel(item)}
+                        {item.href === "/restaurants" && !isAdminLevel ? "매장 정보" : getLabel(item)}
                       </span>
                     </div>
                   </Link>
