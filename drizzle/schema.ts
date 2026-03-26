@@ -153,11 +153,12 @@ export const fixedCosts = mysqlTable("fixed_costs", {
   id: int("id").autoincrement().primaryKey(),
   restaurantId: int("restaurantId").notNull(),
   costName: varchar("costName", { length: 100 }).notNull(),
-  // monthly: 월 고정, yearly: 연간(월할), one_time: 일회성
-  costType: mysqlEnum("costType", ["monthly", "yearly", "one_time"]).default("monthly").notNull(),
+  // monthly: 월 고정, yearly: 연간(월할), quarterly: 분기별(3개월할), sales_ratio: 매출대비 %
+  costType: mysqlEnum("costType", ["monthly", "yearly", "one_time", "quarterly", "sales_ratio"]).default("monthly").notNull(),
   amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
-  // yearly면 12로 나눠서 월 배분, one_time이면 해당 월에만
-  effectiveMonth: varchar("effectiveMonth", { length: 7 }), // YYYY-MM (one_time용)
+  // yearly→12분할, quarterly→3분할, sales_ratio→amount는 % 값 (예: 5.5 = 5.5%)
+  effectiveMonth: varchar("effectiveMonth", { length: 7 }), // YYYY-MM (레거시)
+  attachmentUrl: varchar("attachmentUrl", { length: 500 }),  // 첨부파일 URL
   note: text("note"),
   isActive: boolean("isActive").default(true).notNull(),
   createdBy: int("createdBy"),

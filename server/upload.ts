@@ -104,6 +104,48 @@ uploadRouter.post("/order-image", orderUpload.single("photo"), (req: Request, re
   res.json({ url });
 });
 
+/**
+ * POST /api/upload/fixed-cost-attachment
+ * multipart/form-data: field name = "file"
+ * 고정비 첨부파일 (이미지 + PDF 허용, 10MB)
+ */
+const FIXED_COST_DIR = path.join(UPLOAD_ROOT, "fixed-costs");
+if (!fs.existsSync(FIXED_COST_DIR)) fs.mkdirSync(FIXED_COST_DIR, { recursive: true });
+
+const fixedCostStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, FIXED_COST_DIR);
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname) || ".pdf";
+    const unique = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+    cb(null, unique);
+  },
+});
+
+const fixedCostUpload = multer({
+  storage: fixedCostStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter(_req, file, cb) {
+    const allowed = file.mimetype.startsWith("image/") || file.mimetype === "application/pdf";
+    if (!allowed) {
+      cb(new Error("이미지 또는 PDF 파일만 업로드 가능합니다"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+uploadRouter.post("/fixed-cost-attachment", fixedCostUpload.single("file"), (req: Request, res: Response) => {
+  if (!req.file) {
+    res.status(400).json({ error: "파일이 없습니다" });
+    return;
+  }
+  const relativePath = path.relative(UPLOAD_ROOT, req.file.path).replace(/\\/g, "/");
+  const url = `/uploads/${relativePath}`;
+  res.json({ url });
+});
+
 // ─── 2주 지난 체크리스트 사진 자동삭제 ────────────────────────────────────────
 
 const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
