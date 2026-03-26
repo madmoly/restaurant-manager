@@ -3,12 +3,14 @@ import { eq, and, asc, desc } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { recipes } from "../../drizzle/schema";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 
 export const recipesRouter = router({
   /** 매장 레시피 목록 조회 */
   list: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       return db
         .select()
         .from(recipes)
@@ -23,7 +25,7 @@ export const recipesRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
-      const [row] = await db.select().from(recipes).where(eq(recipes.id, input.id));
+      const [row] = await db.select().from(recipes).where(and(eq(recipes.id, input.id), eq(recipes.isPublished, true)));
       return row ?? null;
     }),
 

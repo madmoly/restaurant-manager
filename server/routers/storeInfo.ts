@@ -3,6 +3,7 @@ import { eq, and, asc, desc } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { storeInfoCards } from "../../drizzle/schema";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 
 const CARD_TYPES = ["notice", "access", "contact", "rule", "other"] as const;
 
@@ -10,7 +11,8 @@ export const storeInfoRouter = router({
   /** 매장 업무정보 카드 목록 */
   list: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       return db
         .select()
         .from(storeInfoCards)

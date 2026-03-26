@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and, gte, lte, sql, sum } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 import {
   monthlyClosings,
   sales,
@@ -15,7 +16,8 @@ export const monthlyClosingsRouter = router({
   /** 특정 월 마감 조회 */
   get: protectedProcedure
     .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const [row] = await db
         .select()
         .from(monthlyClosings)
@@ -33,7 +35,8 @@ export const monthlyClosingsRouter = router({
   /** 연간 월마감 목록 */
   listByYear: protectedProcedure
     .input(z.object({ restaurantId: z.number(), year: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       return db
         .select()
         .from(monthlyClosings)

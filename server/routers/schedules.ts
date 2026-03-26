@@ -12,6 +12,7 @@ import {
   restaurantUsers,
   employeeContracts,
 } from "../../drizzle/schema";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 
 // ─── 헬퍼 함수 ──────────────────────────────────────────────────────────────
 
@@ -92,7 +93,8 @@ export const schedulesRouter = router({
   /** 매장+기간별 스케줄 조회 */
   listByRestaurant: protectedProcedure
     .input(z.object({ restaurantId: z.number(), from: z.string(), to: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const rows = await db
         .select({
           id: schedules.id,
@@ -570,7 +572,8 @@ export const schedulesRouter = router({
   /** 향후 7일 (대시보드용) */
   getUpcoming7Days: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const now = new Date();
       const end = new Date(now);
       end.setDate(end.getDate() + 7);

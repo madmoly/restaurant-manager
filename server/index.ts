@@ -341,37 +341,40 @@ app.post("/api/error-report", async (req, res) => {
     const mysql2 = await import("mysql2/promise");
     const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
 
-    // 쿠키에서 userId 추출 시도
-    let userId: number | null = null;
     try {
-      const { parse: parseCookie } = await import("cookie");
-      const { verifyToken } = await import("./auth");
-      const cookies = parseCookie(req.headers.cookie || "");
-      const token = cookies["session"];
-      if (token) {
-        const payload = await verifyToken(token);
-        userId = payload?.userId ?? null;
+      // 쿠키에서 userId 추출 시도
+      let userId: number | null = null;
+      try {
+        const { parse: parseCookie } = await import("cookie");
+        const { verifyToken } = await import("./auth");
+        const cookies = parseCookie(req.headers.cookie || "");
+        const token = cookies["session"];
+        if (token) {
+          const payload = await verifyToken(token);
+          userId = payload?.userId ?? null;
+        }
+      } catch {}
+
+      const userAgent = req.headers["user-agent"]?.slice(0, 500);
+
+      for (const err of errors.slice(0, 20)) {
+        await conn.query(
+          `INSERT INTO error_logs (userId, errorType, message, stack, url, userAgent, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userId,
+            (err.errorType || "client").slice(0, 50),
+            (err.message || "unknown").slice(0, 2000),
+            err.stack?.slice(0, 5000) || null,
+            err.url?.slice(0, 500) || null,
+            userAgent || null,
+            err.metadata ? JSON.stringify(err.metadata) : null,
+          ]
+        );
       }
-    } catch {}
-
-    const userAgent = req.headers["user-agent"]?.slice(0, 500);
-
-    for (const err of errors.slice(0, 20)) {
-      await conn.query(
-        `INSERT INTO error_logs (userId, errorType, message, stack, url, userAgent, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          userId,
-          (err.errorType || "client").slice(0, 50),
-          (err.message || "unknown").slice(0, 2000),
-          err.stack?.slice(0, 5000) || null,
-          err.url?.slice(0, 500) || null,
-          userAgent || null,
-          err.metadata ? JSON.stringify(err.metadata) : null,
-        ]
-      );
+      res.json({ ok: true });
+    } finally {
+      await conn.end();
     }
-    await conn.end();
-    res.json({ ok: true });
   } catch (e: any) {
     console.error("[error-report]", e.message);
     res.json({ ok: false });

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and, sql, count } from "drizzle-orm";
-import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
+import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
 import { restaurants, restaurantUsers, users, sales, apiUsageLogs } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
@@ -146,7 +146,7 @@ export const restaurantsRouter = router({
       return { id: result.id };
     }),
 
-  update: protectedProcedure
+  update: managerProcedure
     .input(z.object({
       id: z.number(),
       name: z.string().optional(),
@@ -196,7 +196,7 @@ export const restaurantsRouter = router({
     }),
 
   /** 직원 매장 배정 */
-  addStaff: protectedProcedure
+  addStaff: managerProcedure
     .input(z.object({
       restaurantId: z.number(),
       userId: z.number(),
@@ -261,7 +261,7 @@ export const restaurantsRouter = router({
     }),
 
   /** 직원 매장에서 제거 */
-  removeStaff: protectedProcedure
+  removeStaff: managerProcedure
     .input(z.object({ restaurantId: z.number(), userId: z.number() }))
     .mutation(async ({ input }) => {
       await db

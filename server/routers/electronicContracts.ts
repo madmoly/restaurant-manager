@@ -5,6 +5,7 @@ import { router, publicProcedure, protectedProcedure, managerProcedure, ownerPro
 import { db } from "../db";
 import { employmentElectronicContracts, restaurantContracts, restaurants } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 
 export const electronicContractsRouter = router({
   // ═══ 매장 계약 조건 (임대/수수료/로열티 등) ═══
@@ -12,7 +13,8 @@ export const electronicContractsRouter = router({
   /** 매장 계약 조건 목록 */
   listRestaurantContracts: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       return db
         .select()
         .from(restaurantContracts)
@@ -93,7 +95,8 @@ export const electronicContractsRouter = router({
   /** 근로계약서 목록 */
   listEmploymentContracts: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       return db
         .select()
         .from(employmentElectronicContracts)

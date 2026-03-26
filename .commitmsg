@@ -1,5 +1,20 @@
-매니져/직원 화면에서 인건비정산 네비 숨김 (점장 이상만 표시)
+보안/구조 일괄 수정: 매장 데이터 격리 + 권한 강화 + 버그 수정
 
-- AppLayout: requireStoreRole 필터 추가 (인건비정산 → owner만)
-- App.tsx: storeRole prop을 AppLayout에 전달
-- 모바일 하단탭에도 동일 필터 적용
+[CRITICAL] verifyStoreAccess 미들웨어 적용 (8개 라우터)
+- schedules: listByRestaurant, getUpcoming7Days
+- recipes: list
+- storeInfo: list
+- leaveRequests: listMine
+- dailyOps: getByDate
+- storeChecklists: listTemplates
+- monthlyClosings: get, listByYear
+- electronicContracts: listRestaurantContracts, listEmploymentContracts
+
+[CRITICAL] restaurants.ts 프로시저 레벨 수정
+- update: protectedProcedure → managerProcedure (staff 수정 차단)
+- addStaff: protectedProcedure → managerProcedure
+- removeStaff: protectedProcedure → managerProcedure
+
+[CRITICAL] /notifications 유령 네비 항목 제거 (라우트 없는 메뉴)
+[CRITICAL] /api/error-report DB 연결 누수 try-finally 래핑
+[HIGH] recipes.ts getById에 isPublished 필터 추가 (삭제된 레시피 조회 차단)

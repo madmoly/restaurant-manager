@@ -3,6 +3,7 @@ import { eq, and, sql, gte, lte, count } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { storeChecklistTemplates, dailyChecklistLogs, users } from "../../drizzle/schema";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 import type { CheckedItemData } from "../../drizzle/schema";
 
 const checkedItemSchema = z.object({
@@ -69,7 +70,8 @@ export const storeChecklistsRouter = router({
         date: z.string().optional(), // 반복 필터용 날짜
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const templates = await db
         .select()
         .from(storeChecklistTemplates)

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and, sql, sum, between, count } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 import {
   dailyOperations,
   dailySalesDetail,
@@ -23,7 +24,8 @@ export const dailyOpsRouter = router({
   /** 오늘 운영 현황 조회 */
   getByDate: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const [row] = await db
         .select()
         .from(dailyOperations)

@@ -3,6 +3,7 @@ import { eq, and, desc, gte, sql } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { leaveRequests, users } from "../../drizzle/schema";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 
 const LEAVE_TYPE_LABELS: Record<string, string> = {
   dayoff: "휴무",
@@ -15,6 +16,7 @@ export const leaveRequestsRouter = router({
   listMine: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
     .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       return db
         .select({
           id: leaveRequests.id,
