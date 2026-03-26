@@ -484,7 +484,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="hidden lg:flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-xl transition-all"
+                className="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-xl transition-all"
                 onClick={toggleTheme}
                 title={theme === "dark" ? "라이트 모드" : "다크 모드"}
               >
@@ -592,8 +592,8 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
                 {/* 더보기 팝업 — 글래스모피즘 */}
                 {moreMenuOpen && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setMoreMenuOpen(false)} />
-                    <div className="absolute bottom-full right-0 mb-4 w-56 glass-panel rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-5 border-border/50">
+                    <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={() => setMoreMenuOpen(false)} />
+                    <div className="absolute bottom-full right-0 mb-4 w-56 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-5 border border-border/50 bg-card/95 backdrop-blur-xl">
                       {(() => {
                         const moreHrefs = new Set(moreItems.map(i => i.href));
                         // 시스템 메뉴 + 매장 메뉴 합산하여 더보기에 표시

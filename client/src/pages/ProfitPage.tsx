@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
-import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download, FileText } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download, FileText, Lock } from "lucide-react";
 import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { ProfitPageSkeleton } from "@/components/ui/skeletons";
@@ -10,8 +11,13 @@ import { loadKoreanFont } from "@/lib/pdfKoreanFont";
 type CostCategory = "sales" | "purchases" | "labor" | "fixed" | null;
 
 export default function ProfitPage() {
+  const { user } = useAuth();
   const { selectedRestaurant: current } = useRestaurant();
   const restaurantId = current?.id ?? 0;
+
+  // 권한: master/admin/owner만 상세내역+내보내기 가능
+  const isPrivileged = user?.role === "master" || user?.role === "admin" || current?.storeRole === "owner";
+
 
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -86,6 +92,7 @@ export default function ProfitPage() {
   const fixedBreakdown = fixedTotal?.breakdown ?? [];
 
   const toggleCategory = (cat: CostCategory) => {
+    if (!isPrivileged) return; // staff/supervisor는 상세 내역 접근 불가
     setExpandedCategory(prev => prev === cat ? null : cat);
   };
 
@@ -161,7 +168,7 @@ export default function ProfitPage() {
       <PageHeader
         title="수익 분석"
         description={current?.name}
-        action={
+        action={isPrivileged ? (
           <div className="relative" ref={exportRef}>
             <Button variant="outline" size="sm" onClick={() => setShowExportMenu(!showExportMenu)} className="gap-1">
               <Download className="h-3.5 w-3.5" />
@@ -184,7 +191,7 @@ export default function ProfitPage() {
               </div>
             )}
           </div>
-        }
+        ) : undefined}
       />
 
       <MonthNav year={year} month={month} onPrev={prevMonth} onNext={nextMonth}
@@ -208,7 +215,13 @@ export default function ProfitPage() {
 
       {/* 비용 구성 — 클릭 가능 */}
       <h3 className="text-sm font-semibold text-foreground mb-3">비용 구성</h3>
-      <p className="text-[11px] text-muted-foreground mb-2">항목을 눌러 상세 내역을 확인하세요</p>
+      {isPrivileged ? (
+        <p className="text-[11px] text-muted-foreground mb-2">항목을 눌러 상세 내역을 확인하세요</p>
+      ) : (
+        <p className="text-[11px] text-muted-foreground mb-2 flex items-center gap-1">
+          <Lock className="h-3 w-3" /> 상세 내역은 점장 이상만 열람 가능합니다
+        </p>
+      )}
 
       <div className="space-y-2 mb-6">
         <CostCard

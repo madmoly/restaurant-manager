@@ -371,30 +371,42 @@ function YesterdayClosingCard({
 interface WeatherData {
   current: {
     temperature_2m: number;
+    apparent_temperature: number;
+    relative_humidity_2m: number;
     weather_code: number;
+    wind_speed_10m: number;
+    precipitation: number;
   };
   timezone: string;
 }
+
+// 서울 기본 좌표 (매장 위치 미설정 시 fallback)
+const DEFAULT_LAT = 37.5665;
+const DEFAULT_LNG = 126.9780;
 
 function WeatherCard() {
   const { selectedRestaurant } = useRestaurant();
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [usingDefault, setUsingDefault] = useState(false);
 
   useEffect(() => {
-    if (!selectedRestaurant?.latitude || !selectedRestaurant?.longitude) {
-      setError('위치 미설정');
-      setLoading(false);
-      return;
-    }
+    const lat = selectedRestaurant?.latitude ? Number(selectedRestaurant.latitude) : 0;
+    const lng = selectedRestaurant?.longitude ? Number(selectedRestaurant.longitude) : 0;
+    const useLat = lat > 0 ? lat : DEFAULT_LAT;
+    const useLng = lng > 0 ? lng : DEFAULT_LNG;
+    setUsingDefault(lat === 0 || lng === 0);
 
     const fetchWeather = async () => {
+      setLoading(true);
       try {
         const response = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${selectedRestaurant.latitude}&longitude=${selectedRestaurant.longitude}&current=temperature_2m,weather_code&timezone=Asia/Seoul`
+          `https://api.open-meteo.com/v1/forecast?latitude=${useLat}&longitude=${useLng}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation&timezone=Asia/Seoul`
         );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
+        if (!data?.current) throw new Error('응답 데이터 없음');
         setWeather(data);
         setError(null);
       } catch (err) {
@@ -408,36 +420,24 @@ function WeatherCard() {
   }, [selectedRestaurant?.latitude, selectedRestaurant?.longitude]);
 
   const getWeatherIcon = (code: number) => {
-    if (code === 0) return <Sun className="w-6 h-6 text-yellow-500" />;
-    if (code === 1 || code === 2 || code === 3) return <Cloud className="w-6 h-6 text-muted-foreground" />;
-    if ([61, 63, 65, 80, 81, 82].includes(code)) return <CloudRain className="w-6 h-6 text-blue-500" />;
-    return <Cloud className="w-6 h-6 text-muted-foreground" />;
+    if (code === 0) return <Sun className="w-8 h-8 text-yellow-500" />;
+    if (code >= 1 && code <= 3) return <Cloud className="w-8 h-8 text-muted-foreground" />;
+    if ([45, 48].includes(code)) return <Cloud className="w-8 h-8 text-slate-400" />;
+    if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) return <CloudRain className="w-8 h-8 text-blue-500" />;
+    if ([71, 73, 75, 77].includes(code)) return <CloudRain className="w-8 h-8 text-sky-300" />;
+    if ([95, 96, 99].includes(code)) return <CloudRain className="w-8 h-8 text-purple-500" />;
+    return <Cloud className="w-8 h-8 text-muted-foreground" />;
   };
 
   const getWeatherDescription = (code: number): string => {
     const weatherMap: Record<number, string> = {
-      0: '맑음',
-      1: '구름 조금',
-      2: '구름 약간',
-      3: '구름 많음',
-      45: '안개',
-      48: '어린 안개',
-      51: '이슬비 약함',
-      53: '이슬비',
-      55: '이슬비 강함',
-      61: '빗소리 약함',
-      63: '빗소리',
-      65: '빗소리 강함',
-      71: '눈 약함',
-      73: '눈',
-      75: '눈 강함',
-      77: '눈입자',
-      80: '소나기 약함',
-      81: '소나기',
-      82: '소나기 강함',
-      95: '뇌우',
-      96: '뇌우 우박',
-      99: '뇌우 큰 우박',
+      0: '맑음', 1: '구름 조금', 2: '구름 약간', 3: '흐림',
+      45: '안개', 48: '짙은 안개',
+      51: '이슬비', 53: '이슬비', 55: '강한 이슬비',
+      61: '약한 비', 63: '비', 65: '강한 비',
+      71: '약한 눈', 73: '눈', 75: '강한 눈', 77: '싸락눈',
+      80: '약한 소나기', 81: '소나기', 82: '강한 소나기',
+      95: '뇌우', 96: '뇌우+우박', 99: '강한 뇌우+우박',
     };
     return weatherMap[code] || '알 수 없음';
   };
@@ -464,18 +464,28 @@ function WeatherCard() {
     return null;
   }
 
-  const temp = weather.current.temperature_2m;
-  const code = weather.current.weather_code;
+  const { temperature_2m: temp, apparent_temperature: feelsLike, relative_humidity_2m: humidity, weather_code: code, wind_speed_10m: wind, precipitation } = weather.current;
 
   return (
     <Card className="bg-card border-border p-4">
-      <h4 className="text-sm font-semibold text-foreground mb-2">오늘 날씨</h4>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-sm font-semibold text-foreground">오늘 날씨</h4>
+        {usingDefault && <span className="text-[10px] text-muted-foreground/60">서울 기준</span>}
+      </div>
       <div className="flex items-center gap-3">
         {getWeatherIcon(code)}
-        <div>
-          <p className="text-lg font-bold text-foreground">{temp}°C</p>
+        <div className="flex-1">
+          <div className="flex items-baseline gap-1.5">
+            <p className="text-xl font-bold text-foreground">{Math.round(temp)}°C</p>
+            <p className="text-xs text-muted-foreground">체감 {Math.round(feelsLike)}°</p>
+          </div>
           <p className="text-xs text-muted-foreground">{getWeatherDescription(code)}</p>
         </div>
+      </div>
+      <div className="flex gap-3 mt-2 pt-2 border-t border-border/50">
+        <span className="text-[11px] text-muted-foreground">습도 {humidity}%</span>
+        <span className="text-[11px] text-muted-foreground">풍속 {wind}km/h</span>
+        {precipitation > 0 && <span className="text-[11px] text-blue-500">강수 {precipitation}mm</span>}
       </div>
     </Card>
   );
