@@ -1,1 +1,1 @@
-점장 초대를 대표(admin) 이상만 가능하도록 권한 분리 - invite_role ENUM에 owner 추가 (스키마+마이그레이션) - generate 엔드포인트에서 owner 초대 시 admin 이상 권한 체크 - StaffPage에서 admin일 때만 점장 옵션 표시  
+5인 이상 사업장 대체휴무/연차 시스템 구현 - leave_transactions 테이블 및 leaveBalance 라우터 추가 - 공휴일 유틸리티 (shared/holidays.ts) 추가 - 스케줄 배정 시 공휴일 대체휴무 발생 알림 배너 - 인건비 정산 페이지에 대체휴무/연차 현황 섹션 추가  

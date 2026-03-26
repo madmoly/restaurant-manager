@@ -20,12 +20,151 @@ import {
   users,
   restaurantUsers,
 } from "../../drizzle/schema";
-import { getHolidayName, isHoliday } from "@shared/holidays";
+import { getHolidayName, isHoliday, getHolidaysForYear } from "@shared/holidays";
 
 export const leaveBalanceRouter = router({
   /**
+   * 해당 월의 공휴일 근무 자동 감지
+   * 스케줄 데이터에서 공휴일에 근무한 5인 이상 사업장 직원 목록 반환
+   * + 이미 대체휴무 반영 여부 표시
+   */
+  detectHolidayWork: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      year: z.number(),
+      month: z.number(),
+    }))
+    .query(async ({ input }) => {
+      const { restaurantId, year, month } = input;
+      // 해당 월의 공휴일 목록
+      const holidays = getHolidaysForYear(year).filter((h) => {
+        const m = parseInt(h.date.slice(5, 7));
+        return m === month;
+      });
+
+      if (holidays.length === 0) return [];
+
+      // 해당 월 시작/끝
+      const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+      const nextMonth = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+      // 해당 월의 confirmed/completed 스케줄 조회 (userId가 있는 것만)
+      const monthSchedules = await db.select({
+        id: schedules.id,
+        userId: schedules.userId,
+        startTime: schedules.startTime,
+        status: schedules.status,
+      })
+        .from(schedules)
+        .where(and(
+          eq(schedules.restaurantId, restaurantId),
+          sql`${schedules.startTime} >= ${monthStart}`,
+          sql`${schedules.startTime} < ${nextMonth}`,
+          sql`${schedules.status} IN ('confirmed', 'completed', 'draft')`,
+          sql`${schedules.userId} IS NOT NULL`,
+        ));
+
+      // 공휴일 근무 감지
+      const results: Array<{
+        holidayDate: string;
+        holidayName: string;
+        userId: number;
+        userName: string;
+        scheduleId: number;
+        is5Plus: boolean;
+        alreadyEarned: boolean;
+      }> = [];
+
+      // userId → userName 캐시
+      const userNameCache: Record<number, string> = {};
+      const is5PlusCache: Record<number, boolean> = {};
+
+      for (const holiday of holidays) {
+        // 이 공휴일에 근무한 스케줄 찾기
+        const holidaySchedules = monthSchedules.filter((s) => {
+          if (!s.startTime) return false;
+          const d = new Date(s.startTime);
+          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          return dateStr === holiday.date;
+        });
+
+        for (const sched of holidaySchedules) {
+          const uid = sched.userId!;
+
+          // 5인 이상 체크 (캐시)
+          if (is5PlusCache[uid] === undefined) {
+            is5PlusCache[uid] = await check5PlusEmployee(uid, restaurantId);
+          }
+          if (!is5PlusCache[uid]) continue; // 5인 미만은 제외
+
+          // 이름 캐시
+          if (!userNameCache[uid]) {
+            const [u] = await db.select({ name: users.name }).from(users).where(eq(users.id, uid)).limit(1);
+            userNameCache[uid] = u?.name ?? `직원#${uid}`;
+          }
+
+          // 이미 반영 여부
+          const [existing] = await db.select({ id: leaveTransactions.id })
+            .from(leaveTransactions)
+            .where(and(
+              eq(leaveTransactions.userId, uid),
+              eq(leaveTransactions.restaurantId, restaurantId),
+              eq(leaveTransactions.holidayDate, holiday.date),
+              eq(leaveTransactions.txType, "earn"),
+            ))
+            .limit(1);
+
+          results.push({
+            holidayDate: holiday.date,
+            holidayName: holiday.name,
+            userId: uid,
+            userName: userNameCache[uid],
+            scheduleId: sched.id,
+            is5Plus: true,
+            alreadyEarned: !!existing,
+          });
+        }
+      }
+
+      return results;
+    }),
+
+  /**
+   * 대체휴무 반영 취소 (점장이 잘못 반영한 경우)
+   */
+  cancelEarnSubstitute: managerProcedure
+    .input(z.object({
+      userId: z.number(),
+      restaurantId: z.number(),
+      holidayDate: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const [existing] = await db.select({ id: leaveTransactions.id })
+        .from(leaveTransactions)
+        .where(and(
+          eq(leaveTransactions.userId, input.userId),
+          eq(leaveTransactions.restaurantId, input.restaurantId),
+          eq(leaveTransactions.holidayDate, input.holidayDate),
+          eq(leaveTransactions.txType, "earn"),
+          eq(leaveTransactions.leaveType, "substitute"),
+        ))
+        .limit(1);
+
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "해당 대체휴무 기록이 없습니다" });
+      }
+
+      await db.delete(leaveTransactions).where(eq(leaveTransactions.id, existing.id));
+
+      const year = parseInt(input.holidayDate.slice(0, 4));
+      await syncLeaveBalance(input.userId, input.restaurantId, year, "substitute");
+
+      return { ok: true };
+    }),
+
+  /**
    * 공휴일 근무 시 대체휴무 발생 등록
-   * 점장/매니져가 스케줄 확정 시 호출하거나, 수동 등록
+   * 점장이 인건비 정산에서 수동 반영
    */
   earnSubstitute: managerProcedure
     .input(z.object({

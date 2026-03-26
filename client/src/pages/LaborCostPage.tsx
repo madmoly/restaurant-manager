@@ -4,6 +4,7 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   ChevronLeft, ChevronRight, Building2, Users, Clock, Wallet,
   ChevronDown, ChevronUp, FileText, Download, CalendarCheck, CalendarDays,
+  AlertTriangle, Check, X, Plus, Minus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
@@ -272,79 +273,285 @@ export default function LaborCostPage() {
   );
 }
 
-/* ─── 대체휴무/연차 잔여 요약 섹션 ─────────────────────────────── */
+/* ─── 대체휴무/연차 관리 섹션 ─────────────────────────────── */
 function LeaveSummarySection({ restaurantId, year, month }: { restaurantId: number; year: number; month: number }) {
   const [open, setOpen] = useState(false);
-  const { data, isLoading } = trpc.leaveBalance.storeSummary.useQuery(
+  const [useLeaveTarget, setUseLeaveTarget] = useState<{ userId: number; userName: string; leaveType: "substitute" | "annual" } | null>(null);
+  const [useDate, setUseDate] = useState("");
+  const [useDays, setUseDays] = useState<"1" | "0.5">("1");
+
+  const utils = trpc.useUtils();
+
+  // 공휴일 근무 자동 감지
+  const { data: holidayWork, isLoading: hwLoading } = trpc.leaveBalance.detectHolidayWork.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 },
+  );
+
+  // 전체 잔여 현황
+  const { data: summary, isLoading: sumLoading } = trpc.leaveBalance.storeSummary.useQuery(
     { restaurantId, year },
     { enabled: restaurantId > 0 },
   );
 
+  // 대체휴무 반영 mutation
+  const earnMut = trpc.leaveBalance.earnSubstitute.useMutation({
+    onSuccess: () => {
+      utils.leaveBalance.detectHolidayWork.invalidate();
+      utils.leaveBalance.storeSummary.invalidate();
+    },
+  });
+
+  // 대체휴무 반영 취소 mutation
+  const cancelMut = trpc.leaveBalance.cancelEarnSubstitute.useMutation({
+    onSuccess: () => {
+      utils.leaveBalance.detectHolidayWork.invalidate();
+      utils.leaveBalance.storeSummary.invalidate();
+    },
+  });
+
+  // 휴가 소진 mutation
+  const useMut = trpc.leaveBalance.useLeave.useMutation({
+    onSuccess: () => {
+      utils.leaveBalance.storeSummary.invalidate();
+      setUseLeaveTarget(null);
+      setUseDate("");
+      setUseDays("1");
+    },
+  });
+
+  const isLoading = hwLoading || sumLoading;
+  const hasHolidayWork = holidayWork && holidayWork.length > 0;
+  const hasSummary = summary && summary.length > 0;
+
   if (isLoading) return null;
-  if (!data || data.length === 0) return null;
+  if (!hasHolidayWork && !hasSummary) return null;
+
+  const unreflected = holidayWork?.filter((h) => !h.alreadyEarned) ?? [];
 
   return (
     <div className="bg-card border border-border rounded-lg overflow-hidden">
+      {/* 헤더 */}
       <div
         className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors"
         onClick={() => setOpen(!open)}
       >
         <CalendarCheck className="w-4 h-4 text-muted-foreground shrink-0" />
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-foreground">대체휴무 / 연차 현황</div>
-          <div className="text-xs text-muted-foreground">{year}년 · 5인 이상 사업장 직원 {data.length}명</div>
+          <div className="text-sm font-semibold text-foreground">대체휴무 / 연차 관리</div>
+          <div className="text-xs text-muted-foreground">
+            {year}년 {month}월
+            {unreflected.length > 0 && (
+              <span className="ml-1 text-amber-600 font-medium">
+                · 미반영 {unreflected.length}건
+              </span>
+            )}
+          </div>
         </div>
+        {unreflected.length > 0 && !open && (
+          <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+            {unreflected.length}
+          </span>
+        )}
         {open ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
       </div>
 
       {open && (
         <div className="border-t border-border">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-muted/50">
-                <th className="text-left px-4 py-2 font-medium text-muted-foreground">이름</th>
-                <th className="text-center px-2 py-2 font-medium text-muted-foreground" colSpan={3}>
-                  <span className="flex items-center justify-center gap-1"><CalendarDays className="w-3 h-3" /> 대체휴무</span>
-                </th>
-                <th className="text-center px-2 py-2 font-medium text-muted-foreground" colSpan={3}>
-                  <span className="flex items-center justify-center gap-1"><CalendarCheck className="w-3 h-3" /> 연차</span>
-                </th>
-              </tr>
-              <tr className="bg-muted/30">
-                <th className="px-4 py-1"></th>
-                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">발생</th>
-                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">사용</th>
-                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">잔여</th>
-                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">발생</th>
-                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">사용</th>
-                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">잔여</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((emp) => (
-                <tr key={emp.userId} className="border-t border-border/50">
-                  <td className="px-4 py-2">
-                    <div className="font-medium text-foreground">{emp.userName}</div>
-                    {emp.storeRole && (
-                      <div className="text-[10px] text-muted-foreground">
-                        {emp.storeRole === "owner" ? "점장" : emp.storeRole === "supervisor" ? "매니져" : "직원"}
-                      </div>
-                    )}
-                  </td>
-                  <td className="text-center px-2 py-2 text-muted-foreground">{emp.substitute.earned}</td>
-                  <td className="text-center px-2 py-2 text-muted-foreground">{emp.substitute.used}</td>
-                  <td className={`text-center px-2 py-2 font-medium ${emp.substitute.remaining > 0 ? "text-blue-600" : "text-muted-foreground"}`}>
-                    {emp.substitute.remaining}
-                  </td>
-                  <td className="text-center px-2 py-2 text-muted-foreground">{emp.annual.earned}</td>
-                  <td className="text-center px-2 py-2 text-muted-foreground">{emp.annual.used}</td>
-                  <td className={`text-center px-2 py-2 font-medium ${emp.annual.remaining > 0 ? "text-green-600" : "text-muted-foreground"}`}>
-                    {emp.annual.remaining}
-                  </td>
-                </tr>
+          {/* ── 1. 공휴일 근무 감지 (이번 달) ── */}
+          {hasHolidayWork && (
+            <div className="p-3 space-y-2">
+              <div className="text-xs font-semibold text-muted-foreground flex items-center gap-1 mb-2">
+                <AlertTriangle className="w-3 h-3" /> {month}월 공휴일 근무 감지 (5인 이상 사업장)
+              </div>
+              {holidayWork!.map((hw, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs bg-muted/30 rounded-md px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium text-foreground">{hw.userName}</span>
+                    <span className="text-muted-foreground ml-1">
+                      {hw.holidayDate.slice(5)} {hw.holidayName}
+                    </span>
+                  </div>
+                  {hw.alreadyEarned ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-green-600 flex items-center gap-0.5">
+                        <Check className="w-3 h-3" /> 반영됨
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`${hw.userName}의 ${hw.holidayName} 대체휴무 반영을 취소하시겠습니까?`)) {
+                            cancelMut.mutate({ userId: hw.userId, restaurantId, holidayDate: hw.holidayDate });
+                          }
+                        }}
+                        disabled={cancelMut.isPending}
+                        className="text-muted-foreground hover:text-red-500 transition-colors ml-1"
+                        title="반영 취소"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        earnMut.mutate({
+                          userId: hw.userId,
+                          restaurantId,
+                          holidayDate: hw.holidayDate,
+                          scheduleId: hw.scheduleId,
+                        });
+                      }}
+                      disabled={earnMut.isPending}
+                      className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium transition-colors"
+                    >
+                      <Plus className="w-3 h-3" /> 대체휴무 반영
+                    </button>
+                  )}
+                </div>
               ))}
-            </tbody>
-          </table>
+              {unreflected.length > 1 && (
+                <button
+                  onClick={() => {
+                    if (!confirm(`미반영 ${unreflected.length}건을 모두 반영하시겠습니까?`)) return;
+                    for (const hw of unreflected) {
+                      earnMut.mutate({
+                        userId: hw.userId,
+                        restaurantId,
+                        holidayDate: hw.holidayDate,
+                        scheduleId: hw.scheduleId,
+                      });
+                    }
+                  }}
+                  disabled={earnMut.isPending}
+                  className="w-full text-center text-xs font-medium text-blue-600 hover:text-blue-800 py-1.5 bg-blue-50 dark:bg-blue-950/30 rounded-md transition-colors"
+                >
+                  미반영 {unreflected.length}건 일괄 반영
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* ── 2. 연간 잔여 현황 ── */}
+          {hasSummary && (
+            <div className={hasHolidayWork ? "border-t border-border" : ""}>
+              <div className="px-3 pt-3 pb-1 text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                <CalendarDays className="w-3 h-3" /> {year}년 잔여 현황
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-muted/30">
+                    <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">이름</th>
+                    <th className="text-center px-1 py-1.5 text-[10px] text-muted-foreground font-normal" colSpan={3}>대체휴무</th>
+                    <th className="text-center px-1 py-1.5 text-[10px] text-muted-foreground font-normal" colSpan={3}>연차</th>
+                    <th className="px-2 py-1.5"></th>
+                  </tr>
+                  <tr className="bg-muted/15">
+                    <th className="px-3 py-0.5"></th>
+                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">발생</th>
+                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">사용</th>
+                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">잔여</th>
+                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">발생</th>
+                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">사용</th>
+                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">잔여</th>
+                    <th className="px-2 py-0.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary!.map((emp) => (
+                    <tr key={emp.userId} className="border-t border-border/50">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-foreground">{emp.userName}</div>
+                      </td>
+                      <td className="text-center px-1 py-2 text-muted-foreground">{emp.substitute.earned}</td>
+                      <td className="text-center px-1 py-2 text-muted-foreground">{emp.substitute.used}</td>
+                      <td className={`text-center px-1 py-2 font-medium ${emp.substitute.remaining > 0 ? "text-blue-600" : "text-muted-foreground"}`}>
+                        {emp.substitute.remaining}
+                      </td>
+                      <td className="text-center px-1 py-2 text-muted-foreground">{emp.annual.earned}</td>
+                      <td className="text-center px-1 py-2 text-muted-foreground">{emp.annual.used}</td>
+                      <td className={`text-center px-1 py-2 font-medium ${emp.annual.remaining > 0 ? "text-green-600" : "text-muted-foreground"}`}>
+                        {emp.annual.remaining}
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="flex items-center gap-1">
+                          {emp.substitute.remaining > 0 && (
+                            <button
+                              onClick={() => setUseLeaveTarget({ userId: emp.userId, userName: emp.userName, leaveType: "substitute" })}
+                              className="text-[10px] text-blue-600 hover:underline whitespace-nowrap"
+                              title="대체휴무 소진"
+                            >
+                              <Minus className="w-3 h-3 inline" />대휴
+                            </button>
+                          )}
+                          {emp.annual.remaining > 0 && (
+                            <button
+                              onClick={() => setUseLeaveTarget({ userId: emp.userId, userName: emp.userName, leaveType: "annual" })}
+                              className="text-[10px] text-green-600 hover:underline whitespace-nowrap"
+                              title="연차 소진"
+                            >
+                              <Minus className="w-3 h-3 inline" />연차
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* ── 3. 소진 입력 모달 (인라인) ── */}
+          {useLeaveTarget && (
+            <div className="border-t border-border p-3 bg-muted/20 space-y-2">
+              <div className="text-xs font-semibold text-foreground">
+                {useLeaveTarget.userName} — {useLeaveTarget.leaveType === "substitute" ? "대체휴무" : "연차"} 소진
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={useDate}
+                  onChange={(e) => setUseDate(e.target.value)}
+                  className="text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground flex-1"
+                  placeholder="사용일"
+                />
+                <select
+                  value={useDays}
+                  onChange={(e) => setUseDays(e.target.value as "1" | "0.5")}
+                  className="text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground"
+                >
+                  <option value="1">1일</option>
+                  <option value="0.5">반차 (0.5일)</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="text-xs h-7"
+                  disabled={!useDate || useMut.isPending}
+                  onClick={() => {
+                    useMut.mutate({
+                      userId: useLeaveTarget.userId,
+                      restaurantId,
+                      leaveType: useLeaveTarget.leaveType,
+                      useDate,
+                      days: parseFloat(useDays),
+                    });
+                  }}
+                >
+                  {useMut.isPending ? "처리중..." : "소진 등록"}
+                </Button>
+                <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => setUseLeaveTarget(null)}>
+                  취소
+                </Button>
+                {useMut.error && (
+                  <span className="text-xs text-red-500">{useMut.error.message}</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
