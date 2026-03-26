@@ -453,18 +453,23 @@ export const schedulesRouter = router({
   confirmRange: managerProcedure
     .input(z.object({ restaurantId: z.number(), from: z.string(), to: z.string() }))
     .mutation(async ({ input }) => {
-      await db
+      // KST 기준으로 범위 지정 (from은 YYYY-MM-DD, to는 YYYY-MM-DDT23:59:59 등)
+      const fromStr = input.from.length === 10 ? input.from + "T00:00:00+09:00" : input.from + "+09:00";
+      const toStr = input.to.includes("T") ? input.to.replace(/T.*/, "T23:59:59+09:00") : input.to + "T23:59:59+09:00";
+      const fromDate = new Date(fromStr);
+      const toDate = new Date(toStr);
+      const result = await db
         .update(schedules)
         .set({ status: "confirmed", confirmedAt: new Date(), publishedAt: new Date() })
         .where(
           and(
             eq(schedules.restaurantId, input.restaurantId),
-            gte(schedules.startTime, new Date(input.from)),
-            sql`${schedules.startTime} <= ${new Date(input.to)}`,
+            gte(schedules.startTime, fromDate),
+            sql`${schedules.startTime} <= ${toDate}`,
             eq(schedules.status, "draft")
           )
         );
-      return { success: true };
+      return { success: true, affected: (result as any)[0]?.affectedRows ?? 0 };
     }),
 
   /** 날짜별 확정 (draft → confirmed) */

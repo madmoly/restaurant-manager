@@ -1,5 +1,7 @@
-스케줄 반차 인원 0.5명 반영
+스케줄 UI 개선 + 스케줄 확정 버그 수정
 
-- 주간 그리드 날짜별 인원 합계에서 반차(open/close) = 0.5, 풀타임 = 1로 계산
-- 기존: daySchedules.length (모두 1명)
-- 변경: shiftPreset이 open/close이면 0.5명으로 카운트
+- PC화면 글씨 확대: 날짜/이름/시간 text-xs → md:text-sm, 상태뱃지/인원수도 md:text-xs
+- 지난주 복사/스케줄 확정 버튼: 드롭다운 메뉴에서 헤더 직접 노출로 변경
+- 전체 확정 → 스케줄 확정 명칭 변경
+- confirmRange KST 타임존 버그 수정: UTC 기준 날짜 파싱 → KST(+09:00) 명시
+- confirmRange affected 수 반환 추가 (0건이면 안내 토스트)

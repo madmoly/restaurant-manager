@@ -343,7 +343,7 @@ export default function SchedulePage() {
   const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "" });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
-  const [showBulkMenu, setShowBulkMenu] = useState(false);
+  // showBulkMenu 삭제 — 버튼이 헤더에 직접 노출됨
 
   const utils = trpc.useUtils();
 
@@ -426,7 +426,12 @@ export default function SchedulePage() {
   });
 
   const confirmRange = trpc.schedules.confirmRange.useMutation({
-    onSuccess() { toast.success("확정 완료 (직원 공개 + 예상인건비 반영)"); invalidate(); },
+    onSuccess(data: any) {
+      const cnt = data?.affected ?? 0;
+      if (cnt > 0) toast.success(`${cnt}건 스케줄 확정 완료`);
+      else toast.info("확정할 초안 스케줄이 없습니다");
+      invalidate();
+    },
     onError(err) { toast.error(err.message); },
   });
 
@@ -578,29 +583,25 @@ export default function SchedulePage() {
       {/* ─── 헤더 ──────────────────────────────── */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold text-foreground">스케줄 관리</h1>
-        <div className="relative">
-          <Button variant="outline" size="sm" onClick={() => setShowBulkMenu(!showBulkMenu)}>
-            <MoreHorizontal className="w-4 h-4" />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => copyWeek.mutate({ restaurantId, targetWeekStart: weekStart })}
+            disabled={copyWeek.isPending}
+            className="text-xs gap-1.5"
+          >
+            <Copy className="w-3.5 h-3.5" /> 지난주 복사
           </Button>
-          {showBulkMenu && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setShowBulkMenu(false)} />
-              <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-lg shadow-lg py-1 w-44">
-                <button
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
-                  onClick={() => { copyWeek.mutate({ restaurantId, targetWeekStart: weekStart }); setShowBulkMenu(false); }}
-                >
-                  <Copy className="w-4 h-4" /> 지난주 복사
-                </button>
-                <button
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
-                  onClick={() => { confirmRange.mutate({ restaurantId, from: weekStart, to: weekEnd }); setShowBulkMenu(false); }}
-                >
-                  <Send className="w-4 h-4" /> 전체 확정
-                </button>
-              </div>
-            </>
-          )}
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => confirmRange.mutate({ restaurantId, from: weekStart, to: weekEnd })}
+            disabled={confirmRange.isPending}
+            className="text-xs gap-1.5"
+          >
+            <Send className="w-3.5 h-3.5" /> 스케줄 확정
+          </Button>
         </div>
       </div>
 
@@ -649,7 +650,7 @@ export default function SchedulePage() {
             >
               <div className="flex items-center justify-between mb-1.5">
                 <span
-                  className={`text-xs font-semibold ${
+                  className={`text-xs md:text-sm font-semibold ${
                     isToday ? "text-primary" : isWeekend ? "text-red-500" : "text-muted-foreground"
                   }`}
                 >
@@ -657,14 +658,14 @@ export default function SchedulePage() {
                   {daySchedules.length > 0 && (() => {
                     const headcount = daySchedules.reduce((sum, s) =>
                       sum + (s.shiftPreset === "open" || s.shiftPreset === "close" ? 0.5 : 1), 0);
-                    return <span className="ml-1 text-[10px] font-normal">({headcount % 1 === 0 ? headcount : headcount.toFixed(1)}명)</span>;
+                    return <span className="ml-1 text-[10px] md:text-xs font-normal">({headcount % 1 === 0 ? headcount : headcount.toFixed(1)}명)</span>;
                   })()}
                 </span>
                 {daySchedules.some((s) => s.status === "draft") && (
                   <button
                     onClick={(e) => { e.stopPropagation(); confirmDay.mutate({ restaurantId, date: dateStr }); }}
                     disabled={confirmDay.isPending}
-                    className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/50 transition-colors"
+                    className="px-1.5 py-0.5 rounded text-[10px] md:text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/50 transition-colors"
                   >
                     확정
                   </button>
@@ -679,19 +680,19 @@ export default function SchedulePage() {
                     <button
                       key={s.id}
                       onClick={() => openEditModal(s)}
-                      className={`w-full text-left p-1.5 rounded bg-background border-l-2 ${st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors`}
+                      className={`w-full text-left p-1.5 md:p-2 rounded bg-background border-l-2 ${st.bgCard} border border-border/50 text-xs md:text-sm active:bg-accent/50 transition-colors`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-medium text-foreground truncate">
                           {s.userName ?? s.tempWorkerName ?? "미배정"}
                           {s.tempWorkerName && <span className="text-orange-500 ml-1">(임시)</span>}
                         </span>
-                        <span className={`px-1 py-0.5 rounded text-[10px] font-medium shrink-0 ${st.color}`}>
+                        <span className={`px-1 py-0.5 rounded text-[10px] md:text-xs font-medium shrink-0 ${st.color}`}>
                           {st.label}
                         </span>
                       </div>
                       <div className="text-muted-foreground flex items-center gap-1 mt-0.5">
-                        <Clock className="w-3 h-3 shrink-0" />
+                        <Clock className="w-3 h-3 md:w-3.5 md:h-3.5 shrink-0" />
                         <span>
                           {fmtTime(s.startTime)}~{fmtTime(s.endTime)}
                           {presetInfo && <span className="ml-1 opacity-60">({presetInfo.label})</span>}
@@ -704,7 +705,7 @@ export default function SchedulePage() {
 
               <button
                 onClick={() => openAssignModal(dateStr)}
-                className="w-full mt-1 py-2 rounded border border-dashed border-border/60 text-[11px] text-muted-foreground hover:bg-accent/30 active:bg-accent/50 transition-colors"
+                className="w-full mt-1 py-2 rounded border border-dashed border-border/60 text-[11px] md:text-xs text-muted-foreground hover:bg-accent/30 active:bg-accent/50 transition-colors"
               >
                 + 직원 배정
               </button>
