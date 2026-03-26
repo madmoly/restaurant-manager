@@ -77,11 +77,11 @@ export default function RestaurantsPage() {
         <StaffSection restaurantId={current.id} />
       </div>
 
-      {/* 체크리스트 설정 → 업무관리로 이동 안내 */}
+      {/* 매장 업무관리로 이동 안내 */}
       <div className="bg-card rounded-lg border border-border p-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-foreground">일일운영 체크리스트 설정</h3>
+            <h3 className="text-sm font-semibold text-foreground">매장 업무관리</h3>
             <p className="text-xs text-muted-foreground mt-0.5">오픈/매입/일간보고/마감 체크리스트 항목 관리 및 이력</p>
           </div>
           <a href="/task-management" className="text-xs px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">

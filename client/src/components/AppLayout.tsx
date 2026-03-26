@@ -73,7 +73,7 @@ const NAV_GROUPS: NavGroup[] = [
         roles: ["master", "admin", "manager"],
       },
       {
-        label: "체크리스트 설정", href: "/task-management",
+        label: "매장 업무관리", href: "/task-management",
         icon: <ListChecks className="h-4 w-4" />,
         mobileIcon: <ListChecks className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
