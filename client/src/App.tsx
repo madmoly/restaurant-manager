@@ -28,6 +28,8 @@ import ContractSignPage from "./pages/ContractSignPage";
 import JoinPage from "./pages/JoinPage";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
 import SystemPage from "./pages/SystemPage";
+import RecipesPage from "./pages/RecipesPage";
+import StoreInfoPage from "./pages/StoreInfoPage";
 import AppLayout from "./components/AppLayout";
 
 function RoleRouter() {
@@ -81,6 +83,8 @@ function RoleRouter() {
             <Route path="/daily-ops" component={DailyOpsPage} />
             <Route path="/ops-calendar" component={OpsCalendarPage} />
             <Route path="/staff" component={StaffPage} />
+            <Route path="/recipes" component={RecipesPage} />
+            <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/system" component={SystemPage} />
           </>
         )}
@@ -105,6 +109,8 @@ function RoleRouter() {
             <Route path="/task-management" component={TaskManagementPage} />
             <Route path="/labor-cost" component={LaborCostPage} />
             <Route path="/staff" component={StaffPage} />
+            <Route path="/recipes" component={RecipesPage} />
+            <Route path="/store-info" component={StoreInfoPage} />
           </>
         )}
 
@@ -125,6 +131,8 @@ function RoleRouter() {
             <Route path="/task-management" component={TaskManagementPage} />
             <Route path="/labor-cost" component={LaborCostPage} />
             <Route path="/staff" component={StaffPage} />
+            <Route path="/recipes" component={RecipesPage} />
+            <Route path="/store-info" component={StoreInfoPage} />
           </>
         )}
 
@@ -137,6 +145,8 @@ function RoleRouter() {
             <Route path="/sales" component={SalesPage} />
             <Route path="/profitability" component={ProfitPage} />
             <Route path="/purchase-management" component={PurchaseManagementPage} />
+            <Route path="/recipes" component={RecipesPage} />
+            <Route path="/store-info" component={StoreInfoPage} />
           </>
         )}
 

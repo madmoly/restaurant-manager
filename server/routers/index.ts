@@ -28,6 +28,8 @@ import { adminRouter } from "./admin";
 import { systemRouter } from "./system";
 import { invitesRouter } from "./invites";
 import { leaveBalanceRouter } from "./leaveBalance";
+import { recipesRouter } from "./recipes";
+import { storeInfoRouter } from "./storeInfo";
 
 export const appRouter = router({
   auth: authRouter,
@@ -59,6 +61,8 @@ export const appRouter = router({
   system: systemRouter,
   invites: invitesRouter,
   leaveBalance: leaveBalanceRouter,
+  recipes: recipesRouter,
+  storeInfo: storeInfoRouter,
 });
 
 export type AppRouter = typeof appRouter;

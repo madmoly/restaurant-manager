@@ -795,3 +795,36 @@ export const leaveTransactions = mysqlTable("leave_transactions", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type LeaveTransaction = typeof leaveTransactions.$inferSelect;
+
+// ─── 레시피 게시판 ────────────────────────────────────────────────────────────
+export const recipes = mysqlTable("recipes", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  title: varchar("title", { length: 200 }).notNull(),           // 메뉴명
+  category: varchar("category", { length: 50 }),                 // 분류 (메인, 사이드, 음료 등)
+  imageUrl: varchar("imageUrl", { length: 500 }),                // 대표 사진
+  content: text("content"),                                       // 레시피 본문 (재료, 조리법 등)
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isPublished: boolean("isPublished").default(true).notNull(),
+  createdBy: int("createdBy").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type Recipe = typeof recipes.$inferSelect;
+
+// ─── 매장 업무정보 (카드형) ───────────────────────────────────────────────────
+export const storeInfoCards = mysqlTable("store_info_cards", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  cardType: varchar("cardType", { length: 30 }).notNull(),       // notice, access, contact, etc.
+  title: varchar("title", { length: 200 }).notNull(),
+  content: text("content"),                                       // 본문 (마크다운 or 일반 텍스트)
+  imageUrl: varchar("imageUrl", { length: 500 }),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isPinned: boolean("isPinned").default(false).notNull(),
+  isPublished: boolean("isPublished").default(true).notNull(),
+  createdBy: int("createdBy").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type StoreInfoCard = typeof storeInfoCards.$inferSelect;

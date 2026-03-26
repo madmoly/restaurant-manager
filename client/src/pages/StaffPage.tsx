@@ -803,11 +803,14 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
                 </button>
               </div>
             </div>
-            {form.over5Employees && (
-              <div className="text-[11px] rounded-md px-3 py-2 space-y-0.5 bg-blue-500/10 text-blue-700 dark:text-blue-300">
-                <p className="font-semibold">근로기준법 전면 적용</p><p>연차유급휴가, 야간/휴일 가산수당(1.5배), 부당해고 제한, 주휴수당 의무</p>
-              </div>
-            )}
+            <div className={`text-[11px] rounded-md px-3 py-2 space-y-0.5 ${form.over5Employees ? "bg-blue-500/10 text-blue-700 dark:text-blue-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>
+              {form.over5Employees ? (
+                <><p className="font-semibold">근로기준법 전면 적용</p><p>연차유급휴가, 야간/휴일 가산수당(1.5배), 부당해고 제한, 주휴수당 의무</p></>
+              ) : (
+                <><p className="font-semibold">근로기준법 일부 적용</p><p>해고예고(30일), 퇴직금, 최저임금 적용 / 연차·가산수당·부당해고 규정 미적용</p></>
+              )}
+            </div>
+            <p className={subLabelCls}>※ 사업장 규모는 계약서 생성 기준 참고용이며, 실제 계약서에는 기재되지 않습니다</p>
           </div>
 
           {/* ═══ 직원 정보 ═══ */}

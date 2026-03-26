@@ -175,21 +175,8 @@ export default function ContractSignPage({ token }: { token: string }) {
                     }
                   />
                 )}
-                <ContractRow
-                  label={contract.mealProvided ? "12. 사업장규모" : "11. 사업장규모"}
-                  value={contract.over5Employees ? "상시 5인 이상" : "상시 5인 미만"}
-                />
               </tbody>
             </table>
-
-            {/* 5인 미만 안내 */}
-            {!contract.over5Employees && (
-              <div className="rounded-md p-3 text-xs"
-                style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}>
-                <strong>※ 5인 미만 사업장 안내:</strong> 근로기준법 일부 조항(연차유급휴가, 야간/휴일 가산수당, 부당해고 구제 등)이 적용되지 않습니다.
-                단, 해고예고(30일), 퇴직금, 최저임금은 적용됩니다.
-              </div>
-            )}
 
             {/* 특약사항 */}
             {contract.specialTerms && (

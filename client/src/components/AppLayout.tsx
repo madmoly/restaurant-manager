@@ -23,7 +23,7 @@ import {
   // 새롭게 개편된 직관적인 프리미엄 아이콘 세트
   LayoutGrid, Activity, CalendarRange, ListChecks, Clock,
   UsersRound, Coins, BarChart3, Receipt, ShoppingCart, ShieldCheck,
-  Store, BellRing, Bell
+  Store, BellRing, Bell, ChefHat, ClipboardList,
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -168,6 +168,18 @@ const STORE_NAV_GROUPS: NavGroup[] = [
         icon: <Store className="h-4 w-4" />,
         mobileIcon: <Store className="h-5 w-5" />,
         roles: ["manager"],  // manager/staff만 (admin은 시스템 전역에서 접근)
+      },
+      {
+        label: "레시피 정보", href: "/recipes",
+        icon: <ChefHat className="h-4 w-4" />,
+        mobileIcon: <ChefHat className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "staff"],
+      },
+      {
+        label: "업무정보", href: "/store-info",
+        icon: <ClipboardList className="h-4 w-4" />,
+        mobileIcon: <ClipboardList className="h-5 w-5" />,
+        roles: ["master", "admin", "manager", "staff"],
       },
       {
         label: "알림", href: "/notifications",

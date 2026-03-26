@@ -286,6 +286,43 @@ app.use(express.json());
       )
     `);
 
+    // ─── 레시피 게시판 ───────────────────────────────────────────────
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS recipes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        category VARCHAR(50),
+        imageUrl VARCHAR(500),
+        content TEXT,
+        sortOrder INT NOT NULL DEFAULT 0,
+        isPublished BOOLEAN NOT NULL DEFAULT TRUE,
+        createdBy INT NOT NULL,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_recipes_restaurant (restaurantId)
+      )
+    `);
+
+    // ─── 매장 업무정보 카드 ─────────────────────────────────────────
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS store_info_cards (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        cardType VARCHAR(30) NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        content TEXT,
+        imageUrl VARCHAR(500),
+        sortOrder INT NOT NULL DEFAULT 0,
+        isPinned BOOLEAN NOT NULL DEFAULT FALSE,
+        isPublished BOOLEAN NOT NULL DEFAULT TRUE,
+        createdBy INT NOT NULL,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_info_cards_restaurant (restaurantId)
+      )
+    `);
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {
