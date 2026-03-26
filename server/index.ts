@@ -104,6 +104,24 @@ app.use(express.json());
     await addColumnIfNotExists("store_checklist_templates", "specificDate", "DATE DEFAULT NULL");
     await addColumnIfNotExists("store_checklist_templates", "isHighlight", "BOOLEAN DEFAULT FALSE");
 
+    // 체크리스트 로그: targetTab 컬럼 추가 + 기존 데이터 마이그레이션
+    await addColumnIfNotExists("daily_checklist_logs", "targetTab", "VARCHAR(20) DEFAULT NULL");
+    // 기존 checkType → targetTab 매핑 (한번만 실행됨: targetTab이 NULL인 행만)
+    try {
+      await conn.query(`
+        UPDATE daily_checklist_logs SET targetTab = CASE
+          WHEN checkType = 'open' THEN 'open'
+          WHEN checkType = 'order' THEN 'purchase'
+          WHEN checkType IN ('cleaning','hygiene','inventory','other') THEN 'close'
+          ELSE 'open'
+        END
+        WHERE targetTab IS NULL
+      `);
+      console.log("[migrate] daily_checklist_logs.targetTab backfilled");
+    } catch (e: any) {
+      console.log("[migrate] targetTab backfill:", e.message);
+    }
+
     // notifications type ENUM 확장 (health_cert_expiry 추가)
     try {
       await conn.query(`ALTER TABLE notifications MODIFY COLUMN type ENUM('schedule_change','cost_exceeded','target_achieved','general','schedule_assigned','schedule_updated','schedule_deleted','health_cert_expiry') NOT NULL`);

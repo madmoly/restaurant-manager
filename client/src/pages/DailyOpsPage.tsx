@@ -25,19 +25,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 
 // ============================================================================
-// CHECK TYPE LABELS
+// TAB LABELS
 // ============================================================================
-const CHECK_TYPE_LABELS: Record<string, string> = {
+const TAB_LABELS: Record<string, string> = {
   open: '오픈',
-  order: '발주',
-  cleaning: '마감',
-  hygiene: '위생',
-  inventory: '재고',
-  other: '기타',
+  purchase: '매입',
+  midday: '일간보고',
+  close: '마감',
 };
 
 // ============================================================================
-// TAB CHECKLISTS — 탭별로 모든 관련 체크리스트 섹션 렌더링
+// TAB CHECKLISTS — targetTab 기준으로 체크리스트 렌더링
 // ============================================================================
 function TabChecklists({
   restaurantId,
@@ -48,46 +46,31 @@ function TabChecklists({
   date: string;
   targetTab: 'open' | 'purchase' | 'midday' | 'close';
 }) {
-  const checkTypesQuery = trpc.storeChecklists.getCheckTypesForTab.useQuery({
-    restaurantId,
-    targetTab,
-  });
-
-  const checkTypes = checkTypesQuery.data ?? [];
-
-  if (checkTypesQuery.isLoading) return null;
-  if (checkTypes.length === 0) return null;
-
   return (
-    <>
-      {checkTypes.map((ct) => (
-        <ChecklistSection
-          key={ct}
-          restaurantId={restaurantId}
-          date={date}
-          checkType={ct as any}
-          label={`${CHECK_TYPE_LABELS[ct] ?? ct} 체크리스트`}
-          icon={Check}
-        />
-      ))}
-    </>
+    <ChecklistSection
+      restaurantId={restaurantId}
+      date={date}
+      targetTab={targetTab}
+      label={`${TAB_LABELS[targetTab] ?? targetTab} 체크리스트`}
+      icon={Check}
+    />
   );
 }
 
 // ============================================================================
-// CHECKLIST SECTION COMPONENT
+// CHECKLIST SECTION COMPONENT — targetTab 기반
 // ============================================================================
 
 function ChecklistSection({
   restaurantId,
   date,
-  checkType,
+  targetTab,
   label,
   icon: Icon,
 }: {
   restaurantId: number;
   date: string;
-  checkType: 'open' | 'order' | 'cleaning' | 'hygiene' | 'inventory' | 'other';
+  targetTab: 'open' | 'purchase' | 'midday' | 'close';
   label: string;
   icon: React.ElementType;
 }) {
@@ -97,13 +80,14 @@ function ChecklistSection({
 
   const templatesQuery = trpc.storeChecklists.listTemplates.useQuery({
     restaurantId,
-    checkType,
+    targetTab,
+    date,
   });
 
   const logQuery = trpc.storeChecklists.getLog.useQuery({
     restaurantId,
     logDate: date,
-    checkType,
+    targetTab,
   });
 
   const saveLogMutation = trpc.storeChecklists.saveLog.useMutation({
@@ -168,7 +152,7 @@ function ChecklistSection({
     saveLogMutation.mutate({
       restaurantId,
       logDate: date,
-      checkType,
+      targetTab,
       checkedItemIds,
       checkedItems: updatedCheckedItems,
     });
@@ -1480,12 +1464,6 @@ function MiddayTab({
         )}
       </Card>
 
-      {/* 매입 탭 체크리스트 */}
-      <TabChecklists
-        restaurantId={restaurantId}
-        date={date}
-        targetTab="purchase"
-      />
     </div>
   );
 }

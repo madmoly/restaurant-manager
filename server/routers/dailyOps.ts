@@ -512,18 +512,24 @@ export const dailyOpsRouter = router({
           )
         );
 
-      // 체크리스트 템플릿 수 (타입별)
+      // 체크리스트 템플릿 수 (targetTab 기준)
       const templates = await db
-        .select({ checkType: storeChecklistTemplates.checkType, cnt: count() })
+        .select({ targetTab: storeChecklistTemplates.targetTab, cnt: count() })
         .from(storeChecklistTemplates)
-        .where(eq(storeChecklistTemplates.restaurantId, input.restaurantId))
-        .groupBy(storeChecklistTemplates.checkType);
+        .where(
+          and(
+            eq(storeChecklistTemplates.restaurantId, input.restaurantId),
+            eq(storeChecklistTemplates.isActive, true),
+          )
+        )
+        .groupBy(storeChecklistTemplates.targetTab);
       const templateCounts: Record<string, number> = {};
       for (const t of templates) {
-        templateCounts[t.checkType] = Number(t.cnt);
+        if (t.targetTab) templateCounts[t.targetTab] = Number(t.cnt);
       }
 
       // 날짜별 체크리스트 완료율 맵
+      const TAB_LABELS: Record<string, string> = { open: "오픈", purchase: "매입", midday: "일간보고", close: "마감" };
       const checklistByDate: Record<string, { checked: number; total: number; types: string[] }> = {};
       for (const log of checklistLogs) {
         const dateStr = typeof log.logDate === "string"
@@ -532,12 +538,13 @@ export const dailyOpsRouter = router({
         if (!checklistByDate[dateStr]) {
           checklistByDate[dateStr] = { checked: 0, total: 0, types: [] };
         }
+        const tab = (log as any).targetTab ?? log.checkType; // legacy fallback
         const checkedCount = (log.checkedItemIds as number[] || []).length;
-        const totalForType = templateCounts[log.checkType] ?? 0;
+        const totalForTab = templateCounts[tab] ?? 0;
         checklistByDate[dateStr].checked += checkedCount;
-        checklistByDate[dateStr].total += totalForType;
-        if (checkedCount >= totalForType && totalForType > 0) {
-          checklistByDate[dateStr].types.push(log.checkType);
+        checklistByDate[dateStr].total += totalForTab;
+        if (checkedCount >= totalForTab && totalForTab > 0) {
+          checklistByDate[dateStr].types.push(TAB_LABELS[tab] ?? tab);
         }
       }
 
@@ -746,6 +753,7 @@ export const dailyOpsRouter = router({
         })),
         checklists: checklistLogs.map(c => ({
           checkType: c.checkType,
+          targetTab: (c as any).targetTab ?? c.checkType,
           checkedCount: (c.checkedItemIds as number[] || []).length,
           noOrderToday: c.noOrderToday,
           completedAt: c.completedAt,

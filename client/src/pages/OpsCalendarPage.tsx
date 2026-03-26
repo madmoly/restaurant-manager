@@ -69,14 +69,18 @@ function DayDetailContent({ restaurantId, date }: {
           </div>
           {data.checklists.length > 0 && (
             <div className="pt-1 border-t border-border/50 mt-1">
-              {data.checklists.map((c: any, i: number) => (
-                <div key={i} className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">{c.checkType === "open" ? "오픈" : c.checkType === "order" ? "발주" : "마감"} 체크</span>
-                  <span className={c.checkedCount > 0 ? "text-emerald-600" : "text-muted-foreground/50"}>
-                    {c.checkedCount}항목 완료
-                  </span>
-                </div>
-              ))}
+              {data.checklists.map((c: any, i: number) => {
+                const tabLabels: Record<string, string> = { open: "오픈", purchase: "매입", midday: "일간보고", close: "마감" };
+                const label = tabLabels[c.targetTab] ?? c.targetTab ?? c.checkType;
+                return (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{label} 체크</span>
+                    <span className={c.checkedCount > 0 ? "text-emerald-600" : "text-muted-foreground/50"}>
+                      {c.checkedCount}항목 완료
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -371,8 +375,15 @@ export default function OpsCalendarPage() {
                         {dailyProfit >= 0 ? "+" : ""}{fmtWon(dailyProfit)}
                       </div>
                     )}
+                    {/* 체크리스트 완료 현황 */}
+                    {dayData?.checklist && dayData.checklist.total > 0 && (
+                      <div className={`text-[9px] flex items-center gap-0.5 mt-0.5 ${dayData.checklist.checked === dayData.checklist.total ? "text-emerald-600" : dayData.checklist.checked > 0 ? "text-blue-500" : "text-muted-foreground/50"}`}>
+                        <ClipboardCheck className="w-2.5 h-2.5 shrink-0" />
+                        <span className="truncate">{dayData.checklist.checked}/{dayData.checklist.total}</span>
+                      </div>
+                    )}
                     {/* 스케줄 (공간 있을 때만) */}
-                    {dayData?.schedule && dayData.schedule.total > 0 && !dayData.totalPurchases && (
+                    {dayData?.schedule && dayData.schedule.total > 0 && !dayData.totalPurchases && !dayData?.checklist && (
                       <div className={`text-[9px] flex items-center gap-0.5 mt-0.5 ${dayData.schedule.completed === dayData.schedule.total ? "text-emerald-600" : dayData.schedule.completed > 0 ? "text-blue-500" : "text-muted-foreground"}`}>
                         <Users className="w-2.5 h-2.5 shrink-0" />
                         <span className="truncate">{dayData.schedule.completed}/{dayData.schedule.total}</span>
@@ -397,6 +408,7 @@ export default function OpsCalendarPage() {
             <div className="flex items-center gap-1"><Clock className="w-3 h-3 text-amber-500" /> 오픈</div>
             <div className="flex items-center gap-1"><TrendingUp className="w-3 h-3 text-emerald-500" /> 매출</div>
             <div className="flex items-center gap-1"><ShoppingCart className="w-3 h-3 text-orange-400" /> 매입</div>
+            <div className="flex items-center gap-1"><ClipboardCheck className="w-3 h-3 text-blue-500" /> 체크리스트</div>
             <div className="flex items-center gap-1"><Users className="w-3 h-3 text-blue-500" /> 스케줄</div>
           </div>
 

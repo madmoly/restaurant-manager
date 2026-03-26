@@ -9,10 +9,20 @@ import {
 import { Button } from "@/components/ui/button";
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
-const DEFAULT_TAGS = ["오픈", "발주", "마감", "위생", "재고", "기타"];
+const DEFAULT_TAGS = ["위생", "재고", "기타"];
+
+const TARGET_TABS = [
+  { key: "open" as const, label: "오픈" },
+  { key: "purchase" as const, label: "매입" },
+  { key: "midday" as const, label: "일간보고" },
+  { key: "close" as const, label: "마감" },
+];
+
+type TargetTab = "open" | "purchase" | "midday" | "close";
 
 type Template = {
   id: number; itemText: string; checkType: string;
+  targetTab: string | null;
   requirementType: string; sortOrder: number; isActive: boolean;
   tags: string[] | null; repeatType: string | null;
   repeatDays: number[] | null; specificDate: string | null;
@@ -26,11 +36,13 @@ export default function TaskManagementPage() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
+  const [filterTab, setFilterTab] = useState<TargetTab | null>(null);
   const [filterTag, setFilterTag] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   // form state
   const [formText, setFormText] = useState("");
+  const [formTargetTab, setFormTargetTab] = useState<TargetTab>("open");
   const [formTags, setFormTags] = useState<string[]>([]);
   const [formRepeatType, setFormRepeatType] = useState<"none" | "daily" | "weekly">("none");
   const [formRepeatDays, setFormRepeatDays] = useState<number[]>([]);
@@ -40,7 +52,7 @@ export default function TaskManagementPage() {
 
   const utils = trpc.useUtils();
   const { data: templates = [], isLoading } = trpc.storeChecklists.listAllTemplates.useQuery(
-    { restaurantId },
+    { restaurantId, targetTab: filterTab ?? undefined },
     { enabled: restaurantId > 0 },
   );
   const createMut = trpc.storeChecklists.createTemplate.useMutation({
@@ -54,14 +66,17 @@ export default function TaskManagementPage() {
   });
 
   const resetForm = () => {
-    setFormText(""); setFormTags([]); setFormRepeatType("none");
-    setFormRepeatDays([]); setFormSpecificDate(""); setFormIsHighlight(false);
+    setFormText(""); setFormTargetTab("open"); setFormTags([]);
+    setFormRepeatType("none"); setFormRepeatDays([]);
+    setFormSpecificDate(""); setFormIsHighlight(false);
     setFormReqType("none"); setShowAdd(false); setEditId(null);
   };
 
   const startEdit = (t: Template) => {
     setEditId(t.id); setShowAdd(true);
-    setFormText(t.itemText); setFormTags(t.tags ?? []);
+    setFormText(t.itemText);
+    setFormTargetTab((t.targetTab as TargetTab) ?? "open");
+    setFormTags(t.tags ?? []);
     setFormRepeatType((t.repeatType as any) ?? "none");
     setFormRepeatDays(t.repeatDays ?? []);
     setFormSpecificDate(t.specificDate ?? "");
@@ -73,6 +88,7 @@ export default function TaskManagementPage() {
     if (!formText.trim()) return;
     const payload = {
       itemText: formText.trim(),
+      targetTab: formTargetTab,
       tags: formTags,
       repeatType: formRepeatType as any,
       repeatDays: formRepeatDays,
@@ -83,7 +99,7 @@ export default function TaskManagementPage() {
     if (editId) {
       updateMut.mutate({ id: editId, ...payload });
     } else {
-      createMut.mutate({ restaurantId, checkType: "open", ...payload });
+      createMut.mutate({ restaurantId, ...payload });
     }
   };
 
@@ -102,6 +118,9 @@ export default function TaskManagementPage() {
     return list.sort((a, b) => a.sortOrder - b.sortOrder);
   }, [templates, filterTag]);
 
+  const tabLabel = (tab: string | null) =>
+    TARGET_TABS.find(t => t.key === tab)?.label ?? tab ?? "미지정";
+
   if (!restaurantId) return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
 
   return (
@@ -115,18 +134,29 @@ export default function TaskManagementPage() {
         </Button>
       </div>
 
+      {/* 탭 필터 */}
+      <div className="flex gap-1.5 overflow-x-auto">
+        <button
+          onClick={() => setFilterTab(null)}
+          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${!filterTab ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
+        >전체</button>
+        {TARGET_TABS.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setFilterTab(filterTab === tab.key ? null : tab.key)}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${filterTab === tab.key ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
+          >{tab.label}</button>
+        ))}
+      </div>
+
       {/* 태그 필터 */}
       <div className="flex flex-wrap gap-1.5">
-        <button
-          onClick={() => setFilterTag(null)}
-          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${!filterTag ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
-        >전체</button>
         {allTags.map(tag => (
           <button
             key={tag}
             onClick={() => setFilterTag(filterTag === tag ? null : tag)}
-            className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${filterTag === tag ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
-          >{tag}</button>
+            className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${filterTag === tag ? "bg-blue-600 text-white border-blue-600" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
+          ><Tag className="w-2.5 h-2.5 inline mr-0.5" />{tag}</button>
         ))}
       </div>
 
@@ -135,7 +165,7 @@ export default function TaskManagementPage() {
         <div className="text-center py-8 text-muted-foreground text-sm">로딩 중...</div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground text-sm">
-          {filterTag ? `"${filterTag}" 태그 업무가 없습니다` : "등록된 업무가 없습니다"}
+          {filterTab || filterTag ? "조건에 맞는 업무가 없습니다" : "등록된 업무가 없습니다"}
         </div>
       ) : (
         <div className="space-y-2">
@@ -154,6 +184,9 @@ export default function TaskManagementPage() {
                     <span className="text-sm font-medium text-foreground">{t.itemText}</span>
                   </div>
                   <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-medium">
+                      {tabLabel(t.targetTab)}
+                    </span>
                     {(t.tags ?? []).map(tag => (
                       <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{tag}</span>
                     ))}
@@ -205,6 +238,18 @@ export default function TaskManagementPage() {
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold">{editId ? "업무 수정" : "새 업무 추가"}</h3>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={resetForm}><X className="w-4 h-4" /></Button>
+            </div>
+
+            {/* 탭 (어느 탭에 표시할지) */}
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">표시 탭</label>
+              <div className="flex gap-1.5">
+                {TARGET_TABS.map(tab => (
+                  <button key={tab.key} onClick={() => setFormTargetTab(tab.key)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${formTargetTab === tab.key ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground"}`}
+                  >{tab.label}</button>
+                ))}
+              </div>
             </div>
 
             {/* 업무명 */}

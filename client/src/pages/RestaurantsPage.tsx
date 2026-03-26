@@ -26,8 +26,6 @@ export default function RestaurantsPage() {
   const { user } = useAuth();
   const { selectedRestaurant: current } = useRestaurant();
   const utils = trpc.useUtils();
-  const activeTypeInfo = CHECK_TYPES.find((ct) => ct.key === activeType);
-  const isFlexibleType = !activeTypeInfo?.fixedTab;
   const [showCreate, setShowCreate] = useState(false);
 
   const isAdmin = user?.role === "admin" || user?.role === "master";
@@ -205,18 +203,9 @@ function StaffSection({ restaurantId }: { restaurantId: number }) {
 
 // ─── 체크리스트 관리 ──────────────────────────────────────────────────────────
 
-type CheckTypeKey = "open" | "order" | "cleaning" | "hygiene" | "inventory" | "other";
+type TargetTabKey = "open" | "purchase" | "midday" | "close";
 
-const CHECK_TYPES: { key: CheckTypeKey; label: string; fixedTab?: string }[] = [
-  { key: "open", label: "오픈", fixedTab: "open" },
-  { key: "order", label: "발주", fixedTab: "purchase" },
-  { key: "cleaning", label: "마감", fixedTab: "close" },
-  { key: "hygiene", label: "위생" },
-  { key: "inventory", label: "재고" },
-  { key: "other", label: "기타" },
-];
-
-const TARGET_TAB_OPTIONS = [
+const TARGET_TABS: { key: TargetTabKey; label: string }[] = [
   { key: "open", label: "오픈" },
   { key: "purchase", label: "매입" },
   { key: "midday", label: "일간보고" },
@@ -230,11 +219,11 @@ const REQ_LABELS: Record<string, { label: string; icon: React.ElementType }> = {
 };
 
 function ChecklistManager({ restaurantId }: { restaurantId: number }) {
-  const [activeType, setActiveType] = useState<CheckTypeKey>("open");
+  const [activeType, setActiveType] = useState<TargetTabKey>("open");
   const utils = trpc.useUtils();
 
   const { data: templates = [], isLoading } = trpc.storeChecklists.listAllTemplates.useQuery(
-    { restaurantId, checkType: activeType },
+    { restaurantId, targetTab: activeType },
     { enabled: restaurantId > 0 },
   );
 
@@ -289,7 +278,7 @@ function ChecklistManager({ restaurantId }: { restaurantId: number }) {
     <div className="p-4 space-y-3">
       {/* 타입 탭 */}
       <div className="flex gap-1">
-        {CHECK_TYPES.map((ct) => (
+        {TARGET_TABS.map((ct) => (
           <button
             key={ct.key}
             onClick={() => { setActiveType(ct.key); setShowAdd(false); setEditId(null); }}
@@ -339,7 +328,7 @@ function ChecklistManager({ restaurantId }: { restaurantId: number }) {
                         id: t.id,
                         itemText: editText,
                         requirementType: editReq,
-                        ...(isFlexibleType ? { targetTab: editTargetTab } : {}),
+                        targetTab: editTargetTab as TargetTabKey,
                       })}
                       disabled={!editText.trim()}
                       className="px-2.5 py-1 bg-primary text-primary-foreground text-xs rounded hover:bg-primary/90 disabled:opacity-50"
@@ -367,9 +356,9 @@ function ChecklistManager({ restaurantId }: { restaurantId: number }) {
                           {REQ_LABELS[t.requirementType]?.label}
                         </span>
                       )}
-                      {isFlexibleType && t.targetTab && (
+                      {t.targetTab && (
                         <span className="inline-flex items-center mt-0.5 text-[10px] px-1.5 py-0.5 rounded font-medium bg-violet-500/15 text-violet-600 dark:text-violet-400">
-                          {TARGET_TAB_OPTIONS.find((o) => o.key === t.targetTab)?.label ?? t.targetTab}탭
+                          {TARGET_TABS.find((o) => o.key === t.targetTab)?.label ?? t.targetTab}탭
                         </span>
                       )}
                     </div>
@@ -415,7 +404,7 @@ function ChecklistManager({ restaurantId }: { restaurantId: number }) {
                 if (!addText.trim()) return;
                 createTemplate.mutate({
                   restaurantId,
-                  checkType: activeType,
+                  targetTab: activeType,
                   itemText: addText.trim(),
                   requirementType: addReq,
                   sortOrder: activeTemplates.length,
@@ -459,7 +448,7 @@ function ChecklistHistory({ restaurantId }: { restaurantId: number }) {
     { enabled: restaurantId > 0 },
   );
 
-  const { data: templates = [] } = trpc.storeChecklists.listTemplates.useQuery(
+  const { data: templates = [] } = trpc.storeChecklists.listAllTemplates.useQuery(
     { restaurantId },
     { enabled: restaurantId > 0 },
   );
@@ -476,7 +465,7 @@ function ChecklistHistory({ restaurantId }: { restaurantId: number }) {
 
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
 
-  const typeLabel = (t: string) => CHECK_TYPES.find((ct) => ct.key === t)?.label ?? t;
+  const typeLabel = (t: string) => TARGET_TABS.find((ct) => ct.key === t)?.label ?? t;
 
   return (
     <div className="p-4 space-y-3">
@@ -504,11 +493,11 @@ function ChecklistHistory({ restaurantId }: { restaurantId: number }) {
             const isExpanded = expandedDate === dateStr;
 
             // 각 타입별 완료율 계산
-            const summaries = CHECK_TYPES.map((ct) => {
-              const typeTemplates = templates.filter((t: any) => t.checkType === ct.key);
-              const log = dayLogs.find((l) => l.checkType === ct.key);
+            const summaries = TARGET_TABS.map((ct) => {
+              const tabTemplates = templates.filter((t: any) => t.targetTab === ct.key);
+              const log = dayLogs.find((l: any) => (l.targetTab ?? l.checkType) === ct.key);
               const checked = (log?.checkedItemIds as number[])?.length ?? 0;
-              return { key: ct.key, label: ct.label, total: typeTemplates.length, checked, hasLog: !!log, log };
+              return { key: ct.key, label: ct.label, total: tabTemplates.length, checked, hasLog: !!log, log };
             }).filter((s) => s.total > 0);
 
             const allComplete = summaries.every((s) => s.checked >= s.total);
@@ -540,7 +529,7 @@ function ChecklistHistory({ restaurantId }: { restaurantId: number }) {
                 {isExpanded && (
                   <div className="border-t border-border px-3 py-2 space-y-2">
                     {summaries.map((s) => {
-                      const typeTemplateList = templates.filter((t: any) => t.checkType === s.key);
+                      const typeTemplateList = templates.filter((t: any) => t.targetTab === s.key);
                       const checkedIds = (s.log?.checkedItemIds as number[]) ?? [];
                       const checkedItems = (s.log?.checkedItems as any[]) ?? [];
 

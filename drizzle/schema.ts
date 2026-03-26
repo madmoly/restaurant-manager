@@ -449,6 +449,7 @@ export const dailyChecklistLogs = mysqlTable("daily_checklist_logs", {
   restaurantId: int("restaurantId").notNull(),
   logDate: date("logDate").notNull(),
   checkType: mysqlEnum("checkType", ["open", "order", "cleaning", "hygiene", "inventory", "other"]).notNull(),
+  targetTab: varchar("targetTab", { length: 20 }),
   checkedItemIds: json("checkedItemIds").$type<number[]>().default([]),
   checkedItems: json("checkedItems").$type<CheckedItemData[]>().default([]),
   noOrderToday: boolean("noOrderToday").default(false).notNull(),
