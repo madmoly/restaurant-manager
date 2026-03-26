@@ -1042,19 +1042,18 @@ function PurchaseTab({
               <div className="flex items-center gap-2">
                 <Camera className="w-5 h-5 text-muted-foreground" />
                 <div>
-                  <p className="text-xs font-medium text-foreground">전표/영수증 촬영</p>
+                  <p className="text-xs font-medium text-foreground">전표/영수증 촬영 또는 앨범 선택</p>
                   <p className="text-[10px] text-muted-foreground">사진 업로드 시 AI가 자동 입력합니다</p>
                 </div>
               </div>
               <div className="mt-2 w-full bg-muted/30 rounded px-2.5 py-1.5 space-y-0.5">
-                <p className="text-[10px] text-muted-foreground leading-relaxed">• 한 번에 전표 1장만 촬영해주세요</p>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">• 한 번에 전표 1장만 촬영/선택해주세요</p>
                 <p className="text-[10px] text-muted-foreground leading-relaxed">• 거래처, 품목명, 단가, 수량, 합계가 잘 보이게 찍어주세요</p>
                 <p className="text-[10px] text-muted-foreground leading-relaxed">• 그림자나 빛 반사를 피해주세요</p>
               </div>
               <input
                 type="file"
                 accept="image/*"
-                capture="environment"
                 onChange={(e) => {
                   if (e.target.files?.[0]) {
                     if (simpleMode) setSimpleMode(false);

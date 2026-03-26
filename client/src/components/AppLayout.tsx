@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
+import TutorialBanner from "@/components/TutorialBanner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -552,8 +553,19 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
         </header>
 
         {/* 페이지 콘텐츠 */}
-        <main className="flex-1 overflow-y-auto relative z-0">
+        <main
+          className={cn("flex-1 overflow-y-auto relative z-0 transition-all duration-300", moreMenuOpen && "blur-sm brightness-75 lg:blur-none lg:brightness-100")}
+          onClick={() => moreMenuOpen && setMoreMenuOpen(false)}
+        >
           <div className="pb-24 lg:pb-8 pt-4 lg:pt-6 h-full">
+            {/* Tutorial 배너 — 라우트 경로 기반 자동 매핑 */}
+            <div className="px-4 md:px-6 mb-2">
+              <TutorialBanner pageKey={
+                location === "/" ? "dashboard"
+                : location === "/business" ? "admin-dashboard"
+                : location.replace(/^\//, "").replace(/\//g, "-") || "dashboard"
+              } />
+            </div>
             {children}
           </div>
         </main>
@@ -610,10 +622,10 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
                   <span className="text-[10px] font-bold tracking-wide text-muted-foreground/70">더보기</span>
                 </button>
 
-                {/* 더보기 팝업 — 글래스모피즘 */}
+                {/* 더보기 팝업 — 본화면 블러 + 네비 투명 배경 */}
                 {moreMenuOpen && (
                   <>
-                    <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={() => setMoreMenuOpen(false)} />
+                    <div className="fixed inset-0 z-40" onClick={() => setMoreMenuOpen(false)} />
                     <div className="absolute bottom-full right-0 mb-4 w-56 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-5 border border-border/50 bg-card/95 backdrop-blur-xl">
                       {(() => {
                         const moreHrefs = new Set(moreItems.map(i => i.href));
