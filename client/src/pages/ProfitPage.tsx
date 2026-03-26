@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
-import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download } from "lucide-react";
+import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download, FileText } from "lucide-react";
 import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { ProfitPageSkeleton } from "@/components/ui/skeletons";
@@ -77,31 +77,82 @@ export default function ProfitPage() {
     setExpandedCategory(prev => prev === cat ? null : cat);
   };
 
-  // 엑셀 다운로드
-  const handleExport = () => {
-    const rows = [
-      ["항목", "금액(원)", "비율(%)"],
-      ["매출", sales, "100.0"],
-      ["매입 (식재료비)", purchases, costRatio.toFixed(1)],
-      ["인건비", labor, laborRatio.toFixed(1)],
-      ["고정비", fixed, sales > 0 ? (fixed / sales * 100).toFixed(1) : "0.0"],
-      ["순이익", profit, profitRatio.toFixed(1)],
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showExportMenu]);
+
+  const fileName = `수익분석_${year}년${month}월_${current?.name ?? ""}`;
+
+  const summaryHeaders = ["항목", "금액(원)", "비율(%)"];
+  const summaryRows: (string | number)[][] = [
+    ["매출", sales, "100.0"],
+    ["매입 (식재료비)", purchases, costRatio.toFixed(1)],
+    ["인건비", labor, laborRatio.toFixed(1)],
+    ["고정비", fixed, sales > 0 ? (fixed / sales * 100).toFixed(1) : "0.0"],
+    ["순이익", profit, profitRatio.toFixed(1)],
+  ];
+  const fixedHeaders = ["항목", "금액(원)", "유형"];
+  const fixedRows = fixedBreakdown.map((b: any) => [
+    b.name,
+    b.amount,
+    b.type === "monthly" ? "월납" : b.type === "yearly" ? "연납(÷12)" : b.type === "quarterly" ? "분기(÷3)" : b.type,
+  ]);
+
+  const handleExportExcel = async () => {
+    setShowExportMenu(false);
+    const XLSX = await import("xlsx");
+    const ws = XLSX.utils.aoa_to_sheet([
+      summaryHeaders, ...summaryRows,
       [],
       ["고정비 내역"],
-      ["항목", "금액(원)", "유형"],
-      ...fixedBreakdown.map(b => [b.name, b.amount, b.type === "monthly" ? "월납" : b.type === "yearly" ? "연납(÷12)" : "일시"]),
-    ];
+      fixedHeaders, ...fixedRows,
+    ]);
+    ws["!cols"] = [{ wch: 16 }, { wch: 14 }, { wch: 10 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "수익분석");
+    XLSX.writeFile(wb, `${fileName}.xlsx`);
+  };
 
-    // CSV 생성
-    const csvContent = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
-    const BOM = "\uFEFF";
-    const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `수익분석_${year}년${month}월_${current?.name ?? ""}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleExportPDF = async () => {
+    setShowExportMenu(false);
+    const { jsPDF } = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default;
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+    doc.setFontSize(14);
+    doc.text(fileName, 14, 15);
+
+    autoTable(doc, {
+      startY: 22,
+      head: [summaryHeaders],
+      body: summaryRows.map(r => r.map(c => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [59, 130, 246], textColor: 255 },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+    });
+
+    const finalY = (doc as any).lastAutoTable?.finalY ?? 80;
+    doc.setFontSize(11);
+    doc.text("고정비 내역", 14, finalY + 10);
+
+    autoTable(doc, {
+      startY: finalY + 14,
+      head: [fixedHeaders],
+      body: fixedRows.map((r: any[]) => r.map((c: any) => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [100, 116, 139], textColor: 255 },
+      columnStyles: { 1: { halign: "right" } },
+    });
+
+    doc.save(`${fileName}.pdf`);
   };
 
   return (
@@ -110,10 +161,28 @@ export default function ProfitPage() {
         title="수익 분석"
         description={current?.name}
         action={
-          <Button variant="outline" size="sm" onClick={handleExport} className="gap-1.5">
-            <Download className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">엑셀 내보내기</span>
-          </Button>
+          <div className="relative" ref={exportRef}>
+            <Button variant="outline" size="sm" onClick={() => setShowExportMenu(!showExportMenu)} className="gap-1">
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">내보내기</span>
+            </Button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-lg shadow-lg z-50 min-w-[140px] py-1">
+                <button
+                  onClick={handleExportExcel}
+                  className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors flex items-center gap-2"
+                >
+                  <FileText className="w-3.5 h-3.5 text-green-600" /> Excel (.xlsx)
+                </button>
+                <button
+                  onClick={handleExportPDF}
+                  className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors flex items-center gap-2"
+                >
+                  <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
+                </button>
+              </div>
+            )}
+          </div>
         }
       />
 
