@@ -12,6 +12,28 @@
 - **빌드 명령**: `pnpm run build` → Vite(클라이언트) + esbuild(서버)
 - **시작 명령**: `NODE_ENV=production node dist/index.js`
 
+## Railway 인프라 스펙 (Hobby Plan)
+
+| 항목 | 스펙 | 비용 |
+|------|------|------|
+| 월 구독료 | $5/월 (포함 크레딧 $5) | 초과분만 청구 |
+| 서비스당 CPU | 최대 48 vCPU | $20/vCPU/월 |
+| 서비스당 RAM | 최대 48 GB | $10/GB/월 |
+| 볼륨 스토리지 | 최대 5 GB/서비스 | $0.15/GB/월 |
+| 볼륨 수 | 최대 10개/프로젝트 | — |
+| 임시 스토리지 | 100 GB/서비스 | — |
+| 이미지 크기 | 최대 100 GB | — |
+| 네트워크 Egress | — | $0.05/GB |
+| 레플리카 | 최대 6개/서비스 | — |
+| 이미지 보존 | 72시간 (롤백용) | — |
+| 볼륨 삭제 복구 | 48시간 유예 | — |
+
+### 주의사항
+- DB(MySQL)도 볼륨 기반 → **5GB 한도** (Hobby). 초과 시 Pro($20/월, 50GB~250GB) 업그레이드 필요
+- 파일 업로드(레시피 사진, 체크리스트 등)는 서버 임시 스토리지 사용 → **배포 시 초기화됨**. 영구 저장 필요 시 볼륨 마운트 또는 외부 스토리지(S3 등) 필요
+- 실 사용량 기반 과금: CPU/RAM은 활성 시간 기준, 유휴 시 비용 최소화
+- Pro 플랜 업그레이드 기준: 볼륨 5GB 초과, 레플리카 7개 이상, 더 긴 이미지 보존(120시간) 필요 시
+
 ## 기술 스택
 
 | 레이어 | 기술 |
@@ -145,9 +167,11 @@ master(개발자) > admin(대표) > owner(점장) > supervisor(매니져) > staf
 | `/task-management` | TaskManagementPage (업무관리) | admin, manager |
 | `/labor-cost` | LaborCostPage (인건비) | admin, manager |
 | `/staff` | StaffPage (직원관리) | master, admin, manager |
+| `/recipes` | RecipesPage (레시피 정보) | 전체 (편집: manager 이상) |
+| `/store-info` | StoreInfoPage (업무정보) | 전체 (편집: manager 이상) |
 | `/sign/:token` | ContractSignPage (전자서명) | 비로그인 접근 |
 
-## DB 테이블 (34개)
+## DB 테이블 (36개)
 
 ### 핵심 테이블
 | 변수명 | DB 테이블명 | 설명 |
@@ -208,6 +232,12 @@ master(개발자) > admin(대표) > owner(점장) > supervisor(매니져) > staf
 | employmentElectronicContracts | employment_electronic_contracts | 전자 근로계약서 (토큰 서명, affiliatedCompany 포함) |
 | notifications | notifications | 알림 (type, title, content, isRead) |
 | errorLogs | error_logs | 에러 로그 (errorType, message, stack, url, userAgent, metadata) |
+
+### 매장 콘텐츠
+| 변수명 | DB 테이블명 | 설명 |
+|--------|------------|------|
+| recipes | recipes | 레시피 게시판 (restaurantId, title, category, imageUrl, content, sortOrder) |
+| storeInfoCards | store_info_cards | 업무정보 카드 (restaurantId, cardType, title, content, isPinned, sortOrder) |
 
 ## 자동 마이그레이션
 

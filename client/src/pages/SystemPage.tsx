@@ -197,6 +197,50 @@ function SystemStatusTab() {
           </div>
         </Card>
       </div>
+
+      {/* 인프라 스펙 */}
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
+          <Server size={14} className="text-primary" /> Railway 인프라 스펙 (Hobby Plan)
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="p-3 rounded-lg border border-border bg-muted/30">
+            <p className="text-muted-foreground mb-1">플랜 / 월 구독</p>
+            <p className="font-semibold text-foreground">Hobby · $5/월</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">포함 크레딧 $5/월</p>
+          </div>
+          <div className="p-3 rounded-lg border border-border bg-muted/30">
+            <p className="text-muted-foreground mb-1">서비스당 CPU / RAM</p>
+            <p className="font-semibold text-foreground">최대 48 vCPU / 48 GB</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">$20/vCPU · $10/GB/월</p>
+          </div>
+          <div className="p-3 rounded-lg border border-border bg-muted/30">
+            <p className="text-muted-foreground mb-1">볼륨 스토리지</p>
+            <p className="font-semibold text-foreground">최대 5 GB/서비스</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">$0.15/GB/월 · 10볼륨/프로젝트</p>
+          </div>
+          <div className="p-3 rounded-lg border border-border bg-muted/30">
+            <p className="text-muted-foreground mb-1">네트워크 / 이미지</p>
+            <p className="font-semibold text-foreground">$0.05/GB egress</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">이미지 최대 100GB · 보존 72시간</p>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div className="p-3 rounded-lg border border-border bg-muted/30">
+            <p className="text-muted-foreground mb-1">DB (MySQL 8)</p>
+            <p className="font-semibold text-foreground">Railway 내장 MySQL</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">볼륨 5GB 한도 · 별도 스토리지 $0.15/GB/월</p>
+          </div>
+          <div className="p-3 rounded-lg border border-border bg-muted/30">
+            <p className="text-muted-foreground mb-1">배포 방식</p>
+            <p className="font-semibold text-foreground">GitHub main push → 자동 빌드/배포</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">볼륨 삭제 시 48시간 복구 가능</p>
+          </div>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-2">
+          * 실 사용량 기반 과금. 포함 크레딧($5) 초과분만 청구. Hobby 리밋 초과 시 Pro($20/월) 업그레이드 필요.
+        </p>
+      </Card>
     </>
   );
 }
