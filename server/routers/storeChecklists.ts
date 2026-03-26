@@ -15,32 +15,34 @@ const targetTabEnum = z.enum(["open", "purchase", "midday", "close"]);
 
 /**
  * 반복 필터: 해당 날짜에 보여야 하는 템플릿만 반환
- * - repeatType = "daily" → 항상 표시
- * - repeatType = "weekly" + repeatDays 포함 → 해당 요일만 표시
- * - repeatType = "none" + specificDate 있으면 → 해당 날짜만 표시
- * - repeatType = "none" + specificDate 없으면 → 항상 표시 (기본 항목)
+ * - repeatType = "daily" (또는 "none"/null) → 항상 표시
+ * - repeatType = "weekly" + repeatDays(0~6 요일) → 해당 요일만 표시
+ * - repeatType = "monthly" + repeatDays(1~31 일자) → 해당 날짜만 표시
  */
 function shouldShowOnDate(
   template: {
     repeatType: string | null;
     repeatDays: number[] | null;
-    specificDate: string | Date | null;
+    specificDate?: string | Date | null; // 레거시 호환
   },
   dateStr: string,
 ): boolean {
   const d = new Date(dateStr);
-  const dayOfWeek = d.getDay(); // 0=일~6=토
+  const repeatType = template.repeatType ?? "daily";
 
-  const repeatType = template.repeatType ?? "none";
-
-  if (repeatType === "daily") return true;
+  if (repeatType === "daily" || repeatType === "none") return true;
 
   if (repeatType === "weekly") {
     const days = template.repeatDays ?? [];
-    return days.includes(dayOfWeek);
+    return days.includes(d.getDay()); // 0=일~6=토
   }
 
-  // repeatType = "none"
+  if (repeatType === "monthly") {
+    const days = template.repeatDays ?? [];
+    return days.includes(d.getDate()); // 1~31
+  }
+
+  // 레거시 fallback: specificDate 1회성
   if (template.specificDate) {
     const specific = typeof template.specificDate === "string"
       ? template.specificDate
@@ -48,7 +50,6 @@ function shouldShowOnDate(
     return specific === dateStr;
   }
 
-  // 반복 없음 + 특정 날짜 없음 = 매일 기본 항목
   return true;
 }
 
@@ -119,9 +120,8 @@ export const storeChecklistsRouter = router({
         itemText: z.string().min(1),
         requirementType: z.enum(["none", "text_input", "camera_photo"]).default("none"),
         sortOrder: z.number().optional(),
-        repeatType: z.enum(["none", "daily", "weekly"]).optional(),
+        repeatType: z.enum(["daily", "weekly", "monthly"]).optional(),
         repeatDays: z.array(z.number()).optional(),
-        specificDate: z.string().optional(),
         isHighlight: z.boolean().optional(),
       })
     )
@@ -142,9 +142,8 @@ export const storeChecklistsRouter = router({
         itemText: input.itemText,
         requirementType: input.requirementType,
         sortOrder: input.sortOrder ?? 0,
-        repeatType: (input.repeatType ?? "none") as any,
+        repeatType: (input.repeatType ?? "daily") as any,
         repeatDays: input.repeatDays ?? [],
-        specificDate: input.specificDate ? new Date(input.specificDate) : null,
         isHighlight: input.isHighlight ?? false,
         createdBy: ctx.user.userId,
       });
@@ -161,9 +160,8 @@ export const storeChecklistsRouter = router({
         requirementType: z.enum(["none", "text_input", "camera_photo"]).optional(),
         sortOrder: z.number().optional(),
         isActive: z.boolean().optional(),
-        repeatType: z.enum(["none", "daily", "weekly"]).optional(),
+        repeatType: z.enum(["daily", "weekly", "monthly"]).optional(),
         repeatDays: z.array(z.number()).optional(),
-        specificDate: z.string().nullable().optional(),
         isHighlight: z.boolean().optional(),
       })
     )

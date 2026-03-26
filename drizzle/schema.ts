@@ -425,9 +425,9 @@ export const storeChecklistTemplates = mysqlTable("store_checklist_templates", {
   isActive: boolean("isActive").default(true).notNull(),
   // 업무관리 개편: 태그 + 반복/특정날짜
   tags: json("tags").$type<string[]>().default([]),
-  repeatType: mysqlEnum("repeatType", ["none", "daily", "weekly"]).default("none"),
-  repeatDays: json("repeatDays").$type<number[]>().default([]),  // 0=일~6=토
-  specificDate: date("specificDate"),
+  repeatType: mysqlEnum("repeatType", ["none", "daily", "weekly", "monthly"]).default("daily"),
+  repeatDays: json("repeatDays").$type<number[]>().default([]),  // weekly: 0=일~6=토, monthly: 1~31일
+  specificDate: date("specificDate"),  // 레거시 (monthly 전환 후 미사용)
   isHighlight: boolean("isHighlight").default(false),
   createdBy: int("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

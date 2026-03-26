@@ -24,7 +24,7 @@ type Template = {
   targetTab: string | null;
   requirementType: string; sortOrder: number; isActive: boolean;
   repeatType: string | null;
-  repeatDays: number[] | null; specificDate: string | null;
+  repeatDays: number[] | null; specificDate?: string | null;
   isHighlight: boolean | null;
 };
 
@@ -41,9 +41,8 @@ export default function TaskManagementPage() {
   // form state
   const [formText, setFormText] = useState("");
   const [formTargetTab, setFormTargetTab] = useState<TargetTab>("open");
-  const [formRepeatType, setFormRepeatType] = useState<"none" | "daily" | "weekly" | "specificDate">("none");
+  const [formRepeatType, setFormRepeatType] = useState<"daily" | "weekly" | "monthly">("daily");
   const [formRepeatDays, setFormRepeatDays] = useState<number[]>([]);
-  const [formSpecificDate, setFormSpecificDate] = useState("");
   const [formIsHighlight, setFormIsHighlight] = useState(false);
   const [formReqType, setFormReqType] = useState<"none" | "text_input" | "camera_photo">("none");
 
@@ -64,8 +63,8 @@ export default function TaskManagementPage() {
 
   const resetForm = () => {
     setFormText(""); setFormTargetTab("open");
-    setFormRepeatType("none"); setFormRepeatDays([]);
-    setFormSpecificDate(""); setFormIsHighlight(false);
+    setFormRepeatType("daily"); setFormRepeatDays([]);
+    setFormIsHighlight(false);
     setFormReqType("none"); setShowAdd(false); setEditId(null);
   };
 
@@ -73,9 +72,8 @@ export default function TaskManagementPage() {
     setEditId(t.id); setShowAdd(true);
     setFormText(t.itemText);
     setFormTargetTab((t.targetTab as TargetTab) ?? "open");
-    setFormRepeatType(t.specificDate ? "specificDate" : ((t.repeatType as any) ?? "none"));
+    setFormRepeatType(((t.repeatType === "none" || !t.repeatType) ? "daily" : t.repeatType) as any);
     setFormRepeatDays(t.repeatDays ?? []);
-    setFormSpecificDate(t.specificDate ?? "");
     setFormIsHighlight(t.isHighlight ?? false);
     setFormReqType((t.requirementType as any) ?? "none");
   };
@@ -85,9 +83,8 @@ export default function TaskManagementPage() {
     const payload = {
       itemText: formText.trim(),
       targetTab: formTargetTab,
-      repeatType: (formRepeatType === "specificDate" ? "none" : formRepeatType) as any,
-      repeatDays: formRepeatType === "weekly" ? formRepeatDays : [],
-      specificDate: formRepeatType === "specificDate" ? formSpecificDate || undefined : undefined,
+      repeatType: formRepeatType as any,
+      repeatDays: (formRepeatType === "weekly" || formRepeatType === "monthly") ? formRepeatDays : [],
       isHighlight: formIsHighlight,
       requirementType: formReqType as any,
     };
@@ -161,7 +158,7 @@ export default function TaskManagementPage() {
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-medium">
                       {tabLabel(t.targetTab)}
                     </span>
-                    {t.repeatType === "daily" && (
+                    {(t.repeatType === "daily" || !t.repeatType || t.repeatType === "none") && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 flex items-center gap-0.5">
                         <Repeat className="w-2.5 h-2.5" /> 매일
                       </span>
@@ -171,9 +168,9 @@ export default function TaskManagementPage() {
                         <Repeat className="w-2.5 h-2.5" /> 주{(t.repeatDays ?? []).map(d => DAY_NAMES[d]).join("·")}
                       </span>
                     )}
-                    {t.specificDate && (
+                    {t.repeatType === "monthly" && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 flex items-center gap-0.5">
-                        <Calendar className="w-2.5 h-2.5" /> {t.specificDate}
+                        <Calendar className="w-2.5 h-2.5" /> 매월 {(t.repeatDays ?? []).join("·")}일
                       </span>
                     )}
                   </div>
@@ -234,33 +231,40 @@ export default function TaskManagementPage() {
               <label className="text-xs text-muted-foreground mb-1 block">반복 유형</label>
               <div className="flex gap-1.5 flex-wrap">
                 {([
-                  { key: "none", label: "매일(기본)" },
                   { key: "daily", label: "매일" },
                   { key: "weekly", label: "주간" },
-                  { key: "specificDate", label: "특정날짜" },
+                  { key: "monthly", label: "월간" },
                 ] as const).map(rt => (
                   <button key={rt.key} onClick={() => {
                     setFormRepeatType(rt.key);
-                    if (rt.key !== "weekly") setFormRepeatDays([]);
-                    if (rt.key !== "specificDate") setFormSpecificDate("");
+                    if (rt.key === "daily") setFormRepeatDays([]);
                   }}
                     className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${formRepeatType === rt.key ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground"}`}
                   >{rt.label}</button>
                 ))}
               </div>
               {formRepeatType === "weekly" && (
-                <div className="flex gap-1.5 mt-2">
-                  {DAY_NAMES.map((name, i) => (
-                    <button key={i} onClick={() => setFormRepeatDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i])}
-                      className={`w-8 h-8 rounded-full text-xs font-medium border transition-colors ${formRepeatDays.includes(i) ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground"}`}
-                    >{name}</button>
-                  ))}
+                <div className="mt-2">
+                  <p className="text-[10px] text-muted-foreground mb-1">반복 요일 선택</p>
+                  <div className="flex gap-1.5">
+                    {DAY_NAMES.map((name, i) => (
+                      <button key={i} onClick={() => setFormRepeatDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i])}
+                        className={`w-8 h-8 rounded-full text-xs font-medium border transition-colors ${formRepeatDays.includes(i) ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground"}`}
+                      >{name}</button>
+                    ))}
+                  </div>
                 </div>
               )}
-              {formRepeatType === "specificDate" && (
+              {formRepeatType === "monthly" && (
                 <div className="mt-2">
-                  <input type="date" className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background"
-                    value={formSpecificDate} onChange={e => setFormSpecificDate(e.target.value)} />
+                  <p className="text-[10px] text-muted-foreground mb-1">반복 날짜 선택 (매월)</p>
+                  <div className="flex gap-1 flex-wrap">
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                      <button key={day} onClick={() => setFormRepeatDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b))}
+                        className={`w-8 h-8 rounded text-xs font-medium border transition-colors ${formRepeatDays.includes(day) ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground"}`}
+                      >{day}</button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

@@ -104,6 +104,18 @@ app.use(express.json());
     await addColumnIfNotExists("store_checklist_templates", "specificDate", "DATE DEFAULT NULL");
     await addColumnIfNotExists("store_checklist_templates", "isHighlight", "BOOLEAN DEFAULT FALSE");
 
+    // repeatType enum 확장: monthly 추가 + none→daily 변환 + specificDate→monthly 변환
+    try {
+      await conn.query(`ALTER TABLE store_checklist_templates MODIFY COLUMN repeatType ENUM('none','daily','weekly','monthly') DEFAULT 'daily'`);
+      // none → daily (의미 동일)
+      await conn.query(`UPDATE store_checklist_templates SET repeatType = 'daily' WHERE repeatType = 'none' AND specificDate IS NULL`);
+      // specificDate 있는 항목 → monthly (매월 해당 일자 반복으로 변환)
+      await conn.query(`UPDATE store_checklist_templates SET repeatType = 'monthly', repeatDays = JSON_ARRAY(DAY(specificDate)) WHERE repeatType = 'none' AND specificDate IS NOT NULL`);
+      console.log("[migrate] repeatType: none→daily, specificDate→monthly 변환 완료");
+    } catch (e: any) {
+      console.log("[migrate] repeatType enum 확장:", e.message);
+    }
+
     // 체크리스트 로그: targetTab 컬럼 추가 + 기존 데이터 마이그레이션
     await addColumnIfNotExists("daily_checklist_logs", "targetTab", "VARCHAR(20) DEFAULT NULL");
     // 기존 checkType → targetTab 매핑 (한번만 실행됨: targetTab이 NULL인 행만)
