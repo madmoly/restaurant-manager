@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { formatDate } from 'date-fns';
 import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
@@ -1503,6 +1503,40 @@ function CloseTab({
     date,
   });
 
+  // ── 전체 체크리스트 완료 검증 (4탭 모두) ──
+  const openTemplates = trpc.storeChecklists.listTemplates.useQuery({ restaurantId, targetTab: 'open', date });
+  const purchaseTemplates = trpc.storeChecklists.listTemplates.useQuery({ restaurantId, targetTab: 'purchase', date });
+  const middayTemplates = trpc.storeChecklists.listTemplates.useQuery({ restaurantId, targetTab: 'midday', date });
+  const closeTemplates = trpc.storeChecklists.listTemplates.useQuery({ restaurantId, targetTab: 'close', date });
+  const openLog = trpc.storeChecklists.getLog.useQuery({ restaurantId, logDate: date, targetTab: 'open' });
+  const purchaseLog = trpc.storeChecklists.getLog.useQuery({ restaurantId, logDate: date, targetTab: 'purchase' });
+  const middayLog = trpc.storeChecklists.getLog.useQuery({ restaurantId, logDate: date, targetTab: 'midday' });
+  const closeLog = trpc.storeChecklists.getLog.useQuery({ restaurantId, logDate: date, targetTab: 'close' });
+
+  const checklistStatus = useMemo(() => {
+    const tabs = [
+      { key: 'open', label: '오픈', templates: openTemplates.data ?? [], log: openLog.data },
+      { key: 'purchase', label: '매입', templates: purchaseTemplates.data ?? [], log: purchaseLog.data },
+      { key: 'midday', label: '일간보고', templates: middayTemplates.data ?? [], log: middayLog.data },
+      { key: 'close', label: '마감', templates: closeTemplates.data ?? [], log: closeLog.data },
+    ];
+    const incomplete: string[] = [];
+    let totalItems = 0;
+    let totalChecked = 0;
+    for (const tab of tabs) {
+      const total = tab.templates.length;
+      if (total === 0) continue;
+      const checked = (tab.log?.checkedItemIds as number[] ?? []).length;
+      totalItems += total;
+      totalChecked += checked;
+      if (checked < total) incomplete.push(tab.label);
+    }
+    return { incomplete, totalItems, totalChecked, allDone: incomplete.length === 0 && totalItems > 0 };
+  }, [
+    openTemplates.data, purchaseTemplates.data, middayTemplates.data, closeTemplates.data,
+    openLog.data, purchaseLog.data, middayLog.data, closeLog.data,
+  ]);
+
   const midSalesQuery = trpc.dailyOps.getMidSales.useQuery({
     restaurantId,
     date,
@@ -1861,6 +1895,18 @@ function CloseTab({
       {/* ─── 일마감 손익 요약 ─── */}
       <ClosingProfitSection restaurantId={restaurantId} date={date} />
 
+      {/* 체크리스트 완료 상태 */}
+      {!operationQuery.data?.closeCheckedAt && checklistStatus.totalItems > 0 && !checklistStatus.allDone && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 p-3">
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+            체크리스트 미완료 ({checklistStatus.totalChecked}/{checklistStatus.totalItems})
+          </p>
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
+            미완료 탭: {checklistStatus.incomplete.join(', ')}
+          </p>
+        </div>
+      )}
+
       {/* 마감 체크 */}
       <Button
         onClick={() => {
@@ -1873,7 +1919,8 @@ function CloseTab({
         disabled={
           checkCloseMutation.isPending ||
           !!operationQuery.data?.closeCheckedAt ||
-          !salesQuery.data
+          !salesQuery.data ||
+          (checklistStatus.totalItems > 0 && !checklistStatus.allDone)
         }
         className="w-full"
         size="lg"
@@ -1881,7 +1928,9 @@ function CloseTab({
       >
         {operationQuery.data?.closeCheckedAt
           ? `마감 완료 (${operationQuery.data.closeCheckedAt})`
-          : '마감 체크 완료'}
+          : checklistStatus.totalItems > 0 && !checklistStatus.allDone
+            ? `체크리스트 완료 후 마감 가능 (${checklistStatus.totalChecked}/${checklistStatus.totalItems})`
+            : '마감 체크 완료'}
       </Button>
     </div>
   );

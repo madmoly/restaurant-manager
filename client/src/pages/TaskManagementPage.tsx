@@ -3,13 +3,12 @@ import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  ClipboardList, Plus, X, Check, Tag, Calendar, Repeat,
-  Trash2, Edit3, ChevronDown, ChevronUp, Star, Filter,
+  ClipboardList, Plus, X, Check, Calendar, Repeat,
+  Trash2, Edit3, ChevronDown, ChevronUp, Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
-const DEFAULT_TAGS = ["위생", "재고", "기타"];
 
 const TARGET_TABS = [
   { key: "open" as const, label: "오픈" },
@@ -24,7 +23,7 @@ type Template = {
   id: number; itemText: string; checkType: string;
   targetTab: string | null;
   requirementType: string; sortOrder: number; isActive: boolean;
-  tags: string[] | null; repeatType: string | null;
+  repeatType: string | null;
   repeatDays: number[] | null; specificDate: string | null;
   isHighlight: boolean | null;
 };
@@ -37,14 +36,12 @@ export default function TaskManagementPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [filterTab, setFilterTab] = useState<TargetTab | null>(null);
-  const [filterTag, setFilterTag] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   // form state
   const [formText, setFormText] = useState("");
   const [formTargetTab, setFormTargetTab] = useState<TargetTab>("open");
-  const [formTags, setFormTags] = useState<string[]>([]);
-  const [formRepeatType, setFormRepeatType] = useState<"none" | "daily" | "weekly">("none");
+  const [formRepeatType, setFormRepeatType] = useState<"none" | "daily" | "weekly" | "specificDate">("none");
   const [formRepeatDays, setFormRepeatDays] = useState<number[]>([]);
   const [formSpecificDate, setFormSpecificDate] = useState("");
   const [formIsHighlight, setFormIsHighlight] = useState(false);
@@ -66,7 +63,7 @@ export default function TaskManagementPage() {
   });
 
   const resetForm = () => {
-    setFormText(""); setFormTargetTab("open"); setFormTags([]);
+    setFormText(""); setFormTargetTab("open");
     setFormRepeatType("none"); setFormRepeatDays([]);
     setFormSpecificDate(""); setFormIsHighlight(false);
     setFormReqType("none"); setShowAdd(false); setEditId(null);
@@ -76,8 +73,7 @@ export default function TaskManagementPage() {
     setEditId(t.id); setShowAdd(true);
     setFormText(t.itemText);
     setFormTargetTab((t.targetTab as TargetTab) ?? "open");
-    setFormTags(t.tags ?? []);
-    setFormRepeatType((t.repeatType as any) ?? "none");
+    setFormRepeatType(t.specificDate ? "specificDate" : ((t.repeatType as any) ?? "none"));
     setFormRepeatDays(t.repeatDays ?? []);
     setFormSpecificDate(t.specificDate ?? "");
     setFormIsHighlight(t.isHighlight ?? false);
@@ -89,10 +85,9 @@ export default function TaskManagementPage() {
     const payload = {
       itemText: formText.trim(),
       targetTab: formTargetTab,
-      tags: formTags,
-      repeatType: formRepeatType as any,
-      repeatDays: formRepeatDays,
-      specificDate: formSpecificDate || undefined,
+      repeatType: (formRepeatType === "specificDate" ? "none" : formRepeatType) as any,
+      repeatDays: formRepeatType === "weekly" ? formRepeatDays : [],
+      specificDate: formRepeatType === "specificDate" ? formSpecificDate || undefined : undefined,
       isHighlight: formIsHighlight,
       requirementType: formReqType as any,
     };
@@ -103,20 +98,10 @@ export default function TaskManagementPage() {
     }
   };
 
-  // 태그 목록 추출
-  const allTags = useMemo(() => {
-    const s = new Set<string>();
-    templates.forEach((t: any) => (t.tags ?? []).forEach((tag: string) => s.add(tag)));
-    DEFAULT_TAGS.forEach(t => s.add(t));
-    return Array.from(s);
-  }, [templates]);
-
   // 필터링
   const filtered = useMemo(() => {
-    let list = (templates as Template[]).filter(t => t.isActive);
-    if (filterTag) list = list.filter(t => (t.tags ?? []).includes(filterTag));
-    return list.sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [templates, filterTag]);
+    return (templates as Template[]).filter(t => t.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [templates]);
 
   const tabLabel = (tab: string | null) =>
     TARGET_TABS.find(t => t.key === tab)?.label ?? tab ?? "미지정";
@@ -149,23 +134,12 @@ export default function TaskManagementPage() {
         ))}
       </div>
 
-      {/* 태그 필터 */}
-      <div className="flex flex-wrap gap-1.5">
-        {allTags.map(tag => (
-          <button
-            key={tag}
-            onClick={() => setFilterTag(filterTag === tag ? null : tag)}
-            className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${filterTag === tag ? "bg-blue-600 text-white border-blue-600" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
-          ><Tag className="w-2.5 h-2.5 inline mr-0.5" />{tag}</button>
-        ))}
-      </div>
-
       {/* 업무 목록 */}
       {isLoading ? (
         <div className="text-center py-8 text-muted-foreground text-sm">로딩 중...</div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground text-sm">
-          {filterTab || filterTag ? "조건에 맞는 업무가 없습니다" : "등록된 업무가 없습니다"}
+          {filterTab ? "조건에 맞는 업무가 없습니다" : "등록된 업무가 없습니다"}
         </div>
       ) : (
         <div className="space-y-2">
@@ -187,9 +161,6 @@ export default function TaskManagementPage() {
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-medium">
                       {tabLabel(t.targetTab)}
                     </span>
-                    {(t.tags ?? []).map(tag => (
-                      <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{tag}</span>
-                    ))}
                     {t.repeatType === "daily" && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 flex items-center gap-0.5">
                         <Repeat className="w-2.5 h-2.5" /> 매일
@@ -258,26 +229,23 @@ export default function TaskManagementPage() {
               <input className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background" placeholder="예: 냉장고 온도 확인" value={formText} onChange={e => setFormText(e.target.value)} />
             </div>
 
-            {/* 태그 */}
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">태그 (복수 선택 가능)</label>
-              <div className="flex flex-wrap gap-1.5">
-                {allTags.map(tag => (
-                  <button key={tag} onClick={() => setFormTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag])}
-                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${formTags.includes(tag) ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground"}`}
-                  >{tag}</button>
-                ))}
-              </div>
-            </div>
-
             {/* 반복 설정 */}
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">반복 유형</label>
-              <div className="flex gap-2">
-                {(["none", "daily", "weekly"] as const).map(rt => (
-                  <button key={rt} onClick={() => setFormRepeatType(rt)}
-                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${formRepeatType === rt ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground"}`}
-                  >{rt === "none" ? "없음" : rt === "daily" ? "매일" : "주간"}</button>
+              <div className="flex gap-1.5 flex-wrap">
+                {([
+                  { key: "none", label: "매일(기본)" },
+                  { key: "daily", label: "매일" },
+                  { key: "weekly", label: "주간" },
+                  { key: "specificDate", label: "특정날짜" },
+                ] as const).map(rt => (
+                  <button key={rt.key} onClick={() => {
+                    setFormRepeatType(rt.key);
+                    if (rt.key !== "weekly") setFormRepeatDays([]);
+                    if (rt.key !== "specificDate") setFormSpecificDate("");
+                  }}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${formRepeatType === rt.key ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground"}`}
+                  >{rt.label}</button>
                 ))}
               </div>
               {formRepeatType === "weekly" && (
@@ -289,13 +257,12 @@ export default function TaskManagementPage() {
                   ))}
                 </div>
               )}
-            </div>
-
-            {/* 특정 날짜 */}
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">특정 날짜 (선택)</label>
-              <input type="date" className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background"
-                value={formSpecificDate} onChange={e => setFormSpecificDate(e.target.value)} />
+              {formRepeatType === "specificDate" && (
+                <div className="mt-2">
+                  <input type="date" className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background"
+                    value={formSpecificDate} onChange={e => setFormSpecificDate(e.target.value)} />
+                </div>
+              )}
             </div>
 
             {/* 강조 & 요구사항 */}
