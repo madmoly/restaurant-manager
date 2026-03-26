@@ -7,7 +7,7 @@ import {
   Users, Plus, ChevronDown, ChevronUp, FileText, Trash2, X, UserCog,
   Copy, ExternalLink, Send, Eye, KeyRound, Camera, ShieldCheck,
   AlertTriangle, Loader2, Building2, Edit3, Check, UserPlus, Link,
-  Phone, Clock, CalendarDays, Briefcase, Info,
+  Phone, Clock, CalendarDays, Briefcase, Info, Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -586,9 +586,20 @@ export default function StaffPage() {
                       onClick={() => window.open(signUrl, "_blank")}
                       className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded-md hover:bg-accent transition-colors"
                     >
-                      <Eye className="w-3.5 h-3.5" /> 미리보기
+                      <Eye className="w-3.5 h-3.5" /> 근로계약서 미리보기
                     </button>
-                    {c.status !== "draft" && (
+                    {c.status === "signed" && (
+                      <button
+                        onClick={() => {
+                          // 서명 완료된 계약서 → PDF 다운로드 (서명 페이지를 새 탭으로 열어 PDF 저장)
+                          window.open(signUrl, "_blank");
+                        }}
+                        className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200 px-2.5 py-1.5 rounded-md hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" /> 계약서 PDF 다운로드
+                      </button>
+                    )}
+                    {c.status === "sent" && (
                       <button
                         onClick={copyLink}
                         className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 px-2.5 py-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
