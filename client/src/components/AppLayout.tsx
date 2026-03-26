@@ -19,8 +19,8 @@ import { cn } from "@/lib/utils";
 import { ROLE_LABELS, type EffectiveRole } from "@shared/permissions";
 import { 
   UtensilsCrossed, LogOut, Menu, X, Sun, Moon, MoreHorizontal,
-  Check, Building2,
-  
+  Check, Building2, ZoomIn,
+
   // 새롭게 개편된 직관적인 프리미엄 아이콘 세트
   LayoutGrid, Activity, CalendarRange, ListChecks, Clock,
   UsersRound, Coins, BarChart3, Receipt, ShoppingCart, ShieldCheck,
@@ -208,6 +208,14 @@ interface AppLayoutProps {
 }
 
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
+// 직원 화면 전용 줌 레벨
+const ZOOM_OPTIONS = [
+  { label: "기본", value: 100 },
+  { label: "+30%", value: 130 },
+  { label: "+60%", value: 160 },
+  { label: "+90%", value: 190 },
+] as const;
+
 export default function AppLayout({ children, effectiveRole, storeRole }: AppLayoutProps) {
   const { user, logout } = useAuth();
   const [location] = useLocation();
@@ -215,6 +223,20 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const { restaurants, selectedRestaurant, selectedRestaurantId, setSelectedRestaurantId } = useRestaurant();
   const { theme, toggleTheme } = useTheme();
+
+  // 직원 화면 전용 글씨 확대
+  const isStaff = effectiveRole === "staff";
+  const [zoomLevel, setZoomLevel] = useState(() => {
+    if (typeof window === "undefined") return 100;
+    const saved = localStorage.getItem("staff-zoom");
+    return saved ? Number(saved) : 100;
+  });
+  const cycleZoom = () => {
+    const idx = ZOOM_OPTIONS.findIndex(z => z.value === zoomLevel);
+    const next = ZOOM_OPTIONS[(idx + 1) % ZOOM_OPTIONS.length];
+    setZoomLevel(next.value);
+    localStorage.setItem("staff-zoom", String(next.value));
+  };
 
   if (!user) return null;
 
@@ -501,6 +523,29 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
           <div className="flex-1 min-w-0" />
 
           <div className="flex items-center gap-2">
+            {/* 직원 전용 글씨 확대 */}
+            {isStaff && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-9 w-9 rounded-xl transition-all relative",
+                  zoomLevel > 100
+                    ? "text-primary bg-primary/10 hover:bg-primary/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                )}
+                onClick={cycleZoom}
+                title={`글씨 크기: ${zoomLevel}%`}
+              >
+                <ZoomIn className="h-4 w-4" />
+                {zoomLevel > 100 && (
+                  <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                    {(zoomLevel - 100) / 10}
+                  </span>
+                )}
+              </Button>
+            )}
+
             {/* 다크모드 토글 */}
             {toggleTheme && (
               <Button
@@ -534,6 +579,15 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
                   <p className="text-[11px] text-muted-foreground mt-0.5">{ROLE_LABELS[effectiveRole] ?? effectiveRole}</p>
                 </div>
                 <DropdownMenuSeparator className="bg-border/30" />
+                {isStaff && (
+                  <>
+                    <DropdownMenuItem onClick={cycleZoom} className="rounded-lg cursor-pointer my-1 transition-all hover:bg-primary/10 hover:text-primary">
+                      <ZoomIn className="mr-2 h-4 w-4" />
+                      글씨 크기: {zoomLevel === 100 ? "기본" : `+${zoomLevel - 100}%`}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator className="bg-border/30" />
+                  </>
+                )}
                 {toggleTheme && (
                   <>
                     <DropdownMenuItem onClick={toggleTheme} className="rounded-lg cursor-pointer my-1 transition-all hover:bg-primary/10 hover:text-primary">
@@ -557,7 +611,7 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
           className={cn("flex-1 overflow-y-auto relative z-0 transition-all duration-300", moreMenuOpen && "blur-sm brightness-75 lg:blur-none lg:brightness-100")}
           onClick={() => moreMenuOpen && setMoreMenuOpen(false)}
         >
-          <div className="pb-40 lg:pb-8 pt-4 lg:pt-6 h-full">
+          <div className="pb-40 lg:pb-8 pt-4 lg:pt-6 h-full" style={isStaff && zoomLevel > 100 ? { fontSize: `${zoomLevel}%` } : undefined}>
             {/* Tutorial 배너 — 라우트 경로 기반 자동 매핑 */}
             <div className="px-4 md:px-6 mb-2">
               <TutorialBanner pageKey={
