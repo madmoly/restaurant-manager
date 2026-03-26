@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { formatDate } from 'date-fns';
 import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
@@ -25,9 +26,9 @@ import {
 // 이미지 확대보기 모달 (핀치줌/스와이프 지원)
 // ============================================================================
 function ImageViewer({ src, onClose }: { src: string; onClose: () => void }) {
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center"
+      className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center"
       onClick={onClose}
     >
       <button
@@ -43,7 +44,8 @@ function ImageViewer({ src, onClose }: { src: string; onClose: () => void }) {
         style={{ touchAction: 'pinch-zoom' }}
         onClick={(e) => e.stopPropagation()}
       />
-    </div>
+    </div>,
+    document.body
   );
 }
 import { Button, Card, Input, Badge } from '@/components/ui/index';
@@ -621,7 +623,7 @@ function OpenTab({
 // PURCHASE TAB – 일별 매입 관리 (간편모드 + 전표OCR모드)
 // ============================================================================
 
-const UNIT_OPTIONS = ['개', '박스', 'kg', 'g', '리터', 'ml', '팩', '봉', '병', '캔', '포', '판', '줄', '묶음', 'EA'];
+const UNIT_OPTIONS = ['개', '박스', 'kg', 'g', '리터', 'ml', '팩', '봉', '병', '캔', '포', '판', '줄', '묶음', '단', 'EA', '직접입력'];
 
 interface PurchaseItemRow {
   rawItemName: string;
@@ -1230,9 +1232,19 @@ function PurchaseTab({
                       </div>
                       <div>
                         <span className="text-[10px] text-muted-foreground mb-0.5 block">단위</span>
-                        <select value={item.unitName} onChange={(e) => updateItem(idx, 'unitName', e.target.value)} className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground">
-                          {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
-                        </select>
+                        {UNIT_OPTIONS.includes(item.unitName) && item.unitName !== '직접입력' ? (
+                          <select value={item.unitName} onChange={(e) => {
+                            if (e.target.value === '직접입력') updateItem(idx, 'unitName', '');
+                            else updateItem(idx, 'unitName', e.target.value);
+                          }} className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground">
+                            {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                          </select>
+                        ) : (
+                          <div className="flex gap-1">
+                            <Input placeholder="단위 입력" value={item.unitName} onChange={(e) => updateItem(idx, 'unitName', e.target.value)} className="text-sm h-9 flex-1" />
+                            <button onClick={() => updateItem(idx, 'unitName', '개')} className="px-2 h-9 text-xs text-muted-foreground border border-border rounded-md hover:bg-muted" title="목록으로">▼</button>
+                          </div>
+                        )}
                       </div>
                     </div>
                     {/* 단가 + 합계 */}

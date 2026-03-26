@@ -25,6 +25,7 @@ export const users = mysqlTable("users", {
   authProvider: varchar("authProvider", { length: 20 }).default("local"),
   authProviderId: varchar("authProviderId", { length: 255 }),
   isActive: boolean("isActive").default(true).notNull(),
+  isTutorial: boolean("isTutorial").default(false).notNull(),
   healthCertUrl: varchar("healthCertUrl", { length: 500 }),
   healthCertExpiry: date("healthCertExpiry"),
   mustChangePassword: boolean("mustChangePassword").default(false).notNull(),
@@ -52,6 +53,7 @@ export const restaurants = mysqlTable("restaurants", {
   // 반차 판별 기준: 전체 운영시간 대비 근무시간 비율(%) 미만이면 반차
   halfShiftThreshold: int("halfShiftThreshold").default(60).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
+  isTutorial: boolean("isTutorial").default(false).notNull(),
   // 소프트 삭제 일시 (null이면 활성)
   deletedAt: timestamp("deletedAt"),
   // 매출 입력 허용 시간대 (null이면 제한 없음)

@@ -557,7 +557,7 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
           className={cn("flex-1 overflow-y-auto relative z-0 transition-all duration-300", moreMenuOpen && "blur-sm brightness-75 lg:blur-none lg:brightness-100")}
           onClick={() => moreMenuOpen && setMoreMenuOpen(false)}
         >
-          <div className="pb-24 lg:pb-8 pt-4 lg:pt-6 h-full">
+          <div className="pb-40 lg:pb-8 pt-4 lg:pt-6 h-full">
             {/* Tutorial 배너 — 라우트 경로 기반 자동 매핑 */}
             <div className="px-4 md:px-6 mb-2">
               <TutorialBanner pageKey={

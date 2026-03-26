@@ -266,7 +266,7 @@ export const systemRouter = router({
 
     // 매장 목록
     const allStores = await db.select({ id: restaurants.id, name: restaurants.name })
-      .from(restaurants).where(isNull(restaurants.deletedAt));
+      .from(restaurants).where(and(isNull(restaurants.deletedAt), eq(restaurants.isTutorial, false)));
 
     const issues: { type: string; severity: "warning" | "error" | "info"; store: string; message: string }[] = [];
 

@@ -251,6 +251,10 @@ app.use(express.json());
       )
     `);
 
+    // ─── Tutorial 플래그 ──────────────────────────────────────────────────────
+    await addColumnIfNotExists("users", "isTutorial", "BOOLEAN NOT NULL DEFAULT FALSE");
+    await addColumnIfNotExists("restaurants", "isTutorial", "BOOLEAN NOT NULL DEFAULT FALSE");
+
     // ─── Phase 5: 초대코드 + 비밀번호 강제변경 ─────────────────────────────────
     // users.mustChangePassword
     await addColumnIfNotExists("users", "mustChangePassword", "BOOLEAN NOT NULL DEFAULT FALSE");

@@ -11,7 +11,7 @@ export const usersRouter = router({
       id: users.id, username: users.username, name: users.name,
       email: users.email, phone: users.phone, role: users.role,
       isActive: users.isActive, createdAt: users.createdAt,
-    }).from(users)
+    }).from(users).where(eq(users.isTutorial, false))
   ),
 
   /** 사용자 목록 + 매장 배정 현황 */
@@ -20,7 +20,7 @@ export const usersRouter = router({
       id: users.id, username: users.username, name: users.name,
       email: users.email, phone: users.phone, role: users.role,
       isActive: users.isActive, createdAt: users.createdAt,
-    }).from(users);
+    }).from(users).where(eq(users.isTutorial, false));
 
     const assignments = await db.select({
       userId: restaurantUsers.userId,

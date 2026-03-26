@@ -105,10 +105,17 @@ function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; 
       const calculated = Math.round(qty * price);
       const diff = Math.abs(total - calculated);
       if (diff > 1 && diff / Math.max(total, calculated) > 0.02) {
-        // 2% 이상 차이 → 문서 값(공급가액) 우선, medium 마킹
-        // 문서에 적힌 공급가액이 더 신뢰할 만함
-        finalTotal = totalStr;
-        confidence = "medium";
+        // VAT 패턴 감지: 단가가 세후(부가세포함), 공급가액이 세전 → 비율 ~1.1
+        const vatRatio = calculated / total;
+        if (vatRatio > 1.08 && vatRatio < 1.12) {
+          // 부가세 차이 → 수량×단가(세후) = 실제 지불금액으로 교정
+          finalTotal = String(calculated);
+          confidence = "medium";
+        } else {
+          // 기타 불일치 → 수량×단가를 우선 사용 (사용자가 직접 입력한 값 기준)
+          finalTotal = String(calculated);
+          confidence = "medium";
+        }
       }
     } else if (qty > 0 && price > 0 && !total) {
       // 합계 누락 시 계산

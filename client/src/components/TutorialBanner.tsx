@@ -174,29 +174,29 @@ export default function TutorialBanner({ pageKey }: TutorialBannerProps) {
 
   return (
     <div className="mx-auto max-w-full">
-      <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg overflow-hidden">
+      <div className="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 rounded-lg overflow-hidden">
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex items-center justify-between px-3 py-2 hover:bg-emerald-500/5 transition-colors"
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-emerald-100/50 dark:hover:bg-emerald-500/5 transition-colors"
         >
           <div className="flex items-center gap-2">
-            <GraduationCap className="h-4 w-4 text-emerald-400 shrink-0" />
-            <span className="text-sm font-medium text-emerald-300">
+            <GraduationCap className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
               Tutorial — {guide.title}
             </span>
           </div>
           {collapsed ? (
-            <ChevronDown className="h-3.5 w-3.5 text-emerald-400" />
+            <ChevronDown className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
           ) : (
-            <ChevronUp className="h-3.5 w-3.5 text-emerald-400" />
+            <ChevronUp className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
           )}
         </button>
         {!collapsed && (
           <div className="px-3 pb-2.5 pt-0">
             <ul className="space-y-1">
               {guide.tips.map((tip, i) => (
-                <li key={i} className="flex items-start gap-2 text-xs text-slate-300 leading-relaxed">
-                  <span className="text-emerald-400 mt-0.5 shrink-0">•</span>
+                <li key={i} className="flex items-start gap-2 text-xs text-emerald-900 dark:text-slate-300 leading-relaxed">
+                  <span className="text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0">•</span>
                   <span>{tip}</span>
                 </li>
               ))}

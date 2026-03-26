@@ -1,9 +1,8 @@
-OCR 재설계 + 이미지 확대보기
+UI/UX 개선 + OCR 합계 보정 + Tutorial 격리
 
-- OCR: 2단계(sonnet+haiku) → 단일 Vision 직접 구조화로 변경
-  - 이중 변환 정보손실 제거, 숫자/합계 정확도 향상
-  - max_tokens 4096→8192 (30행 이상 문서 대응)
-  - 거래명세서 열구조 명시적 가이드 프롬프트
-  - summary 크로스체크: 아이템합산 vs 문서합계 비교 검증
-- 이미지 확대보기: OCR 전표 + 발주 이미지 클릭시 전체화면 뷰어
-  - 핀치줌 지원, 오버레이 탭으로 닫기
+- isTutorial 필터링: users.ts, admin.ts, system.ts 라우터에서 튜토리얼 데이터 제외
+- 하단 네비 가림: pb-32 → pb-40 (160px) 확대
+- TutorialBanner 라이트모드: dark: 접두어로 다크/라이트 분리
+- 매입 단위: '단', '직접입력' 추가 (커스텀 입력 지원)
+- 이미지 크게보기: createPortal로 body에 렌더링 (z-index 스태킹 이슈 해결)
+- OCR 합계 보정: 수량×단가 불일치 시 VAT 패턴 감지, qty×unitPrice 우선 적용

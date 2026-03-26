@@ -61,7 +61,7 @@ export const restaurantsRouter = router({
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
     const nextMonth = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
-    const allRestaurants = await db.select().from(restaurants).where(eq(restaurants.isActive, true));
+    const allRestaurants = await db.select().from(restaurants).where(and(eq(restaurants.isActive, true), eq(restaurants.isTutorial, false)));
 
     const staffCounts = await db
       .select({

@@ -22,7 +22,7 @@ export const adminRouter = router({
       // 활성 매장 목록
       const allRestaurants = await db.select()
         .from(restaurants)
-        .where(isNull(restaurants.deletedAt));
+        .where(and(isNull(restaurants.deletedAt), eq(restaurants.isTutorial, false)));
 
       const storeData = await Promise.all(
         allRestaurants.map(async (r) => {          // 매출 합계
