@@ -1,7 +1,6 @@
-PDF 내보내기 widths 오류 수정 + 하단 네비 콘텐츠 가림 해결
+PDF 내보내기 autoTable 호출 방식 수정
 
-- jspdf-autotable: autoTable(doc, opts) → doc.autoTable(opts) 방식으로 변경
-  - 동적 import 시 side-effect 등록 방식이 안정적 (v5 호환)
-- AppLayout 내부 div: h-full → min-h-full 변경
-  - h-full은 컨텐츠 오버플로우 시 pb-40 패딩이 스크롤 영역에 미포함
-  - min-h-full로 컨텐츠 길이에 따라 확장 + 패딩 보장
+- doc.autoTable(opts) 프로토타입 메서드 → autoTable(doc, opts) 함수형 호출로 복원
+- Vite ESM 빌드에서 side-effect import로는 프로토타입 등록이 안됨
+- atModule.default || atModule.autoTable fallback으로 ESM/CJS 양쪽 호환
+- 빌드된 chunk에서 default/autoTable 모두 named export 확인됨

@@ -139,14 +139,15 @@ export default function ProfitPage() {
     setShowExportMenu(false);
     try {
       const { jsPDF } = await import("jspdf");
-      await import("jspdf-autotable");
+      const atModule = await import("jspdf-autotable");
+      const autoTable = atModule.default || atModule.autoTable;
       const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       await loadKoreanFont(doc);
 
       doc.setFontSize(14);
       doc.text(fileName, 14, 15);
 
-      (doc as any).autoTable({
+      autoTable(doc, {
         startY: 22,
         head: [summaryHeaders],
         body: summaryRows.map(r => r.map(c => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
@@ -159,7 +160,7 @@ export default function ProfitPage() {
       doc.setFontSize(11);
       doc.text("고정비 내역", 14, finalY + 10);
 
-      (doc as any).autoTable({
+      autoTable(doc, {
         startY: finalY + 14,
         head: [fixedHeaders],
         body: fixedRows.map((r: any[]) => r.map((c: any) => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),

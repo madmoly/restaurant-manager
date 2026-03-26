@@ -115,7 +115,8 @@ export default function LaborCostPage() {
       const rows = buildRows();
       if (!rows.length) return;
       const { jsPDF } = await import("jspdf");
-      await import("jspdf-autotable");
+      const atModule = await import("jspdf-autotable");
+      const autoTable = atModule.default || atModule.autoTable;
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       await loadKoreanFont(doc);
 
@@ -125,7 +126,7 @@ export default function LaborCostPage() {
       doc.setFontSize(9);
       doc.text(`합계: ${fmtWon(grandTotalWage)}원 / ${grandTotalHours.toFixed(1)}시간`, 14, 22);
 
-      (doc as any).autoTable({
+      autoTable(doc, {
         startY: 28,
         head: [headers],
         body: rows.map(r => r.map(c => String(c))),
