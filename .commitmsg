@@ -1,7 +1,1 @@
-Tutorial 시스템 도입 + 모바일 UX 개선
-
-- 로그인: 테스트 계정 → Tutorial 체험 패널 (점장/매니져/직원 3계정)
-- TutorialBanner: 라우트 기반 페이지별 사용법 안내 (Tutorial 계정만 표시)
-- seed.ts: 전체 DB 리셋 + Tutorial 매장/3개월 샘플 데이터 재생성
-- 모바일 더보기 네비: 본화면 블러 처리, 터치로 닫기
-- 매입 OCR: 앨범에서 파일 선택 가능하도록 수정
+fix: seed.ts users.role staff -> employee enum 수정

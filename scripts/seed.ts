@@ -43,10 +43,10 @@ console.log("── Phase 0: Tutorial Users / Restaurant ──");
 
 await db.insert(schema.users).values({ username: "master", passwordHash: pwMaster, name: "개발자", role: "master", phone: "01056695407" });
 await db.insert(schema.users).values({ username: "admin", passwordHash: pwAdmin, name: "대표", role: "admin", phone: "01053345366" });
-await db.insert(schema.users).values({ username: "owner1", passwordHash: pwTutorial, name: "Tutorial 점장", role: "staff", phone: "01011111111" });
-await db.insert(schema.users).values({ username: "supervisor1", passwordHash: pwTutorial, name: "Tutorial 매니져", role: "staff", phone: "01022222222" });
-await db.insert(schema.users).values({ username: "staff1", passwordHash: pwTutorial, name: "Tutorial 직원1", role: "staff", phone: "01033333333" });
-await db.insert(schema.users).values({ username: "staff2", passwordHash: pwTutorial, name: "Tutorial 직원2", role: "staff", phone: "01044444444" });
+await db.insert(schema.users).values({ username: "owner1", passwordHash: pwTutorial, name: "Tutorial 점장", role: "employee", phone: "01011111111" });
+await db.insert(schema.users).values({ username: "supervisor1", passwordHash: pwTutorial, name: "Tutorial 매니져", role: "employee", phone: "01022222222" });
+await db.insert(schema.users).values({ username: "staff1", passwordHash: pwTutorial, name: "Tutorial 직원1", role: "employee", phone: "01033333333" });
+await db.insert(schema.users).values({ username: "staff2", passwordHash: pwTutorial, name: "Tutorial 직원2", role: "employee", phone: "01044444444" });
 
 // user IDs: 1=master, 2=admin, 3=owner1, 4=supervisor1, 5=staff1, 6=staff2
 
