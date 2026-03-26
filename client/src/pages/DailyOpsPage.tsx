@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { formatDate } from 'date-fns';
 import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
-import { resizeImage } from '@/lib/imageResize';
+import { resizeImage, OCR_HIGH, OCR_STORAGE } from '@/lib/imageResize';
 import { formatDateWithHoliday, getHolidayName } from '@/lib/koreanHolidays';
 import { toast } from 'sonner';
 import {
@@ -681,6 +681,7 @@ function PurchaseTab({
   const [ocrProcessing, setOcrProcessing] = useState(false);
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [ocrOriginalItems, setOcrOriginalItems] = useState<any[] | null>(null); // AI 원본 (수정 비교용)
 
   const utils = trpc.useUtils();
 
@@ -767,7 +768,7 @@ function PurchaseTab({
     }
   };
 
-  // OCR 사진 업로드 + AI 추출
+  // OCR 사진 업로드 + AI 추출 (고품질 분석 → 저품질 저장 이중 구조)
   const handleOcrUpload = async (file: File) => {
     try {
       setOcrProcessing(true);
@@ -778,10 +779,10 @@ function PurchaseTab({
       previewReader.onload = (e) => setOcrPreviewUrl(e.target?.result as string);
       previewReader.readAsDataURL(file);
 
-      // 서버 업로드
-      const resized = await resizeImage(file, { maxSize: 1280 });
+      // 1단계: 고품질 이미지로 업로드 (OCR 분석용)
+      const highQuality = await resizeImage(file, OCR_HIGH);
       const formData = new FormData();
-      formData.append('photo', resized);
+      formData.append('photo', highQuality);
 
       const uploadRes = await fetch('/api/upload/order-image', {
         method: 'POST',
@@ -791,11 +792,11 @@ function PurchaseTab({
       const { url } = await uploadRes.json();
       setAttachmentUrl(url);
 
-      // AI OCR 추출 요청
+      // 2단계: AI OCR 추출 요청 (고품질 이미지로 분석)
       const ocrRes = await fetch('/api/ocr/extract-purchase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: url }),
+        body: JSON.stringify({ imageUrl: url, restaurantId }),
       });
 
       if (!ocrRes.ok) {
@@ -805,9 +806,27 @@ function PurchaseTab({
 
       const ocrData = await ocrRes.json();
 
+      // 3단계: OCR 완료 후 저품질 이미지로 교체 (저장 공간 절약)
+      try {
+        const storageQuality = await resizeImage(file, OCR_STORAGE);
+        const replaceForm = new FormData();
+        replaceForm.append('photo', storageQuality);
+        replaceForm.append('replaceUrl', url);
+        await fetch('/api/upload/order-image-replace', {
+          method: 'POST',
+          body: replaceForm,
+        });
+      } catch {
+        // 교체 실패해도 OCR 결과는 유효 — 무시
+      }
+
+      // OCR 원본 저장 (나중에 사용자 수정 비교용)
+      if (ocrData.items && ocrData.items.length > 0) {
+        setOcrOriginalItems(ocrData.items);
+      }
+
       // 추출 결과로 폼 프리필
       if (ocrData.counterpartyName) {
-        // 거래처명 매칭 시도
         const matched = counterpartiesQuery.data?.find(
           (cp: any) => cp.name.includes(ocrData.counterpartyName) || ocrData.counterpartyName.includes(cp.name)
         );
@@ -816,31 +835,22 @@ function PurchaseTab({
 
       if (ocrData.items && ocrData.items.length > 0) {
         setPurchaseItems(
-          ocrData.items.map((item: any) => {
-            // 합계 검증: 수량×단가 ≠ lineTotal이면 수량×단가로 보정
-            const qty = parseFloat(item.quantity || '0');
-            const price = parseFloat(item.unitPrice || '0');
-            let total = item.lineTotal || '';
-            if (qty > 0 && price > 0) {
-              const calculated = Math.round(qty * price);
-              const parsed = parseFloat(total || '0');
-              if (parsed > 0 && Math.abs(parsed - calculated) / calculated > 0.05) {
-                total = String(calculated);
-              } else if (!parsed) {
-                total = String(calculated);
-              }
-            }
-            return {
-              rawItemName: item.shortName || item.name || '',
-              originalName: item.originalName || item.name || '',
-              quantity: item.quantity || '',
-              unitName: item.unit || '개',
-              unitPrice: item.unitPrice || '',
-              lineTotal: total,
-            };
-          })
+          ocrData.items.map((item: any) => ({
+            rawItemName: item.shortName || item.name || '',
+            originalName: item.originalName || item.name || '',
+            quantity: item.quantity || '',
+            unitName: item.unit || '개',
+            unitPrice: item.unitPrice || '',
+            lineTotal: item.lineTotal || '',
+            confidence: item.confidence || 'high',
+          }))
         );
-        toast.success(`${ocrData.items.length}개 항목이 추출되었습니다. 확인 후 수정하세요.`);
+        const lowConfCount = ocrData.items.filter((i: any) => i.confidence === 'low').length;
+        if (lowConfCount > 0) {
+          toast.success(`${ocrData.items.length}개 항목 추출 (${lowConfCount}개 확인 필요). 노란색 항목을 확인하세요.`);
+        } else {
+          toast.success(`${ocrData.items.length}개 항목이 추출되었습니다. 확인 후 수정하세요.`);
+        }
       } else {
         toast.info('항목을 추출하지 못했습니다. 직접 입력해주세요.');
       }
@@ -898,6 +908,28 @@ function PurchaseTab({
         lineTotal: i.lineTotal,
       })),
     });
+
+    // OCR 수정 데이터 비동기 제출 (품질 개선용, 실패해도 무시)
+    if (ocrOriginalItems && attachmentUrl) {
+      fetch('/api/ocr/submit-correction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          restaurantId,
+          counterpartyId: counterpartyId || null,
+          imageUrl: attachmentUrl,
+          originalItems: ocrOriginalItems,
+          correctedItems: validItems.map(i => ({
+            rawItemName: i.rawItemName,
+            quantity: i.quantity || '',
+            unitName: i.unitName || '',
+            unitPrice: i.unitPrice || '',
+            lineTotal: i.lineTotal || '',
+          })),
+        }),
+      }).catch(() => {}); // 무시
+      setOcrOriginalItems(null);
+    }
   };
 
   const orders = ordersQuery.data || [];
@@ -1120,8 +1152,25 @@ function PurchaseTab({
               {/* 항목 입력 */}
               <div className="space-y-2">
                 <Label className="text-xs">매입 항목</Label>
-                {purchaseItems.map((item, idx) => (
-                  <div key={idx} className={`space-y-2 border rounded-lg p-3 ${ocrPreviewUrl ? 'border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10' : 'border-border bg-card/50'}`}>
+                {purchaseItems.map((item, idx) => {
+                  const isLowConf = item.confidence === 'low';
+                  const isMedConf = item.confidence === 'medium';
+                  const cardBorder = isLowConf
+                    ? 'border-red-300 dark:border-red-700 bg-red-50/30 dark:bg-red-900/10'
+                    : isMedConf
+                      ? 'border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-900/10'
+                      : ocrPreviewUrl
+                        ? 'border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10'
+                        : 'border-border bg-card/50';
+                  return (
+                  <div key={idx} className={`space-y-2 border rounded-lg p-3 ${cardBorder}`}>
+                    {/* 신뢰도 배지 */}
+                    {(isLowConf || isMedConf) && (
+                      <div className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded w-fit ${isLowConf ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'}`}>
+                        <AlertCircle className="w-3 h-3" />
+                        {isLowConf ? '판독 불확실 — 확인 필요' : '합계 보정됨 — 확인 필요'}
+                      </div>
+                    )}
                     {/* 품명 */}
                     <div>
                       <Input
@@ -1166,7 +1215,8 @@ function PurchaseTab({
                       <Trash2 className="w-3 h-3" /> 이 항목 삭제
                     </button>
                   </div>
-                ))}
+                  );
+                })}
                 <Button variant="secondary" size="sm" onClick={() => setPurchaseItems([...purchaseItems, emptyPurchaseItem()])} className="w-full">
                   <Plus className="w-3 h-3 mr-1" /> 항목 추가
                 </Button>

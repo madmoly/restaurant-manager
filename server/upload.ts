@@ -146,6 +146,40 @@ uploadRouter.post("/fixed-cost-attachment", fixedCostUpload.single("file"), (req
   res.json({ url });
 });
 
+/**
+ * POST /api/upload/order-image-replace
+ * OCR 분석 완료 후 고품질 이미지를 저품질로 교체 (저장 공간 절약)
+ * Body: multipart { photo: File, replaceUrl: string }
+ */
+uploadRouter.post("/order-image-replace", orderUpload.single("photo"), (req: Request, res: Response) => {
+  if (!req.file) {
+    res.status(400).json({ error: "파일이 없습니다" });
+    return;
+  }
+  const replaceUrl = req.body?.replaceUrl;
+  if (!replaceUrl || typeof replaceUrl !== "string") {
+    // 교체 대상 없으면 새 파일만 삭제하고 종료
+    fs.unlinkSync(req.file.path);
+    res.status(400).json({ error: "replaceUrl이 필요합니다" });
+    return;
+  }
+  try {
+    const relativePath = replaceUrl.replace(/^\/uploads\//, "");
+    const targetPath = path.join(UPLOAD_ROOT, relativePath);
+    if (fs.existsSync(targetPath)) {
+      // 새 저품질 파일로 기존 고품질 파일 교체
+      fs.copyFileSync(req.file.path, targetPath);
+    }
+    // 임시 업로드 파일 삭제
+    fs.unlinkSync(req.file.path);
+    res.json({ ok: true });
+  } catch (err: any) {
+    // 교체 실패해도 치명적이지 않음
+    try { fs.unlinkSync(req.file.path); } catch {}
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 // ─── 2주 지난 체크리스트 사진 자동삭제 ────────────────────────────────────────
 
 const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;

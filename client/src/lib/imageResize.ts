@@ -6,6 +6,10 @@
  *  - 최대 크기: 1280px (장변 기준)
  *  - JPEG 품질: 0.8
  *  - 출력 포맷: image/jpeg
+ *
+ * OCR 전용 프리셋:
+ *  - OCR_HIGH: 분석용 고품질 (2560px, 0.92)
+ *  - OCR_STORAGE: 저장용 저품질 (1280px, 0.7)
  */
 
 export interface ResizeOptions {
@@ -20,6 +24,20 @@ export interface ResizeOptions {
 const DEFAULT_OPTIONS: Required<ResizeOptions> = {
   maxSize: 1280,
   quality: 0.8,
+  mimeType: "image/jpeg",
+};
+
+/** OCR 분석용 고품질 프리셋 */
+export const OCR_HIGH: ResizeOptions = {
+  maxSize: 2560,
+  quality: 0.92,
+  mimeType: "image/jpeg",
+};
+
+/** OCR 분석 후 저장용 저품질 프리셋 */
+export const OCR_STORAGE: ResizeOptions = {
+  maxSize: 1280,
+  quality: 0.7,
   mimeType: "image/jpeg",
 };
 

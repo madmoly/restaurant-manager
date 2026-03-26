@@ -236,6 +236,21 @@ app.use(express.json());
       if (!e.message.includes("Duplicate")) console.log("[migrate] notifications type:", e.message);
     }
 
+    // ─── OCR 수정 데이터 축적 테이블 ─────────────────────────────────────────
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS ocr_corrections (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        counterpartyId INT,
+        imageUrl TEXT NOT NULL,
+        originalItems JSON,
+        correctedItems JSON,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ocr_restaurant (restaurantId),
+        INDEX idx_ocr_counterparty (counterpartyId)
+      )
+    `);
+
     // ─── Phase 5: 초대코드 + 비밀번호 강제변경 ─────────────────────────────────
     // users.mustChangePassword
     await addColumnIfNotExists("users", "mustChangePassword", "BOOLEAN NOT NULL DEFAULT FALSE");
