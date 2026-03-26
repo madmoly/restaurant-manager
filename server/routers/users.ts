@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { router, protectedProcedure, adminProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
-import { users, restaurantUsers } from "../../drizzle/schema";
+import { users, restaurantUsers, restaurants } from "../../drizzle/schema";
 import { hashPassword } from "../auth";
 
 export const usersRouter = router({
@@ -13,6 +13,35 @@ export const usersRouter = router({
       isActive: users.isActive, createdAt: users.createdAt,
     }).from(users)
   ),
+
+  /** 사용자 목록 + 매장 배정 현황 */
+  listWithAssignments: adminProcedure.query(async () => {
+    const allUsers = await db.select({
+      id: users.id, username: users.username, name: users.name,
+      email: users.email, phone: users.phone, role: users.role,
+      isActive: users.isActive, createdAt: users.createdAt,
+    }).from(users);
+
+    const assignments = await db.select({
+      userId: restaurantUsers.userId,
+      restaurantId: restaurantUsers.restaurantId,
+      restaurantName: restaurants.name,
+      storeRole: restaurantUsers.role,
+    })
+      .from(restaurantUsers)
+      .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId));
+
+    const assignmentMap: Record<number, Array<{ restaurantId: number; restaurantName: string; storeRole: string }>> = {};
+    for (const a of assignments) {
+      if (!assignmentMap[a.userId]) assignmentMap[a.userId] = [];
+      assignmentMap[a.userId].push({ restaurantId: a.restaurantId, restaurantName: a.restaurantName, storeRole: a.storeRole });
+    }
+
+    return allUsers.map((u) => ({
+      ...u,
+      assignments: assignmentMap[u.id] ?? [],
+    }));
+  }),
 
   get: protectedProcedure
     .input(z.object({ id: z.number() }))

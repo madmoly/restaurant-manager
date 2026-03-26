@@ -42,7 +42,6 @@ export default function StaffPage() {
   const isOwnerOrAdmin = isAdmin || current?.storeRole === "owner";
   const canChangeRole = user?.role === "master" || current?.storeRole === "owner";
 
-  const [showAddStaff, setShowAddStaff] = useState(false);
   const [showContractForm, setShowContractForm] = useState(false);
   const [showInviteSection, setShowInviteSection] = useState(false);
   const [expandedStaff, setExpandedStaff] = useState<number | null>(null);
@@ -80,12 +79,6 @@ export default function StaffPage() {
     { enabled: restaurantId > 0 },
   );
 
-  const { data: allUsers } = trpc.users.list.useQuery(undefined, { enabled: showAddStaff });
-
-  const addStaff = trpc.restaurants.addStaff.useMutation({
-    onSuccess() { toast.success("직원 배정됨"); setShowAddStaff(false); utils.restaurants.getStaff.invalidate(); },
-    onError(err) { toast.error(err.message); },
-  });
 
   const updateRole = trpc.restaurants.updateStaffRole.useMutation({
     onSuccess() { toast.success("역할 변경됨"); utils.restaurants.getStaff.invalidate(); },
@@ -203,9 +196,6 @@ export default function StaffPage() {
           <Button size="sm" variant={showInviteSection ? "secondary" : "outline"} onClick={() => setShowInviteSection(!showInviteSection)} className="text-xs">
             <UserPlus className="w-3.5 h-3.5 mr-1" /> 초대
           </Button>
-          <Button size="sm" onClick={() => setShowAddStaff(true)} className="text-xs">
-            <Plus className="w-3.5 h-3.5 mr-1" /> 배정
-          </Button>
         </div>
       </div>
 
@@ -317,15 +307,10 @@ export default function StaffPage() {
         <div className="text-center py-12 bg-card border border-border rounded-lg">
           <Users className="w-10 h-10 mx-auto text-muted-foreground/50 mb-3" />
           <p className="text-sm font-medium text-muted-foreground mb-1">배정된 직원이 없습니다</p>
-          <p className="text-xs text-muted-foreground mb-4">위의 "배정" 또는 "초대" 버튼으로 직원을 추가하세요</p>
-          <div className="flex justify-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setShowInviteSection(true)} className="text-xs">
-              <UserPlus className="w-3.5 h-3.5 mr-1" /> 초대 링크 생성
-            </Button>
-            <Button size="sm" onClick={() => setShowAddStaff(true)} className="text-xs">
-              <Plus className="w-3.5 h-3.5 mr-1" /> 기존 사용자 배정
-            </Button>
-          </div>
+          <p className="text-xs text-muted-foreground mb-4">초대 링크를 생성하여 직원을 추가하세요</p>
+          <Button size="sm" variant="outline" onClick={() => setShowInviteSection(true)} className="text-xs">
+            <UserPlus className="w-3.5 h-3.5 mr-1" /> 초대 링크 생성
+          </Button>
         </div>
       ) : (
         <div className="space-y-2">
@@ -641,18 +626,6 @@ export default function StaffPage() {
         />
       )}
 
-      {/* 직원 배정 모달 */}
-      {showAddStaff && (
-        <AddStaffModal
-          restaurantId={restaurantId}
-          allUsers={allUsers ?? []}
-          existingStaff={staffList ?? []}
-          onAdd={(userId, role) => addStaff.mutate({ restaurantId, userId, role: role as any })}
-          onClose={() => setShowAddStaff(false)}
-          isPending={addStaff.isPending}
-        />
-      )}
-
       {/* 계약서 작성 모달 */}
       {showContractForm && (
         <ContractFormModal
@@ -722,55 +695,6 @@ function CredentialEditModal({ data, restaurantId, onSave, onClose, isPending }:
             disabled={isPending}
           >
             {isPending ? "저장 중..." : "저장"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── 직원 배정 모달 ───────────────────────────────────────────────────────────
-
-function AddStaffModal({ restaurantId, allUsers, existingStaff, onAdd, onClose, isPending }: {
-  restaurantId: number; allUsers: any[]; existingStaff: any[];
-  onAdd: (userId: number, role: string) => void; onClose: () => void; isPending: boolean;
-}) {
-  const [userId, setUserId] = useState(0);
-  const [role, setRole] = useState("staff");
-
-  const existingIds = new Set(existingStaff.map((s: any) => s.userId));
-  const available = allUsers.filter((u: any) => !existingIds.has(u.id));
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-foreground">직원 배정</h2>
-          <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="text-sm font-medium text-foreground">사용자</label>
-            <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={userId} onChange={(e) => setUserId(Number(e.target.value))}>
-              <option value={0}>선택...</option>
-              {available.map((u: any) => <option key={u.id} value={u.id}>{u.name} (@{u.username})</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-foreground">역할</label>
-            <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="owner">점장</option>
-                        <option value="supervisor">매니져</option>
-              <option value="staff">직원</option>
-            </select>
-          </div>
-        </div>
-        <div className="flex gap-2 pt-4 justify-end">
-          <Button variant="outline" onClick={onClose}>취소</Button>
-          <Button onClick={() => onAdd(userId, role)} disabled={!userId || isPending}>
-            {isPending ? "배정 중..." : "배정"}
           </Button>
         </div>
       </div>
