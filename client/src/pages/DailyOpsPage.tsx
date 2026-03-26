@@ -549,17 +549,17 @@ function OpenTab({
 
   return (
     <div className="space-y-4 p-4">
-      <DateInfoCard date={date} />
-      <TodayStaffCard restaurantId={restaurantId} date={date} />
-      <YesterdayClosingCard restaurantId={restaurantId} date={date} />
-      <WeatherCard />
-      <WeekdayAvgSalesCard restaurantId={restaurantId} date={date} />
-
       <TabChecklists
         restaurantId={restaurantId}
         date={date}
         targetTab="open"
       />
+
+      <DateInfoCard date={date} />
+      <TodayStaffCard restaurantId={restaurantId} date={date} />
+      <YesterdayClosingCard restaurantId={restaurantId} date={date} />
+      <WeatherCard />
+      <WeekdayAvgSalesCard restaurantId={restaurantId} date={date} />
 
       <Button
         onClick={() => {
@@ -898,6 +898,13 @@ function PurchaseTab({
 
   return (
     <div className="space-y-4 p-4">
+      {/* 매입 탭 체크리스트 */}
+      <TabChecklists
+        restaurantId={restaurantId}
+        date={date}
+        targetTab="purchase"
+      />
+
       {/* ─── 일별 매입 현황 ─── */}
       <Card className="bg-card border-border p-4">
         <div className="flex items-center justify-between mb-3">
@@ -1202,13 +1209,6 @@ function PurchaseTab({
           </Button>
         </Card>
       )}
-
-      {/* 매입 탭 체크리스트 */}
-      <TabChecklists
-        restaurantId={restaurantId}
-        date={date}
-        targetTab="purchase"
-      />
 
       {/* 미입고 발주 전표 요약 (매입탭 최하단) */}
       <PendingOrdersBanner restaurantId={restaurantId} />
@@ -1633,6 +1633,13 @@ function CloseTab({
 
   return (
     <div className="space-y-4 p-4">
+      {/* 마감 탭 체크리스트 */}
+      <TabChecklists
+        restaurantId={restaurantId}
+        date={date}
+        targetTab="close"
+      />
+
       {/* 금일 운영 확인 */}
       <Card className="bg-card border-border p-4">
         <h3 className="font-semibold text-foreground mb-4">금일 운영 확인</h3>
@@ -1884,13 +1891,6 @@ function CloseTab({
           </Button>
         </div>
       </Card>
-
-      {/* 마감 탭 체크리스트 */}
-      <TabChecklists
-        restaurantId={restaurantId}
-        date={date}
-        targetTab="close"
-      />
 
       {/* ─── 일마감 손익 요약 ─── */}
       <ClosingProfitSection restaurantId={restaurantId} date={date} />

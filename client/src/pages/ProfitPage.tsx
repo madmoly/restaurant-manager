@@ -5,6 +5,7 @@ import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download, FileText } 
 import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { ProfitPageSkeleton } from "@/components/ui/skeletons";
+import { loadKoreanFont } from "@/lib/pdfKoreanFont";
 
 type CostCategory = "sales" | "purchases" | "labor" | "fixed" | null;
 
@@ -125,6 +126,7 @@ export default function ProfitPage() {
     const { jsPDF } = await import("jspdf");
     const autoTable = (await import("jspdf-autotable")).default;
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    await loadKoreanFont(doc);
 
     doc.setFontSize(14);
     doc.text(fileName, 14, 15);
@@ -133,8 +135,8 @@ export default function ProfitPage() {
       startY: 22,
       head: [summaryHeaders],
       body: summaryRows.map(r => r.map(c => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
-      styles: { fontSize: 9, cellPadding: 3 },
-      headStyles: { fillColor: [59, 130, 246], textColor: 255 },
+      styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
+      headStyles: { fillColor: [59, 130, 246], textColor: 255, font: "NanumGothic" },
       columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
     });
 
@@ -146,8 +148,8 @@ export default function ProfitPage() {
       startY: finalY + 14,
       head: [fixedHeaders],
       body: fixedRows.map((r: any[]) => r.map((c: any) => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
-      styles: { fontSize: 9, cellPadding: 3 },
-      headStyles: { fillColor: [100, 116, 139], textColor: 255 },
+      styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
+      headStyles: { fillColor: [100, 116, 139], textColor: 255, font: "NanumGothic" },
       columnStyles: { 1: { halign: "right" } },
     });
 

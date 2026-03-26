@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
+import { loadKoreanFont } from "@/lib/pdfKoreanFont";
 
 function fmtWon(n: number) {
   return Math.round(n).toLocaleString();
@@ -108,19 +109,20 @@ export default function LaborCostPage() {
     const { jsPDF } = await import("jspdf");
     const autoTable = (await import("jspdf-autotable")).default;
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    await loadKoreanFont(doc);
 
     // 제목
     doc.setFontSize(14);
     doc.text(`${fileName}`, 14, 15);
     doc.setFontSize(9);
-    doc.text(`Total: ${fmtWon(grandTotalWage)} won / ${grandTotalHours.toFixed(1)}h`, 14, 22);
+    doc.text(`합계: ${fmtWon(grandTotalWage)}원 / ${grandTotalHours.toFixed(1)}시간`, 14, 22);
 
     autoTable(doc, {
       startY: 28,
       head: [headers],
       body: rows.map(r => r.map(c => String(c))),
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [59, 130, 246], textColor: 255, fontSize: 8 },
+      styles: { fontSize: 8, cellPadding: 2, font: "NanumGothic" },
+      headStyles: { fillColor: [59, 130, 246], textColor: 255, fontSize: 8, font: "NanumGothic" },
       columnStyles: {
         4: { halign: "right" },
         5: { halign: "right" },
