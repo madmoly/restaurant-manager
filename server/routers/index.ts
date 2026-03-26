@@ -25,6 +25,7 @@ import { electronicContractsRouter } from "./electronicContracts";
 import { leaveRequestsRouter } from "./leaveRequests";
 import { errorLogsRouter } from "./errorLogs";
 import { adminRouter } from "./admin";
+import { systemRouter } from "./system";
 
 export const appRouter = router({
   auth: authRouter,
@@ -53,6 +54,7 @@ export const appRouter = router({
   leaveRequests: leaveRequestsRouter,
   errorLogs: errorLogsRouter,
   admin: adminRouter,
+  system: systemRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -151,6 +151,91 @@ app.use(express.json());
     }
     await addColumnIfNotExists("fixed_costs", "attachmentUrl", "VARCHAR(500) DEFAULT NULL");
 
+    // ─── Phase 4: 시스템 관리 테이블 ─────────────────────────────────────────
+    // 감사 로그
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        userId INT,
+        userName VARCHAR(100),
+        restaurantId INT,
+        action VARCHAR(50) NOT NULL,
+        target VARCHAR(50) NOT NULL,
+        targetId INT,
+        details JSON,
+        ipAddress VARCHAR(45),
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_audit_created (createdAt),
+        INDEX idx_audit_user (userId),
+        INDEX idx_audit_target (target, targetId)
+      )
+    `);
+
+    // 시스템 설정
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS system_settings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        settingKey VARCHAR(100) NOT NULL UNIQUE,
+        settingValue TEXT,
+        description VARCHAR(255),
+        updatedBy INT,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 기본 설정값 삽입 (이미 있으면 무시)
+    await conn.query(`
+      INSERT IGNORE INTO system_settings (settingKey, settingValue, description) VALUES
+      ('leave_min_days', '5', '휴무신청 최소 사전 일수'),
+      ('ocr_model', 'claude-sonnet-4-20250514', 'OCR에 사용하는 Claude 모델'),
+      ('default_latitude', '37.5665', '기본 위도 (서울)'),
+      ('default_longitude', '126.9780', '기본 경도 (서울)'),
+      ('backup_retention_days', '30', 'DB 백업 보관 일수'),
+      ('backup_interval_hours', '24', 'DB 자동 백업 주기 (시간)')
+    `);
+
+    // API 사용량 로그
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS api_usage_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        apiType VARCHAR(50) NOT NULL,
+        endpoint VARCHAR(255),
+        userId INT,
+        restaurantId INT,
+        requestPayloadSize INT,
+        responseTimeMs INT,
+        success BOOLEAN NOT NULL DEFAULT TRUE,
+        errorMessage TEXT,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_api_type (apiType),
+        INDEX idx_api_created (createdAt)
+      )
+    `);
+
+    // DB 백업 로그
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS db_backup_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        fileName VARCHAR(255) NOT NULL,
+        fileSizeBytes INT,
+        tableCount INT,
+        status VARCHAR(20) NOT NULL DEFAULT 'success',
+        errorMessage TEXT,
+        durationMs INT,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_backup_created (createdAt)
+      )
+    `);
+
+    // notifications type ENUM 확장 (system_announcement 추가)
+    try {
+      await conn.query(`ALTER TABLE notifications MODIFY COLUMN type ENUM('schedule_change','cost_exceeded','target_achieved','general','schedule_assigned','schedule_updated','schedule_deleted','health_cert_expiry','system_announcement') NOT NULL`);
+      console.log("[migrate] notifications.type: system_announcement 추가");
+    } catch (e: any) {
+      if (!e.message.includes("Duplicate")) console.log("[migrate] notifications type:", e.message);
+    }
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {
@@ -563,6 +648,95 @@ if (process.env.NODE_ENV === "production") {
     app.use("*", (_req, res) => res.sendFile(path.resolve(distPath, "index.html")));
   }
 }
+
+// ─── DB 자동 백업 스케줄러 (24시간마다) ──────────────────────────────────────
+(async () => {
+  const runAutoBackup = async () => {
+    const startTime = Date.now();
+    try {
+      const mysql2 = await import("mysql2/promise");
+      const fsMod = await import("fs");
+      const pathMod = await import("path");
+      const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
+
+      const backupDir = pathMod.resolve("backups");
+      if (!fsMod.existsSync(backupDir)) fsMod.mkdirSync(backupDir, { recursive: true });
+
+      const now = new Date();
+      const fileName = `auto_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}.sql`;
+      const filePath = pathMod.join(backupDir, fileName);
+
+      const [tables] = await conn.query("SHOW TABLES") as any[];
+      const tableNames = tables.map((t: any) => Object.values(t)[0] as string);
+
+      let sqlContent = `-- Auto Backup: ${now.toISOString()}\n-- Tables: ${tableNames.length}\nSET FOREIGN_KEY_CHECKS = 0;\n\n`;
+      for (const table of tableNames) {
+        const [createResult] = await conn.query(`SHOW CREATE TABLE \`${table}\``) as any[];
+        sqlContent += `DROP TABLE IF EXISTS \`${table}\`;\n${createResult[0]["Create Table"]};\n\n`;
+        const [rows] = await conn.query(`SELECT * FROM \`${table}\``) as any[];
+        if (rows.length > 0) {
+          const cols = Object.keys(rows[0]);
+          for (const row of rows) {
+            const vals = cols.map((c: string) => {
+              const v = row[c];
+              if (v === null) return "NULL";
+              if (v instanceof Date) return `'${v.toISOString().slice(0, 19).replace("T", " ")}'`;
+              if (typeof v === "object") return `'${JSON.stringify(v).replace(/'/g, "\\'")}'`;
+              return `'${String(v).replace(/'/g, "\\'")}'`;
+            });
+            sqlContent += `INSERT INTO \`${table}\` (${cols.map(c => `\`${c}\``).join(",")}) VALUES (${vals.join(",")});\n`;
+          }
+          sqlContent += "\n";
+        }
+      }
+      sqlContent += "SET FOREIGN_KEY_CHECKS = 1;\n";
+
+      fsMod.writeFileSync(filePath, sqlContent, "utf8");
+      const fileSizeBytes = fsMod.statSync(filePath).size;
+      const durationMs = Date.now() - startTime;
+      await conn.end();
+
+      // 백업 로그 기록 (raw SQL — drizzle import 안 쓰기 위해)
+      const conn2 = await mysql2.createConnection(process.env.DATABASE_URL!);
+      await conn2.query(
+        `INSERT INTO db_backup_logs (fileName, fileSizeBytes, tableCount, status, durationMs) VALUES (?, ?, ?, 'success', ?)`,
+        [fileName, fileSizeBytes, tableNames.length, durationMs]
+      );
+
+      // 오래된 백업 삭제 (30일)
+      const [settingRows] = await conn2.query(`SELECT settingValue FROM system_settings WHERE settingKey = 'backup_retention_days'`) as any[];
+      const retentionDays = parseInt(settingRows?.[0]?.settingValue ?? "30");
+      const files = fsMod.readdirSync(backupDir).filter(f => f.endsWith(".sql")).sort();
+      const cutoff = new Date(Date.now() - retentionDays * 86400000);
+      for (const f of files) {
+        const fPath = pathMod.join(backupDir, f);
+        const stat = fsMod.statSync(fPath);
+        if (stat.mtime < cutoff) {
+          fsMod.unlinkSync(fPath);
+          console.log(`[backup] deleted old backup: ${f}`);
+        }
+      }
+
+      await conn2.end();
+      console.log(`[backup] auto backup complete: ${fileName} (${(fileSizeBytes / 1024).toFixed(0)}KB, ${(durationMs / 1000).toFixed(1)}s)`);
+    } catch (e: any) {
+      console.error("[backup] auto backup failed:", e.message);
+      try {
+        const mysql2 = await import("mysql2/promise");
+        const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
+        await conn.query(
+          `INSERT INTO db_backup_logs (fileName, status, errorMessage, durationMs) VALUES (?, 'failed', ?, ?)`,
+          [`failed_auto_${new Date().toISOString()}`, e.message, Date.now() - startTime]
+        );
+        await conn.end();
+      } catch {}
+    }
+  };
+
+  // 서버 시작 30초 후 1회 + 24시간마다 반복
+  setTimeout(runAutoBackup, 30000);
+  setInterval(runAutoBackup, 24 * 60 * 60 * 1000);
+})();
 
 const port = parseInt(process.env.PORT || "3000");
 app.listen(port, "0.0.0.0", () => console.log(`Server running on http://localhost:${port}/`));

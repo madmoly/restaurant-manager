@@ -1,7 +1,22 @@
-개발자 대시보드를 매장 대시보드로 통일, 시스템현황은 시스템관리로 이동
+시스템관리 페이지 대규모 확장 (7개 기능 추가)
 
-- master / → ManagerDashboard (점장과 동일한 매장 대시보드)
-- 기존 MasterDashboard 시스템현황 콘텐츠 → SystemPage 시스템현황 탭으로 통합
-- SystemPage 3탭 구성: 시스템 현황 / 에러 개요 / 에러 목록
+[새 기능]
+1. 공지사항 발송 - 전체/매장별 공지 작성 및 발송, 이력 조회
+2. 감사 로그 - 누가 언제 무엇을 변경했는지 추적 (7일 요약, 페이지네이션)
+3. 세션/접속 관리 - 사용자 활성/비활성화, 비밀번호 초기화
+4. 시스템 설정 - DB 기반 설정값 관리 (휴무신청일수, OCR모델, 기본좌표 등)
+5. API 사용량 모니터링 - OCR/Geocoding 호출 추적, 일별 추이
+6. 데이터 정합성 체크 - 매출/일마감/고정비 누락 자동 탐지
+7. DB 자동 백업 - 24시간 주기 자동 백업 + 수동 백업 + 30일 보관
+
+[DB 변경]
+- audit_logs, system_settings, api_usage_logs, db_backup_logs 테이블 추가
+- notifications.type에 system_announcement 추가
+- 기본 설정값 6개 자동 삽입
+
+[서버]
+- system 라우터 신규 (16개 엔드포인트)
+- geocoding에 API 사용량 로깅 추가
+- 자동 백업 스케줄러 (서버 시작 30초 후 + 24시간 반복)
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

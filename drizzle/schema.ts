@@ -646,7 +646,7 @@ export const notifications = mysqlTable("notifications", {
   type: mysqlEnum("type", [
     "schedule_change", "cost_exceeded", "target_achieved", "general",
     "schedule_assigned", "schedule_updated", "schedule_deleted",
-    "health_cert_expiry",
+    "health_cert_expiry", "system_announcement",
   ]).notNull(),
   title: varchar("title", { length: 200 }).notNull(),
   content: text("content"),
@@ -703,3 +703,58 @@ export const errorLogs = mysqlTable("error_logs", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type ErrorLog = typeof errorLogs.$inferSelect;
+
+// ─── 감사 로그 (Audit Log) ────────────────────────────────────────────────────
+export const auditLogs = mysqlTable("audit_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"),
+  userName: varchar("userName", { length: 100 }),
+  restaurantId: int("restaurantId"),
+  action: varchar("action", { length: 50 }).notNull(), // create, update, delete
+  target: varchar("target", { length: 50 }).notNull(), // sales, schedule, staff, restaurant, etc.
+  targetId: int("targetId"),
+  details: json("details"), // { before: {...}, after: {...} }
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AuditLog = typeof auditLogs.$inferSelect;
+
+// ─── 시스템 설정 ──────────────────────────────────────────────────────────────
+export const systemSettings = mysqlTable("system_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  settingKey: varchar("settingKey", { length: 100 }).notNull().unique(),
+  settingValue: text("settingValue"),
+  description: varchar("description", { length: 255 }),
+  updatedBy: int("updatedBy"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type SystemSetting = typeof systemSettings.$inferSelect;
+
+// ─── API 사용량 로그 ──────────────────────────────────────────────────────────
+export const apiUsageLogs = mysqlTable("api_usage_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  apiType: varchar("apiType", { length: 50 }).notNull(), // ocr, geocoding
+  endpoint: varchar("endpoint", { length: 255 }),
+  userId: int("userId"),
+  restaurantId: int("restaurantId"),
+  requestPayloadSize: int("requestPayloadSize"),
+  responseTimeMs: int("responseTimeMs"),
+  success: boolean("success").default(true).notNull(),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ApiUsageLog = typeof apiUsageLogs.$inferSelect;
+
+// ─── DB 백업 로그 ─────────────────────────────────────────────────────────────
+export const dbBackupLogs = mysqlTable("db_backup_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  fileSizeBytes: int("fileSizeBytes"),
+  tableCount: int("tableCount"),
+  status: varchar("status", { length: 20 }).notNull().default("success"), // success, failed
+  errorMessage: text("errorMessage"),
+  durationMs: int("durationMs"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type DbBackupLog = typeof dbBackupLogs.$inferSelect;

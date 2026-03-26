@@ -2,24 +2,47 @@ import { z } from "zod";
 import { eq, and, sql, count } from "drizzle-orm";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { restaurants, restaurantUsers, users, sales } from "../../drizzle/schema";
+import { restaurants, restaurantUsers, users, sales, apiUsageLogs } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 
-/** 주소 → 좌표 자동 변환 (Nominatim / OpenStreetMap) */
-async function geocodeAddress(address: string): Promise<{ latitude: string; longitude: string } | null> {
+/** 주소 → 좌표 자동 변환 (Nominatim / OpenStreetMap) + API 사용량 로깅 */
+async function geocodeAddress(address: string, userId?: number, restaurantId?: number): Promise<{ latitude: string; longitude: string } | null> {
+  const startTime = Date.now();
   try {
     const url = `https://nominatim.openstreetmap.org/search?` +
       `q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=kr`;
     const res = await fetch(url, {
       headers: { "User-Agent": "331RestaurantManager/1.0" },
     });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.length > 0 && data[0].lat && data[0].lon) {
-      return { latitude: String(data[0].lat), longitude: String(data[0].lon) };
-    }
-    return null;
-  } catch {
+    const responseTimeMs = Date.now() - startTime;
+    const success = res.ok;
+    const data = success ? await res.json() : [];
+    const result = data.length > 0 && data[0].lat && data[0].lon
+      ? { latitude: String(data[0].lat), longitude: String(data[0].lon) }
+      : null;
+
+    // API 사용량 로깅 (비동기, 실패해도 무시)
+    db.insert(apiUsageLogs).values({
+      apiType: "geocoding",
+      endpoint: "nominatim",
+      userId: userId ?? null,
+      restaurantId: restaurantId ?? null,
+      responseTimeMs,
+      success: !!result,
+      errorMessage: result ? null : "주소 변환 실패: " + address,
+    }).catch(() => {});
+
+    return result;
+  } catch (e: any) {
+    db.insert(apiUsageLogs).values({
+      apiType: "geocoding",
+      endpoint: "nominatim",
+      userId: userId ?? null,
+      restaurantId: restaurantId ?? null,
+      responseTimeMs: Date.now() - startTime,
+      success: false,
+      errorMessage: e.message,
+    }).catch(() => {});
     return null;
   }
 }

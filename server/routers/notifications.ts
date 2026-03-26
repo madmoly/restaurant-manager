@@ -75,6 +75,7 @@ export const notificationsRouter = router({
           "schedule_updated",
           "schedule_deleted",
           "health_cert_expiry",
+          "system_announcement",
         ]),
         title: z.string(),
         content: z.string().optional(),
