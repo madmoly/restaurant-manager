@@ -1,10 +1,7 @@
-전체 매장 페이지 재설계: 매장별 종합 정보 카드 뷰
+개발자 대시보드를 매장 대시보드로 통일, 시스템현황은 시스템관리로 이동
 
-- admin/master: 전체 매장 카드 그리드 (직원수, 당월매출, 달성률 표시)
-- 카드 클릭 시 상세 정보 펼침 (전화, 운영시간, 목표, 좌표, 소속직원)
-- 상세에서 매장 정보 수정 가능 (목표매출, 원가율, 인건비율, 좌표 등)
-- restaurants.listWithSummary 엔드포인트 추가 (직원수+당월매출 조인)
-- restaurants.update에 latitude/longitude 필드 추가
-- manager/staff는 기존 단일 매장 뷰 유지
+- master / → ManagerDashboard (점장과 동일한 매장 대시보드)
+- 기존 MasterDashboard 시스템현황 콘텐츠 → SystemPage 시스템현황 탭으로 통합
+- SystemPage 3탭 구성: 시스템 현황 / 에러 개요 / 에러 목록
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

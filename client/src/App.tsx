@@ -65,7 +65,7 @@ function RoleRouter() {
         {/* 개발자(master): 시스템 대시보드 + 전체 접근 */}
         {effectiveRole === "master" && (
           <>
-            <Route path="/" component={MasterDashboard} />
+            <Route path="/" component={ManagerDashboard} />
             <Route path="/business" component={AdminDashboard} />
             <Route path="/users" component={UsersPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
