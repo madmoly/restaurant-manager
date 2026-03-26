@@ -430,8 +430,8 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden selection:bg-primary/20">
-      {/* 데스크탑 사이드바 (투명한 글래스 사양) */}
-      <aside className="hidden lg:flex w-[240px] shrink-0 flex-col bg-sidebar/60 backdrop-blur-3xl border-r border-sidebar-border shadow-2xl z-10 transition-all duration-300">
+      {/* 데스크탑 사이드바 */}
+      <aside className="hidden lg:flex w-[240px] shrink-0 flex-col bg-sidebar/95 backdrop-blur-xl border-r border-sidebar-border shadow-2xl z-10 transition-all duration-300">
         <SidebarInner />
       </aside>
 
