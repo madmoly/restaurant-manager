@@ -64,7 +64,7 @@ function RoleRouter() {
   const effectiveRole = getEffectiveRole(role, storeRole);
 
   return (
-    <AppLayout effectiveRole={effectiveRole}>
+    <AppLayout effectiveRole={effectiveRole} storeRole={storeRole}>
       <Switch>
         {/* 개발자(master): 시스템 대시보드 + 전체 접근 */}
         {effectiveRole === "master" && (

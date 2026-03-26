@@ -1,1 +1,5 @@
-근로계약서 버튼 명칭 변경: 미리보기→근로계약서 미리보기, 서명완료 시 PDF 다운로드 버튼, 발송대기 시 서명링크복사  
+매니져/직원 화면에서 인건비정산 네비 숨김 (점장 이상만 표시)
+
+- AppLayout: requireStoreRole 필터 추가 (인건비정산 → owner만)
+- App.tsx: storeRole prop을 AppLayout에 전달
+- 모바일 하단탭에도 동일 필터 적용

@@ -36,6 +36,8 @@ interface NavItem {
   roles: EffectiveRole[];
   /** 역할별 모바일 하단탭 우선순위 (1~4만 탭에 표시, 나머지는 더보기) */
   mobileTabPriority?: Partial<Record<EffectiveRole, number>>;
+  /** 매장 역할 기반 추가 필터 — 이 배열에 값이 있으면 해당 storeRole만 표시 */
+  requireStoreRole?: string[];
 }
 
 interface NavGroup {
@@ -137,6 +139,7 @@ const STORE_NAV_GROUPS: NavGroup[] = [
         icon: <Coins className="h-4 w-4" />,
         mobileIcon: <Coins className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
+        requireStoreRole: ["owner", "store_manager"],  // 점장만 (매니져 제외)
       },
       {
         label: "매출캘린더",
@@ -206,10 +209,11 @@ const ROLE_COLORS: Record<string, string> = {
 interface AppLayoutProps {
   children: ReactNode;
   effectiveRole: EffectiveRole;
+  storeRole?: string | null;  // 매장 역할 (owner/supervisor/staff) — 세부 권한 필터용
 }
 
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
-export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
+export default function AppLayout({ children, effectiveRole, storeRole }: AppLayoutProps) {
   const { user, logout } = useAuth();
   const [location] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -229,10 +233,20 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
   // 매장별 운영 메뉴 — 역할 기반 필터링 + 중복 제거(시스템 메뉴와 겹치는 href 제외)
   const systemHrefs = new Set(visibleSystemItems.map(i => i.href));
   const seen = new Set<string>();
+  // storeRole 기반 추가 필터 헬퍼
+  const passesStoreRoleFilter = (item: NavItem) => {
+    if (!item.requireStoreRole) return true; // 제한 없음
+    // master/admin은 시스템 역할이므로 항상 통과
+    if (effectiveRole === "master" || effectiveRole === "admin") return true;
+    // storeRole이 requireStoreRole 목록에 포함되어야 표시
+    return !!storeRole && item.requireStoreRole.includes(storeRole);
+  };
+
   const visibleStoreGroups: NavGroup[] = STORE_NAV_GROUPS.map(group => ({
     ...group,
     items: group.items.filter(item => {
       if (!item.roles.includes(effectiveRole)) return false;
+      if (!passesStoreRoleFilter(item)) return false;
       if (systemHrefs.has(item.href)) return false; // 시스템 메뉴와 중복 제거
       if (seen.has(item.href)) return false;
       seen.add(item.href);
@@ -244,6 +258,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
   const seenMobile = new Set<string>();
   const visibleNav = ALL_NAV_ITEMS.filter(n => {
     if (!n.roles.includes(effectiveRole)) return false;
+    if (!passesStoreRoleFilter(n)) return false;
     if (seenMobile.has(n.href)) return false;
     seenMobile.add(n.href);
     return true;
