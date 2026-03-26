@@ -5,6 +5,25 @@ import { db } from "../db";
 import { restaurants, restaurantUsers, users, sales } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 
+/** 주소 → 좌표 자동 변환 (Nominatim / OpenStreetMap) */
+async function geocodeAddress(address: string): Promise<{ latitude: string; longitude: string } | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?` +
+      `q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=kr`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "331RestaurantManager/1.0" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.length > 0 && data[0].lat && data[0].lon) {
+      return { latitude: String(data[0].lat), longitude: String(data[0].lon) };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export const restaurantsRouter = router({
   /** 전체 매장 목록 (master/admin: 전체) */
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -91,7 +110,16 @@ export const restaurantsRouter = router({
       closeTime: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
-      const [result] = await db.insert(restaurants).values(input).$returningId();
+      // 주소가 있으면 좌표 자동 설정
+      let insertData: any = { ...input };
+      if (input.address) {
+        const coords = await geocodeAddress(input.address);
+        if (coords) {
+          insertData.latitude = coords.latitude;
+          insertData.longitude = coords.longitude;
+        }
+      }
+      const [result] = await db.insert(restaurants).values(insertData).$returningId();
       return { id: result.id };
     }),
 
@@ -106,12 +134,19 @@ export const restaurantsRouter = router({
       targetCostRatio: z.string().optional(),
       openTime: z.string().optional(),
       closeTime: z.string().optional(),
-      latitude: z.string().optional(),
-      longitude: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
       const { id, ...data } = input;
-      await db.update(restaurants).set(data).where(eq(restaurants.id, id));
+      // 주소가 변경되었으면 좌표 자동 갱신
+      let updateData: any = { ...data };
+      if (data.address) {
+        const coords = await geocodeAddress(data.address);
+        if (coords) {
+          updateData.latitude = coords.latitude;
+          updateData.longitude = coords.longitude;
+        }
+      }
+      await db.update(restaurants).set(updateData).where(eq(restaurants.id, id));
       return { ok: true };
     }),
 

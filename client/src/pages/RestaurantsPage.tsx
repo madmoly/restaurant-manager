@@ -177,7 +177,6 @@ function RestaurantDetail({ restaurant: r, onNavigate }: {
     targetLaborRatio: r.targetLaborRatio ?? "30",
     targetCostRatio: r.targetCostRatio ?? "80",
     openTime: r.openTime ?? "09:00", closeTime: r.closeTime ?? "22:00",
-    latitude: r.latitude ?? "", longitude: r.longitude ?? "",
   });
 
   const updateMut = trpc.restaurants.update.useMutation({
@@ -220,7 +219,7 @@ function RestaurantDetail({ restaurant: r, onNavigate }: {
             <InfoRow icon={<Clock size={12} />} label="운영" value={`${r.openTime ?? "09:00"} ~ ${r.closeTime ?? "22:00"}`} />
             <InfoRow icon={<Target size={12} />} label="월 목표" value={Number(r.monthlyTargetSales) > 0 ? `${Math.round(Number(r.monthlyTargetSales) / 10000).toLocaleString()}만원` : "미설정"} />
             <InfoRow icon={<TrendingUp size={12} />} label="원가/인건비" value={`${r.targetCostRatio ?? 80}% / ${r.targetLaborRatio ?? 30}%`} />
-            <InfoRow icon={<MapPin size={12} />} label="좌표" value={r.latitude && r.longitude ? `${Number(r.latitude).toFixed(4)}, ${Number(r.longitude).toFixed(4)}` : "미설정"} />
+            <InfoRow icon={<MapPin size={12} />} label="좌표" value={r.latitude && r.longitude ? `${Number(r.latitude).toFixed(4)}, ${Number(r.longitude).toFixed(4)} (자동)` : "주소 입력 시 자동 설정"} />
           </div>
 
           {/* 직원 목록 */}
@@ -257,8 +256,6 @@ function RestaurantDetail({ restaurant: r, onNavigate }: {
             <EditField label="월 목표매출" value={form.monthlyTargetSales} onChange={v => setForm(f => ({ ...f, monthlyTargetSales: v }))} placeholder="0" />
             <EditField label="목표 원가율(%)" value={form.targetCostRatio} onChange={v => setForm(f => ({ ...f, targetCostRatio: v }))} placeholder="80" />
             <EditField label="목표 인건비율(%)" value={form.targetLaborRatio} onChange={v => setForm(f => ({ ...f, targetLaborRatio: v }))} placeholder="30" />
-            <EditField label="위도" value={form.latitude} onChange={v => setForm(f => ({ ...f, latitude: v }))} placeholder="37.5665" />
-            <EditField label="경도" value={form.longitude} onChange={v => setForm(f => ({ ...f, longitude: v }))} placeholder="126.9780" />
           </div>
           <div className="flex gap-2 pt-1">
             <Button size="sm" className="text-xs h-7 gap-1" onClick={handleSave} disabled={!form.name.trim() || updateMut.isPending}>
