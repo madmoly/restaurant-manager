@@ -1,1 +1,10 @@
-시스템관리 페이지(master전용): 매장별/사용자별/일별 에러리포트 + 사용자관리 admin 접근 허용 + admin에 /business,/users 라우트 추가  
+전체 매장 페이지 재설계: 매장별 종합 정보 카드 뷰
+
+- admin/master: 전체 매장 카드 그리드 (직원수, 당월매출, 달성률 표시)
+- 카드 클릭 시 상세 정보 펼침 (전화, 운영시간, 목표, 좌표, 소속직원)
+- 상세에서 매장 정보 수정 가능 (목표매출, 원가율, 인건비율, 좌표 등)
+- restaurants.listWithSummary 엔드포인트 추가 (직원수+당월매출 조인)
+- restaurants.update에 latitude/longitude 필드 추가
+- manager/staff는 기존 단일 매장 뷰 유지
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

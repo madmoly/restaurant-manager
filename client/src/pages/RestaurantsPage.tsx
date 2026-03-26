@@ -3,39 +3,319 @@ import { trpc } from "../lib/trpc";
 import { useAuth } from "../hooks/useAuth";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { toast } from "sonner";
+import { Card } from "@/components/ui/compat";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
-  Plus,
-  Store,
-  Phone,
-  MapPin,
-  Edit3,
-  Check,
-  X,
+  Plus, Store, Phone, MapPin, Edit3, Check, X,
+  Users, TrendingUp, Clock, Target, ChevronRight,
 } from "lucide-react";
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
 
 export default function RestaurantsPage() {
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin" || user?.role === "master";
+
+  // admin/master → 전체 매장 종합 뷰, 그 외 → 단일 매장 정보
+  if (isAdmin) return <AllRestaurantsView />;
+  return <SingleRestaurantView />;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 전체 매장 종합 뷰 (admin/master)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function AllRestaurantsView() {
+  const utils = trpc.useUtils();
+  const { setSelectedRestaurantId } = useRestaurant();
+  const [showCreate, setShowCreate] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  const { data: restaurants, isLoading } = trpc.restaurants.listWithSummary.useQuery();
+
+  const now = new Date();
+  const monthLabel = `${now.getFullYear()}년 ${now.getMonth() + 1}월`;
+
+  if (isLoading) {
+    return (
+      <div className="p-4 md:p-6 max-w-4xl mx-auto">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-muted rounded w-40" />
+          <div className="grid gap-4 md:grid-cols-2">{[1, 2, 3].map(i => <div key={i} className="h-48 bg-muted rounded-lg" />)}</div>
+        </div>
+      </div>
+    );
+  }
+
+  const totalStaff = restaurants?.reduce((s, r) => s + r.staffCount, 0) ?? 0;
+  const totalSales = restaurants?.reduce((s, r) => s + r.monthlySales, 0) ?? 0;
+
+  return (
+    <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-5">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">전체 매장</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {restaurants?.length ?? 0}개 매장 · 직원 {totalStaff}명 · {monthLabel} 매출 {Math.round(totalSales).toLocaleString()}원
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setShowCreate(!showCreate)} className="gap-1.5">
+          <Plus size={14} />
+          매장 추가
+        </Button>
+      </div>
+
+      {showCreate && (
+        <CreateRestaurantForm onDone={() => { setShowCreate(false); utils.restaurants.listWithSummary.invalidate(); }} />
+      )}
+
+      {/* 매장 카드 그리드 */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {restaurants?.map(r => {
+          const expanded = expandedId === r.id;
+          const targetSales = Number(r.monthlyTargetSales ?? 0);
+          const salesAchieve = targetSales > 0 ? Math.round(r.monthlySales / targetSales * 100) : 0;
+
+          return (
+            <Card
+              key={r.id}
+              className="overflow-hidden transition-all duration-200 hover:shadow-md"
+            >
+              {/* 상단: 매장명 + 핵심 수치 */}
+              <div
+                className="p-4 cursor-pointer"
+                onClick={() => setExpandedId(expanded ? null : r.id)}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <Store size={18} className="text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold text-foreground truncate">{r.name}</h3>
+                      <p className="text-[11px] text-muted-foreground truncate">{r.address || "주소 미등록"}</p>
+                    </div>
+                  </div>
+                  <ChevronRight
+                    size={16}
+                    className={`text-muted-foreground shrink-0 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+                  />
+                </div>
+
+                {/* KPI 행 */}
+                <div className="grid grid-cols-3 gap-2">
+                  <KpiPill icon={<Users size={12} />} label="직원" value={`${r.staffCount}명`} />
+                  <KpiPill icon={<TrendingUp size={12} />} label={monthLabel.slice(-3)} value={`${Math.round(r.monthlySales / 10000).toLocaleString()}만`} />
+                  <KpiPill
+                    icon={<Target size={12} />}
+                    label="달성률"
+                    value={targetSales > 0 ? `${salesAchieve}%` : "-"}
+                    color={salesAchieve >= 100 ? "text-emerald-600" : salesAchieve >= 70 ? "text-amber-600" : "text-muted-foreground"}
+                  />
+                </div>
+
+                {/* 목표 달성 프로그레스 바 */}
+                {targetSales > 0 && (
+                  <div className="mt-3">
+                    <div className="w-full bg-muted rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full transition-all duration-500 ${salesAchieve >= 100 ? "bg-emerald-500" : salesAchieve >= 70 ? "bg-amber-500" : "bg-red-400"}`}
+                        style={{ width: `${Math.min(salesAchieve, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 확장: 상세 정보 */}
+              {expanded && (
+                <RestaurantDetail restaurant={r} onNavigate={() => setSelectedRestaurantId(r.id)} />
+              )}
+            </Card>
+          );
+        })}
+      </div>
+
+      {(!restaurants || restaurants.length === 0) && (
+        <div className="text-center py-12 text-muted-foreground text-sm">
+          등록된 매장이 없습니다
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── KPI 알약 ──────────────────────────────────────────────────────────────────
+
+function KpiPill({ icon, label, value, color }: {
+  icon: React.ReactNode; label: string; value: string; color?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 bg-muted/50 rounded-lg px-2 py-1.5">
+      <span className="text-muted-foreground">{icon}</span>
+      <div className="min-w-0">
+        <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>
+        <p className={`text-xs font-bold tabular-nums leading-tight ${color ?? "text-foreground"}`}>{value}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── 매장 상세 펼침 ────────────────────────────────────────────────────────────
+
+function RestaurantDetail({ restaurant: r, onNavigate }: {
+  restaurant: any;
+  onNavigate: () => void;
+}) {
+  const utils = trpc.useUtils();
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    name: r.name, address: r.address ?? "", phone: r.phone ?? "",
+    monthlyTargetSales: r.monthlyTargetSales ?? "0",
+    targetLaborRatio: r.targetLaborRatio ?? "30",
+    targetCostRatio: r.targetCostRatio ?? "80",
+    openTime: r.openTime ?? "09:00", closeTime: r.closeTime ?? "22:00",
+    latitude: r.latitude ?? "", longitude: r.longitude ?? "",
+  });
+
+  const updateMut = trpc.restaurants.update.useMutation({
+    onSuccess() {
+      toast.success("매장 정보 수정 완료");
+      utils.restaurants.listWithSummary.invalidate();
+      utils.restaurants.list.invalidate();
+      setEditing(false);
+    },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const handleSave = () => {
+    updateMut.mutate({
+      id: r.id,
+      name: form.name,
+      address: form.address,
+      phone: form.phone,
+      monthlyTargetSales: form.monthlyTargetSales,
+      targetLaborRatio: form.targetLaborRatio,
+      targetCostRatio: form.targetCostRatio,
+      openTime: form.openTime,
+      closeTime: form.closeTime,
+    });
+  };
+
+  const { data: staff } = trpc.restaurants.getStaff.useQuery({ restaurantId: r.id });
+  const roleLabel = (role: string) => {
+    const map: Record<string, string> = { owner: "점장", supervisor: "매니져", staff: "직원", store_manager: "점장", manager: "매니져", employee: "직원" };
+    return map[role] ?? role;
+  };
+
+  return (
+    <div className="border-t border-border bg-muted/20 px-4 py-3 space-y-3 text-sm">
+      {!editing ? (
+        <>
+          {/* 기본 정보 */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <InfoRow icon={<Phone size={12} />} label="전화" value={r.phone || "-"} />
+            <InfoRow icon={<Clock size={12} />} label="운영" value={`${r.openTime ?? "09:00"} ~ ${r.closeTime ?? "22:00"}`} />
+            <InfoRow icon={<Target size={12} />} label="월 목표" value={Number(r.monthlyTargetSales) > 0 ? `${Math.round(Number(r.monthlyTargetSales) / 10000).toLocaleString()}만원` : "미설정"} />
+            <InfoRow icon={<TrendingUp size={12} />} label="원가/인건비" value={`${r.targetCostRatio ?? 80}% / ${r.targetLaborRatio ?? 30}%`} />
+            <InfoRow icon={<MapPin size={12} />} label="좌표" value={r.latitude && r.longitude ? `${Number(r.latitude).toFixed(4)}, ${Number(r.longitude).toFixed(4)}` : "미설정"} />
+          </div>
+
+          {/* 직원 목록 */}
+          {staff && staff.length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold text-muted-foreground mb-1.5">소속 직원 ({staff.length}명)</p>
+              <div className="flex flex-wrap gap-1.5">
+                {staff.map((s: any) => (
+                  <Badge key={s.userId} variant="secondary" className="text-[11px] px-2 py-0.5 font-normal">
+                    {s.name} <span className="text-muted-foreground ml-1">{roleLabel(s.storeRole)}</span>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setEditing(true)}>
+              <Edit3 size={12} className="mr-1" /> 정보 수정
+            </Button>
+            <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => { onNavigate(); window.location.href = "/"; }}>
+              이 매장으로 이동
+            </Button>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <EditField label="매장명" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} />
+            <EditField label="전화번호" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
+            <EditField label="주소" value={form.address} onChange={v => setForm(f => ({ ...f, address: v }))} full />
+            <EditField label="운영 시작" value={form.openTime} onChange={v => setForm(f => ({ ...f, openTime: v }))} placeholder="09:00" />
+            <EditField label="운영 종료" value={form.closeTime} onChange={v => setForm(f => ({ ...f, closeTime: v }))} placeholder="22:00" />
+            <EditField label="월 목표매출" value={form.monthlyTargetSales} onChange={v => setForm(f => ({ ...f, monthlyTargetSales: v }))} placeholder="0" />
+            <EditField label="목표 원가율(%)" value={form.targetCostRatio} onChange={v => setForm(f => ({ ...f, targetCostRatio: v }))} placeholder="80" />
+            <EditField label="목표 인건비율(%)" value={form.targetLaborRatio} onChange={v => setForm(f => ({ ...f, targetLaborRatio: v }))} placeholder="30" />
+            <EditField label="위도" value={form.latitude} onChange={v => setForm(f => ({ ...f, latitude: v }))} placeholder="37.5665" />
+            <EditField label="경도" value={form.longitude} onChange={v => setForm(f => ({ ...f, longitude: v }))} placeholder="126.9780" />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" className="text-xs h-7 gap-1" onClick={handleSave} disabled={!form.name.trim() || updateMut.isPending}>
+              <Check size={12} /> 저장
+            </Button>
+            <Button size="sm" variant="ghost" className="text-xs h-7 gap-1" onClick={() => setEditing(false)}>
+              <X size={12} /> 취소
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs">
+      <span className="text-muted-foreground/70">{icon}</span>
+      <span className="text-muted-foreground w-12 shrink-0">{label}</span>
+      <span className="text-foreground truncate">{value}</span>
+    </div>
+  );
+}
+
+function EditField({ label, value, onChange, placeholder, full }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string; full?: boolean;
+}) {
+  return (
+    <div className={full ? "col-span-2" : ""}>
+      <label className="text-[10px] text-muted-foreground">{label}</label>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full px-2 py-1 border border-border rounded text-xs bg-background text-foreground"
+      />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 단일 매장 정보 뷰 (manager/staff)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function SingleRestaurantView() {
   const { selectedRestaurant: current } = useRestaurant();
   const utils = trpc.useUtils();
-  const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editAddress, setEditAddress] = useState("");
   const [editPhone, setEditPhone] = useState("");
 
-  const isAdmin = user?.role === "admin" || user?.role === "master";
-
-  // 점장 이상만 수정 가능 (master, admin, owner)
-  const canEdit = isAdmin || current?.storeRole === "owner" || current?.storeRole === "store_manager";
+  const canEdit = current?.storeRole === "owner" || current?.storeRole === "store_manager";
 
   const updateMut = trpc.restaurants.update.useMutation({
-    onSuccess() {
-      toast.success("매장 정보가 수정되었습니다");
-      utils.restaurants.list.invalidate();
-      setEditing(false);
-    },
+    onSuccess() { toast.success("매장 정보가 수정되었습니다"); utils.restaurants.list.invalidate(); setEditing(false); },
     onError(err) { toast.error(err.message); },
   });
 
@@ -49,12 +329,7 @@ export default function RestaurantsPage() {
 
   const handleUpdate = () => {
     if (!current || !editName.trim()) return;
-    updateMut.mutate({
-      id: current.id,
-      name: editName.trim(),
-      address: editAddress.trim(),
-      phone: editPhone.trim(),
-    });
+    updateMut.mutate({ id: current.id, name: editName.trim(), address: editAddress.trim(), phone: editPhone.trim() });
   };
 
   if (!current) {
@@ -63,24 +338,8 @@ export default function RestaurantsPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-2xl mx-auto">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-foreground">매장 정보</h2>
-        {isAdmin && (
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground text-sm rounded-lg hover:bg-primary/90"
-          >
-            <Plus size={16} />
-            매장 추가
-          </button>
-        )}
-      </div>
+      <h2 className="text-lg font-semibold text-foreground">매장 정보</h2>
 
-      {showCreate && (
-        <CreateRestaurantForm onDone={() => { setShowCreate(false); utils.restaurants.list.invalidate(); }} />
-      )}
-
-      {/* 매장 정보 카드 */}
       <div className="bg-card rounded-lg border border-border p-5 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -89,12 +348,8 @@ export default function RestaurantsPage() {
             </div>
             <div>
               {editing ? (
-                <input
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="text-base font-semibold bg-background border border-border rounded px-2 py-1 text-foreground"
-                  placeholder="매장명"
-                />
+                <input value={editName} onChange={(e) => setEditName(e.target.value)}
+                  className="text-base font-semibold bg-background border border-border rounded px-2 py-1 text-foreground" placeholder="매장명" />
               ) : (
                 <>
                   <h3 className="text-base font-semibold text-foreground">{current.name}</h3>
@@ -104,10 +359,7 @@ export default function RestaurantsPage() {
             </div>
           </div>
           {canEdit && !editing && (
-            <button
-              onClick={startEdit}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
-            >
+            <button onClick={startEdit} className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors">
               <Edit3 size={13} /> 수정
             </button>
           )}
@@ -117,34 +369,20 @@ export default function RestaurantsPage() {
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <MapPin size={14} className="text-muted-foreground/70 shrink-0" />
-              <input
-                value={editAddress}
-                onChange={(e) => setEditAddress(e.target.value)}
-                placeholder="주소"
-                className="flex-1 px-2.5 py-1.5 border border-border rounded text-sm bg-background text-foreground"
-              />
+              <input value={editAddress} onChange={(e) => setEditAddress(e.target.value)} placeholder="주소"
+                className="flex-1 px-2.5 py-1.5 border border-border rounded text-sm bg-background text-foreground" />
             </div>
             <div className="flex items-center gap-2">
               <Phone size={14} className="text-muted-foreground/70 shrink-0" />
-              <input
-                value={editPhone}
-                onChange={(e) => setEditPhone(e.target.value)}
-                placeholder="전화번호"
-                className="flex-1 px-2.5 py-1.5 border border-border rounded text-sm bg-background text-foreground"
-              />
+              <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="전화번호"
+                className="flex-1 px-2.5 py-1.5 border border-border rounded text-sm bg-background text-foreground" />
             </div>
             <div className="flex gap-2 pt-1">
-              <button
-                onClick={handleUpdate}
-                disabled={!editName.trim() || updateMut.isPending}
-                className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded-lg hover:bg-primary/90 disabled:opacity-50"
-              >
+              <button onClick={handleUpdate} disabled={!editName.trim() || updateMut.isPending}
+                className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded-lg hover:bg-primary/90 disabled:opacity-50">
                 <Check size={13} /> 저장
               </button>
-              <button
-                onClick={() => setEditing(false)}
-                className="flex items-center gap-1 px-3 py-1.5 text-muted-foreground text-xs rounded-lg hover:bg-accent"
-              >
+              <button onClick={() => setEditing(false)} className="flex items-center gap-1 px-3 py-1.5 text-muted-foreground text-xs rounded-lg hover:bg-accent">
                 <X size={13} /> 취소
               </button>
             </div>
@@ -163,7 +401,6 @@ export default function RestaurantsPage() {
         )}
       </div>
 
-      {/* 직원 관리 → StaffPage로 이동 안내 */}
       <div className="bg-card rounded-lg border border-border p-4">
         <div className="flex items-center justify-between">
           <div>
@@ -192,14 +429,14 @@ function CreateRestaurantForm({ onDone }: { onDone: () => void }) {
   });
 
   return (
-    <div className="bg-card rounded-lg border border-primary/30 p-4 mb-4 space-y-3">
+    <Card className="border-primary/30 p-4 space-y-3">
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="매장명 *" className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background text-foreground" />
       <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="주소" className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background text-foreground" />
       <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="전화번호" className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background text-foreground" />
       <div className="flex gap-2">
-        <button onClick={() => create.mutate({ name, address, phone })} disabled={!name} className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded-lg hover:bg-primary/90 disabled:opacity-50">등록</button>
-        <button onClick={onDone} className="px-4 py-2 text-muted-foreground text-sm rounded-lg hover:bg-accent">취소</button>
+        <Button size="sm" onClick={() => create.mutate({ name, address, phone })} disabled={!name}>등록</Button>
+        <Button size="sm" variant="ghost" onClick={onDone}>취소</Button>
       </div>
-    </div>
+    </Card>
   );
 }

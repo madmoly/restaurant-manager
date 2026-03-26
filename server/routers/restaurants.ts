@@ -1,14 +1,56 @@
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql, count } from "drizzle-orm";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { restaurants, restaurantUsers, users } from "../../drizzle/schema";
+import { restaurants, restaurantUsers, users, sales } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 
 export const restaurantsRouter = router({
   /** 전체 매장 목록 (master/admin: 전체) */
   list: protectedProcedure.query(async ({ ctx }) => {
     return db.select().from(restaurants).where(eq(restaurants.isActive, true));
+  }),
+
+  /** 전체 매장 + 직원수 + 당월 매출 요약 (admin 이상) */
+  listWithSummary: adminProcedure.query(async () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const nextMonth = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+    const allRestaurants = await db.select().from(restaurants).where(eq(restaurants.isActive, true));
+
+    const staffCounts = await db
+      .select({
+        restaurantId: restaurantUsers.restaurantId,
+        staffCount: count(restaurantUsers.id),
+      })
+      .from(restaurantUsers)
+      .groupBy(restaurantUsers.restaurantId);
+
+    const monthlySales = await db
+      .select({
+        restaurantId: sales.restaurantId,
+        total: sql<string>`COALESCE(SUM(${sales.amount}), 0)`,
+      })
+      .from(sales)
+      .where(
+        and(
+          sql`${sales.saleDate} >= ${monthStart}`,
+          sql`${sales.saleDate} < ${nextMonth}`,
+        )
+      )
+      .groupBy(sales.restaurantId);
+
+    const staffMap = new Map(staffCounts.map(s => [s.restaurantId, Number(s.staffCount)]));
+    const salesMap = new Map(monthlySales.map(s => [s.restaurantId, Number(s.total)]));
+
+    return allRestaurants.map(r => ({
+      ...r,
+      staffCount: staffMap.get(r.id) ?? 0,
+      monthlySales: salesMap.get(r.id) ?? 0,
+    }));
   }),
 
   /** 내 매장 + 역할 (admin 미만) */
@@ -64,6 +106,8 @@ export const restaurantsRouter = router({
       targetCostRatio: z.string().optional(),
       openTime: z.string().optional(),
       closeTime: z.string().optional(),
+      latitude: z.string().optional(),
+      longitude: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
       const { id, ...data } = input;
