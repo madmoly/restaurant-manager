@@ -3,5 +3,27 @@ dist
 .env
 *.log
 .DS_Store
+
+# Archives & snapshots
 *.tar.gz
+
+# Legacy dev scripts (Railway only, no local dev)
+dev-start.bat
+dev-start.ps1
+dev.ps1
+setup.bat
+cleanup.bat
+
+# Preview images (outdated)
+preview-*.png
+
+# Legacy migration scripts
+run-migration.mjs
+run-migration-v2.mjs
+
+# Legacy docs
 porting-strategy.md
+
+# System junk
+NVIDIA Corporation/
+package-lock.json
