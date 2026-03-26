@@ -1,8 +1,7 @@
-UI/UX 개선 + OCR 합계 보정 + Tutorial 격리
+매장정보 > 휴무일 관리 UI 추가
 
-- isTutorial 필터링: users.ts, admin.ts, system.ts 라우터에서 튜토리얼 데이터 제외
-- 하단 네비 가림: pb-32 → pb-40 (160px) 확대
-- TutorialBanner 라이트모드: dark: 접두어로 다크/라이트 분리
-- 매입 단위: '단', '직접입력' 추가 (커스텀 입력 지원)
-- 이미지 크게보기: createPortal로 body에 렌더링 (z-index 스태킹 이슈 해결)
-- OCR 합계 보정: 수량×단가 불일치 시 VAT 패턴 감지, qty×unitPrice 우선 적용
+- 정기 휴무 요일: 요일 버튼 토글로 설정/해제
+- 특정 휴무일: 미니캘린더에서 날짜 클릭으로 지정/해제
+- 정기 휴무는 빨간 반투명, 지정 휴무는 빨간 실색으로 시각 구분
+- 기존 백엔드(storeClosures 라우터)와 연동
+- 스케줄 배정 로직은 기존 isClosedDay()로 이미 정상 작동
