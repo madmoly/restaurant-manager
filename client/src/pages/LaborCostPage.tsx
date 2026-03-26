@@ -3,7 +3,7 @@ import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   ChevronLeft, ChevronRight, Building2, Users, Clock, Wallet,
-  ChevronDown, ChevronUp, FileText, Download,
+  ChevronDown, ChevronUp, FileText, Download, CalendarCheck, CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
@@ -194,6 +194,9 @@ export default function LaborCostPage() {
         </div>
       </div>
 
+      {/* 대체휴무/연차 잔여 요약 */}
+      <LeaveSummarySection restaurantId={restaurantId} year={year} month={month} />
+
       {/* 회사별 카드 */}
       {isLoading ? (
         <CompanyCardListSkeleton />
@@ -263,6 +266,85 @@ export default function LaborCostPage() {
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── 대체휴무/연차 잔여 요약 섹션 ─────────────────────────────── */
+function LeaveSummarySection({ restaurantId, year, month }: { restaurantId: number; year: number; month: number }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = trpc.leaveBalance.storeSummary.useQuery(
+    { restaurantId, year },
+    { enabled: restaurantId > 0 },
+  );
+
+  if (isLoading) return null;
+  if (!data || data.length === 0) return null;
+
+  return (
+    <div className="bg-card border border-border rounded-lg overflow-hidden">
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors"
+        onClick={() => setOpen(!open)}
+      >
+        <CalendarCheck className="w-4 h-4 text-muted-foreground shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-foreground">대체휴무 / 연차 현황</div>
+          <div className="text-xs text-muted-foreground">{year}년 · 5인 이상 사업장 직원 {data.length}명</div>
+        </div>
+        {open ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
+      </div>
+
+      {open && (
+        <div className="border-t border-border">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-muted/50">
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">이름</th>
+                <th className="text-center px-2 py-2 font-medium text-muted-foreground" colSpan={3}>
+                  <span className="flex items-center justify-center gap-1"><CalendarDays className="w-3 h-3" /> 대체휴무</span>
+                </th>
+                <th className="text-center px-2 py-2 font-medium text-muted-foreground" colSpan={3}>
+                  <span className="flex items-center justify-center gap-1"><CalendarCheck className="w-3 h-3" /> 연차</span>
+                </th>
+              </tr>
+              <tr className="bg-muted/30">
+                <th className="px-4 py-1"></th>
+                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">발생</th>
+                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">사용</th>
+                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">잔여</th>
+                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">발생</th>
+                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">사용</th>
+                <th className="text-center px-2 py-1 text-[10px] text-muted-foreground font-normal">잔여</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((emp) => (
+                <tr key={emp.userId} className="border-t border-border/50">
+                  <td className="px-4 py-2">
+                    <div className="font-medium text-foreground">{emp.userName}</div>
+                    {emp.storeRole && (
+                      <div className="text-[10px] text-muted-foreground">
+                        {emp.storeRole === "owner" ? "점장" : emp.storeRole === "supervisor" ? "매니져" : "직원"}
+                      </div>
+                    )}
+                  </td>
+                  <td className="text-center px-2 py-2 text-muted-foreground">{emp.substitute.earned}</td>
+                  <td className="text-center px-2 py-2 text-muted-foreground">{emp.substitute.used}</td>
+                  <td className={`text-center px-2 py-2 font-medium ${emp.substitute.remaining > 0 ? "text-blue-600" : "text-muted-foreground"}`}>
+                    {emp.substitute.remaining}
+                  </td>
+                  <td className="text-center px-2 py-2 text-muted-foreground">{emp.annual.earned}</td>
+                  <td className="text-center px-2 py-2 text-muted-foreground">{emp.annual.used}</td>
+                  <td className={`text-center px-2 py-2 font-medium ${emp.annual.remaining > 0 ? "text-green-600" : "text-muted-foreground"}`}>
+                    {emp.annual.remaining}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

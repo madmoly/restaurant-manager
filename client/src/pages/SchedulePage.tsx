@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getHolidayName } from "@shared/holidays";
 
 // ─── 헬퍼 ────────────────────────────────────────────────────────────────────
 
@@ -810,6 +811,22 @@ export default function SchedulePage() {
                 >
                   <ChevronLeft className="w-3 h-3" /> 직원 다시 선택
                 </button>
+                {/* 공휴일 대체휴무 알림 */}
+                {assignDate && (() => {
+                  const hName = getHolidayName(assignDate);
+                  if (!hName) return null;
+                  return (
+                    <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-amber-800 dark:text-amber-300">{hName} (공휴일)</p>
+                        <p className="text-amber-700 dark:text-amber-400 mt-0.5">
+                          5인 이상 사업장 계약 직원에게 <span className="font-bold">대체휴무 1일</span>이 자동 발생합니다.
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()}
                 {(["fullday", "open", "close"] as const).map((preset) => {
                   const info = PRESET_LABELS[preset];
                   const Icon = info.icon;

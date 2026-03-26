@@ -773,3 +773,25 @@ export const restaurantInvites = mysqlTable("restaurant_invites", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type RestaurantInvite = typeof restaurantInvites.$inferSelect;
+
+// ─── 대체휴무/연차 상세 이력 ────────────────────────────────────────────────────
+export const leaveTransactions = mysqlTable("leave_transactions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  restaurantId: int("restaurantId").notNull(),
+  year: int("year").notNull(),
+  leaveType: mysqlEnum("leave_tx_type", ["annual", "substitute"]).notNull(),
+  // earn = 발생, use = 소진
+  txType: mysqlEnum("tx_type", ["earn", "use"]).notNull(),
+  days: decimal("days", { precision: 5, scale: 1 }).notNull().default("1"),
+  // 대체휴무: 어떤 공휴일 근무로 발생했는지
+  holidayDate: date("holidayDate"),         // 공휴일 날짜
+  holidayName: varchar("holidayName", { length: 50 }), // 공휴일명
+  scheduleId: int("scheduleId"),            // 관련 스케줄 ID
+  // 소진: 언제 사용했는지
+  useDate: date("useDate"),                 // 소진일
+  note: text("note"),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type LeaveTransaction = typeof leaveTransactions.$inferSelect;

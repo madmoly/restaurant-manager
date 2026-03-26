@@ -264,6 +264,28 @@ app.use(express.json());
       if (!e.message.includes("Duplicate")) console.log("[migrate] invite_role enum:", e.message);
     }
 
+    // ─── Phase 6: 대체휴무/연차 상세 이력 ─────────────────────────────────────
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS leave_transactions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        userId INT NOT NULL,
+        restaurantId INT NOT NULL,
+        year INT NOT NULL,
+        leave_tx_type ENUM('annual','substitute') NOT NULL,
+        tx_type ENUM('earn','use') NOT NULL,
+        days DECIMAL(5,1) NOT NULL DEFAULT 1,
+        holidayDate DATE,
+        holidayName VARCHAR(50),
+        scheduleId INT,
+        useDate DATE,
+        note TEXT,
+        createdBy INT,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_leave_tx_user (userId, restaurantId, year),
+        INDEX idx_leave_tx_holiday (holidayDate)
+      )
+    `);
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {
