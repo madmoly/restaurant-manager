@@ -1341,6 +1341,7 @@ function MiddayTab({
   const [midAmount, setMidAmount] = useState('');
   const [midNote, setMidNote] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [viewerImage, setViewerImage] = useState<string | null>(null);
 
   const midSalesQuery = trpc.dailyOps.getMidSales.useQuery({
     restaurantId,

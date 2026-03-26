@@ -1,8 +1,4 @@
-직원 화면 전용 글씨 확대(돋보기) 기능
+일간보고 탭 오류 수정 — viewerImage 미선언 + Badge success variant 추가
 
-- 직원(staff) 역할만 헤더에 돋보기 아이콘 표시
-- 클릭할 때마다 기본 → +30% → +60% → +90% → 기본 순환
-- 메인 콘텐츠 영역 font-size를 퍼센트로 적용 (rem/em 기반 요소 전체 확대)
-- 선택값 localStorage에 저장 (새로고침 시 유지)
-- 유저 드롭다운 메뉴에서도 현재 설정 확인/변경 가능
-- 활성화 시 돋보기 아이콘 하이라이트 + 배율 뱃지 표시
+- MiddayTab에 viewerImage/setViewerImage state 누락 → 발주 이미지 확대보기 시 런타임 에러 발생 → state 선언 추가
+- Badge 컴포넌트에 success variant 없음 → 체크리스트 완료 뱃지 렌더링 오류 → emerald 색상 success variant 추가
