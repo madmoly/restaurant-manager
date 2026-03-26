@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
@@ -49,12 +49,23 @@ export default function LaborCostPage() {
 
   if (!restaurantId) return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
 
-  // CSV 내보내기
-  const handleExport = () => {
-    if (!data) return;
-    const rows: (string | number)[][] = [
-      ["소속회사", "이름", "직위", "급여유형", "급여액", "출근횟수", "총근무시간", "인건비(원)", "계약시작", "계약종료"],
-    ];
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  // 외부 클릭 시 메뉴 닫기
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showExportMenu]);
+
+  // 데이터 행 생성 (공통)
+  const buildRows = () => {
+    if (!data) return [];
+    const rows: (string | number)[][] = [];
     for (const company of data) {
       for (const emp of company.employees) {
         rows.push([
@@ -71,15 +82,54 @@ export default function LaborCostPage() {
         ]);
       }
     }
-    const csvContent = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
-    const BOM = "\uFEFF";
-    const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `인건비정산_${year}년${month}월_${current?.name ?? ""}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    return rows;
+  };
+
+  const headers = ["소속회사", "이름", "직위", "급여유형", "급여액", "출근횟수", "총근무시간", "인건비(원)", "계약시작", "계약종료"];
+  const fileName = `인건비정산_${year}년${month}월_${current?.name ?? ""}`;
+
+  const handleExportExcel = async () => {
+    setShowExportMenu(false);
+    const rows = buildRows();
+    if (!rows.length) return;
+    const XLSX = await import("xlsx");
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    // 열 너비 설정
+    ws["!cols"] = headers.map((h, i) => ({ wch: i === 0 ? 14 : i === 7 ? 14 : 10 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "인건비정산");
+    XLSX.writeFile(wb, `${fileName}.xlsx`);
+  };
+
+  const handleExportPDF = async () => {
+    setShowExportMenu(false);
+    const rows = buildRows();
+    if (!rows.length) return;
+    const { jsPDF } = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default;
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+
+    // 제목
+    doc.setFontSize(14);
+    doc.text(`${fileName}`, 14, 15);
+    doc.setFontSize(9);
+    doc.text(`Total: ${fmtWon(grandTotalWage)} won / ${grandTotalHours.toFixed(1)}h`, 14, 22);
+
+    autoTable(doc, {
+      startY: 28,
+      head: [headers],
+      body: rows.map(r => r.map(c => String(c))),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [59, 130, 246], textColor: 255, fontSize: 8 },
+      columnStyles: {
+        4: { halign: "right" },
+        5: { halign: "right" },
+        6: { halign: "right" },
+        7: { halign: "right" },
+      },
+    });
+
+    doc.save(`${fileName}.pdf`);
   };
 
   return (
@@ -91,10 +141,28 @@ export default function LaborCostPage() {
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{current?.name}</span>
           {data && data.length > 0 && (
-            <Button variant="outline" size="sm" onClick={handleExport} className="gap-1">
-              <Download className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">내보내기</span>
-            </Button>
+            <div className="relative" ref={exportRef}>
+              <Button variant="outline" size="sm" onClick={() => setShowExportMenu(!showExportMenu)} className="gap-1">
+                <Download className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">내보내기</span>
+              </Button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-lg shadow-lg z-50 min-w-[140px] py-1">
+                  <button
+                    onClick={handleExportExcel}
+                    className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors flex items-center gap-2"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-green-600" /> Excel (.xlsx)
+                  </button>
+                  <button
+                    onClick={handleExportPDF}
+                    className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors flex items-center gap-2"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
