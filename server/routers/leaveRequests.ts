@@ -93,7 +93,7 @@ export const leaveRequestsRouter = router({
           and(
             eq(leaveRequests.userId, ctx.user.userId),
             eq(leaveRequests.restaurantId, input.restaurantId),
-            eq(leaveRequests.leaveDate, input.leaveDate),
+            sql`${leaveRequests.leaveDate} = ${input.leaveDate}`,
             eq(leaveRequests.status, "pending")
           )
         )

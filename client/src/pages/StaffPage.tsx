@@ -270,7 +270,7 @@ export default function StaffPage() {
                         <div className="flex items-center gap-2 flex-1">
                           <input
                             className="text-xs px-2 py-1 rounded border border-input bg-background flex-1 max-w-[200px]"
-                            value={editingCompany.value}
+                            value={editingCompany!.value}
                             onChange={(e) => setEditingCompany({ userId: s.userId, value: e.target.value })}
                             placeholder="소속회사명"
                             autoFocus

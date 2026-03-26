@@ -708,8 +708,8 @@ export const schedulesRouter = router({
             wageType: r.wageType ?? (r.tempWageType ?? null),
             wageAmount: r.wageAmount ?? (r.tempWageAmount ?? null),
             position: r.position ?? null,
-            contractStart: r.contractStart ?? null,
-            contractEnd: r.contractEnd ?? null,
+            contractStart: r.contractStart ? String(r.contractStart) : null,
+            contractEnd: r.contractEnd ? String(r.contractEnd) : null,
           };
         }
 

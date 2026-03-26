@@ -1,0 +1,7 @@
+기존 TypeScript 에러 5건 전체 수정
+
+- Button: outline variant 타입 추가 (ui/index.tsx ButtonVariant)
+- StaffPage: editingCompany null 체크 (non-null assertion)
+- leaveRequests: Date/string 타입 불일치 → sql 템플릿 사용
+- purchasesV2: ResultSetHeader → unknown → any[] 캐스팅 (3건)
+- schedules: Date → String() 변환 (contractStart/contractEnd)

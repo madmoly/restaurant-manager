@@ -313,7 +313,7 @@ export const purchasesV2Router = router({
       `);
       // Group by item name → list of supplier prices
       const map = new Map<string, any[]>();
-      for (const row of rows[0] as any[]) {
+      for (const row of (rows[0] as unknown as any[])) {
         const key = row.rawItemName;
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push({
@@ -384,7 +384,7 @@ export const purchasesV2Router = router({
       `);
       // Group by item → chronological price points
       const map = new Map<string, any[]>();
-      for (const row of rows[0] as any[]) {
+      for (const row of (rows[0] as unknown as any[])) {
         const key = row.rawItemName;
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push({
@@ -428,7 +428,7 @@ export const purchasesV2Router = router({
       `);
       // Group by counterparty
       const map = new Map<string, any>();
-      for (const row of rows[0] as any[]) {
+      for (const row of (rows[0] as unknown as any[])) {
         const key = row.counterpartyName || '미지정';
         if (!map.has(key)) {
           map.set(key, {

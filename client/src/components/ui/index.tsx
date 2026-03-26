@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 // ─── Button ──────────────────────────────────────────────────────────────────
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "outline";
 type ButtonSize = "sm" | "md" | "lg";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -17,6 +17,7 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   secondary: "bg-secondary text-secondary-foreground border border-border hover:bg-accent active:bg-accent/80 disabled:opacity-50",
   ghost: "text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent/80",
   danger: "bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/80",
+  outline: "border bg-transparent shadow-xs hover:bg-accent dark:bg-transparent dark:border-input dark:hover:bg-input/50 disabled:opacity-50",
 };
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
