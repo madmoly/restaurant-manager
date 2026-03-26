@@ -43,7 +43,7 @@ export const counterpartiesRouter = router({
     .mutation(async ({ input, ctx }) => {
       await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
       const { id, restaurantId, ...data } = input;
-      await db.update(counterparties).set(data).where(eq(counterparties.id, id));
+      await db.update(counterparties).set(data).where(and(eq(counterparties.id, id), eq(counterparties.restaurantId, restaurantId)));
       return { ok: true };
     }),
 
@@ -51,7 +51,7 @@ export const counterpartiesRouter = router({
     .input(z.object({ id: z.number(), restaurantId: z.number() }))
     .mutation(async ({ input, ctx }) => {
       await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
-      await db.update(counterparties).set({ isActive: false }).where(eq(counterparties.id, input.id));
+      await db.update(counterparties).set({ isActive: false }).where(and(eq(counterparties.id, input.id), eq(counterparties.restaurantId, input.restaurantId)));
       return { ok: true };
     }),
 });

@@ -33,13 +33,17 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
 /**
  * manager 이상 (master/admin + 매장 owner/supervisor)
  * 점장·매니져 공통 권한
+ *
+ * 분기: master(4)/admin(3) → 시스템 레벨로 즉시 통과
+ *       user(1) → DB에서 매장 역할 확인 (owner/supervisor면 통과)
  */
 export const managerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   const level = ROLE_LEVEL[ctx.user.role] ?? 0;
   if (level >= ROLE_LEVEL.manager) {
+    // master(4)/admin(3) >= manager(2) → 시스템 권한으로 즉시 통과
     return next({ ctx });
   }
-  // 시스템 역할이 부족하면 매장 역할 확인
+  // user(1) → 매장 역할로 판단
   const storeRoles = await db
     .select({ role: restaurantUsers.role })
     .from(restaurantUsers)
