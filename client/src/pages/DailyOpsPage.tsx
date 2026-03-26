@@ -1323,6 +1323,11 @@ function PurchaseTab({
 
       {/* 미입고 발주 전표 요약 (매입탭 최하단) */}
       <PendingOrdersBanner restaurantId={restaurantId} />
+
+      {/* 이미지 확대보기 모달 */}
+      {viewerImage && (
+        <ImageViewer src={viewerImage} onClose={() => setViewerImage(null)} />
+      )}
     </div>
   );
 }

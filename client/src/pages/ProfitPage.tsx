@@ -137,37 +137,50 @@ export default function ProfitPage() {
 
   const handleExportPDF = async () => {
     setShowExportMenu(false);
-    const { jsPDF } = await import("jspdf");
-    const autoTable = (await import("jspdf-autotable")).default;
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    await loadKoreanFont(doc);
+    try {
+      const { jsPDF } = await import("jspdf");
+      const autoTable = (await import("jspdf-autotable")).default;
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      await loadKoreanFont(doc);
 
-    doc.setFontSize(14);
-    doc.text(fileName, 14, 15);
+      doc.setFontSize(14);
+      doc.text(fileName, 14, 15);
 
-    autoTable(doc, {
-      startY: 22,
-      head: [summaryHeaders],
-      body: summaryRows.map(r => r.map(c => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
-      styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
-      headStyles: { fillColor: [59, 130, 246], textColor: 255, font: "NanumGothic" },
-      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
-    });
+      autoTable(doc, {
+        startY: 22,
+        head: [summaryHeaders],
+        body: summaryRows.map(r => r.map(c => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
+        styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
+        headStyles: { fillColor: [59, 130, 246], textColor: 255, font: "NanumGothic" },
+        columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+      });
 
-    const finalY = (doc as any).lastAutoTable?.finalY ?? 80;
-    doc.setFontSize(11);
-    doc.text("고정비 내역", 14, finalY + 10);
+      const finalY = (doc as any).lastAutoTable?.finalY ?? 80;
+      doc.setFontSize(11);
+      doc.text("고정비 내역", 14, finalY + 10);
 
-    autoTable(doc, {
-      startY: finalY + 14,
-      head: [fixedHeaders],
-      body: fixedRows.map((r: any[]) => r.map((c: any) => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
-      styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
-      headStyles: { fillColor: [100, 116, 139], textColor: 255, font: "NanumGothic" },
-      columnStyles: { 1: { halign: "right" } },
-    });
+      autoTable(doc, {
+        startY: finalY + 14,
+        head: [fixedHeaders],
+        body: fixedRows.map((r: any[]) => r.map((c: any) => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
+        styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
+        headStyles: { fillColor: [100, 116, 139], textColor: 255, font: "NanumGothic" },
+        columnStyles: { 1: { halign: "right" } },
+      });
 
-    doc.save(`${fileName}.pdf`);
+      const pdfBlob = doc.output("blob");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const a = document.createElement("a");
+      a.href = pdfUrl;
+      a.download = `${fileName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(pdfUrl);
+    } catch (err: any) {
+      console.error("PDF export error:", err);
+      alert(`PDF 내보내기 실패: ${err.message || "알 수 없는 오류"}`);
+    }
   };
 
   return (

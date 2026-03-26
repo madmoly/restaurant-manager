@@ -1,4 +1,6 @@
-일간보고 탭 오류 수정 — viewerImage 미선언 + Badge success variant 추가
+매입 이미지 확대보기 + PDF 내보내기 수정
 
-- MiddayTab에 viewerImage/setViewerImage state 누락 → 발주 이미지 확대보기 시 런타임 에러 발생 → state 선언 추가
-- Badge 컴포넌트에 success variant 없음 → 체크리스트 완료 뱃지 렌더링 오류 → emerald 색상 success variant 추가
+- PurchaseTab: ImageViewer 렌더링 누락 → 추가 (viewerImage state는 있었으나 JSX 미렌더링)
+- ProfitPage/LaborCostPage: doc.save() → Blob 수동 다운로드로 변경 (PWA/모바일 호환)
+- PDF 내보내기에 try-catch + 에러 알림 추가
+- document.body.appendChild(a) 패턴으로 iOS Safari 호환성 확보

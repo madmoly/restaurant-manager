@@ -111,34 +111,47 @@ export default function LaborCostPage() {
 
   const handleExportPDF = async () => {
     setShowExportMenu(false);
-    const rows = buildRows();
-    if (!rows.length) return;
-    const { jsPDF } = await import("jspdf");
-    const autoTable = (await import("jspdf-autotable")).default;
-    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    await loadKoreanFont(doc);
+    try {
+      const rows = buildRows();
+      if (!rows.length) return;
+      const { jsPDF } = await import("jspdf");
+      const autoTable = (await import("jspdf-autotable")).default;
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      await loadKoreanFont(doc);
 
-    // 제목
-    doc.setFontSize(14);
-    doc.text(`${fileName}`, 14, 15);
-    doc.setFontSize(9);
-    doc.text(`합계: ${fmtWon(grandTotalWage)}원 / ${grandTotalHours.toFixed(1)}시간`, 14, 22);
+      // 제목
+      doc.setFontSize(14);
+      doc.text(`${fileName}`, 14, 15);
+      doc.setFontSize(9);
+      doc.text(`합계: ${fmtWon(grandTotalWage)}원 / ${grandTotalHours.toFixed(1)}시간`, 14, 22);
 
-    autoTable(doc, {
-      startY: 28,
-      head: [headers],
-      body: rows.map(r => r.map(c => String(c))),
-      styles: { fontSize: 8, cellPadding: 2, font: "NanumGothic" },
-      headStyles: { fillColor: [59, 130, 246], textColor: 255, fontSize: 8, font: "NanumGothic" },
-      columnStyles: {
-        4: { halign: "right" },
-        5: { halign: "right" },
-        6: { halign: "right" },
-        7: { halign: "right" },
-      },
-    });
+      autoTable(doc, {
+        startY: 28,
+        head: [headers],
+        body: rows.map(r => r.map(c => String(c))),
+        styles: { fontSize: 8, cellPadding: 2, font: "NanumGothic" },
+        headStyles: { fillColor: [59, 130, 246], textColor: 255, fontSize: 8, font: "NanumGothic" },
+        columnStyles: {
+          4: { halign: "right" },
+          5: { halign: "right" },
+          6: { halign: "right" },
+          7: { halign: "right" },
+        },
+      });
 
-    doc.save(`${fileName}.pdf`);
+      const pdfBlob = doc.output("blob");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const a = document.createElement("a");
+      a.href = pdfUrl;
+      a.download = `${fileName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(pdfUrl);
+    } catch (err: any) {
+      console.error("PDF export error:", err);
+      alert(`PDF 내보내기 실패: ${err.message || "알 수 없는 오류"}`);
+    }
   };
 
   return (
