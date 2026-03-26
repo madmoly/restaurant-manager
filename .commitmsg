@@ -1,6 +1,7 @@
-매입 이미지 확대보기 + PDF 내보내기 수정
+PDF 내보내기 widths 오류 수정 + 하단 네비 콘텐츠 가림 해결
 
-- PurchaseTab: ImageViewer 렌더링 누락 → 추가 (viewerImage state는 있었으나 JSX 미렌더링)
-- ProfitPage/LaborCostPage: doc.save() → Blob 수동 다운로드로 변경 (PWA/모바일 호환)
-- PDF 내보내기에 try-catch + 에러 알림 추가
-- document.body.appendChild(a) 패턴으로 iOS Safari 호환성 확보
+- jspdf-autotable: autoTable(doc, opts) → doc.autoTable(opts) 방식으로 변경
+  - 동적 import 시 side-effect 등록 방식이 안정적 (v5 호환)
+- AppLayout 내부 div: h-full → min-h-full 변경
+  - h-full은 컨텐츠 오버플로우 시 pb-40 패딩이 스크롤 영역에 미포함
+  - min-h-full로 컨텐츠 길이에 따라 확장 + 패딩 보장
