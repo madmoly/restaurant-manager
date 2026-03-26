@@ -96,11 +96,17 @@ export default function LaborCostPage() {
     if (!rows.length) return;
     const XLSX = await import("xlsx");
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    // 열 너비 설정
-    ws["!cols"] = headers.map((h, i) => ({ wch: i === 0 ? 14 : i === 7 ? 14 : 10 }));
+    ws["!cols"] = headers.map((_h: string, i: number) => ({ wch: i === 0 ? 14 : i === 7 ? 14 : 10 }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "인건비정산");
-    XLSX.writeFile(wb, `${fileName}.xlsx`);
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${fileName}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleExportPDF = async () => {
