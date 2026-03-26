@@ -1,5 +1,5 @@
-엑셀 내보내기 깨짐 수정 (인건비/수익분석)
+스케줄 반차 인원 0.5명 반영
 
-- XLSX.writeFile → XLSX.write(array) + Blob + URL.createObjectURL 방식으로 변경
-- writeFile은 일부 모바일/PWA 환경에서 깨진 파일 생성하는 이슈 있음
-- 수동 Blob 다운로드로 안정적 파일 생성 보장
+- 주간 그리드 날짜별 인원 합계에서 반차(open/close) = 0.5, 풀타임 = 1로 계산
+- 기존: daySchedules.length (모두 1명)
+- 변경: shiftPreset이 open/close이면 0.5명으로 카운트

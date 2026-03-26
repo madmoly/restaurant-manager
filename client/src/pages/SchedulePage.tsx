@@ -654,9 +654,11 @@ export default function SchedulePage() {
                   }`}
                 >
                   {DAY_NAMES[i]} {date.getDate()}일
-                  {daySchedules.length > 0 && (
-                    <span className="ml-1 text-[10px] font-normal">({daySchedules.length}명)</span>
-                  )}
+                  {daySchedules.length > 0 && (() => {
+                    const headcount = daySchedules.reduce((sum, s) =>
+                      sum + (s.shiftPreset === "open" || s.shiftPreset === "close" ? 0.5 : 1), 0);
+                    return <span className="ml-1 text-[10px] font-normal">({headcount % 1 === 0 ? headcount : headcount.toFixed(1)}명)</span>;
+                  })()}
                 </span>
                 {daySchedules.some((s) => s.status === "draft") && (
                   <button
