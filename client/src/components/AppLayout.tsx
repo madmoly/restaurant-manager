@@ -305,7 +305,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
         <div className="px-2 pt-3 pb-2 border-b border-sidebar-border">
           <div className="px-3 pb-1.5">
             <p className="text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40 select-none">
-              시스템 관리
+              전역 관리
             </p>
           </div>
           <div className="space-y-0.5">
@@ -598,7 +598,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
                         const moreHrefs = new Set(moreItems.map(i => i.href));
                         // 시스템 메뉴 + 매장 메뉴 합산하여 더보기에 표시
                         const allGroups = [
-                          ...(visibleSystemItems.length > 0 ? [{ label: "시스템 관리", items: visibleSystemItems }] : []),
+                          ...(visibleSystemItems.length > 0 ? [{ label: "전역 관리", items: visibleSystemItems }] : []),
                           ...visibleStoreGroups,
                         ];
                         const moreGroups = allGroups
