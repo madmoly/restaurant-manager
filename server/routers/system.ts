@@ -172,7 +172,7 @@ export const systemRouter = router({
     .mutation(async ({ ctx, input }) => {
       const bcrypt = await import("bcryptjs");
       const hash = await bcrypt.hash("1111", 10);
-      await db.update(users).set({ passwordHash: hash } as any).where(eq(users.id, input.userId));
+      await db.update(users).set({ passwordHash: hash, mustChangePassword: true } as any).where(eq(users.id, input.userId));
       await db.insert(auditLogs).values({
         userId: ctx.user.userId,
         userName: ctx.user.name ?? "master",

@@ -26,6 +26,7 @@ import { leaveRequestsRouter } from "./leaveRequests";
 import { errorLogsRouter } from "./errorLogs";
 import { adminRouter } from "./admin";
 import { systemRouter } from "./system";
+import { invitesRouter } from "./invites";
 
 export const appRouter = router({
   auth: authRouter,
@@ -55,6 +56,7 @@ export const appRouter = router({
   errorLogs: errorLogsRouter,
   admin: adminRouter,
   system: systemRouter,
+  invites: invitesRouter,
 });
 
 export type AppRouter = typeof appRouter;

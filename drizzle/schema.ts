@@ -27,6 +27,7 @@ export const users = mysqlTable("users", {
   isActive: boolean("isActive").default(true).notNull(),
   healthCertUrl: varchar("healthCertUrl", { length: 500 }),
   healthCertExpiry: date("healthCertExpiry"),
+  mustChangePassword: boolean("mustChangePassword").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn"),
@@ -758,3 +759,17 @@ export const dbBackupLogs = mysqlTable("db_backup_logs", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type DbBackupLog = typeof dbBackupLogs.$inferSelect;
+
+// ─── 매장 초대 코드 ───────────────────────────────────────────────────────────
+export const restaurantInvites = mysqlTable("restaurant_invites", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  code: varchar("code", { length: 20 }).notNull().unique(),
+  role: mysqlEnum("invite_role", ["staff", "supervisor"]).notNull().default("staff"),
+  createdBy: int("createdBy").notNull(),
+  usedBy: int("usedBy"),
+  usedAt: timestamp("usedAt"),
+  expiresAt: timestamp("expiresAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RestaurantInvite = typeof restaurantInvites.$inferSelect;

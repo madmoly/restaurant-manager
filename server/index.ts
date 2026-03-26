@@ -236,6 +236,27 @@ app.use(express.json());
       if (!e.message.includes("Duplicate")) console.log("[migrate] notifications type:", e.message);
     }
 
+    // ─── Phase 5: 초대코드 + 비밀번호 강제변경 ─────────────────────────────────
+    // users.mustChangePassword
+    await addColumnIfNotExists("users", "mustChangePassword", "BOOLEAN NOT NULL DEFAULT FALSE");
+
+    // 매장 초대코드 테이블
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS restaurant_invites (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        code VARCHAR(20) NOT NULL UNIQUE,
+        invite_role ENUM('staff','supervisor') NOT NULL DEFAULT 'staff',
+        createdBy INT NOT NULL,
+        usedBy INT,
+        usedAt TIMESTAMP NULL,
+        expiresAt TIMESTAMP NOT NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_invite_code (code),
+        INDEX idx_invite_restaurant (restaurantId)
+      )
+    `);
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

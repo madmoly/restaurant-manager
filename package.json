@@ -77,9 +77,6 @@
     "vite": "^7.1.7"
   },
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "@tailwindcss/oxide",
-      "esbuild"
-    ]
+    "onlyBuiltDependencies": ["bcryptjs"]
   }
 }

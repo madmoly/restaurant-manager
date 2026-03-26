@@ -20,7 +20,11 @@ export const authRouter = router({
       await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
 
       const token = await createToken({ userId: user.id, username: user.username, role: user.role });
-      return { token, user: { id: user.id, username: user.username, name: user.name, role: user.role } };
+      return {
+        token,
+        user: { id: user.id, username: user.username, name: user.name, role: user.role },
+        mustChangePassword: !!user.mustChangePassword,
+      };
     }),
 
   logout: publicProcedure.mutation(() => ({ ok: true })),
@@ -35,7 +39,7 @@ export const authRouter = router({
       if (!ok) throw new Error("현재 비밀번호가 올바르지 않습니다");
 
       const hash = await hashPassword(input.newPassword);
-      await db.update(users).set({ passwordHash: hash }).where(eq(users.id, user.id));
+      await db.update(users).set({ passwordHash: hash, mustChangePassword: false }).where(eq(users.id, user.id));
       return { ok: true };
     }),
 });

@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import {
   Users, Plus, ChevronDown, ChevronUp, FileText, Trash2, X, UserCog,
   Copy, ExternalLink, Send, Eye, KeyRound, Camera, ShieldCheck,
-  AlertTriangle, Loader2, Building2, Edit3, Check,
+  AlertTriangle, Loader2, Building2, Edit3, Check, UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -43,11 +43,31 @@ export default function StaffPage() {
 
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [showContractForm, setShowContractForm] = useState(false);
+  const [showInviteSection, setShowInviteSection] = useState(false);
   const [expandedStaff, setExpandedStaff] = useState<number | null>(null);
   const [editingCredentials, setEditingCredentials] = useState<any>(null);
   const [editingCompany, setEditingCompany] = useState<{ userId: number; value: string } | null>(null);
 
   const utils = trpc.useUtils();
+
+  // 초대코드
+  const [inviteRole, setInviteRole] = useState<"staff" | "supervisor">("staff");
+  const { data: inviteList } = trpc.invites.list.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 && showInviteSection },
+  );
+  const generateInvite = trpc.invites.generate.useMutation({
+    onSuccess(data) {
+      const url = `${window.location.origin}/join/${data.code}`;
+      navigator.clipboard.writeText(url).then(() => toast.success(`초대 링크 복사됨: ${data.code}`));
+      utils.invites.list.invalidate();
+    },
+    onError(err) { toast.error(err.message); },
+  });
+  const deleteInvite = trpc.invites.delete.useMutation({
+    onSuccess() { toast.success("초대코드 삭제됨"); utils.invites.list.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
 
   const { data: staffList, isLoading } = trpc.restaurants.getStaff.useQuery(
     { restaurantId },
@@ -175,11 +195,86 @@ export default function StaffPage() {
               <FileText className="w-4 h-4 mr-1" /> 계약서 작성
             </Button>
           )}
+          <Button size="sm" variant={showInviteSection ? "secondary" : "outline"} onClick={() => setShowInviteSection(!showInviteSection)}>
+            <UserPlus className="w-4 h-4 mr-1" /> 초대
+          </Button>
           <Button size="sm" onClick={() => setShowAddStaff(true)}>
             <Plus className="w-4 h-4 mr-1" /> 직원 배정
           </Button>
         </div>
       </div>
+
+      {/* ═══ 초대코드 섹션 ═══ */}
+      {showInviteSection && (
+        <div className="border border-border rounded-lg bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">초대코드로 직원 등록</h3>
+            <div className="flex items-center gap-2">
+              <select
+                className="text-xs rounded-md border border-input bg-background px-2 py-1"
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value as "staff" | "supervisor")}
+              >
+                <option value="staff">직원</option>
+                <option value="supervisor">매니져</option>
+              </select>
+              <Button
+                size="sm"
+                onClick={() => generateInvite.mutate({ restaurantId, role: inviteRole })}
+                disabled={generateInvite.isPending}
+              >
+                {generateInvite.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Plus className="w-3 h-3 mr-1" />}
+                코드 생성
+              </Button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            초대코드를 생성하면 링크가 자동 복사됩니다. 직원에게 링크를 보내면 스스로 계정을 만들고 매장에 등록됩니다. (48시간 유효)
+          </p>
+          {inviteList && inviteList.length > 0 && (
+            <div className="space-y-2">
+              {inviteList.map((inv: any) => {
+                const joinUrl = `${window.location.origin}/join/${inv.code}`;
+                return (
+                  <div key={inv.id} className={`flex items-center justify-between px-3 py-2 rounded-md border text-xs ${
+                    inv.isUsed ? "bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800" :
+                    inv.isExpired ? "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 opacity-60" :
+                    "bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800"
+                  }`}>
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span className="font-mono font-bold">{inv.code}</span>
+                      <span className="text-muted-foreground">
+                        {inv.role === "supervisor" ? "매니져" : "직원"}
+                      </span>
+                      {inv.isUsed && <span className="text-green-600 dark:text-green-400">사용됨 ({inv.usedByName})</span>}
+                      {!inv.isUsed && inv.isExpired && <span className="text-muted-foreground">만료</span>}
+                      {!inv.isUsed && !inv.isExpired && <span className="text-blue-600 dark:text-blue-400">활성</span>}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {!inv.isUsed && !inv.isExpired && (
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(joinUrl); toast.success("링크 복사됨"); }}
+                          className="p-1 rounded hover:bg-accent" title="링크 복사"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {!inv.isUsed && (
+                        <button
+                          onClick={() => { if (confirm("삭제하시겠습니까?")) deleteInvite.mutate({ id: inv.id }); }}
+                          className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500" title="삭제"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 소속회사별 요약 */}
       {staffList && staffList.length > 0 && Object.keys(companyCounts).length > 0 && (

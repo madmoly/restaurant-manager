@@ -25,6 +25,8 @@ import OpsCalendarPage from "./pages/OpsCalendarPage";
 import TaskManagementPage from "./pages/TaskManagementPage";
 import LaborCostPage from "./pages/LaborCostPage";
 import ContractSignPage from "./pages/ContractSignPage";
+import JoinPage from "./pages/JoinPage";
+import ChangePasswordPage from "./pages/ChangePasswordPage";
 import SystemPage from "./pages/SystemPage";
 import AppLayout from "./components/AppLayout";
 
@@ -147,7 +149,7 @@ function RoleRouter() {
 }
 
 export default function App() {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, mustChangePassword } = useAuth();
 
   return (
     <Switch>
@@ -155,16 +157,26 @@ export default function App() {
       <Route path="/sign/:token">
         {(params: { token: string }) => <ContractSignPage token={params.token} />}
       </Route>
+      {/* 초대코드 자가등록 — 비로그인 접근 가능 */}
+      <Route path="/join/:code">
+        {(params: { code: string }) => <JoinPage code={params.code} />}
+      </Route>
+      {/* 비밀번호 강제 변경 */}
+      <Route path="/change-password">
+        {isLoggedIn ? <ChangePasswordPage /> : <Redirect to="/login" />}
+      </Route>
       <Route path="/login">
         {isLoggedIn ? <Redirect to="/" /> : <Login />}
       </Route>
       <Route>
-        {isLoggedIn ? (
+        {!isLoggedIn ? (
+          <Redirect to="/login" />
+        ) : mustChangePassword ? (
+          <Redirect to="/change-password" />
+        ) : (
           <RestaurantProvider>
             <RoleRouter />
           </RestaurantProvider>
-        ) : (
-          <Redirect to="/login" />
         )}
       </Route>
     </Switch>

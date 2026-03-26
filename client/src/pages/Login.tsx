@@ -85,9 +85,14 @@ export default function Login() {
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess(data) {
-      login(data.token, data.user);
-      setLocation("/");
-      toast.success(`${data.user.name}님 환영합니다`);
+      login(data.token, data.user, data.mustChangePassword);
+      if (data.mustChangePassword) {
+        setLocation("/change-password");
+        toast.info("비밀번호 변경이 필요합니다");
+      } else {
+        setLocation("/");
+        toast.success(`${data.user.name}님 환영합니다`);
+      }
       setLoadingAccount(null);
     },
     onError(err) {
