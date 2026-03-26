@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import {
   Users, Plus, ChevronDown, ChevronUp, FileText, Trash2, X, UserCog,
   Copy, ExternalLink, Send, Eye, KeyRound, Camera, ShieldCheck,
-  AlertTriangle, Loader2, Building2, Edit3, Check, UserPlus,
+  AlertTriangle, Loader2, Building2, Edit3, Check, UserPlus, Link,
+  Phone, Clock, CalendarDays, Briefcase, Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -187,19 +188,23 @@ export default function StaffPage() {
     <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       {/* 헤더 */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-xl font-bold text-foreground">직원 관리</h1>
+        <div>
+          <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
+            <Users className="w-5 h-5" /> 직원 관리
+          </h1>
+          <p className="text-xs text-muted-foreground mt-0.5">{current?.name}</p>
+        </div>
         <div className="flex gap-2">
-          {/* 점장 이상 계약서 작성 가능 */}
           {isOwnerOrAdmin && (
-            <Button size="sm" variant="outline" onClick={() => setShowContractForm(true)}>
-              <FileText className="w-4 h-4 mr-1" /> 계약서 작성
+            <Button size="sm" variant="outline" onClick={() => setShowContractForm(true)} className="text-xs">
+              <FileText className="w-3.5 h-3.5 mr-1" /> 계약서
             </Button>
           )}
-          <Button size="sm" variant={showInviteSection ? "secondary" : "outline"} onClick={() => setShowInviteSection(!showInviteSection)}>
-            <UserPlus className="w-4 h-4 mr-1" /> 초대
+          <Button size="sm" variant={showInviteSection ? "secondary" : "outline"} onClick={() => setShowInviteSection(!showInviteSection)} className="text-xs">
+            <UserPlus className="w-3.5 h-3.5 mr-1" /> 초대
           </Button>
-          <Button size="sm" onClick={() => setShowAddStaff(true)}>
-            <Plus className="w-4 h-4 mr-1" /> 직원 배정
+          <Button size="sm" onClick={() => setShowAddStaff(true)} className="text-xs">
+            <Plus className="w-3.5 h-3.5 mr-1" /> 배정
           </Button>
         </div>
       </div>
@@ -229,9 +234,12 @@ export default function StaffPage() {
               </Button>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            초대코드를 생성하면 링크가 자동 복사됩니다. 직원에게 링크를 보내면 스스로 계정을 만들고 매장에 등록됩니다. (48시간 유효)
-          </p>
+          <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2 space-y-0.5">
+            <p>1. 아래에서 역할을 선택하고 "코드 생성"을 누르세요</p>
+            <p>2. 생성된 링크가 자동 복사됩니다 → 직원에게 카톡 등으로 전달</p>
+            <p>3. 직원이 링크를 열어 이름/ID/비밀번호를 입력하면 자동으로 매장에 등록됩니다</p>
+            <p className="text-muted-foreground/70">유효기간: 48시간</p>
+          </div>
           {inviteList && inviteList.length > 0 && (
             <div className="space-y-2">
               {inviteList.map((inv: any) => {
@@ -277,19 +285,28 @@ export default function StaffPage() {
         </div>
       )}
 
-      {/* 소속회사별 요약 */}
-      {staffList && staffList.length > 0 && Object.keys(companyCounts).length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {Object.entries(companyCounts).map(([company, count]) => (
-            <div key={company} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-card text-xs">
-              <Building2 className="w-3 h-3 text-muted-foreground" />
-              <span className="font-medium">{company}</span>
-              <span className="text-muted-foreground">{count}명</span>
-              <span className={`ml-1 ${count >= 5 ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400"}`}>
-                {count >= 5 ? "5인↑" : "5인↓"}
-              </span>
+      {/* 소속회사별 요약 + 직원수 */}
+      {staffList && staffList.length > 0 && (
+        <div className="bg-card border border-border rounded-lg p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <Users className="w-3 h-3" /> 총 {staffList.length}명
+            </span>
+          </div>
+          {Object.keys(companyCounts).length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(companyCounts).map(([company, count]) => (
+                <div key={company} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-background text-xs">
+                  <Building2 className="w-3 h-3 text-muted-foreground" />
+                  <span className="font-medium">{company}</span>
+                  <span className="text-muted-foreground">{count}명</span>
+                  <span className={`ml-1 font-medium ${count >= 5 ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400"}`}>
+                    {count >= 5 ? "5인↑" : "5인↓"}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -297,9 +314,18 @@ export default function StaffPage() {
       {isLoading ? (
         <div className="text-center py-8 text-muted-foreground">로딩 중...</div>
       ) : !staffList?.length ? (
-        <div className="text-center py-12">
-          <Users className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
-          <p className="text-sm text-muted-foreground">배정된 직원이 없습니다</p>
+        <div className="text-center py-12 bg-card border border-border rounded-lg">
+          <Users className="w-10 h-10 mx-auto text-muted-foreground/50 mb-3" />
+          <p className="text-sm font-medium text-muted-foreground mb-1">배정된 직원이 없습니다</p>
+          <p className="text-xs text-muted-foreground mb-4">위의 "배정" 또는 "초대" 버튼으로 직원을 추가하세요</p>
+          <div className="flex justify-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setShowInviteSection(true)} className="text-xs">
+              <UserPlus className="w-3.5 h-3.5 mr-1" /> 초대 링크 생성
+            </Button>
+            <Button size="sm" onClick={() => setShowAddStaff(true)} className="text-xs">
+              <Plus className="w-3.5 h-3.5 mr-1" /> 기존 사용자 배정
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-2">
@@ -311,31 +337,46 @@ export default function StaffPage() {
               <div key={s.id} className="border border-border rounded-lg bg-card overflow-hidden">
                 {/* 메인 행 */}
                 <div
-                  className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-accent/30 transition-colors"
+                  className="px-4 py-3 flex items-start gap-3 cursor-pointer hover:bg-accent/30 transition-colors"
                   onClick={() => setExpandedStaff(isExpanded ? null : s.userId)}
                 >
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <span className="text-sm font-medium text-foreground truncate">{s.name}</span>
-                    <span className="text-xs text-muted-foreground">@{s.username}</span>
-                    {/* 역할 배지 */}
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-border font-medium text-muted-foreground">
-                      {STORE_ROLE_LABELS[s.storeRole] || s.storeRole}
-                    </span>
-                    {/* 소속회사 배지 */}
-                    {s.affiliatedCompany && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium">
-                        {s.affiliatedCompany}
+                  {/* 왼쪽: 이름 + 메타 */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-foreground">{s.name}</span>
+                      {/* 역할 배지 */}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                        s.storeRole === "owner" ? "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800" :
+                        s.storeRole === "supervisor" ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800" :
+                        "border border-border text-muted-foreground"
+                      }`}>
+                        {STORE_ROLE_LABELS[s.storeRole] || s.storeRole}
                       </span>
-                    )}
-                    {/* 보건증 경고 */}
-                    {healthStatus?.urgent && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${healthStatus.bg} ${healthStatus.color}`}>
-                        <AlertTriangle className="w-3 h-3 inline mr-0.5" />보건증 {healthStatus.label}
-                      </span>
-                    )}
+                      {/* 소속회사 배지 */}
+                      {s.affiliatedCompany && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent text-muted-foreground">
+                          {s.affiliatedCompany}
+                        </span>
+                      )}
+                      {/* 보건증 경고 */}
+                      {healthStatus?.urgent && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${healthStatus.bg} ${healthStatus.color}`}>
+                          <AlertTriangle className="w-3 h-3 inline mr-0.5" />보건증 {healthStatus.label}
+                        </span>
+                      )}
+                    </div>
+                    {/* 부가 정보 행 */}
+                    <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
+                      <span className="flex items-center gap-0.5">@{s.username}</span>
+                      {s.phone && (
+                        <span className="flex items-center gap-0.5">
+                          <Phone className="w-3 h-3" />{s.phone}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {s.phone && <span className="text-xs text-muted-foreground hidden sm:inline">{s.phone}</span>}
+                  {/* 오른쪽: 펼침 */}
+                  <div className="pt-1 shrink-0">
                     {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
                   </div>
                 </div>
@@ -343,17 +384,19 @@ export default function StaffPage() {
                 {/* 확장 패널 */}
                 {isExpanded && (
                   <div className="border-t border-border px-4 py-3 space-y-3 bg-muted/30">
-                    {/* 역할 변경 (admin만) */}
+                    {/* 역할 변경 */}
                     {canChangeRole && (
                       <div className="flex items-center gap-3">
-                        <label className="text-xs font-medium text-muted-foreground w-16">역할</label>
+                        <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
+                          <UserCog className="w-3 h-3" /> 역할
+                        </label>
                         <select
-                          className="text-xs px-2 py-1 rounded border border-input bg-background"
+                          className="text-xs px-2 py-1.5 rounded-md border border-input bg-background"
                           value={s.storeRole}
                           onChange={(e) => updateRole.mutate({ restaurantId, userId: s.userId, role: e.target.value as any })}
                         >
                           <option value="owner">점장</option>
-                        <option value="supervisor">매니져</option>
+                          <option value="supervisor">매니져</option>
                           <option value="staff">직원</option>
                         </select>
                       </div>
@@ -361,7 +404,9 @@ export default function StaffPage() {
 
                     {/* 소속회사 */}
                     <div className="flex items-center gap-3">
-                      <label className="text-xs font-medium text-muted-foreground w-16">소속회사</label>
+                      <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
+                        <Building2 className="w-3 h-3" /> 소속
+                      </label>
                       {editingCompany?.userId === s.userId ? (
                         <div className="flex items-center gap-2 flex-1">
                           <input
@@ -396,7 +441,9 @@ export default function StaffPage() {
 
                     {/* ID/비밀번호 수정 */}
                     <div className="flex items-center gap-3">
-                      <label className="text-xs font-medium text-muted-foreground w-16">계정</label>
+                      <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
+                        <KeyRound className="w-3 h-3" /> 계정
+                      </label>
                       <Button
                         size="sm" variant="outline"
                         className="h-7 text-xs"
@@ -408,7 +455,9 @@ export default function StaffPage() {
 
                     {/* 보건증 */}
                     <div className="flex items-start gap-3">
-                      <label className="text-xs font-medium text-muted-foreground w-16 pt-1">보건증</label>
+                      <label className="text-xs font-medium text-muted-foreground w-16 pt-1 flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3" /> 보건증
+                      </label>
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <input
@@ -453,8 +502,10 @@ export default function StaffPage() {
                     </div>
 
                     {/* 삭제 */}
-                    <div className="flex items-center gap-3 pt-1 border-t border-border">
-                      <label className="text-xs font-medium text-muted-foreground w-16">관리</label>
+                    <div className="flex items-center gap-3 pt-2 border-t border-border">
+                      <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
+                        <Trash2 className="w-3 h-3" /> 관리
+                      </label>
                       <button
                         onClick={() => {
                           if (confirm(`${s.name}을(를) 매장에서 제거하시겠습니까?`))
@@ -475,54 +526,90 @@ export default function StaffPage() {
 
       {/* 근로계약서 목록 — 점장 이상 표시 */}
       {isOwnerOrAdmin && contracts && contracts.length > 0 && (
-        <div className="mt-6">
-          <h2 className="text-lg font-semibold text-foreground mb-3">근로계약서</h2>
+        <div className="mt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <FileText className="w-4 h-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">근로계약서</h2>
+            <span className="text-xs text-muted-foreground">{contracts.length}건</span>
+          </div>
           <div className="space-y-2">
             {contracts.map((c: any) => {
-              const statusMap: Record<string, { label: string; color: string }> = {
-                draft: { label: "초안", color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400" },
-                sent: { label: "발송됨", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" },
-                signed: { label: "서명완료", color: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300" },
-                expired: { label: "만료", color: "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400" },
-                cancelled: { label: "취소", color: "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400" },
+              const statusMap: Record<string, { label: string; color: string; icon: string }> = {
+                draft: { label: "초안", color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400", icon: "📝" },
+                sent: { label: "서명 대기중", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300", icon: "📨" },
+                signed: { label: "서명 완료", color: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300", icon: "✅" },
+                expired: { label: "만료", color: "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400", icon: "⏰" },
+                cancelled: { label: "취소됨", color: "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400", icon: "❌" },
               };
               const st = statusMap[c.status] ?? statusMap.draft;
               const signUrl = `${window.location.origin}/sign/${c.token}`;
-              const copyLink = () => { navigator.clipboard.writeText(signUrl).then(() => toast.success("링크 복사됨")); };
+              const copyLink = () => { navigator.clipboard.writeText(signUrl).then(() => toast.success("서명 링크가 클립보드에 복사되었습니다")); };
               return (
-                <div key={c.id} className="border border-border rounded-lg bg-card px-4 py-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <FileText className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm font-medium text-foreground">{c.employeeName}</span>
-                      <span className="text-xs text-muted-foreground">{c.position}</span>
-                      {c.affiliatedCompany && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">{c.affiliatedCompany}</span>}
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${st.color}`}>{st.label}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground mr-1">
-                        {c.wageType === "hourly" ? "시급" : "월급"} {Number(c.wageAmount).toLocaleString()}원
+                <div key={c.id} className="border border-border rounded-lg bg-card overflow-hidden">
+                  {/* 상단: 직원 정보 + 상태 */}
+                  <div className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-foreground">{c.employeeName}</span>
+                          <span className="text-xs text-muted-foreground">{c.position}</span>
+                          {c.affiliatedCompany && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent text-muted-foreground">{c.affiliatedCompany}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Briefcase className="w-3 h-3" />
+                            {c.wageType === "hourly" ? "시급" : "월급"} {Number(c.wageAmount).toLocaleString()}원
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <CalendarDays className="w-3 h-3" />
+                            {String(c.contractStart).slice(0, 10)}
+                            {c.contractEnd ? ` ~ ${String(c.contractEnd).slice(0, 10)}` : " ~"}
+                          </span>
+                        </div>
+                        {c.signedAt && (
+                          <div className="text-[11px] text-green-600 dark:text-green-400 mt-1 flex items-center gap-1">
+                            <Check className="w-3 h-3" /> 서명일: {String(c.signedAt).slice(0, 10)}
+                          </div>
+                        )}
+                      </div>
+                      <span className={`text-[10px] px-2 py-1 rounded-md font-medium whitespace-nowrap ${st.color}`}>
+                        {st.label}
                       </span>
-                      <button onClick={() => window.open(signUrl, "_blank")} className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="미리보기">
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
-                      {c.status !== "draft" && (
-                        <button onClick={copyLink} className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="서명 링크 복사">
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {c.status === "draft" && (
-                        <Button size="sm" variant="outline" onClick={() => sendContract.mutate({ id: c.id })} disabled={sendContract.isPending} className="ml-1">
-                          <Send className="w-3.5 h-3.5 mr-1" /> 발송
-                        </Button>
-                      )}
                     </div>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    계약기간: {String(c.contractStart).slice(0, 10)}
-                    {c.contractEnd && ` ~ ${String(c.contractEnd).slice(0, 10)}`}
-                    {c.signedAt && (
-                      <span className="ml-2 text-green-600 dark:text-green-400">· 서명: {String(c.signedAt).slice(0, 10)}</span>
+
+                  {/* 하단: 액션 버튼들 */}
+                  <div className="border-t border-border bg-muted/20 px-4 py-2 flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => window.open(signUrl, "_blank")}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded-md hover:bg-accent transition-colors"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> 미리보기
+                    </button>
+                    {c.status !== "draft" && (
+                      <button
+                        onClick={copyLink}
+                        className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 px-2.5 py-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                      >
+                        <Link className="w-3.5 h-3.5" /> 서명 링크 복사
+                      </button>
+                    )}
+                    {c.status === "draft" && (
+                      <Button
+                        size="sm" variant="default"
+                        className="h-7 text-xs ml-auto"
+                        onClick={() => sendContract.mutate({ id: c.id })}
+                        disabled={sendContract.isPending}
+                      >
+                        <Send className="w-3.5 h-3.5 mr-1" /> 직원에게 발송
+                      </Button>
+                    )}
+                    {c.status === "sent" && (
+                      <span className="text-[11px] text-muted-foreground ml-auto flex items-center gap-1">
+                        <Info className="w-3 h-3" /> 직원이 링크를 열어 서명하면 완료됩니다
+                      </span>
                     )}
                   </div>
                 </div>
