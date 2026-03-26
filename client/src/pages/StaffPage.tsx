@@ -7,7 +7,7 @@ import {
   Users, Plus, ChevronDown, ChevronUp, FileText, Trash2, X, UserCog,
   Copy, ExternalLink, Send, Eye, KeyRound, Camera, ShieldCheck,
   AlertTriangle, Loader2, Building2, Edit3, Check, UserPlus, Link,
-  Phone, Clock, CalendarDays, Briefcase, Info, Download,
+  Phone, Clock, CalendarDays, Briefcase, Info, Download, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -47,6 +47,7 @@ export default function StaffPage() {
   const [expandedStaff, setExpandedStaff] = useState<number | null>(null);
   const [editingCredentials, setEditingCredentials] = useState<any>(null);
   const [editingCompany, setEditingCompany] = useState<{ userId: number; value: string } | null>(null);
+  const [renewTarget, setRenewTarget] = useState<{ userId: number; name: string; affiliatedCompany?: string } | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -576,12 +577,15 @@ export default function StaffPage() {
                     {c.status === "signed" && (
                       <button
                         onClick={() => {
-                          // 서명 완료된 계약서 → PDF 다운로드 (서명 페이지를 새 탭으로 열어 PDF 저장)
-                          window.open(signUrl, "_blank");
+                          setRenewTarget({
+                            userId: c.employeeId,
+                            name: c.employeeName,
+                            affiliatedCompany: c.affiliatedCompany || "",
+                          });
                         }}
-                        className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200 px-2.5 py-1.5 rounded-md hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors"
+                        className="flex items-center gap-1.5 text-xs text-orange-600 dark:text-orange-400 hover:text-orange-800 dark:hover:text-orange-200 px-2.5 py-1.5 rounded-md hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors"
                       >
-                        <Download className="w-3.5 h-3.5" /> 계약서 PDF 다운로드
+                        <RefreshCw className="w-3.5 h-3.5" /> 서명갱신/재계약
                       </button>
                     )}
                     {c.status === "sent" && (
@@ -632,6 +636,16 @@ export default function StaffPage() {
           restaurantId={restaurantId}
           staffList={staffList ?? []}
           onClose={() => setShowContractForm(false)}
+        />
+      )}
+
+      {/* 서명갱신/재계약 모달 */}
+      {renewTarget && (
+        <ContractFormModal
+          restaurantId={restaurantId}
+          staffList={staffList ?? []}
+          defaultEmployee={renewTarget}
+          onClose={() => setRenewTarget(null)}
         />
       )}
     </div>
@@ -704,15 +718,16 @@ function CredentialEditModal({ data, restaurantId, onSave, onClose, isPending }:
 
 // ─── 계약서 작성 모달 ─────────────────────────────────────────────────────────
 
-function ContractFormModal({ restaurantId, staffList, onClose }: {
+function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }: {
   restaurantId: number; staffList: any[]; onClose: () => void;
+  defaultEmployee?: { userId: number; name: string; affiliatedCompany?: string };
 }) {
   const utils = trpc.useUtils();
   const [form, setForm] = useState({
-    employeeId: 0,
-    employeeName: "",
+    employeeId: defaultEmployee?.userId ?? 0,
+    employeeName: defaultEmployee?.name ?? "",
     position: "직원",
-    affiliatedCompany: "",
+    affiliatedCompany: defaultEmployee?.affiliatedCompany ?? "",
     contractType: "part_time" as "permanent" | "fixed_term" | "part_time" | "daily",
     contractStart: new Date().toISOString().slice(0, 10),
     contractEnd: "",
@@ -761,7 +776,7 @@ function ContractFormModal({ restaurantId, staffList, onClose }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-foreground">근로계약서 작성</h2>
+          <h2 className="text-lg font-semibold text-foreground">{defaultEmployee ? "서명갱신/재계약" : "근로계약서 작성"}</h2>
           <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-5 h-5" /></button>
         </div>
 
@@ -788,13 +803,11 @@ function ContractFormModal({ restaurantId, staffList, onClose }: {
                 </button>
               </div>
             </div>
-            <div className={`text-[11px] rounded-md px-3 py-2 space-y-0.5 ${form.over5Employees ? "bg-blue-500/10 text-blue-700 dark:text-blue-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>
-              {form.over5Employees ? (
-                <><p className="font-semibold">근로기준법 전면 적용</p><p>연차유급휴가, 야간/휴일 가산수당(1.5배), 부당해고 제한, 주휴수당 의무</p></>
-              ) : (
-                <><p className="font-semibold">근로기준법 일부 적용</p><p>해고예고(30일), 퇴직금, 최저임금 적용 / 연차·가산수당·부당해고 규정 미적용</p></>
-              )}
-            </div>
+            {form.over5Employees && (
+              <div className="text-[11px] rounded-md px-3 py-2 space-y-0.5 bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                <p className="font-semibold">근로기준법 전면 적용</p><p>연차유급휴가, 야간/휴일 가산수당(1.5배), 부당해고 제한, 주휴수당 의무</p>
+              </div>
+            )}
           </div>
 
           {/* ═══ 직원 정보 ═══ */}
