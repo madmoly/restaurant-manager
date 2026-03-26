@@ -81,14 +81,18 @@ interface OcrItem {
   confidence: "high" | "medium" | "low";
 }
 
-function validateAndEnrichItems(items: any[]): OcrItem[] {
-  return items.map((item: any) => {
+function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; grandTotal?: string } | null): OcrItem[] {
+  const enriched = items.map((item: any) => {
     const shortName = String(item.shortName || item.name || "");
     const originalName = String(item.originalName || item.name || "");
-    const qtyStr = String(item.quantity || "");
-    const priceStr = String(item.unitPrice || "");
-    const totalStr = String(item.lineTotal || "");
-    const hasUncertain = String(item.uncertain || "");
+    // 수량: 소수점 끝의 불필요한 0 제거 (예: "6.000" → "6")
+    let qtyStr = String(item.quantity || "").replace(/,/g, "");
+    if (qtyStr && !isNaN(Number(qtyStr))) {
+      qtyStr = String(parseFloat(qtyStr));
+    }
+    const priceStr = String(item.unitPrice || "").replace(/,/g, "");
+    const totalStr = String(item.lineTotal || "").replace(/,/g, "");
+    const isUncertain = item.uncertain === true || item.uncertain === "true";
 
     const qty = parseFloat(qtyStr) || 0;
     const price = parseFloat(priceStr) || 0;
@@ -96,25 +100,33 @@ function validateAndEnrichItems(items: any[]): OcrItem[] {
     let finalTotal = totalStr;
     let confidence: "high" | "medium" | "low" = "high";
 
-    // 합계 검증
-    if (qty > 0 && price > 0) {
+    // 합계 검증: 수량×단가 vs 문서 공급가액
+    if (qty > 0 && price > 0 && total > 0) {
       const calculated = Math.round(qty * price);
-      if (total > 0 && Math.abs(total - calculated) / calculated > 0.01) {
-        // 전표 합계와 수량×단가 불일치 → 수량×단가로 보정
-        finalTotal = String(calculated);
+      const diff = Math.abs(total - calculated);
+      if (diff > 1 && diff / Math.max(total, calculated) > 0.02) {
+        // 2% 이상 차이 → 문서 값(공급가액) 우선, medium 마킹
+        // 문서에 적힌 공급가액이 더 신뢰할 만함
+        finalTotal = totalStr;
         confidence = "medium";
-      } else if (!total) {
-        finalTotal = String(calculated);
       }
+    } else if (qty > 0 && price > 0 && !total) {
+      // 합계 누락 시 계산
+      finalTotal = String(Math.round(qty * price));
     }
 
-    // 불확실 마킹된 필드
-    if (hasUncertain === "true" || shortName.includes("[?]") || originalName.includes("[?]")) {
-      confidence = "low";
+    // AI가 uncertain으로 마킹한 항목
+    if (isUncertain) {
+      confidence = confidence === "high" ? "medium" : "low";
     }
 
     // 핵심 데이터 누락
     if (!shortName || (!qtyStr && !totalStr)) {
+      confidence = "low";
+    }
+
+    // 비정상적 단가 감지 (단가 0 또는 음수)
+    if (price < 0 || (price === 0 && total > 0)) {
       confidence = "low";
     }
 
@@ -129,6 +141,24 @@ function validateAndEnrichItems(items: any[]): OcrItem[] {
       confidence,
     };
   });
+
+  // ── summary 크로스체크: 아이템 합산 vs 문서 합계 ──────────────────────
+  if (summary) {
+    const docTotal = parseFloat(String(summary.totalSupply || summary.grandTotal || "").replace(/,/g, "")) || 0;
+    if (docTotal > 0 && enriched.length > 0) {
+      const itemSum = enriched.reduce((sum, it) => sum + (parseFloat(it.lineTotal) || 0), 0);
+      const totalDiff = Math.abs(itemSum - docTotal);
+      if (totalDiff > 100 && totalDiff / docTotal > 0.05) {
+        // 5% 이상 차이 → 모든 아이템을 medium으로 (전체적 판독 오류 가능성)
+        console.warn(`[OCR] 합계 불일치: items합산=${itemSum}, 문서합계=${docTotal}, 차이=${totalDiff}`);
+        for (const it of enriched) {
+          if (it.confidence === "high") it.confidence = "medium";
+        }
+      }
+    }
+  }
+
+  return enriched;
 }
 
 // ─── 거래처 품목 매칭 (기존 DB 활용) ────────────────────────────────────────
@@ -194,7 +224,7 @@ async function findCounterpartyId(name: string, restaurantId?: number): Promise<
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// POST /api/ocr/extract-purchase — 2단계 OCR (판독 → 구조화)
+// POST /api/ocr/extract-purchase — 단일 Vision 직접 구조화
 // ═════════════════════════════════════════════════════════════════════════════
 ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
   try {
@@ -227,115 +257,109 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       },
     };
 
-    // ── 1단계: 이미지 원시 판독 (Vision 집중, sonnet) ──────────────────────
-    const step1 = await anthropic.messages.create({
+    // ── 단일 Vision: 이미지 → 직접 구조화 JSON ───────────────────────────
+    const response = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
+      max_tokens: 8192,
       messages: [{
         role: "user",
         content: [
           imageContent,
           {
             type: "text",
-            text: `당신은 한국 식당 매입 전표/영수증/거래명세서 전문 판독기입니다.
+            text: `이 이미지는 한국 식당/매장의 매입 전표입니다 (거래명세서, 영수증, 간이영수증, 수기전표, 배달정산서 등).
 
-작업: 이 이미지의 모든 텍스트를 있는 그대로 정확하게 전사하세요.
+당신의 임무: 이미지에서 **거래처명**과 **품목별 숫자 데이터**를 정확하게 추출하여 JSON으로 출력하세요.
 
-규칙:
-1. 표 구조가 있으면 | 구분자로 행/열을 유지하세요
-2. 글씨가 흐리거나 불명확한 부분은 [?텍스트] 형식으로 표시하세요 (예: [?삼겹살])
-3. 숫자는 콤마 포함 그대로 전사하세요 (예: 15,000)
-4. 상단의 거래처/업체명, 날짜, 전화번호 등 헤더 정보도 포함하세요
-5. 빈 칸이나 읽을 수 없는 부분은 [판독불가]로 표시하세요
-6. 전표 하단의 합계, 부가세, 총액 등도 반드시 포함하세요
-7. 절대 내용을 추측하거나 보정하지 마세요 — 보이는 그대로만 전사
+## 문서 구조 파악 가이드
 
-문서 유형도 첫 줄에 명시하세요:
-[유형: 거래명세서/영수증/수기전표/카드전표/배달정산서/기타]
+**거래명세서 (표 형태):**
+- 열 순서: 품목/규격 | 단위 | 수량 | 단가 | 공급가액 | 부가세 | 비고
+- "공급가액" = 수량 × 단가 (이 열이 lineTotal)
+- 부가세/비고 열은 무시
+- 하단에 합계 행이 있음 (items에 넣지 말 것)
 
-전사 결과만 출력하세요. 설명이나 해석은 불필요합니다.`,
+**영수증/간이영수증:**
+- 보통 품명, 수량, 금액 순서
+- 합계/총액 행은 items에 넣지 말 것
+
+**수기전표:**
+- 손글씨로 작성, 열 구분이 불명확할 수 있음
+- 읽기 어려운 글씨는 uncertain: true
+
+## 추출 규칙
+
+1. **거래처명**: 문서 상단에서 공급자(판매자) 업체명을 찾으세요. 상호명 필드.
+2. **각 품목별 추출:**
+   - shortName: 핵심 품목명만 (예: "핫철리소스/CHOLIMEX/250g(250g*24ea)/막소" → "핫철리소스")
+   - originalName: 이미지에 적힌 전체 품목/규격 텍스트 그대로
+   - quantity: **수량 열의 숫자** (순수 숫자, 콤마 제거). 소수점 있으면 유지. 예: "6.000" → "6", "0.500" → "0.5"
+   - unit: 단위 (EA, kg, 박스, 봉, 병, 판, 개 등)
+   - unitPrice: **단가 열의 숫자** (순수 숫자, 콤마 제거). 예: "1,200" → "1200"
+   - lineTotal: **공급가액/금액 열의 숫자** (순수 숫자, 콤마 제거). 예: "6,546" → "6546"
+   - uncertain: 글씨가 불명확하거나 숫자 판독이 애매하면 true, 아니면 false
+
+3. **숫자 정확도가 최우선입니다:**
+   - 수량 열과 단가 열을 혼동하지 마세요
+   - 공급가액 열과 부가세 열을 혼동하지 마세요
+   - 거래명세서에서 "수량" 다음 열은 "단가", 그 다음이 "공급가액"
+   - 수량×단가 ≠ 공급가액이면 → 공급가액(문서에 적힌 값)을 lineTotal로 사용하고 uncertain: true
+
+4. **합계/소계/총합 행은 items에 포함하지 마세요.** 대신 summary에 넣으세요.
+
+5. note: 문서에 특이 메모가 있으면 포함, 없으면 null
+
+## 출력 형식 (순수 JSON만, 코드블록 없이):
+{
+  "counterpartyName": "거래처명 또는 null",
+  "documentType": "거래명세서|영수증|간이영수증|수기전표|배달정산서|기타",
+  "items": [
+    {
+      "shortName": "품목 축약명",
+      "originalName": "이미지 원본 텍스트",
+      "quantity": "수량(숫자)",
+      "unit": "단위",
+      "unitPrice": "단가(숫자)",
+      "lineTotal": "공급가액(숫자)",
+      "uncertain": false
+    }
+  ],
+  "summary": {
+    "totalSupply": "공급가액 합계(숫자) 또는 null",
+    "totalTax": "부가세 합계(숫자) 또는 null",
+    "grandTotal": "총합계(숫자) 또는 null"
+  },
+  "note": "비고 또는 null"
+}`,
           },
         ],
       }],
     });
 
-    const rawTranscription = extractText(step1);
-    if (!rawTranscription) {
-      res.status(500).json({ error: "1단계 판독 실패: AI 응답 없음" });
-      return;
-    }
-
-    // ── 2단계: 텍스트 → 구조화 JSON (haiku — 비용 효율) ───────────────────
-    const step2 = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 4096,
-      messages: [{
-        role: "user",
-        content: `아래는 한국 식당 매입 전표를 이미지에서 전사한 원문입니다.
-이 텍스트를 분석하여 구조화된 JSON으로 변환하세요.
-
-=== 전사 원문 ===
-${rawTranscription}
-=== 끝 ===
-
-변환 규칙:
-1. counterpartyName: 거래처/업체명 (없으면 null)
-2. 각 품목별로:
-   - shortName: 핵심 품목명만 (브랜드/용량/규격/등급/원산지 제거)
-     예: "CJ 백설 포도씨유 500ml" → "포도씨유", "국내산 삼겹살 1등급" → "삼겹살"
-   - originalName: 전사 원문 그대로의 품목명
-   - quantity: 수량 (숫자만, 콤마 제거)
-   - unit: 단위 (개, kg, 박스, EA 등)
-   - unitPrice: 단가 (숫자만, 콤마 제거)
-   - lineTotal: 행 합계 (숫자만, 콤마 제거)
-   - uncertain: [?] 마킹이 포함된 필드가 있으면 "true", 없으면 "false"
-3. note: 비고/메모 (없으면 null)
-
-중요:
-- 숫자에서 콤마(,)를 제거하고 순수 숫자만 넣으세요
-- 수량/단가가 없고 합계만 있으면 합계를 lineTotal에 넣고 quantity/unitPrice는 빈 문자열
-- 합계가 없고 수량×단가가 있으면 계산하여 lineTotal에 넣으세요
-- [?]나 [판독불가] 태그가 있는 품목은 uncertain: "true"
-
-순수 JSON만 출력하세요. 코드블록(\`\`\`)으로 감싸지 마세요:
-{
-  "counterpartyName": "거래처명 또는 null",
-  "items": [
-    {
-      "shortName": "축약명",
-      "originalName": "원본명",
-      "quantity": "수량",
-      "unit": "단위",
-      "unitPrice": "단가",
-      "lineTotal": "합계",
-      "uncertain": "true 또는 false"
-    }
-  ],
-  "note": "비고 또는 null"
-}`,
-      }],
-    });
-
-    const step2Text = extractText(step2);
-    if (!step2Text) {
-      res.status(500).json({ error: "2단계 구조화 실패: AI 응답 없음" });
+    const responseText = extractText(response);
+    if (!responseText) {
+      res.status(500).json({ error: "AI 응답 없음" });
       return;
     }
 
     let parsed: any;
     try {
-      parsed = parseAIJson(step2Text);
+      parsed = parseAIJson(responseText);
     } catch {
+      // JSON 파싱 실패 시 원문 일부 반환
       res.status(200).json({
         counterpartyName: null,
         items: [],
-        note: `구조화 실패. 판독 원문: ${rawTranscription.substring(0, 500)}`,
+        note: `구조화 실패. AI 응답: ${responseText.substring(0, 500)}`,
       });
       return;
     }
 
-    // ── 합계 검증 + 신뢰도 산정 ──────────────────────────────────────────
-    let items = validateAndEnrichItems(Array.isArray(parsed.items) ? parsed.items : []);
+    // ── 합계 검증 + 신뢰도 + summary 크로스체크 ──────────────────────────
+    let items = validateAndEnrichItems(
+      Array.isArray(parsed.items) ? parsed.items : [],
+      parsed.summary || null
+    );
 
     // ── 거래처 품목 매칭 (기존 DB와 단가 비교) ──────────────────────────
     const counterpartyName = parsed.counterpartyName || null;
@@ -351,9 +375,6 @@ ${rawTranscription}
     res.json(result);
   } catch (err: any) {
     console.error("[OCR] extract-purchase error:", err);
-
-    // 자동 재시도: 1회
-    // (재시도 로직은 클라이언트에서도 가능하지만, API 비용을 고려하여 서버에서 1회만)
     res.status(500).json({
       error: `OCR 처리 중 오류: ${err.message}`,
       retryable: true,

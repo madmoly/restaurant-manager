@@ -18,7 +18,34 @@ import {
   Clock,
   CheckCircle,
   Users,
+  ZoomIn,
 } from 'lucide-react';
+
+// ============================================================================
+// 이미지 확대보기 모달 (핀치줌/스와이프 지원)
+// ============================================================================
+function ImageViewer({ src, onClose }: { src: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center"
+      onClick={onClose}
+    >
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 z-10 bg-white/20 backdrop-blur rounded-full p-2"
+      >
+        <X className="w-6 h-6 text-white" />
+      </button>
+      <img
+        src={src}
+        alt="확대 이미지"
+        className="max-w-full max-h-full object-contain touch-pinch-zoom"
+        style={{ touchAction: 'pinch-zoom' }}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
+}
 import { Button, Card, Input, Badge } from '@/components/ui/index';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -682,6 +709,7 @@ function PurchaseTab({
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [ocrOriginalItems, setOcrOriginalItems] = useState<any[] | null>(null); // AI 원본 (수정 비교용)
+  const [viewerImage, setViewerImage] = useState<string | null>(null); // 이미지 확대보기
 
   const utils = trpc.useUtils();
 
@@ -1088,7 +1116,19 @@ function PurchaseTab({
           {/* OCR 미리보기 이미지 */}
           {ocrPreviewUrl && !ocrProcessing && (
             <div className="relative">
-              <img src={ocrPreviewUrl} alt="전표 이미지" className="w-full rounded-lg border border-border max-h-40 object-contain bg-muted/20" />
+              <img
+                src={ocrPreviewUrl}
+                alt="전표 이미지"
+                className="w-full rounded-lg border border-border max-h-40 object-contain bg-muted/20 cursor-pointer"
+                onClick={() => setViewerImage(ocrPreviewUrl)}
+              />
+              <button
+                onClick={() => setViewerImage(ocrPreviewUrl)}
+                className="absolute top-2 left-2 bg-black/50 text-white rounded-full p-1.5"
+                title="확대 보기"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
               <button
                 onClick={() => { setOcrPreviewUrl(null); setAttachmentUrl(undefined); }}
                 className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
@@ -1498,15 +1538,19 @@ function MiddayTab({
             {orderImages.map((img: any) => (
               <div
                 key={img.id}
-                className="relative rounded-lg overflow-hidden bg-muted h-20"
+                className="relative rounded-lg overflow-hidden bg-muted h-20 cursor-pointer group"
+                onClick={() => setViewerImage(img.imageUrl)}
               >
                 <img
                   src={img.imageUrl}
                   alt="발주 이미지"
                   className="w-full h-full object-cover"
                 />
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                  <ZoomIn className="w-5 h-5 text-white opacity-0 group-hover:opacity-80 transition-opacity" />
+                </div>
                 <button
-                  onClick={() => deleteOrderImageMutation.mutate({ id: img.id })}
+                  onClick={(e) => { e.stopPropagation(); deleteOrderImageMutation.mutate({ id: img.id }); }}
                   disabled={deleteOrderImageMutation.isPending}
                   className="absolute top-1 right-1 bg-red-500 rounded-full p-1"
                 >
@@ -1522,6 +1566,11 @@ function MiddayTab({
           </div>
         )}
       </Card>
+
+      {/* 이미지 확대보기 모달 */}
+      {viewerImage && (
+        <ImageViewer src={viewerImage} onClose={() => setViewerImage(null)} />
+      )}
 
     </div>
   );
