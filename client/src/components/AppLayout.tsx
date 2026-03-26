@@ -56,8 +56,8 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
     label: "사용자 관리", href: "/users",
     icon: <ShieldCheck className="h-4 w-4" />,
     mobileIcon: <ShieldCheck className="h-5 w-5" />,
-    roles: ["master"],
-    mobileTabPriority: { master: 2 },
+    roles: ["master", "admin"],
+    mobileTabPriority: { master: 2, admin: 2 },
   },
   {
     label: "전체 매장", href: "/restaurants",
@@ -65,7 +65,12 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
     icon: <Store className="h-4 w-4" />,
     mobileIcon: <Store className="h-5 w-5" />,
     roles: ["master", "admin"],
-    mobileTabPriority: { admin: 2 },
+  },
+  {
+    label: "시스템 관리", href: "/system",
+    icon: <Activity className="h-4 w-4" />,
+    mobileIcon: <Activity className="h-5 w-5" />,
+    roles: ["master"],
   },
 ];
 

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { desc, eq, and, gte, lte, sql } from "drizzle-orm";
-import { router, publicProcedure, adminProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
-import { errorLogs } from "../../drizzle/schema";
+import { errorLogs, users, restaurants } from "../../drizzle/schema";
 
 export const errorLogsRouter = router({
   /** 에러 기록 — 비로그인도 가능 (앱 크래시 시) */
@@ -85,4 +85,62 @@ export const errorLogsRouter = router({
       byType,
     };
   }),
+
+  /** 매장별 에러 집계 — master 전용 */
+  summaryByRestaurant: masterProcedure
+    .input(z.object({ days: z.number().min(1).max(90).default(7) }))
+    .query(async ({ input }) => {
+      const since = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
+      const rows = await db
+        .select({
+          restaurantId: errorLogs.restaurantId,
+          restaurantName: restaurants.name,
+          count: sql<number>`COUNT(*)`,
+          lastError: sql<string>`MAX(${errorLogs.createdAt})`,
+        })
+        .from(errorLogs)
+        .leftJoin(restaurants, eq(errorLogs.restaurantId, restaurants.id))
+        .where(gte(errorLogs.createdAt, since))
+        .groupBy(errorLogs.restaurantId, restaurants.name)
+        .orderBy(desc(sql`COUNT(*)`));
+      return rows;
+    }),
+
+  /** 사용자별 에러 집계 — master 전용 */
+  summaryByUser: masterProcedure
+    .input(z.object({ days: z.number().min(1).max(90).default(7) }))
+    .query(async ({ input }) => {
+      const since = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
+      const rows = await db
+        .select({
+          userId: errorLogs.userId,
+          userName: users.name,
+          username: users.username,
+          count: sql<number>`COUNT(*)`,
+          lastError: sql<string>`MAX(${errorLogs.createdAt})`,
+        })
+        .from(errorLogs)
+        .leftJoin(users, eq(errorLogs.userId, users.id))
+        .where(gte(errorLogs.createdAt, since))
+        .groupBy(errorLogs.userId, users.name, users.username)
+        .orderBy(desc(sql`COUNT(*)`));
+      return rows;
+    }),
+
+  /** 일별 에러 추이 — master 전용 */
+  dailyTrend: masterProcedure
+    .input(z.object({ days: z.number().min(1).max(90).default(14) }))
+    .query(async ({ input }) => {
+      const since = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
+      const rows = await db
+        .select({
+          date: sql<string>`DATE(${errorLogs.createdAt})`,
+          count: sql<number>`COUNT(*)`,
+        })
+        .from(errorLogs)
+        .where(gte(errorLogs.createdAt, since))
+        .groupBy(sql`DATE(${errorLogs.createdAt})`)
+        .orderBy(sql`DATE(${errorLogs.createdAt})`);
+      return rows;
+    }),
 });

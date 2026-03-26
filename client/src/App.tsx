@@ -25,6 +25,7 @@ import OpsCalendarPage from "./pages/OpsCalendarPage";
 import TaskManagementPage from "./pages/TaskManagementPage";
 import LaborCostPage from "./pages/LaborCostPage";
 import ContractSignPage from "./pages/ContractSignPage";
+import SystemPage from "./pages/SystemPage";
 import AppLayout from "./components/AppLayout";
 
 function RoleRouter() {
@@ -78,6 +79,7 @@ function RoleRouter() {
             <Route path="/daily-ops" component={DailyOpsPage} />
             <Route path="/ops-calendar" component={OpsCalendarPage} />
             <Route path="/staff" component={StaffPage} />
+            <Route path="/system" component={SystemPage} />
           </>
         )}
 
@@ -85,6 +87,8 @@ function RoleRouter() {
         {effectiveRole === "admin" && (
           <>
             <Route path="/" component={AdminDashboard} />
+            <Route path="/business" component={AdminDashboard} />
+            <Route path="/users" component={UsersPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
             <Route path="/profitability" component={ProfitPage} />
             <Route path="/sales" component={SalesPage} />
