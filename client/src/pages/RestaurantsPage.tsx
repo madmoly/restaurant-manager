@@ -5,8 +5,6 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import { toast } from "sonner";
 import {
   Plus,
-  UserPlus,
-  Trash2,
   Store,
   Phone,
   MapPin,
@@ -68,13 +66,17 @@ export default function RestaurantsPage() {
         </div>
       </div>
 
-      {/* 직원 관리 */}
-      <div className="bg-card rounded-lg border border-border">
-        <div className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-foreground">직원 관리</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">이 매장에 배정된 직원을 관리합니다</p>
+      {/* 직원 관리 → StaffPage로 이동 안내 */}
+      <div className="bg-card rounded-lg border border-border p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">직원 관리</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">직원 배정, 역할 변경, 계약서, 보건증 관리</p>
+          </div>
+          <a href="/staff" className="text-xs px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
+            직원관리로 이동
+          </a>
         </div>
-        <StaffSection restaurantId={current.id} />
       </div>
 
       {/* 매장 업무관리로 이동 안내 */}
@@ -118,74 +120,5 @@ function CreateRestaurantForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-// ─── 직원 관리 ────────────────────────────────────────────────────────────────
-
-function StaffSection({ restaurantId }: { restaurantId: number }) {
-  const utils = trpc.useUtils();
-  const { data: staff, isLoading } = trpc.restaurants.getStaff.useQuery({ restaurantId });
-  const { data: allUsers } = trpc.users.list.useQuery(undefined, { retry: false });
-  const [addUserId, setAddUserId] = useState("");
-  const [addRole, setAddRole] = useState<"manager" | "store_manager" | "employee">("employee");
-
-  const addStaff = trpc.restaurants.addStaff.useMutation({
-    onSuccess() { toast.success("직원이 배정되었습니다"); utils.restaurants.getStaff.invalidate({ restaurantId }); setAddUserId(""); },
-    onError(err) { toast.error(err.message); },
-  });
-  const removeStaff = trpc.restaurants.removeStaff.useMutation({
-    onSuccess() { toast.success("직원이 해제되었습니다"); utils.restaurants.getStaff.invalidate({ restaurantId }); },
-    onError(err) { toast.error(err.message); },
-  });
-  const updateRole = trpc.restaurants.updateStaffRole.useMutation({
-    onSuccess() { toast.success("역할이 변경되었습니다"); utils.restaurants.getStaff.invalidate({ restaurantId }); },
-    onError(err) { toast.error(err.message); },
-  });
-
-  return (
-    <div className="p-4">
-      {isLoading ? (
-        <p className="text-xs text-muted-foreground">로딩 중...</p>
-      ) : !staff?.length ? (
-        <p className="text-xs text-muted-foreground mb-3">배정된 직원이 없습니다</p>
-      ) : (
-        <div className="space-y-2 mb-3">
-          {staff.map((s: any) => (
-            <div key={s.id} className="flex items-center justify-between text-sm">
-              <div>
-                <span className="text-foreground">{s.name}</span>
-                <span className="text-muted-foreground ml-1.5">@{s.username}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <select value={s.storeRole} onChange={(e) => updateRole.mutate({ restaurantId, userId: s.userId, role: e.target.value as any })} className="text-xs border border-input rounded px-2 py-1 bg-background text-foreground">
-                  <option value="store_manager">점장</option>
-                  <option value="manager">매니저</option>
-                  <option value="employee">직원</option>
-                </select>
-                <button onClick={() => removeStaff.mutate({ restaurantId, userId: s.userId })} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {allUsers && (
-        <div className="flex items-center gap-2 pt-2 border-t border-border/50">
-          <select value={addUserId} onChange={(e) => setAddUserId(e.target.value)} className="flex-1 text-xs border border-input rounded px-2 py-1.5 bg-background text-foreground">
-            <option value="">직원 선택...</option>
-            {allUsers.filter((u: any) => !staff?.some((s: any) => s.userId === u.id)).map((u: any) => (
-              <option key={u.id} value={u.id}>{u.name} (@{u.username})</option>
-            ))}
-          </select>
-          <select value={addRole} onChange={(e) => setAddRole(e.target.value as any)} className="text-xs border border-input rounded px-2 py-1.5 bg-background text-foreground">
-            <option value="store_manager">점장</option>
-            <option value="manager">매니저</option>
-            <option value="employee">직원</option>
-          </select>
-          <button onClick={() => addUserId && addStaff.mutate({ restaurantId, userId: Number(addUserId), role: addRole })} disabled={!addUserId} className="flex items-center gap-1 px-2.5 py-1.5 bg-muted text-foreground text-xs rounded hover:bg-accent disabled:opacity-50">
-            <UserPlus size={12} /> 배정
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
+// StaffSection → StaffPage로 통합됨
 // ChecklistManager / ChecklistHistory → TaskManagementPage로 통합됨
