@@ -43,12 +43,38 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// ─── 카테고리 그룹 정의 ──────────────────────────────────────────────────────
+// ─── 시스템 전역 메뉴 (master/admin 전용, 매장 선택 위에 표시) ─────────────
+const SYSTEM_NAV_ITEMS: NavItem[] = [
+  {
+    label: "사업 현황", href: "/business",
+    icon: <Building2 className="h-4 w-4" />,
+    mobileIcon: <Building2 className="h-5 w-5" />,
+    roles: ["master", "admin"],
+    mobileTabPriority: { master: 1, admin: 1 },
+  },
+  {
+    label: "사용자 관리", href: "/users",
+    icon: <ShieldCheck className="h-4 w-4" />,
+    mobileIcon: <ShieldCheck className="h-5 w-5" />,
+    roles: ["master"],
+    mobileTabPriority: { master: 2 },
+  },
+  {
+    label: "전체 매장", href: "/restaurants",
+    labelByRole: { manager: "매장 정보" },
+    icon: <Store className="h-4 w-4" />,
+    mobileIcon: <Store className="h-5 w-5" />,
+    roles: ["master", "admin"],
+    mobileTabPriority: { admin: 2 },
+  },
+];
+
+// ─── 매장별 운영 메뉴 (점장 기준, master/admin도 매장 선택 시 동일하게 표시) ──
 // 모바일 하단탭 목표:
-//   master/admin: 대시보드(1), 사용자관리(2), 스케줄(3), 수익분석(4)
-//   manager:      대시보드(1), 일일운영(2), 스케줄(3), 분석캘린더(4)
-//   employee:     대시보드(1), 일일운영(2), 스케줄(3)
-const NAV_GROUPS: NavGroup[] = [
+//   master/admin: 사업현황(1), 사용자관리/전체매장(2), 스케줄(3), 매출캘린더(4)
+//   manager:      대시보드(1), 일일운영(2), 스케줄(3), 매출캘린더(4)
+//   staff:        대시보드(1), 일일운영(2), 스케줄(3)
+const STORE_NAV_GROUPS: NavGroup[] = [
   {
     label: "일일 운영",
     items: [
@@ -57,14 +83,14 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <LayoutGrid className="h-4 w-4" />,
         mobileIcon: <LayoutGrid className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "staff"],
-        mobileTabPriority: { master: 1, admin: 1, manager: 1, staff: 1 },
+        mobileTabPriority: { manager: 1, staff: 1 },
       },
       {
         label: "일일 운영", href: "/daily-ops",
         icon: <Activity className="h-4 w-4" />,
         mobileIcon: <Activity className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "staff"],
-        mobileTabPriority: { manager: 2, staff: 2 },
+        mobileTabPriority: { master: 3, admin: 3, manager: 2, staff: 2 },
       },
       {
         label: "운영 캘린더", href: "/ops-calendar",
@@ -88,7 +114,7 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <Clock className="h-4 w-4" />,
         mobileIcon: <Clock className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "staff"],
-        mobileTabPriority: { master: 3, admin: 3, manager: 3, staff: 3 },
+        mobileTabPriority: { manager: 3, staff: 3 },
       },
       {
         label: "직원 관리", href: "/staff",
@@ -119,7 +145,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: "고정비 관리", href: "/fixed-costs",
         icon: <Receipt className="h-4 w-4" />,
         mobileIcon: <Receipt className="h-5 w-5" />,
-        roles: ["manager"],
+        roles: ["master", "admin", "manager"],
       },
       {
         label: "매입 관리", href: "/purchase-management",
@@ -130,20 +156,13 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "시스템",
+    label: "매장",
     items: [
-      {
-        label: "사용자 관리", href: "/users",
-        icon: <ShieldCheck className="h-4 w-4" />,
-        mobileIcon: <ShieldCheck className="h-5 w-5" />,
-        roles: ["master", "admin"],
-        mobileTabPriority: { master: 2, admin: 2 },
-      },
       {
         label: "매장 정보", href: "/restaurants",
         icon: <Store className="h-4 w-4" />,
         mobileIcon: <Store className="h-5 w-5" />,
-        roles: ["master", "admin", "manager"],
+        roles: ["manager"],  // manager/staff만 (admin은 시스템 전역에서 접근)
       },
       {
         label: "알림", href: "/notifications",
@@ -155,7 +174,8 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-const ALL_NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap(g => g.items);
+// 모든 아이템 = 시스템 + 매장 (모바일 탭 계산용)
+const ALL_NAV_ITEMS: NavItem[] = [...SYSTEM_NAV_ITEMS, ...STORE_NAV_GROUPS.flatMap(g => g.items)];
 
 // ─── 역할 색상 ───────────────────────────────────────────────────────────────
 const ROLE_COLORS: Record<string, string> = {
@@ -184,19 +204,26 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
 
   const isAdminLevel = effectiveRole === "master" || effectiveRole === "admin";
 
-  // 역할 기반 필터링 + 중복 제거
+  // 시스템 전역 메뉴 (master/admin만)
+  const visibleSystemItems = isAdminLevel
+    ? SYSTEM_NAV_ITEMS.filter(item => item.roles.includes(effectiveRole))
+    : [];
+
+  // 매장별 운영 메뉴 — 역할 기반 필터링 + 중복 제거(시스템 메뉴와 겹치는 href 제외)
+  const systemHrefs = new Set(visibleSystemItems.map(i => i.href));
   const seen = new Set<string>();
-  const visibleGroups: NavGroup[] = NAV_GROUPS.map(group => ({
+  const visibleStoreGroups: NavGroup[] = STORE_NAV_GROUPS.map(group => ({
     ...group,
     items: group.items.filter(item => {
       if (!item.roles.includes(effectiveRole)) return false;
+      if (systemHrefs.has(item.href)) return false; // 시스템 메뉴와 중복 제거
       if (seen.has(item.href)) return false;
       seen.add(item.href);
       return true;
     }),
   })).filter(g => g.items.length > 0);
 
-  // flat list for mobile
+  // flat list for mobile (시스템 + 매장)
   const seenMobile = new Set<string>();
   const visibleNav = ALL_NAV_ITEMS.filter(n => {
     if (!n.roles.includes(effectiveRole)) return false;
@@ -268,8 +295,48 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
         </div>
       </div>
 
-      {/* 매장 선택 (admin이 아닌 경우에만 — admin은 전역 관리) */}
-      {!isAdminLevel && restaurants.length > 1 && (
+      {/* ── 시스템 전역 메뉴 (master/admin만, 매장 선택 위) ── */}
+      {visibleSystemItems.length > 0 && (
+        <div className="px-2 pt-3 pb-2 border-b border-sidebar-border">
+          <div className="px-3 pb-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40 select-none">
+              시스템 관리
+            </p>
+          </div>
+          <div className="space-y-0.5">
+            {visibleSystemItems.map((item) => {
+              const isActive = location === item.href;
+              return (
+                <Link key={item.href} href={item.href}>
+                  <div
+                    className={cn(
+                      "flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 cursor-pointer relative group",
+                      isActive
+                        ? "bg-primary/15 text-primary border border-primary/20"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    )}
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    {isActive && (
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+                    )}
+                    <span className={cn(
+                      "shrink-0 transition-colors",
+                      isActive ? "text-primary" : "text-sidebar-foreground/45 group-hover:text-sidebar-accent-foreground"
+                    )}>
+                      {item.icon}
+                    </span>
+                    <span className="flex-1 truncate">{getLabel(item)}</span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── 매장 선택 ── */}
+      {restaurants.length > 1 && (
         <div className="px-3 py-2.5 border-b border-sidebar-border">
           <Select
             value={selectedRestaurantId ? String(selectedRestaurantId) : undefined}
@@ -289,7 +356,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
           </Select>
         </div>
       )}
-      {!isAdminLevel && restaurants.length === 1 && selectedRestaurant && (
+      {restaurants.length === 1 && selectedRestaurant && (
         <div className="px-3 py-2 border-b border-sidebar-border">
           <div className="flex items-center gap-1.5 px-1">
             <Store className="h-3 w-3 text-sidebar-foreground/40 shrink-0" />
@@ -297,31 +364,10 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
           </div>
         </div>
       )}
-      {/* admin/master용 매장 선택 */}
-      {isAdminLevel && restaurants.length > 0 && (
-        <div className="px-3 py-2.5 border-b border-sidebar-border">
-          <Select
-            value={selectedRestaurantId ? String(selectedRestaurantId) : undefined}
-            onValueChange={(v) => setSelectedRestaurantId(Number(v))}
-          >
-            <SelectTrigger className="h-8 text-xs bg-sidebar-accent border-sidebar-border text-sidebar-foreground gap-1.5">
-              <Store className="h-3 w-3 shrink-0 text-sidebar-foreground/50" />
-              <SelectValue placeholder="매장 선택" />
-            </SelectTrigger>
-            <SelectContent>
-              {restaurants.map(r => (
-                <SelectItem key={r.id} value={String(r.id)} className="text-xs">
-                  {r.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
 
-      {/* 네비게이션 — 카테고리 그룹 */}
+      {/* ── 매장별 운영 메뉴 (점장과 동일) ── */}
       <nav className="flex-1 px-2 py-3 overflow-y-auto">
-        {visibleGroups.map((group, gi) => (
+        {visibleStoreGroups.map((group, gi) => (
           <div key={group.label} className={cn(gi > 0 && "mt-3")}>
             {group.items.length > 0 && (
               <div className="px-3 pb-1.5">
@@ -353,9 +399,7 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
                       )}>
                         {item.icon}
                       </span>
-                      <span className="flex-1 truncate">
-                        {item.href === "/restaurants" && !isAdminLevel ? "매장 정보" : getLabel(item)}
-                      </span>
+                      <span className="flex-1 truncate">{getLabel(item)}</span>
                     </div>
                   </Link>
                 );
@@ -547,7 +591,12 @@ export default function AppLayout({ children, effectiveRole }: AppLayoutProps) {
                     <div className="absolute bottom-full right-0 mb-4 w-56 glass-panel rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-5 border-border/50">
                       {(() => {
                         const moreHrefs = new Set(moreItems.map(i => i.href));
-                        const moreGroups = visibleGroups
+                        // 시스템 메뉴 + 매장 메뉴 합산하여 더보기에 표시
+                        const allGroups = [
+                          ...(visibleSystemItems.length > 0 ? [{ label: "시스템 관리", items: visibleSystemItems }] : []),
+                          ...visibleStoreGroups,
+                        ];
+                        const moreGroups = allGroups
                           .map(g => ({ ...g, items: g.items.filter(i => moreHrefs.has(i.href)) }))
                           .filter(g => g.items.length > 0);
                         return moreGroups.map((group, gi) => (
