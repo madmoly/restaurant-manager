@@ -152,7 +152,7 @@ export default function ProfitPage() {
         head: [summaryHeaders],
         body: summaryRows.map(r => r.map(c => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
         styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
-        headStyles: { fillColor: [59, 130, 246], textColor: 255, font: "NanumGothic" },
+        headStyles: { fillColor: [59, 130, 246], textColor: 255, font: "NanumGothic", fontStyle: "normal" },
         columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
       });
 
@@ -165,19 +165,13 @@ export default function ProfitPage() {
         head: [fixedHeaders],
         body: fixedRows.map((r: any[]) => r.map((c: any) => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
         styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
-        headStyles: { fillColor: [100, 116, 139], textColor: 255, font: "NanumGothic" },
+        headStyles: { fillColor: [100, 116, 139], textColor: 255, font: "NanumGothic", fontStyle: "normal" },
         columnStyles: { 1: { halign: "right" } },
       });
 
       const pdfBlob = doc.output("blob");
       const pdfUrl = URL.createObjectURL(pdfBlob);
-      const a = document.createElement("a");
-      a.href = pdfUrl;
-      a.download = `${fileName}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(pdfUrl);
+      window.open(pdfUrl, "_blank");
     } catch (err: any) {
       console.error("PDF export error:", err);
       alert(`PDF 내보내기 실패: ${err.message || "알 수 없는 오류"}`);

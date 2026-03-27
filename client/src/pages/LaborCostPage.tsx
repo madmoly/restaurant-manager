@@ -79,8 +79,8 @@ export default function LaborCostPage() {
           emp.shifts,
           Number(emp.totalHours.toFixed(1)),
           Math.round(emp.totalWage),
-          emp.contractStart ?? "-",
-          emp.contractEnd ?? "-",
+          emp.contractStart ? new Date(emp.contractStart).toLocaleDateString("ko-KR") : "-",
+          emp.contractEnd ? new Date(emp.contractEnd).toLocaleDateString("ko-KR") : "-",
         ]);
       }
     }
@@ -131,7 +131,7 @@ export default function LaborCostPage() {
         head: [headers],
         body: rows.map(r => r.map(c => String(c))),
         styles: { fontSize: 8, cellPadding: 2, font: "NanumGothic" },
-        headStyles: { fillColor: [59, 130, 246], textColor: 255, fontSize: 8, font: "NanumGothic" },
+        headStyles: { fillColor: [59, 130, 246], textColor: 255, fontSize: 8, font: "NanumGothic", fontStyle: "normal" },
         columnStyles: {
           4: { halign: "right" },
           5: { halign: "right" },
@@ -142,13 +142,7 @@ export default function LaborCostPage() {
 
       const pdfBlob = doc.output("blob");
       const pdfUrl = URL.createObjectURL(pdfBlob);
-      const a = document.createElement("a");
-      a.href = pdfUrl;
-      a.download = `${fileName}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(pdfUrl);
+      window.open(pdfUrl, "_blank");
     } catch (err: any) {
       console.error("PDF export error:", err);
       alert(`PDF 내보내기 실패: ${err.message || "알 수 없는 오류"}`);
