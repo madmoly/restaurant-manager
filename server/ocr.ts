@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "fs";
 import path from "path";
+import sharp from "sharp";
 import { UPLOAD_ROOT } from "./upload";
 import { db } from "./db";
 import { counterpartyItems, counterparties } from "../drizzle/schema";
@@ -17,17 +18,35 @@ function getAnthropicClient(): Anthropic | null {
 }
 
 // ─── 헬퍼: 이미지 → base64 + MIME ────────────────────────────────────────────
-function loadImageBase64(filePath: string): { base64: string; mediaType: string } {
-  const imageBuffer = fs.readFileSync(filePath);
+// 참고: 스마트폰 사진의 EXIF orientation 태그가 있어도 실제 픽셀은 이미 정방향으로
+// 저장되는 경우가 대부분. EXIF 회전을 적용하면 오히려 정상 이미지를 뒤집게 됨.
+// 따라서 원본 픽셀 그대로 사용하고, EXIF 태그만 제거하여 API 혼동 방지.
+async function loadImageBase64(filePath: string): Promise<{ base64: string; mediaType: string }> {
   const ext = path.extname(filePath).toLowerCase();
   const mimeMap: Record<string, string> = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
   };
-  return {
-    base64: imageBuffer.toString("base64"),
-    mediaType: mimeMap[ext] || "image/jpeg",
-  };
+
+  try {
+    // EXIF 메타데이터 제거 (회전 태그 포함) — 픽셀은 변경하지 않음
+    const cleanBuffer = await sharp(filePath)
+      .rotate(0)  // 0도 = 회전 안 함, 하지만 EXIF orientation 태그를 제거함
+      .toBuffer();
+    console.log(`[OCR] EXIF 제거 완료: ${path.basename(filePath)} (${(cleanBuffer.length / 1024).toFixed(0)}KB)`);
+    return {
+      base64: cleanBuffer.toString("base64"),
+      mediaType: mimeMap[ext] || "image/jpeg",
+    };
+  } catch (err) {
+    // sharp 실패 시 원본 그대로 사용
+    console.warn(`[OCR] sharp 처리 실패, 원본 사용: ${path.basename(filePath)}`, err);
+    const imageBuffer = fs.readFileSync(filePath);
+    return {
+      base64: imageBuffer.toString("base64"),
+      mediaType: mimeMap[ext] || "image/jpeg",
+    };
+  }
 }
 
 // ─── 헬퍼: 코드펜스 제거 + JSON 파싱 (잘린 JSON 복구 포함) ──────────────────
@@ -94,8 +113,21 @@ function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; 
     const totalStr = String(item.lineTotal || "").replace(/,/g, "");
     const isUncertain = item.uncertain === true || item.uncertain === "true";
 
-    const qty = parseFloat(qtyStr) || 0;
+    let qty = parseFloat(qtyStr) || 0;
     const price = parseFloat(priceStr) || 0;
+
+    // ── 수량 ".000" 오독 보정 ──────────────────────────────────────────────
+    // OCR이 "3.000"을 "3000"으로 읽는 패턴: qty가 1000의 배수이고,
+    // qty/1000 × price = lineTotal 이면 수량을 1000으로 나눈다
+    if (qty >= 1000 && qty % 1000 === 0 && price > 0) {
+      const correctedQty = qty / 1000;
+      const totalCheck = parseFloat(totalStr) || 0;
+      if (totalCheck > 0 && Math.abs(correctedQty * price - totalCheck) <= 1) {
+        console.log(`[OCR] 수량 .000 보정: ${qtyStr} → ${correctedQty} (${shortName})`);
+        qty = correctedQty;
+        qtyStr = String(correctedQty);
+      }
+    }
     const total = parseFloat(totalStr) || 0;
     let finalTotal = totalStr;
     let confidence: "high" | "medium" | "low" = "high";
@@ -264,7 +296,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       return;
     }
 
-    const { base64, mediaType } = loadImageBase64(filePath);
+    const { base64, mediaType } = await loadImageBase64(filePath);
     const imageContent: Anthropic.ImageBlockParam = {
       type: "image",
       source: {
@@ -447,7 +479,7 @@ ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
       return;
     }
 
-    const { base64, mediaType } = loadImageBase64(filePath);
+    const { base64, mediaType } = await loadImageBase64(filePath);
 
     // 보건증은 단순 구조 → haiku로 충분 (비용 절감)
     const message = await anthropic.messages.create({
