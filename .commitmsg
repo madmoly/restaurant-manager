@@ -1,9 +1,9 @@
-feat: OCR spec extraction - separate item name and specification
+feat: OCR auto-date and counterparty info sync
 
-- OCR prompt updated to split product name and spec (size/weight/packaging)
-- shortName now shows "품목/규격" format (e.g., "코카콜라/1.5L")
-- New spec field in OcrItem for standalone specification data
-- Unit field now inferred from spec when available (e.g., "10kg" -> unit: "kg")
-- Client UI: spec input field next to item name in purchase item cards
+1. Transaction date extraction: OCR reads invoice date and auto-sets
+   purchase date if different from current (with toast notification)
+2. Counterparty info sync: OCR extracts contact name/phone from invoice,
+   auto-updates counterparty DB if changed
+3. Added transactionDate and counterpartyInfo to OCR prompt and response
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

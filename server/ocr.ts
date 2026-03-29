@@ -328,6 +328,40 @@ async function findCounterpartyId(name: string, restaurantId?: number): Promise<
   }
 }
 
+// ─── 거래처 정보 변경 감지 → DB 자동 반영 ─────────────────────────────────
+async function updateCounterpartyInfo(
+  counterpartyId: number,
+  info: { contactName?: string; contactPhone?: string }
+): Promise<void> {
+  try {
+    const existing = await db
+      .select({ contactName: counterparties.contactName, contactPhone: counterparties.contactPhone })
+      .from(counterparties)
+      .where(eq(counterparties.id, counterpartyId))
+      .limit(1);
+    if (existing.length === 0) return;
+
+    const updates: Record<string, string> = {};
+    // 담당자명: 기존에 없거나 다르면 업데이트
+    if (info.contactName && info.contactName !== existing[0].contactName) {
+      updates.contactName = info.contactName;
+    }
+    // 연락처: 기존에 없거나 다르면 업데이트
+    if (info.contactPhone && info.contactPhone !== existing[0].contactPhone) {
+      updates.contactPhone = info.contactPhone;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await db.update(counterparties)
+        .set(updates)
+        .where(eq(counterparties.id, counterpartyId));
+      console.log(`[OCR] 거래처 정보 업데이트: cpId=${counterpartyId}`, updates);
+    }
+  } catch (err) {
+    console.warn("[OCR] 거래처 정보 업데이트 실패:", err);
+  }
+}
+
 // ─── 거래처 OCR 프로파일 조회 ──────────────────────────────────────────────
 async function getOcrProfile(counterpartyId: number | null): Promise<{
   documentType?: string;
@@ -574,11 +608,27 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
 4. **합계/소계/총합 행은 items에 포함하지 마세요.** 대신 summary에 넣으세요.
 
-5. note: 문서에 특이 메모가 있으면 포함, 없으면 null
+5. **거래일자**: 전표에 표기된 거래일/날짜를 추출하세요. "YYYY-MM-DD" 형식으로.
+   - "2026.03.28" → "2026-03-28"
+   - "26.3.28" → "2026-03-28"
+   - "3/28" → 올해 기준 "2026-03-28"
+   - 날짜를 찾을 수 없으면 null
+
+6. **거래처 상세 정보**: 공급자(판매자) 측의 추가 정보가 있으면 추출하세요.
+   - contactName: 담당자명 (대표자명 제외, 담당/배달 담당 등)
+   - contactPhone: 연락처 (전화번호/핸드폰)
+   - 없으면 각각 null
+
+7. note: 문서에 특이 메모가 있으면 포함, 없으면 null
 
 ## 출력 형식 (순수 JSON만, 코드블록 없이):
 {
   "counterpartyName": "거래처명 또는 null",
+  "transactionDate": "거래일 YYYY-MM-DD 또는 null",
+  "counterpartyInfo": {
+    "contactName": "담당자명 또는 null",
+    "contactPhone": "연락처 또는 null"
+  },
   "documentType": "거래명세표|거래명세서|영수증|간이영수증|수기전표|배달정산서|기타",
   "items": [
     {
@@ -660,8 +710,16 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     // ── 거래처 OCR 프로파일 자동 업데이트 (학습) ───────────────────────
     updateOcrProfile(cpId, parsed.documentType || null, items).catch(() => {});
 
+    // ── 거래처 정보 변경 감지 → DB 자동 반영 ──────────────────────────
+    const cpInfo = parsed.counterpartyInfo || {};
+    if (cpId && (cpInfo.contactName || cpInfo.contactPhone)) {
+      updateCounterpartyInfo(cpId, cpInfo).catch(() => {});
+    }
+
     const result = {
       counterpartyName,
+      transactionDate: parsed.transactionDate || null,
+      counterpartyInfo: cpInfo.contactName || cpInfo.contactPhone ? cpInfo : null,
       items,
       note: parsed.note || null,
     };

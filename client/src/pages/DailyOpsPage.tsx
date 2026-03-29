@@ -763,9 +763,11 @@ function PendingOrdersBanner({ restaurantId, onReceive }: { restaurantId: number
 function PurchaseTab({
   restaurantId,
   date,
+  onDateChange,
 }: {
   restaurantId: number;
   date: string;
+  onDateChange?: (newDate: string) => void;
 }) {
   const [inputMode, setInputMode] = useState<PurchaseInputMode>('none');
   const [simpleMode, setSimpleMode] = useState(false);
@@ -969,6 +971,15 @@ function PurchaseTab({
           (cp: any) => cp.name.includes(ocrData.counterpartyName) || ocrData.counterpartyName.includes(cp.name)
         );
         if (matched) setCounterpartyId(matched.id);
+      }
+
+      // 명세서 날짜가 현재와 다르면 해당일로 자동 이동
+      if (ocrData.transactionDate && onDateChange) {
+        const ocrDate = ocrData.transactionDate; // "YYYY-MM-DD"
+        if (ocrDate !== date) {
+          onDateChange(ocrDate);
+          toast.info(`명세서 날짜(${ocrDate})로 입고일이 변경되었습니다.`);
+        }
       }
 
       if (ocrData.items && ocrData.items.length > 0) {
@@ -2570,7 +2581,7 @@ export default function DailyOpsPage() {
             <OpenTab restaurantId={selectedRestaurant.id} date={date} />
           )}
           {activeTab === 'purchase' && (
-            <PurchaseTab restaurantId={selectedRestaurant.id} date={date} />
+            <PurchaseTab restaurantId={selectedRestaurant.id} date={date} onDateChange={setDate} />
           )}
           {activeTab === 'midday' && (
             <MiddayTab restaurantId={selectedRestaurant.id} date={date} />
