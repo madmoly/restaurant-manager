@@ -921,14 +921,13 @@ function PurchaseTab({
     }
   };
 
-  // OCR 사진 업로드 + AI 추출 (고품질 분석 → 저품질 저장 이중 구조)
+  // ── 1단계: 사진 업로드만 (OCR은 별도) ──────────────────────────────────────
   const handleOcrUpload = async (file: File) => {
     try {
       setOcrProcessing(true);
       setOcrError(null);
 
-      // 1단계: 원본 파일 그대로 업로드 (서버에서 EXIF 회전 + 리사이즈 처리)
-      // Canvas를 거치면 EXIF가 소실되어 서버에서 회전 불가능하므로 원본 전송
+      // 원본 파일 그대로 업로드 (서버에서 EXIF 회전 + 리사이즈 처리)
       const formData = new FormData();
       formData.append('photo', file);
 
@@ -939,15 +938,27 @@ function PurchaseTab({
       if (!uploadRes.ok) throw new Error('이미지 업로드 실패');
       const { url } = await uploadRes.json();
       setAttachmentUrl(url);
+      setOcrPreviewUrl(url + `?t=${Date.now()}`);
+      toast.info('이미지 방향을 확인하세요. 옆으로 보이면 회전 버튼을 누른 후 AI 판독을 시작하세요.');
+    } catch (error: any) {
+      setOcrError(error.message || '이미지 업로드 실패');
+      toast.error(error.message || '이미지 업로드 실패');
+    } finally {
+      setOcrProcessing(false);
+    }
+  };
 
-      // 미리보기: 서버에서 EXIF 보정된 이미지 URL 사용 (항상 정방향)
-      setOcrPreviewUrl(url);
+  // ── 2단계: AI OCR 판독 (사용자가 방향 확인 후 실행) ──────────────────────
+  const handleOcrAnalyze = async () => {
+    if (!attachmentUrl) return;
+    try {
+      setOcrProcessing(true);
+      setOcrError(null);
 
-      // 2단계: AI OCR 추출 요청 (고품질 이미지로 분석)
       const ocrRes = await fetch('/api/ocr/extract-purchase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: url, restaurantId }),
+        body: JSON.stringify({ imageUrl: attachmentUrl, restaurantId }),
       });
 
       if (!ocrRes.ok) {
@@ -956,20 +967,6 @@ function PurchaseTab({
       }
 
       const ocrData = await ocrRes.json();
-
-      // 3단계: OCR 완료 후 저품질 이미지로 교체 (저장 공간 절약)
-      try {
-        const storageQuality = await resizeImage(file, OCR_STORAGE);
-        const replaceForm = new FormData();
-        replaceForm.append('photo', storageQuality);
-        replaceForm.append('replaceUrl', url);
-        await fetch('/api/upload/order-image-replace', {
-          method: 'POST',
-          body: replaceForm,
-        });
-      } catch {
-        // 교체 실패해도 OCR 결과는 유효 — 무시
-      }
 
       // OCR 원본 저장 (나중에 사용자 수정 비교용)
       if (ocrData.items && ocrData.items.length > 0) {
@@ -998,9 +995,9 @@ function PurchaseTab({
         );
         const lowConfCount = ocrData.items.filter((i: any) => i.confidence === 'low').length;
         if (lowConfCount > 0) {
-          toast.success(`${ocrData.items.length}개 항목 추출 (${lowConfCount}개 확인 필요). 노란색 항목을 확인하세요.`);
+          toast.success(`${ocrData.items.length}개 항목 추출 (${lowConfCount}개 확인 필요)`);
         } else {
-          toast.success(`${ocrData.items.length}개 항목이 추출되었습니다. 확인 후 수정하세요.`);
+          toast.success(`${ocrData.items.length}개 항목이 추출되었습니다.`);
         }
       } else {
         toast.info('항목을 추출하지 못했습니다. 직접 입력해주세요.');
@@ -1301,55 +1298,60 @@ function PurchaseTab({
             </div>
           )}
 
-          {/* OCR 미리보기 이미지 */}
+          {/* OCR 미리보기 이미지 + 회전/판독 컨트롤 */}
           {ocrPreviewUrl && !ocrProcessing && (
-            <div className="space-y-1">
+            <div className="space-y-2">
               <div className="relative">
                 <img
-                  src={ocrPreviewUrl + (ocrPreviewUrl.startsWith('/') ? `?t=${Date.now()}` : '')}
+                  src={ocrPreviewUrl}
                   alt="전표 이미지"
-                  className="w-full rounded-lg border border-border max-h-40 object-contain bg-muted/20 cursor-pointer"
-                  onClick={() => setViewerImage(ocrPreviewUrl + (ocrPreviewUrl.startsWith('/') ? `?t=${Date.now()}` : ''))}
+                  className="w-full rounded-lg border border-border max-h-48 object-contain bg-muted/20 cursor-pointer"
+                  onClick={() => setViewerImage(ocrPreviewUrl)}
                 />
                 <button
-                  onClick={() => setViewerImage(ocrPreviewUrl + (ocrPreviewUrl.startsWith('/') ? `?t=${Date.now()}` : ''))}
+                  onClick={() => setViewerImage(ocrPreviewUrl)}
                   className="absolute top-2 left-2 bg-black/50 text-white rounded-full p-1.5"
                   title="확대 보기"
                 >
                   <ZoomIn className="w-3.5 h-3.5" />
                 </button>
-                {/* 90° 회전 버튼 */}
                 <button
-                  onClick={async () => {
-                    if (!attachmentUrl) return;
-                    try {
-                      const resp = await fetch('/api/upload/rotate-image', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: attachmentUrl }),
-                      });
-                      if (!resp.ok) throw new Error('회전 실패');
-                      // 캐시 무효화: 같은 URL에 타임스탬프 추가
-                      setOcrPreviewUrl(attachmentUrl);
-                      toast.success('이미지 90° 회전 완료');
-                    } catch {
-                      toast.error('이미지 회전 실패');
-                    }
-                  }}
-                  className="absolute top-2 left-10 bg-black/50 text-white rounded-full p-1.5"
-                  title="90° 회전"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => { setOcrPreviewUrl(null); setAttachmentUrl(undefined); }}
+                  onClick={() => { setOcrPreviewUrl(null); setAttachmentUrl(undefined); setPurchaseItems([emptyPurchaseItem()]); }}
                   className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
                 >
                   <X className="w-3 h-3" />
                 </button>
-                <span className="absolute bottom-2 left-2 text-[10px] text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-1.5 py-0.5 rounded">AI 추출 — 확인 필요</span>
               </div>
-              <p className="text-[10px] text-muted-foreground text-center">이미지가 옆으로 보이면 <RotateCw className="w-3 h-3 inline" /> 버튼으로 정방향으로 돌려주세요</p>
+              {/* 회전 + AI 판독 버튼 */}
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    if (!attachmentUrl) return;
+                    try {
+                      await fetch('/api/upload/rotate-image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: attachmentUrl }),
+                      });
+                      setOcrPreviewUrl(attachmentUrl + `?t=${Date.now()}`);
+                    } catch {
+                      toast.error('회전 실패');
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors"
+                >
+                  <RotateCw className="w-4 h-4" />
+                  90° 회전
+                </button>
+                <button
+                  onClick={handleOcrAnalyze}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+                >
+                  <Camera className="w-4 h-4" />
+                  AI 판독 시작
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground text-center">글씨가 정방향으로 보이는지 확인 후 AI 판독을 시작하세요</p>
             </div>
           )}
 
