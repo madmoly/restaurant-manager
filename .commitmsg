@@ -1,15 +1,6 @@
-feat: Tutorial 데이터를 사업그룹 구조로 물리적 분리
+chore: 기존 admin 계정 username을 331admin으로 변경
 
-Migration (server/index.ts):
-- tutorial_admin 전용 계정 자동 생성 (isTutorial=1, isActive=0, 로그인 불가)
-- "Tutorial 사업그룹" 생성 → tutorial_admin 소유, isActive=0
-- tutorial 매장 ownerAdminId → tutorial_admin으로 배정
-- tutorial 유저 parentId → tutorial_admin으로 연결
-
-Router (businessGroups.ts):
-- list: 소속 매장 조회에서 isTutorial 필터 제거 → tutorial 그룹도 매장 표시
-
-UI (MasterDashboard):
-- isActive=false 그룹에 "Tutorial" 뱃지 표시
+auto-migration에서 최초 실 admin(isTutorial=0, parentId=NULL)의
+username을 331admin으로 업데이트. 이미 331admin이면 스킵.
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

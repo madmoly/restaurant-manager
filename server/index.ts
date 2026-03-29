@@ -388,6 +388,14 @@ app.use(express.json());
         AND NOT EXISTS (SELECT 1 FROM business_groups bg WHERE bg.adminId = u.id)
     `).catch(() => {});
 
+    // ─── 기존 admin 계정 username 변경: → 331admin ─────────────────────────────
+    await conn.query(`
+      UPDATE users SET username = '331admin'
+      WHERE role = 'admin' AND isTutorial = 0 AND parentId IS NULL
+        AND username != '331admin'
+      ORDER BY id ASC LIMIT 1
+    `).catch(() => {});
+
     // ─── Tutorial 사업그룹: tutorial 데이터를 사업그룹 구조로 물리적 분리 ──────
     // 1) Tutorial 전용 admin 생성 (없으면)
     await conn.query(`
