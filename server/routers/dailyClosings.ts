@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, between, sql, desc, inArray } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
-import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, storeClosedDays, storeWeeklyClosures } from "../../drizzle/schema";
+import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 
 export const dailyClosingsRouter = router({
@@ -53,23 +53,49 @@ export const dailyClosingsRouter = router({
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      const dateObj = new Date(input.date);
 
-      // 당일 매출 합계
-      const [salesRow] = await db
-        .select({ total: sql<string>`COALESCE(SUM(${sales.amount}), 0)` })
-        .from(sales)
-        .where(and(eq(sales.restaurantId, input.restaurantId), eq(sales.saleDate, dateObj)));
+      // 당일 매출: dailySalesDetail (현행) → 없으면 sales (레거시) 폴백
+      const [detailRow] = await db
+        .select({ total: sql<string>`COALESCE(${dailySalesDetail.totalAmount}, '0')` })
+        .from(dailySalesDetail)
+        .where(and(
+          eq(dailySalesDetail.restaurantId, input.restaurantId),
+          sql`${dailySalesDetail.saleDate} = ${input.date}`
+        ))
+        .limit(1);
 
-      // 당일 매입 합계
-      const [purchaseRow] = await db
-        .select({ total: sql<string>`COALESCE(SUM(${purchaseOrders.totalAmount}), 0)` })
-        .from(purchaseOrders)
-        .where(and(eq(purchaseOrders.restaurantId, input.restaurantId), eq(purchaseOrders.purchaseDate, dateObj)));
+      let salesTotalStr = detailRow?.total ?? "0";
+      // dailySalesDetail에 없으면 레거시 sales 테이블 폴백
+      if (Number(salesTotalStr) === 0) {
+        const [salesRow] = await db
+          .select({ total: sql<string>`COALESCE(SUM(${sales.amount}), 0)` })
+          .from(sales)
+          .where(and(eq(sales.restaurantId, input.restaurantId), sql`${sales.saleDate} = ${input.date}`));
+        if (Number(salesRow?.total ?? 0) > 0) salesTotalStr = salesRow!.total;
+      }
+
+      // 당일 매입: purchaseOrdersV2 (현행) → 없으면 purchaseOrders (레거시) 폴백
+      const [purchaseV2Row] = await db
+        .select({ total: sql<string>`COALESCE(SUM(${purchaseOrdersV2.totalAmount}), 0)` })
+        .from(purchaseOrdersV2)
+        .where(and(
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+          sql`${purchaseOrdersV2.purchaseDate} = ${input.date}`
+        ));
+
+      let purchasesTotalStr = purchaseV2Row?.total ?? "0";
+      // v2에 없으면 레거시 폴백
+      if (Number(purchasesTotalStr) === 0) {
+        const [purchaseRow] = await db
+          .select({ total: sql<string>`COALESCE(SUM(${purchaseOrders.totalAmount}), 0)` })
+          .from(purchaseOrders)
+          .where(and(eq(purchaseOrders.restaurantId, input.restaurantId), sql`${purchaseOrders.purchaseDate} = ${input.date}`));
+        if (Number(purchaseRow?.total ?? 0) > 0) purchasesTotalStr = purchaseRow!.total;
+      }
 
       return {
-        salesTotal: salesRow?.total ?? "0",
-        purchasesTotal: purchaseRow?.total ?? "0",
+        salesTotal: salesTotalStr,
+        purchasesTotal: purchasesTotalStr,
       };
     }),
 
@@ -133,13 +159,11 @@ export const dailyClosingsRouter = router({
       const start = new Date(input.year, input.month - 1, 1);
       const end = new Date(input.year, input.month, 0);
 
-      const [row] = await db
+      // 마감된 날짜 수 + 인건비/고정비 합계 (dailyClosings 자체)
+      const [closingAgg] = await db
         .select({
-          salesTotal: sql<string>`COALESCE(SUM(${dailyClosings.salesTotal}), 0)`,
-          purchasesTotal: sql<string>`COALESCE(SUM(${dailyClosings.purchasesTotal}), 0)`,
           laborCost: sql<string>`COALESCE(SUM(${dailyClosings.laborCost}), 0)`,
           fixedCostShare: sql<string>`COALESCE(SUM(${dailyClosings.fixedCostShare}), 0)`,
-          profit: sql<string>`COALESCE(SUM(${dailyClosings.profit}), 0)`,
           closedDays: sql<number>`COUNT(*)`,
         })
         .from(dailyClosings)
@@ -148,13 +172,66 @@ export const dailyClosingsRouter = router({
           between(dailyClosings.closingDate, start, end)
         ));
 
+      // 마감된 날짜 목록 (매출/매입을 실제 상세 테이블에서 합산하기 위해)
+      const closedDateRows = await db
+        .select({ closingDate: dailyClosings.closingDate })
+        .from(dailyClosings)
+        .where(and(
+          eq(dailyClosings.restaurantId, input.restaurantId),
+          between(dailyClosings.closingDate, start, end)
+        ));
+
+      // 마감된 날짜의 매출 합계 (dailySalesDetail에서 직접 조회)
+      let closedSalesTotal = 0;
+      let closedPurchasesTotal = 0;
+      if (closedDateRows.length > 0) {
+        const [salesAgg] = await db
+          .select({ total: sql<string>`COALESCE(SUM(${dailySalesDetail.totalAmount}), 0)` })
+          .from(dailySalesDetail)
+          .where(and(
+            eq(dailySalesDetail.restaurantId, input.restaurantId),
+            sql`${dailySalesDetail.saleDate} IN (
+              SELECT closingDate FROM daily_closings
+              WHERE restaurantId = ${input.restaurantId}
+              AND closingDate BETWEEN ${start} AND ${end}
+            )`
+          ));
+        closedSalesTotal = Number(salesAgg?.total ?? 0);
+
+        const [purchaseAgg] = await db
+          .select({ total: sql<string>`COALESCE(SUM(${purchaseOrdersV2.totalAmount}), 0)` })
+          .from(purchaseOrdersV2)
+          .where(and(
+            eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+            sql`${purchaseOrdersV2.purchaseDate} IN (
+              SELECT closingDate FROM daily_closings
+              WHERE restaurantId = ${input.restaurantId}
+              AND closingDate BETWEEN ${start} AND ${end}
+            )`
+          ));
+        closedPurchasesTotal = Number(purchaseAgg?.total ?? 0);
+      }
+
+      const laborCostNum = Number(closingAgg?.laborCost ?? 0);
+      const fixedShareNum = Number(closingAgg?.fixedCostShare ?? 0);
+      const profitNum = closedSalesTotal - closedPurchasesTotal - laborCostNum - fixedShareNum;
+
+      const row = {
+        salesTotal: String(closedSalesTotal),
+        purchasesTotal: String(closedPurchasesTotal),
+        laborCost: closingAgg?.laborCost ?? "0",
+        fixedCostShare: closingAgg?.fixedCostShare ?? "0",
+        profit: String(profitNum),
+        closedDays: closingAgg?.closedDays ?? 0,
+      };
+
       // 미마감/인건비 미확정 분석 (실패해도 기본 합산은 반환)
       let unclosedDates: string[] = [];
       let zeroLaborDates: string[] = [];
 
       try {
-        // 마감된 날짜 목록 + 인건비 0인 마감일
-        const closedRows = await db
+        // 마감된 날짜 + 인건비 (closedDateRows는 위에서 이미 조회됨)
+        const closedWithLabor = await db
           .select({
             closingDate: dailyClosings.closingDate,
             laborCost: dailyClosings.laborCost,
@@ -170,8 +247,8 @@ export const dailyClosingsRouter = router({
           return new Date(d).toISOString().slice(0, 10);
         };
 
-        const closedDateSet = new Set(closedRows.map(r => toDateStr(r.closingDate)));
-        zeroLaborDates = closedRows
+        const closedDateSet = new Set(closedWithLabor.map(r => toDateStr(r.closingDate)));
+        zeroLaborDates = closedWithLabor
           .filter(r => Number(r.laborCost) === 0)
           .map(r => toDateStr(r.closingDate));
 
