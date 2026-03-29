@@ -10,6 +10,26 @@ import { eq, and } from "drizzle-orm";
 
 export const ocrRouter = Router();
 
+// ─── 진단: 배포 버전 + sharp 동작 확인 ─────────────────────────────────────────
+ocrRouter.get("/debug", async (_req: Request, res: Response) => {
+  let sharpStatus = "unknown";
+  try {
+    // 1x1 빨간 픽셀 JPEG 생성으로 sharp 동작 확인
+    const buf = await sharp({
+      create: { width: 1, height: 1, channels: 3, background: { r: 255, g: 0, b: 0 } }
+    }).jpeg().toBuffer();
+    sharpStatus = `ok (${buf.length} bytes)`;
+  } catch (err: any) {
+    sharpStatus = `fail: ${err.message}`;
+  }
+  res.json({
+    version: "61598d8",  // 커밋 해시 — 배포 확인용
+    timestamp: new Date().toISOString(),
+    sharp: sharpStatus,
+    node: process.version,
+  });
+});
+
 // ─── 헬퍼: Anthropic 클라이언트 생성 ─────────────────────────────────────────
 function getAnthropicClient(): Anthropic | null {
   const apiKey = process.env.ANTHROPIC_API_KEY;
