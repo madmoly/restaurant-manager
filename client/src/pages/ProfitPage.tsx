@@ -85,10 +85,15 @@ export default function ProfitPage() {
   const totalSalesAll = Number(salesTotal?.total ?? 0);
   const totalPurchasesAll = Number(purchaseTotal?.total ?? 0);
 
+  // 매출비율형 고정비 (ratioItems: 매출 × 비율%)
+  const ratioItems = fixedTotal?.ratioItems ?? [];
+  const ratioFixed = ratioItems.reduce((sum: number, r: any) => sum + Math.round(closedSales * r.ratio / 100), 0);
+  const totalFixed = fixed + ratioFixed;
+
   // 정산 기준: 마감된 매출 사용
   const sales = closedSales;
   const purchases = closedPurchases;
-  const profit = sales - purchases - labor - fixed;
+  const profit = sales - purchases - labor - totalFixed;
 
   // 미마감분 차이
   const unclosedSalesDiff = totalSalesAll - closedSales;
@@ -122,7 +127,7 @@ export default function ProfitPage() {
     ["매출", sales, "100.0"],
     ["매입 (식재료비)", purchases, costRatio.toFixed(1)],
     ["인건비", labor, laborRatio.toFixed(1)],
-    ["고정비", fixed, sales > 0 ? (fixed / sales * 100).toFixed(1) : "0.0"],
+    ["고정비", totalFixed, sales > 0 ? (totalFixed / sales * 100).toFixed(1) : "0.0"],
     ["순이익", profit, profitRatio.toFixed(1)],
   ];
   const fixedHeaders = ["항목", "금액(원)", "유형"];
@@ -321,18 +326,25 @@ export default function ProfitPage() {
 
         <CostCard
           label="고정비"
-          value={fixed}
+          value={totalFixed}
           expanded={expandedCategory === "fixed"}
           onToggle={() => toggleCategory("fixed")}
         >
-          {fixedBreakdown.length > 0 ? (
+          {(fixedBreakdown.length > 0 || ratioItems.length > 0) ? (
             <DetailTable
               headers={["항목", "유형", "금액"]}
-              rows={fixedBreakdown.map(b => [
-                b.name,
-                b.type === "monthly" ? "월납" : b.type === "yearly" ? "연납(÷12)" : "일시",
-                `₩${b.amount.toLocaleString()}`,
-              ])}
+              rows={[
+                ...fixedBreakdown.map(b => [
+                  b.name,
+                  b.type === "monthly" ? "월납" : b.type === "yearly" ? "연납(÷12)" : b.type === "quarterly" ? "분기(÷3)" : "일시",
+                  `₩${b.amount.toLocaleString()}`,
+                ]),
+                ...ratioItems.map((r: any) => [
+                  r.name,
+                  `매출의 ${r.ratio}%`,
+                  `₩${Math.round(closedSales * r.ratio / 100).toLocaleString()}`,
+                ]),
+              ]}
             />
           ) : (
             <p className="text-xs text-muted-foreground py-2">고정비 항목이 없습니다</p>
@@ -380,7 +392,7 @@ export default function ProfitPage() {
       )}
 
       {/* 미반영 항목 */}
-      {(unclosedDates.length > 0 || zeroLaborDates.length > 0 || unclosedSalesDiff > 0 || unclosedPurchasesDiff > 0) && (
+      {(unclosedDates.length > 0 || zeroLaborDates.length > 0 || unclosedSalesDiff > 0 || unclosedPurchasesDiff > 0 || totalFixed === 0) && (
         <Card className="p-4 border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
             <AlertTriangle size={14} className="text-amber-500" />
@@ -428,6 +440,14 @@ export default function ProfitPage() {
                       return `${day}일`;
                     }).join(", ")})
                   </span>
+                </div>
+              </div>
+            )}
+            {totalFixed === 0 && (
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 font-medium">고정비</span>
+                <div className="text-muted-foreground">
+                  고정비 미등록 — <span className="font-medium text-foreground">재무 &gt; 고정비</span>에서 등록하세요
                 </div>
               </div>
             )}
