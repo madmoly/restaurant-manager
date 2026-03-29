@@ -259,13 +259,13 @@ export default function OpsCalendarPage() {
 
   return (
     <div className="flex h-full">
-      {/* 좌측: 캘렬더 */}
+      {/* 좌측: 캘린더 */}
       <div className={`flex-1 min-w-0 p-4 md:p-6 space-y-4 overflow-y-auto ${selectedDate ? "hidden lg:block lg:max-w-[calc(100%-340px)]" : ""}`}>
         <div className="max-w-3xl mx-auto space-y-4">
           {/* 헤더 */}
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
-              <CalendarDays className="w-5 h-5" /> 운영 캘렬더
+              <CalendarDays className="w-5 h-5" /> 운영 캘린더
             </h1>
             <span className="text-xs text-muted-foreground">{current.name}</span>
           </div>
@@ -319,7 +319,7 @@ export default function OpsCalendarPage() {
             </div>
           </div>
 
-          {/* 캘렬더 그리드 */}
+          {/* 캘린더 그리드 */}
           <div className="bg-card border border-border rounded-lg overflow-hidden">
             <div className="grid grid-cols-7 border-b border-border">
               {DAY_LABELS.map((d, i) => (
