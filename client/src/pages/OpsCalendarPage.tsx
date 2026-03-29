@@ -240,9 +240,13 @@ export default function OpsCalendarPage() {
     };
   }, [calData]);
 
+  // 월간 P&L: 수익분석과 동일하게 마감 기준 데이터 사용
+  const closedSales = Number(closingSummary?.salesTotal ?? 0);
+  const closedPurchases = Number(closingSummary?.purchasesTotal ?? 0);
   const fixed = Number(fixedTotal?.total ?? 0);
   const labor = Number(closingSummary?.laborCost ?? 0);
-  const netProfit = stats.totalSales - stats.totalPurchases - fixed - labor;
+  const closedDayCount = closingSummary?.closedDays ?? 0;
+  const netProfit = closedSales - closedPurchases - fixed - labor;
 
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
@@ -273,16 +277,19 @@ export default function OpsCalendarPage() {
             <Button variant="ghost" size="sm" onClick={nextMonth}><ChevronRight className="w-4 h-4" /></Button>
           </div>
 
-          {/* 월간 P&L 요약 — 핵심 개선 */}
+          {/* 월간 P&L 요약 (마감 기준 — 수익분석과 동일) */}
           <div className="bg-card border border-border rounded-lg p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] text-muted-foreground font-medium">{closedDayCount}일 마감 기준</span>
+            </div>
             <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">매출</div>
-                <div className="text-sm font-bold text-foreground">{stats.totalSales > 0 ? `₩${fmtWon(stats.totalSales)}` : "-"}</div>
+                <div className="text-sm font-bold text-foreground">{closedSales > 0 ? `₩${fmtWon(closedSales)}` : "-"}</div>
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">매입</div>
-                <div className="text-sm font-bold text-foreground">{stats.totalPurchases > 0 ? `₩${fmtWon(stats.totalPurchases)}` : "-"}</div>
+                <div className="text-sm font-bold text-foreground">{closedPurchases > 0 ? `₩${fmtWon(closedPurchases)}` : "-"}</div>
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">고정비</div>
@@ -296,12 +303,12 @@ export default function OpsCalendarPage() {
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">마감</div>
-                <div className="text-sm font-bold text-foreground">{stats.closedDays}일</div>
+                <div className="text-sm font-bold text-foreground">{closedDayCount}일</div>
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">순이익</div>
                 <div className={`text-sm font-bold ${netProfit >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                  {stats.totalSales > 0 ? (
+                  {closedSales > 0 ? (
                     <span className="flex items-center justify-center gap-0.5">
                       {netProfit >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                       {netProfit >= 0 ? "+" : ""}{fmtWon(netProfit)}
