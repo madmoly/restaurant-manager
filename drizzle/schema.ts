@@ -791,18 +791,6 @@ export const systemSettings = mysqlTable("system_settings", {
 });
 export type SystemSetting = typeof systemSettings.$inferSelect;
 
-// ─── OCR 수정 데이터 축적 (사용자 피드백 루프) ───────────────────────────────
-export const ocrCorrections = mysqlTable("ocr_corrections", {
-  id: int("id").autoincrement().primaryKey(),
-  restaurantId: int("restaurantId").notNull(),
-  counterpartyId: int("counterpartyId"),
-  imageUrl: text("imageUrl").notNull(),
-  originalItems: json("originalItems"),   // AI가 추출한 원본
-  correctedItems: json("correctedItems"), // 사용자가 수정한 최종
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-export type OcrCorrection = typeof ocrCorrections.$inferSelect;
-
 // ─── API 사용량 로그 ──────────────────────────────────────────────────────────
 export const apiUsageLogs = mysqlTable("api_usage_logs", {
   id: int("id").autoincrement().primaryKey(),

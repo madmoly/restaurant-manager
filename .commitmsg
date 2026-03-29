@@ -1,14 +1,3 @@
-feat: OCR Phase 2-3 구현 + 합계 위치 이동
-
-Phase 2: 거래처별 OCR 프로파일 DB
-- counterparty_ocr_profiles 테이블 (양식유형, 열구조, 자주등장품목)
-- OCR 결과 기반 자동 프로파일 업데이트 (이동평균 단가)
-- 스키마 + 자동 마이그레이션 추가
-
-Phase 3: 동적 프롬프트 주입
-- 거래처 프로파일의 품목/단가를 OCR 프롬프트에 힌트로 주입
-- 같은 거래처 반복 사용 시 점진적 정확도 향상
-
-UI: 매입액 합계를 거래처 선택 바로 아래로 이동
+fix: remove duplicate ocrCorrections schema declaration (build error)
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
