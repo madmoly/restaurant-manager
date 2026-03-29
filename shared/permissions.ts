@@ -119,6 +119,6 @@ export const STORE_ROLE_LABELS: Record<string, string> = {
   staff: "직원",
   // 레거시 호환
   store_manager: "점장",
-  manager: "매니저",
+  manager: "매니져",
   employee: "직원",
 };

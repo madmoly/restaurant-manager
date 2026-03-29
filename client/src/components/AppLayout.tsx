@@ -197,8 +197,17 @@ const ROLE_COLORS: Record<string, string> = {
   master: "bg-purple-500/20 text-purple-300 border-purple-500/30",
   admin: "bg-blue-500/20 text-blue-300 border-blue-500/30",
   manager: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+  owner: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+  supervisor: "bg-teal-500/20 text-teal-300 border-teal-500/30",
   staff: "bg-slate-500/20 text-slate-300 border-slate-500/30",
 };
+
+/** 배지에 표시할 역할 키: storeRole이 있으면 우선, 아니면 effectiveRole */
+function getBadgeRole(effectiveRole: string, storeRole?: string | null): string {
+  if (effectiveRole === "master" || effectiveRole === "admin") return effectiveRole;
+  if (storeRole && ROLE_LABELS[storeRole]) return storeRole;
+  return effectiveRole;
+}
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface AppLayoutProps {
@@ -337,8 +346,8 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
             <p className="text-[13px] font-semibold text-sidebar-foreground truncate leading-tight">
               {user.name ?? user.username}
             </p>
-            <Badge className={cn("text-[10px] px-1.5 py-0 h-4 mt-0.5 border font-medium", ROLE_COLORS[effectiveRole] ?? "bg-slate-500/20 text-slate-300")}>
-              {ROLE_LABELS[effectiveRole] ?? effectiveRole}
+            <Badge className={cn("text-[10px] px-1.5 py-0 h-4 mt-0.5 border font-medium", ROLE_COLORS[getBadgeRole(effectiveRole, storeRole)] ?? "bg-slate-500/20 text-slate-300")}>
+              {ROLE_LABELS[getBadgeRole(effectiveRole, storeRole)] ?? effectiveRole}
             </Badge>
           </div>
         </div>
@@ -576,7 +585,7 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
               <DropdownMenuContent align="end" className="w-56 glass-panel rounded-xl p-2 animate-in fade-in slide-in-from-top-2 border-border/50">
                 <div className="px-3 py-2.5">
                   <p className="text-sm font-bold text-foreground">{user.name ?? user.username}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{ROLE_LABELS[effectiveRole] ?? effectiveRole}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{ROLE_LABELS[getBadgeRole(effectiveRole, storeRole)] ?? effectiveRole}</p>
                 </div>
                 <DropdownMenuSeparator className="bg-border/30" />
                 {isStaff && (

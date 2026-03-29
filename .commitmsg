@@ -1,6 +1,11 @@
-chore: 기존 admin 계정 username을 331admin으로 변경
+fix: 네비게이션 배지 역할명을 매장 직책과 통일
 
-auto-migration에서 최초 실 admin(isTutorial=0, parentId=NULL)의
-username을 331admin으로 업데이트. 이미 331admin이면 스킵.
+기존: effectiveRole 기준 → owner/supervisor 모두 "매장관리자"로 표시
+변경: storeRole 우선 → "점장" / "매니져" / "직원" 각각 표시
+
+- AppLayout: getBadgeRole() 헬퍼 추가 (storeRole 우선, system role 폴백)
+- ROLE_COLORS에 owner/supervisor 개별 색상 추가
+- 사이드바 배지 + 모바일 드롭다운 모두 적용
+- STORE_ROLE_LABELS 레거시 "매니저" → "매니져"로 통일
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
