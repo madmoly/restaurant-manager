@@ -1,13 +1,7 @@
-feat: 매장정보 기본정보 표시 + 영업시간 설정, 스케줄 휴게시간 기능 추가
+fix: 운영캘린더 PC화면 Drawer overlay 어둡게 표시되는 문제 수정
 
-- StoreInfoPage에 매장 기본정보 섹션 추가 (매장명, 주소, 연락처, 영업시간, 월매출목표)
-- 전 역할 조회 가능, manager 이상만 영업시간 수정 가능
-- RestaurantContext에 openTime/closeTime/monthlyTargetSales 추가
-- schedules 테이블에 breakMinutes 컬럼 추가 (자동 마이그레이션)
-- 풀타임 배정 시 기본 휴게시간 60분 자동 설정
-- 스케줄 편집 모달에 휴게시간 입력 필드 + 실근무시간 표시
-- 스케줄 카드에 휴게시간 표시 (휴XX분)
-- 일별 근무총계에 실근무시간(h) 표시 (휴게시간 차감)
-- 인건비/일일운영 서버 계산에서 휴게시간 차감 반영
+- PC(lg 이상)에서 날짜 클릭 시 Drawer가 열리면서 bg-black/50 overlay가 화면을 가리던 문제
+- matchMedia로 데스크탑 감지 → PC에서는 Drawer를 열지 않고 사이드패널만 표시
+- 모바일에서만 Drawer(바텀시트) 사용하도록 조건 분리
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

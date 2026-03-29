@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { getHolidayName } from "@/lib/koreanHolidays";
@@ -198,6 +198,16 @@ export default function OpsCalendarPage() {
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  // PC(lg 이상)에서는 Drawer 대신 사이드패널 사용 → Drawer overlay 방지
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    setIsDesktop(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   const prevMonth = () => {
     if (month === 1) { setYear(year - 1); setMonth(12); } else setMonth(month - 1);
@@ -427,8 +437,8 @@ export default function OpsCalendarPage() {
         </div>
       </div>
 
-      {/* 모바일: Drawer (바텀시트) */}
-      <Drawer open={!!selectedDate} onOpenChange={(open) => { if (!open) setSelectedDate(null); }}>
+      {/* 모바일: Drawer (바텀시트) — PC에서는 사이드패널 사용하므로 Drawer 비활성 */}
+      <Drawer open={!isDesktop && !!selectedDate} onOpenChange={(open) => { if (!open) setSelectedDate(null); }}>
         <DrawerContent className="lg:hidden max-h-[85vh]">
           <DrawerHeader className="pb-2">
             <DrawerTitle className="text-sm">
