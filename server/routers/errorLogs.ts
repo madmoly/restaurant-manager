@@ -3,6 +3,7 @@ import { desc, eq, and, gte, lte, sql } from "drizzle-orm";
 import { router, publicProcedure, adminProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
 import { errorLogs, users, restaurants } from "../../drizzle/schema";
+import { getOwnedRestaurantIds } from "../helpers/restaurantScope";
 
 export const errorLogsRouter = router({
   /** 에러 기록 — 비로그인도 가능 (앱 크래시 시) */
@@ -86,11 +87,12 @@ export const errorLogsRouter = router({
     };
   }),
 
-  /** 매장별 에러 집계 — master 전용 */
+  /** 매장별 에러 집계 — master 전용, 중앙 스코핑으로 tutorial 제외 */
   summaryByRestaurant: masterProcedure
     .input(z.object({ days: z.number().min(1).max(90).default(7) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const since = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
+      const realIds = await getOwnedRestaurantIds(ctx.user.userId, ctx.user.role);
       const rows = await db
         .select({
           restaurantId: errorLogs.restaurantId,
@@ -102,7 +104,9 @@ export const errorLogsRouter = router({
         .leftJoin(restaurants, eq(errorLogs.restaurantId, restaurants.id))
         .where(and(
           gte(errorLogs.createdAt, since),
-          sql`(${restaurants.isTutorial} = false OR ${errorLogs.restaurantId} IS NULL)`,
+          realIds.length > 0
+            ? sql`(${errorLogs.restaurantId} IN (${sql.raw(realIds.join(","))}) OR ${errorLogs.restaurantId} IS NULL)`
+            : sql`${errorLogs.restaurantId} IS NULL`,
         ))
         .groupBy(errorLogs.restaurantId, restaurants.name)
         .orderBy(desc(sql`COUNT(*)`));

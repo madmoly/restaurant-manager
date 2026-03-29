@@ -8,28 +8,7 @@ import {
   schedules, dailySalesDetail,
 } from "../../drizzle/schema";
 import { ROLE_LEVEL } from "@shared/permissions";
-
-/**
- * 대표/SUB대표의 소유 매장 목록 조회
- * - master: 전체 실매장 (isTutorial=false)
- * - admin (parentId=null): ownerAdminId = 본인
- * - admin (parentId=X, SUB대표): ownerAdminId = parentId (상위 대표)
- */
-async function getOwnedRestaurants(userId: number, role: string) {
-  if (role === "master") {
-    return db.select().from(restaurants)
-      .where(and(isNull(restaurants.deletedAt), eq(restaurants.isTutorial, false)));
-  }
-  // admin 또는 sub-admin: parentId 확인
-  const [me] = await db.select({ parentId: users.parentId }).from(users).where(eq(users.id, userId)).limit(1);
-  const ownerAdminId = me?.parentId ?? userId; // SUB대표면 parentId, 아니면 본인
-  return db.select().from(restaurants)
-    .where(and(
-      isNull(restaurants.deletedAt),
-      eq(restaurants.isTutorial, false),
-      eq(restaurants.ownerAdminId, ownerAdminId),
-    ));
-}
+import { getOwnedRestaurants, getOwnedRestaurantIds, realStoreCondition } from "../helpers/restaurantScope";
 
 export const adminRouter = router({
   /**
@@ -189,7 +168,7 @@ export const adminRouter = router({
           employees: sql<number>`SUM(CASE WHEN ${users.role} = 'staff' THEN 1 ELSE 0 END)`,        })
         .from(users);
 
-      // 매장 통계 (tutorial 제외)
+      // 매장 통계 (tutorial 제외 — active+archived 모두 포함하므로 deletedAt 필터 없음)
       const storeStats = await db
         .select({
           total: sql<number>`COUNT(*)`,
@@ -212,16 +191,18 @@ export const adminRouter = router({
         .orderBy(desc(users.lastSignedIn))
         .limit(5);
 
-      // 매장별 직원 수 (tutorial 매장 제외)
-      const storeStaffCounts = await db
-        .select({
-          restaurantId: restaurantUsers.restaurantId,
-          count: sql<number>`COUNT(*)`,
-        })
-        .from(restaurantUsers)
-        .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
-        .where(eq(restaurants.isTutorial, false))
-        .groupBy(restaurantUsers.restaurantId);
+      // 매장별 직원 수 — 중앙 스코핑 헬퍼로 실매장만
+      const realIds = await getOwnedRestaurantIds(ctx.user.userId, ctx.user.role);
+      const storeStaffCounts = realIds.length > 0
+        ? await db
+            .select({
+              restaurantId: restaurantUsers.restaurantId,
+              count: sql<number>`COUNT(*)`,
+            })
+            .from(restaurantUsers)
+            .where(sql`${restaurantUsers.restaurantId} IN (${sql.raw(realIds.join(","))})`)
+            .groupBy(restaurantUsers.restaurantId)
+        : [];
 
       return {
         users: userStats[0],

@@ -4,6 +4,7 @@ import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProc
 import { db } from "../db";
 import { restaurants, restaurantUsers, users, sales, apiUsageLogs } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
+import { activeRealStoreCondition, getOwnedRestaurants } from "../helpers/restaurantScope";
 
 /** 주소 → 좌표 자동 변환 (Nominatim / OpenStreetMap) + API 사용량 로깅 */
 async function geocodeAddress(address: string, userId?: number, restaurantId?: number): Promise<{ latitude: string; longitude: string } | null> {
@@ -48,9 +49,9 @@ async function geocodeAddress(address: string, userId?: number, restaurantId?: n
 }
 
 export const restaurantsRouter = router({
-  /** 전체 매장 목록 (tutorial 제외) */
+  /** 전체 활성 매장 목록 — 중앙 스코핑으로 tutorial 자동 제외 */
   list: protectedProcedure.query(async ({ ctx }) => {
-    return db.select().from(restaurants).where(and(eq(restaurants.isActive, true), eq(restaurants.isTutorial, false)));
+    return db.select().from(restaurants).where(activeRealStoreCondition());
   }),
 
   /** 소유 매장 + 직원수 + 당월 매출 요약 (admin 이상) */
@@ -61,17 +62,9 @@ export const restaurantsRouter = router({
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
     const nextMonth = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
-    // 소유 매장 필터 (master=전체, admin/sub-admin=소유분만)
-    let allRestaurants;
-    if (ctx.user.role === "master") {
-      allRestaurants = await db.select().from(restaurants).where(and(eq(restaurants.isActive, true), eq(restaurants.isTutorial, false)));
-    } else {
-      const [me] = await db.select({ parentId: users.parentId }).from(users).where(eq(users.id, ctx.user.userId)).limit(1);
-      const ownerAdminId = me?.parentId ?? ctx.user.userId;
-      allRestaurants = await db.select().from(restaurants).where(and(
-        eq(restaurants.isActive, true), eq(restaurants.isTutorial, false), eq(restaurants.ownerAdminId, ownerAdminId),
-      ));
-    }
+    // 소유 매장 필터 — 중앙 스코핑 헬퍼 사용
+    const allRestaurantsRaw = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
+    const allRestaurants = allRestaurantsRaw.filter((r) => r.isActive);
 
     const staffCounts = await db
       .select({
@@ -105,7 +98,7 @@ export const restaurantsRouter = router({
     }));
   }),
 
-  /** 내 매장 + 역할 (admin 미만, tutorial 제외) */
+  /** 내 매장 + 역할 — 중앙 스코핑으로 tutorial 자동 제외 */
   listMine: protectedProcedure.query(async ({ ctx }) => {
     return db
       .select({ restaurant: restaurants, storeRole: restaurantUsers.role })
@@ -113,8 +106,7 @@ export const restaurantsRouter = router({
       .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
       .where(and(
         eq(restaurantUsers.userId, ctx.user.userId),
-        eq(restaurants.isActive, true),
-        eq(restaurants.isTutorial, false),
+        activeRealStoreCondition(),
       ));
   }),
 

@@ -1,9 +1,17 @@
-fix: tutorial 데이터가 실매장 집계에 포함되는 버그 수정
+refactor: tutorial 데이터 분리를 중앙 스코핑 구조로 전환
 
-- restaurants.list / listMine: isTutorial=false 필터 추가
-- admin.systemStatus: 매장 통계 COUNT에서 tutorial 제외
-- admin.systemStatus: storeStaffCounts에 restaurants JOIN + tutorial 필터
-- users.listWithAssignments: 배정 조회에서 tutorial 매장 제외
-- errorLogs.summaryByRestaurant: tutorial 매장 에러 집계 제외
+server/helpers/restaurantScope.ts 신규 — 매장 스코핑 단일 진실 원천:
+- getOwnedRestaurants(): 대표 기준 소유 매장 조회 (master/admin/sub-admin)
+- getOwnedRestaurantIds(): 경량 ID 목록 (IN절 용도)
+- activeRealStoreCondition(): isActive + isTutorial=false 공통 조건
+- realStoreCondition(): deletedAt IS NULL + isTutorial=false 공통 조건
+
+기존 산발적 isTutorial 필터 → 중앙 헬퍼로 교체:
+- admin.ts: 로컬 getOwnedRestaurants 삭제, 헬퍼 import
+- admin.ts systemStatus: storeStaffCounts → getOwnedRestaurantIds 사용
+- restaurants.ts: list/listMine → activeRealStoreCondition() 사용
+- restaurants.ts: listWithSummary → getOwnedRestaurants() 사용
+- users.ts: listWithAssignments → activeRealStoreCondition() 사용
+- errorLogs.ts: summaryByRestaurant → getOwnedRestaurantIds() 사용
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

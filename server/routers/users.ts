@@ -4,6 +4,7 @@ import { router, protectedProcedure, adminProcedure, managerProcedure } from "..
 import { db } from "../db";
 import { users, restaurantUsers, restaurants } from "../../drizzle/schema";
 import { hashPassword } from "../auth";
+import { activeRealStoreCondition } from "../helpers/restaurantScope";
 
 export const usersRouter = router({
   list: adminProcedure.query(() =>
@@ -22,6 +23,7 @@ export const usersRouter = router({
       isActive: users.isActive, createdAt: users.createdAt,
     }).from(users).where(eq(users.isTutorial, false));
 
+    // 중앙 스코핑 — tutorial 매장 자동 제외
     const assignments = await db.select({
       userId: restaurantUsers.userId,
       restaurantId: restaurantUsers.restaurantId,
@@ -30,7 +32,7 @@ export const usersRouter = router({
     })
       .from(restaurantUsers)
       .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
-      .where(eq(restaurants.isTutorial, false));
+      .where(activeRealStoreCondition());
 
     const assignmentMap: Record<number, Array<{ restaurantId: number; restaurantName: string; storeRole: string }>> = {};
     for (const a of assignments) {
