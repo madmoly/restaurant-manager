@@ -22,6 +22,7 @@ import {
   Users,
   ZoomIn,
   Pencil,
+  Minus,
 } from 'lucide-react';
 
 // ============================================================================
@@ -1615,11 +1616,95 @@ function PurchaseTab({
       {/* 미입고 발주 전표 요약 (매입탭 최하단) */}
       <PendingOrdersBanner restaurantId={restaurantId} onReceive={startReceiveFromOrder} />
 
+      {/* ─── 금일 입고/발주 없음 확인 ─── */}
+      <NoPurchaseConfirmation restaurantId={restaurantId} date={date} hasPurchases={orders.length > 0} />
+
       {/* 이미지 확대보기 모달 */}
       {viewerImage && (
         <ImageViewer src={viewerImage} onClose={() => setViewerImage(null)} />
       )}
     </div>
+  );
+}
+
+// ============================================================================
+// NO PURCHASE CONFIRMATION – 금일 입고/발주 없음 확인
+// ============================================================================
+
+function NoPurchaseConfirmation({ restaurantId, date, hasPurchases }: {
+  restaurantId: number;
+  date: string;
+  hasPurchases: boolean;
+}) {
+  const purchaseLog = trpc.storeChecklists.getLog.useQuery({
+    restaurantId,
+    logDate: date,
+    targetTab: 'purchase',
+  });
+
+  const saveLogMutation = trpc.storeChecklists.saveLog.useMutation({
+    onSuccess: () => {
+      toast.success('금일 입고/발주 없음이 확인되었습니다.');
+      purchaseLog.refetch();
+    },
+    onError: (error: any) => {
+      toast.error(`저장 실패: ${error.message}`);
+    },
+  });
+
+  const isNoOrder = purchaseLog.data?.noOrderToday === true;
+
+  // 매입 내역이 있으면 표시 불필요
+  if (hasPurchases) return null;
+
+  const handleConfirm = () => {
+    const existingCheckedIds = (purchaseLog.data?.checkedItemIds as number[]) ?? [];
+    saveLogMutation.mutate({
+      restaurantId,
+      logDate: date,
+      targetTab: 'purchase',
+      checkedItemIds: existingCheckedIds,
+      noOrderToday: true,
+    });
+  };
+
+  const handleCancel = () => {
+    const existingCheckedIds = (purchaseLog.data?.checkedItemIds as number[]) ?? [];
+    saveLogMutation.mutate({
+      restaurantId,
+      logDate: date,
+      targetTab: 'purchase',
+      checkedItemIds: existingCheckedIds,
+      noOrderToday: false,
+    });
+  };
+
+  if (isNoOrder) {
+    return (
+      <Card className="bg-emerald-500/10 border-emerald-200 dark:border-emerald-800 p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">금일 입고/발주 없음 확인됨</span>
+          </div>
+          <Button variant="ghost" size="sm" onClick={handleCancel} disabled={saveLogMutation.isPending}>
+            <X className="w-3.5 h-3.5 text-muted-foreground" />
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Button
+      variant="outline"
+      onClick={handleConfirm}
+      disabled={saveLogMutation.isPending}
+      className="w-full h-11 border-dashed border-muted-foreground/30 text-muted-foreground hover:text-foreground hover:border-foreground/50"
+    >
+      <Minus className="w-4 h-4 mr-2" />
+      금일 입고/발주 없음
+    </Button>
   );
 }
 
@@ -1853,6 +1938,29 @@ function CloseTab({
     openTemplates.data, purchaseTemplates.data, middayTemplates.data, closeTemplates.data,
     openLog.data, purchaseLog.data, middayLog.data, closeLog.data,
   ]);
+
+  // ── 매입 확인 상태 (입고 내역 or 입고없음 확인) ──
+  const purchaseOrdersQuery = trpc.purchasesV2.listByDate.useQuery(
+    { restaurantId, date },
+    { enabled: restaurantId > 0 },
+  );
+  const purchaseConfirmed = useMemo(() => {
+    const hasPurchases = (purchaseOrdersQuery.data ?? []).length > 0;
+    const noOrderConfirmed = purchaseLog.data?.noOrderToday === true;
+    return hasPurchases || noOrderConfirmed;
+  }, [purchaseOrdersQuery.data, purchaseLog.data]);
+
+  // ── 스케줄 완료 상태 ──
+  const daySchedulesQuery = trpc.schedules.getDaySchedules.useQuery(
+    { restaurantId, date },
+    { enabled: restaurantId > 0 },
+  );
+  const scheduleStatus = useMemo(() => {
+    const schedules = daySchedulesQuery.data ?? [];
+    if (schedules.length === 0) return { allDone: true, total: 0, completed: 0 };
+    const completed = schedules.filter((s: any) => s.status === 'completed').length;
+    return { allDone: completed === schedules.length, total: schedules.length, completed };
+  }, [daySchedulesQuery.data]);
 
   const midSalesQuery = trpc.dailyOps.getMidSales.useQuery({
     restaurantId,
@@ -2214,6 +2322,8 @@ function CloseTab({
         closeNote={closeNote}
         checklistAllDone={checklistStatus.allDone}
         checklistStatus={checklistStatus}
+        purchaseConfirmed={purchaseConfirmed}
+        scheduleStatus={scheduleStatus}
         alreadyCloseChecked={!!operationQuery.data?.closeCheckedAt}
       />
     </div>
@@ -2373,12 +2483,14 @@ function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; 
 // CLOSING PROFIT SECTION – 일마감 손익 요약
 // ============================================================================
 
-function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone, checklistStatus, alreadyCloseChecked }: {
+function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone, checklistStatus, purchaseConfirmed, scheduleStatus, alreadyCloseChecked }: {
   restaurantId: number;
   date: string;
   closeNote?: string;
   checklistAllDone: boolean;
   checklistStatus: { totalChecked: number; totalItems: number; incomplete: string[] };
+  purchaseConfirmed: boolean;
+  scheduleStatus: { allDone: boolean; total: number; completed: number };
   alreadyCloseChecked: boolean;
 }) {
   const [laborCost, setLaborCost] = useState('0');
@@ -2435,8 +2547,10 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
   const purchasesTotal = calculated?.purchasesTotal ?? '0';
   const profit = Number(salesTotal) - Number(purchasesTotal) - Number(laborCost) - dailyFixed;
 
-  // 마감 불가 조건: 체크리스트 미완료
-  const canClose = checklistStatus.totalItems === 0 || checklistAllDone;
+  // 마감 불가 조건: 체크리스트 + 매입확인 + 스케줄완료
+  const checklistOk = checklistStatus.totalItems === 0 || checklistAllDone;
+  const scheduleOk = scheduleStatus.allDone;
+  const canClose = checklistOk && purchaseConfirmed && scheduleOk;
 
   const handleSaveClosing = () => {
     save.mutate({
@@ -2517,15 +2631,25 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
         className="text-sm h-9"
       />
 
-      {/* 체크리스트 미완료 경고 */}
+      {/* 마감 불가 사유 경고 */}
       {!canClose && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 p-3">
-          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
-            체크리스트 미완료 ({checklistStatus.totalChecked}/{checklistStatus.totalItems})
-          </p>
-          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
-            미완료 탭: {checklistStatus.incomplete.join(', ')}
-          </p>
+        <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 p-3 space-y-1">
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">마감 전 완료 필요 항목</p>
+          {!checklistOk && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+              · 체크리스트 미완료 ({checklistStatus.totalChecked}/{checklistStatus.totalItems}) — {checklistStatus.incomplete.join(', ')}
+            </p>
+          )}
+          {!purchaseConfirmed && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+              · 매입 미확인 — 매입탭에서 입고 등록 또는 "입고/발주 없음" 확인 필요
+            </p>
+          )}
+          {!scheduleOk && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+              · 근무 스케줄 미완료 ({scheduleStatus.completed}/{scheduleStatus.total}명) — 전원 완료 처리 필요
+            </p>
+          )}
         </div>
       )}
 
@@ -2538,12 +2662,10 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
         {save.isPending || checkCloseMutation.isPending
           ? '저장 중...'
           : !canClose && !existing
-            ? `체크리스트 완료 후 마감 가능 (${checklistStatus.totalChecked}/${checklistStatus.totalItems})`
+            ? '마감 조건 충족 후 확정 가능'
             : existing
               ? '마감 수정'
-              : alreadyCloseChecked
-                ? '마감 확정'
-                : '마감 확정'}
+              : '마감 확정'}
       </Button>
     </Card>
   );

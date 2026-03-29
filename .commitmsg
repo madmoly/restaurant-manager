@@ -1,8 +1,10 @@
-fix: 운영캘린더 다크모드 대비 개선 + 기본 체크리스트 시드
+feat: 마감 필수 조건 강화 — 매입확인 + 스케줄완료 필수
 
-- DayDetailContent: text-foreground/70 → text-muted-foreground, bg-muted/30 → bg-muted/50
-- 다크모드 emerald/blue 색상에 dark: variant 추가
-- 서버 마이그레이션에 기본 체크리스트 시드 추가 (오픈7/매입5/일간보고4/마감8)
-- 매장별 체크리스트 없으면 자동 등록
+- PurchaseTab: "금일 입고/발주 없음" 확인 버튼 추가 (noOrderToday 활용)
+- CloseTab: 마감 조건 3가지로 확장
+  1) 체크리스트 전체 완료 (기존)
+  2) 매입 확인 (입고 내역 있거나 "입고없음" 확인)
+  3) 근무 스케줄 전원 완료 처리
+- ClosingProfitSection: 미충족 조건별 구체적 안내 표시
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
