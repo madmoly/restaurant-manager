@@ -69,11 +69,16 @@ export default function ManagerDashboard() {
     );
   }
 
-  // ─── 계산 ──────────────────────────────────────────────────────────────────
-  const salesNum = Number(monthlyTotal?.total ?? 0);
-  const purchasesNum = Number(purchaseTotal?.total ?? 0);
-  const fixedNum = Number(fixedTotal?.total ?? 0);
+  // ─── 계산 (ProfitPage와 동일: 마감일 기준 매출/매입 + 비율 고정비) ─────────
+  const salesNum = Number(profitSummary?.salesTotal ?? 0);         // 마감 완료일 매출 합계
+  const purchasesNum = Number(profitSummary?.purchasesTotal ?? 0); // 마감 완료일 매입 합계
   const laborNum = Number(profitSummary?.laborCost ?? 0);
+  const fixedStaticNum = Number(fixedTotal?.total ?? 0);           // 고정 금액 고정비
+  // 비율형 고정비: 마감 매출 × 비율%
+  const ratioFixedNum = ((fixedTotal as any)?.ratioItems ?? []).reduce(
+    (sum: number, item: any) => sum + Math.round(salesNum * Number(item.ratio ?? 0) / 100), 0
+  );
+  const fixedNum = fixedStaticNum + ratioFixedNum;
   const profitNum = salesNum - purchasesNum - laborNum - fixedNum;
   const profitRate = salesNum > 0 ? ((profitNum / salesNum) * 100).toFixed(1) : "0.0";
 

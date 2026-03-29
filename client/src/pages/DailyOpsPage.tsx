@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDate } from 'date-fns';
+import { useLocation } from 'wouter';
 import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
 import { resizeImage, OCR_HIGH, OCR_STORAGE } from '@/lib/imageResize';
@@ -20,6 +21,7 @@ import {
   CheckCircle,
   Users,
   ZoomIn,
+  Pencil,
 } from 'lucide-react';
 
 // ============================================================================
@@ -1176,19 +1178,25 @@ function PurchaseTab({
         )}
       </Card>
 
-      {/* ─── 발주/입고 입력 버튼 ─── */}
-      {inputMode === 'none' && (
-        <div className="flex gap-2">
-          <Button onClick={() => setInputMode('order')} variant="secondary" className="flex-1 h-12 flex gap-2">
-            <Plus className="w-4 h-4" />
-            <span className="text-sm font-medium">발주 입력</span>
-          </Button>
-          <Button onClick={() => setInputMode('receive')} variant="default" className="flex-1 h-12 flex gap-2">
-            <Check className="w-4 h-4" />
-            <span className="text-sm font-medium">입고 입력</span>
-          </Button>
-        </div>
-      )}
+      {/* ─── 발주/입고 입력 버튼 (항상 표시, 토글) ─── */}
+      <div className="flex gap-2">
+        <Button
+          onClick={() => { resetForm(); setInputMode(inputMode === 'order' ? 'none' : 'order'); }}
+          variant={inputMode === 'order' ? 'default' : 'secondary'}
+          className={`flex-1 h-12 flex gap-2 ${inputMode === 'order' ? 'ring-2 ring-amber-400' : ''}`}
+        >
+          <Plus className="w-4 h-4" />
+          <span className="text-sm font-medium">발주 입력</span>
+        </Button>
+        <Button
+          onClick={() => { resetForm(); setInputMode(inputMode === 'receive' ? 'none' : 'receive'); }}
+          variant={inputMode === 'receive' ? 'default' : 'secondary'}
+          className={`flex-1 h-12 flex gap-2 ${inputMode === 'receive' ? 'ring-2 ring-blue-400' : ''}`}
+        >
+          <Check className="w-4 h-4" />
+          <span className="text-sm font-medium">입고 입력</span>
+        </Button>
+      </div>
 
       {/* ─── 발주/입고 입력 폼 ─── */}
       {inputMode !== 'none' && (
@@ -1733,15 +1741,7 @@ function CloseTab({
     },
   });
 
-  const checkCloseMutation = trpc.dailyOps.checkClose.useMutation({
-    onSuccess: () => {
-      toast.success('마감 체크 완료');
-      operationQuery.refetch();
-    },
-    onError: (error: any) => {
-      toast.error(`마감 체크 실패: ${error.message}`);
-    },
-  });
+
 
   // Initialize from saved sales
   useEffect(() => {
@@ -2070,46 +2070,15 @@ function CloseTab({
         </div>
       </Card>
 
-      {/* ─── 일마감 손익 요약 ─── */}
-      <ClosingProfitSection restaurantId={restaurantId} date={date} />
-
-      {/* 체크리스트 완료 상태 */}
-      {!operationQuery.data?.closeCheckedAt && checklistStatus.totalItems > 0 && !checklistStatus.allDone && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 p-3">
-          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
-            체크리스트 미완료 ({checklistStatus.totalChecked}/{checklistStatus.totalItems})
-          </p>
-          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
-            미완료 탭: {checklistStatus.incomplete.join(', ')}
-          </p>
-        </div>
-      )}
-
-      {/* 마감 체크 */}
-      <Button
-        onClick={() => {
-          checkCloseMutation.mutate({
-            restaurantId,
-            date,
-            closeNote: closeNote || undefined,
-          });
-        }}
-        disabled={
-          checkCloseMutation.isPending ||
-          !!operationQuery.data?.closeCheckedAt ||
-          !salesQuery.data ||
-          (checklistStatus.totalItems > 0 && !checklistStatus.allDone)
-        }
-        className="w-full"
-        size="lg"
-        variant={operationQuery.data?.closeCheckedAt ? 'secondary' : 'primary'}
-      >
-        {operationQuery.data?.closeCheckedAt
-          ? `마감 완료 (${fmtTs(operationQuery.data.closeCheckedAt)})`
-          : checklistStatus.totalItems > 0 && !checklistStatus.allDone
-            ? `체크리스트 완료 후 마감 가능 (${checklistStatus.totalChecked}/${checklistStatus.totalItems})`
-            : '마감 체크 완료'}
-      </Button>
+      {/* ─── 일마감 손익 + 마감 확정 (통합) ─── */}
+      <ClosingProfitSection
+        restaurantId={restaurantId}
+        date={date}
+        closeNote={closeNote}
+        checklistAllDone={checklistStatus.allDone}
+        checklistStatus={checklistStatus}
+        alreadyCloseChecked={!!operationQuery.data?.closeCheckedAt}
+      />
     </div>
   );
 }
@@ -2124,6 +2093,7 @@ const SHIFT_LABELS: Record<string, string> = { open: '오픈', close: '마감', 
 
 function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; date: string }) {
   const [expanded, setExpanded] = useState(false);
+  const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
 
   const { data: daySchedules = [], isLoading } = trpc.schedules.getDaySchedules.useQuery(
@@ -2181,18 +2151,6 @@ function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; 
       {/* 펼친 상세 (접이식) */}
       {expanded && (
         <div className="space-y-2 pt-2 border-t border-border">
-          {confirmed.length > 0 && (
-            <div className="flex justify-end">
-              <button
-                onClick={() => completeDay.mutate({ restaurantId, date })}
-                disabled={completeDay.isPending}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
-              >
-                <CheckCircle className="w-3 h-3" />
-                전체 완료 ({confirmed.length}건)
-              </button>
-            </div>
-          )}
           <div className="space-y-1.5">
             {daySchedules.map((s: any) => {
               const isConfirmed = s.status === 'confirmed';
@@ -2247,6 +2205,27 @@ function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; 
               );
             })}
           </div>
+
+          {/* 하단 액션 버튼 */}
+          <div className="flex gap-2 pt-2">
+            {confirmed.length > 0 && (
+              <button
+                onClick={() => completeDay.mutate({ restaurantId, date })}
+                disabled={completeDay.isPending}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
+              >
+                <CheckCircle className="w-4 h-4" />
+                전체 완료 처리 ({confirmed.length}건)
+              </button>
+            )}
+            <button
+              onClick={() => setLocation('/schedule')}
+              className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium border border-border bg-muted/50 text-foreground hover:bg-muted transition-colors ${confirmed.length > 0 ? '' : 'flex-1'}`}
+            >
+              <Pencil className="w-4 h-4" />
+              스케줄 수정
+            </button>
+          </div>
         </div>
       )}
     </Card>
@@ -2257,7 +2236,14 @@ function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; 
 // CLOSING PROFIT SECTION – 일마감 손익 요약
 // ============================================================================
 
-function ClosingProfitSection({ restaurantId, date }: { restaurantId: number; date: string }) {
+function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone, checklistStatus, alreadyCloseChecked }: {
+  restaurantId: number;
+  date: string;
+  closeNote?: string;
+  checklistAllDone: boolean;
+  checklistStatus: { totalChecked: number; totalItems: number; incomplete: string[] };
+  alreadyCloseChecked: boolean;
+}) {
   const [laborCost, setLaborCost] = useState('0');
   const [closingNote, setClosingNote] = useState('');
   const utils = trpc.useUtils();
@@ -2300,11 +2286,20 @@ function ClosingProfitSection({ restaurantId, date }: { restaurantId: number; da
     onError(err: any) { toast.error(err.message); },
   });
 
+  const checkCloseMutation = trpc.dailyOps.checkClose.useMutation({
+    onSuccess() {
+      utils.dailyOps.getByDate.invalidate();
+    },
+  });
+
   if (calcLoading) return null;
 
   const salesTotal = calculated?.salesTotal ?? '0';
   const purchasesTotal = calculated?.purchasesTotal ?? '0';
   const profit = Number(salesTotal) - Number(purchasesTotal) - Number(laborCost) - dailyFixed;
+
+  // 마감 불가 조건: 체크리스트 미완료
+  const canClose = checklistStatus.totalItems === 0 || checklistAllDone;
 
   const handleSaveClosing = () => {
     save.mutate({
@@ -2317,6 +2312,14 @@ function ClosingProfitSection({ restaurantId, date }: { restaurantId: number; da
       profit: String(profit),
       note: closingNote || undefined,
     });
+    // 마감 체크도 동시 실행 (아직 안 된 경우만)
+    if (!alreadyCloseChecked) {
+      checkCloseMutation.mutate({
+        restaurantId,
+        date,
+        closeNote: closeNote || undefined,
+      });
+    }
   };
 
   return (
@@ -2377,8 +2380,33 @@ function ClosingProfitSection({ restaurantId, date }: { restaurantId: number; da
         className="text-sm h-9"
       />
 
-      <Button onClick={handleSaveClosing} disabled={save.isPending} className="w-full">
-        {save.isPending ? '저장 중...' : existing ? '마감 수정' : '마감 확정'}
+      {/* 체크리스트 미완료 경고 */}
+      {!canClose && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 p-3">
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+            체크리스트 미완료 ({checklistStatus.totalChecked}/{checklistStatus.totalItems})
+          </p>
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
+            미완료 탭: {checklistStatus.incomplete.join(', ')}
+          </p>
+        </div>
+      )}
+
+      <Button
+        onClick={handleSaveClosing}
+        disabled={save.isPending || checkCloseMutation.isPending || (!existing && !canClose)}
+        className="w-full"
+        size="lg"
+      >
+        {save.isPending || checkCloseMutation.isPending
+          ? '저장 중...'
+          : !canClose && !existing
+            ? `체크리스트 완료 후 마감 가능 (${checklistStatus.totalChecked}/${checklistStatus.totalItems})`
+            : existing
+              ? '마감 수정'
+              : alreadyCloseChecked
+                ? '마감 확정'
+                : '마감 확정'}
       </Button>
     </Card>
   );
