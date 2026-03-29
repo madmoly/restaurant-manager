@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and, sql, count } from "drizzle-orm";
-import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProcedure } from "../trpc";
+import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
 import { restaurants, restaurantUsers, users, sales, apiUsageLogs } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
@@ -285,6 +285,32 @@ export const restaurantsRouter = router({
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, input.userId)
         ));
+      return { ok: true };
+    }),
+
+  /** [master] 전체 매장 + 소유 대표 조회 */
+  listAllWithOwner: masterProcedure.query(async () => {
+    const allStores = await db.select({
+      id: restaurants.id,
+      name: restaurants.name,
+      isTutorial: restaurants.isTutorial,
+      ownerAdminId: restaurants.ownerAdminId,
+      isActive: restaurants.isActive,
+    }).from(restaurants).where(sql`${restaurants.deletedAt} IS NULL`);
+
+    // admin 목록 (대표 + SUB대표)
+    const admins = await db.select({
+      id: users.id, name: users.name, parentId: users.parentId,
+    }).from(users).where(eq(users.role, "admin"));
+
+    return { stores: allStores, admins };
+  }),
+
+  /** [master] 매장 소유 대표 변경 */
+  updateOwner: masterProcedure
+    .input(z.object({ restaurantId: z.number(), ownerAdminId: z.number().nullable() }))
+    .mutation(async ({ input }) => {
+      await db.update(restaurants).set({ ownerAdminId: input.ownerAdminId }).where(eq(restaurants.id, input.restaurantId));
       return { ok: true };
     }),
 });

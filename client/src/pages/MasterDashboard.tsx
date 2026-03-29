@@ -4,9 +4,10 @@ import { useLocation } from "wouter";
 import {
   Server, Users, Store, Shield, Activity, Clock,
   ChevronRight, AlertCircle, CheckCircle2, UserCheck,
-  Database, TrendingUp, DollarSign,
+  Database, TrendingUp, DollarSign, UserPlus, Building2,
 } from "lucide-react";
 import { Card, StatCard, PageHeader } from "@/components/ui/compat";
+import { Button } from "@/components/ui/button";
 import { DashboardSkeleton } from "@/components/ui/skeletons";
 import { ROLE_LABELS } from "@shared/permissions";
 
@@ -293,6 +294,147 @@ export default function MasterDashboard() {
           </Card>
         </div>
       </div>
+
+      {/* 매장 소유권 + SUB대표 관리 */}
+      <OwnershipManager />
+    </div>
+  );
+}
+
+// ─── 매장 소유권 + SUB대표 관리 패널 ──────────────────────────────────────────
+function OwnershipManager() {
+  const utils = trpc.useUtils();
+  const { data } = trpc.restaurants.listAllWithOwner.useQuery();
+  const { data: subAdmins } = trpc.users.listSubAdmins.useQuery();
+  const updateOwnerMut = trpc.restaurants.updateOwner.useMutation({
+    onSuccess: () => utils.restaurants.listAllWithOwner.invalidate(),
+  });
+  const createSubAdminMut = trpc.users.createSubAdmin.useMutation({
+    onSuccess: () => {
+      utils.users.listSubAdmins.invalidate();
+      setShowForm(false);
+      setForm({ username: "", password: "", name: "", phone: "" });
+    },
+  });
+
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ username: "", password: "", name: "", phone: "" });
+
+  if (!data) return null;
+
+  const adminMap = new Map(data.admins.map(a => [a.id, a]));
+  const realStores = data.stores.filter(s => !s.isTutorial);
+  const tutorialStores = data.stores.filter(s => s.isTutorial);
+
+  const handleOwnerChange = (restaurantId: number, val: string) => {
+    const ownerAdminId = val === "" ? null : Number(val);
+    updateOwnerMut.mutate({ restaurantId, ownerAdminId });
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* 매장 소유권 */}
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
+          <Building2 size={14} className="text-primary" />
+          매장 소유권 관리
+        </h3>
+        <div className="space-y-2">
+          {realStores.map(store => {
+            const owner = store.ownerAdminId ? adminMap.get(store.ownerAdminId) : null;
+            return (
+              <div key={store.id} className="flex items-center justify-between p-3 rounded-lg border border-border">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{store.name}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {owner ? `${owner.name}${owner.parentId ? ' (SUB)' : ''}` : '미배정'}
+                  </p>
+                </div>
+                <select
+                  value={store.ownerAdminId ?? ""}
+                  onChange={(e) => handleOwnerChange(store.id, e.target.value)}
+                  className="text-xs border border-border rounded px-2 py-1 bg-background text-foreground min-w-[100px]"
+                >
+                  <option value="">미배정</option>
+                  {data.admins.filter(a => !a.parentId).map(a => (
+                    <option key={a.id} value={a.id}>{a.name} (대표)</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+          {tutorialStores.length > 0 && (
+            <div className="pt-2 border-t border-border/50">
+              <p className="text-[10px] text-muted-foreground mb-1">Tutorial 매장 ({tutorialStores.length}개) — 합산 제외</p>
+              {tutorialStores.map(s => (
+                <p key={s.id} className="text-xs text-muted-foreground pl-2">• {s.name}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* SUB대표 관리 */}
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <UserPlus size={14} className="text-primary" />
+            SUB대표 관리
+          </h3>
+          <Button variant="outline" size="sm" onClick={() => setShowForm(!showForm)}>
+            {showForm ? "취소" : "+ 추가"}
+          </Button>
+        </div>
+
+        {showForm && (
+          <div className="p-3 mb-3 rounded-lg border border-primary/20 bg-primary/5 space-y-2">
+            <input placeholder="아이디" value={form.username} onChange={e => setForm(f => ({...f, username: e.target.value}))}
+              className="w-full text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground" />
+            <input placeholder="비밀번호" type="password" value={form.password} onChange={e => setForm(f => ({...f, password: e.target.value}))}
+              className="w-full text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground" />
+            <input placeholder="이름" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))}
+              className="w-full text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground" />
+            <input placeholder="전화번호 (선택)" value={form.phone} onChange={e => setForm(f => ({...f, phone: e.target.value}))}
+              className="w-full text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground" />
+            <Button
+              size="sm"
+              className="w-full"
+              disabled={!form.username || !form.password || !form.name || createSubAdminMut.isPending}
+              onClick={() => createSubAdminMut.mutate({
+                username: form.username, password: form.password, name: form.name,
+                phone: form.phone || undefined,
+              })}
+            >
+              {createSubAdminMut.isPending ? "생성 중..." : "SUB대표 생성"}
+            </Button>
+            {createSubAdminMut.error && (
+              <p className="text-xs text-red-500">{createSubAdminMut.error.message}</p>
+            )}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {(subAdmins ?? []).map((sa: any) => {
+            const parent = sa.parentId ? adminMap.get(sa.parentId) : null;
+            return (
+              <div key={sa.id} className="flex items-center justify-between p-3 rounded-lg border border-border">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{sa.name}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    @{sa.username} · {parent ? `상위: ${parent.name}` : '독립'}
+                  </p>
+                </div>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${sa.isActive ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' : 'bg-gray-100 text-gray-500'}`}>
+                  {sa.isActive ? '활성' : '비활성'}
+                </span>
+              </div>
+            );
+          })}
+          {(!subAdmins || subAdmins.length === 0) && !showForm && (
+            <p className="text-xs text-muted-foreground text-center py-4">등록된 SUB대표가 없습니다</p>
+          )}
+        </div>
+      </Card>
     </div>
   );
 }
