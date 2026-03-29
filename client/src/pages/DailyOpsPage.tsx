@@ -4,7 +4,7 @@ import { formatDate } from 'date-fns';
 import { useLocation } from 'wouter';
 import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
-import { resizeImage, OCR_HIGH, OCR_STORAGE } from '@/lib/imageResize';
+import { resizeImage } from '@/lib/imageResize';
 import { formatDateWithHoliday, getHolidayName } from '@/lib/koreanHolidays';
 import { toast } from 'sonner';
 import {
@@ -22,7 +22,6 @@ import {
   Users,
   ZoomIn,
   Pencil,
-  RotateCw,
 } from 'lucide-react';
 
 // ============================================================================
@@ -921,13 +920,13 @@ function PurchaseTab({
     }
   };
 
-  // ── 1단계: 사진 업로드만 (OCR은 별도) ──────────────────────────────────────
+  // ── 사진 업로드 → AI 방향 자동 감지/회전 → OCR 분석 (원스텝) ───────────────
   const handleOcrUpload = async (file: File) => {
     try {
       setOcrProcessing(true);
       setOcrError(null);
 
-      // 원본 파일 그대로 업로드 (서버에서 EXIF 회전 + 리사이즈 처리)
+      // 1. 원본 파일 업로드 (서버에서 EXIF 회전 + 리사이즈)
       const formData = new FormData();
       formData.append('photo', file);
 
@@ -938,28 +937,18 @@ function PurchaseTab({
       if (!uploadRes.ok) throw new Error('이미지 업로드 실패');
       const { url } = await uploadRes.json();
       setAttachmentUrl(url);
-      setOcrPreviewUrl(url + `?t=${Date.now()}`);
-      toast.info('이미지 방향을 확인하세요. 옆으로 보이면 회전 버튼을 누른 후 AI 판독을 시작하세요.');
-    } catch (error: any) {
-      setOcrError(error.message || '이미지 업로드 실패');
-      toast.error(error.message || '이미지 업로드 실패');
-    } finally {
-      setOcrProcessing(false);
-    }
-  };
 
-  // ── 2단계: AI OCR 판독 (사용자가 방향 확인 후 실행) ──────────────────────
-  const handleOcrAnalyze = async () => {
-    if (!attachmentUrl) return;
-    try {
-      setOcrProcessing(true);
-      setOcrError(null);
+      // 2. OCR 분석 요청 (서버에서 AI 방향 감지 → 자동 회전 → OCR 순서로 처리)
+      toast.info('AI가 이미지 방향을 감지하고 분석 중입니다...');
 
       const ocrRes = await fetch('/api/ocr/extract-purchase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: attachmentUrl, restaurantId }),
+        body: JSON.stringify({ imageUrl: url, restaurantId }),
       });
+
+      // OCR 완료 후 회전된 이미지로 프리뷰 갱신
+      setOcrPreviewUrl(url + `?t=${Date.now()}`);
 
       if (!ocrRes.ok) {
         const errData = await ocrRes.json().catch(() => ({}));
@@ -1298,7 +1287,7 @@ function PurchaseTab({
             </div>
           )}
 
-          {/* OCR 미리보기 이미지 + 회전/판독 컨트롤 */}
+          {/* OCR 결과 프리뷰 이미지 (AI가 자동 회전 처리 완료) */}
           {ocrPreviewUrl && !ocrProcessing && (
             <div className="space-y-2">
               <div className="relative">
@@ -1322,36 +1311,6 @@ function PurchaseTab({
                   <X className="w-3 h-3" />
                 </button>
               </div>
-              {/* 회전 + AI 판독 버튼 */}
-              <div className="flex gap-2">
-                <button
-                  onClick={async () => {
-                    if (!attachmentUrl) return;
-                    try {
-                      await fetch('/api/upload/rotate-image', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: attachmentUrl }),
-                      });
-                      setOcrPreviewUrl(attachmentUrl + `?t=${Date.now()}`);
-                    } catch {
-                      toast.error('회전 실패');
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors"
-                >
-                  <RotateCw className="w-4 h-4" />
-                  90° 회전
-                </button>
-                <button
-                  onClick={handleOcrAnalyze}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-                >
-                  <Camera className="w-4 h-4" />
-                  AI 판독 시작
-                </button>
-              </div>
-              <p className="text-[10px] text-muted-foreground text-center">글씨가 정방향으로 보이는지 확인 후 AI 판독을 시작하세요</p>
             </div>
           )}
 

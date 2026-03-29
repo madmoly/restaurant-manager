@@ -23,7 +23,7 @@ ocrRouter.get("/debug", async (_req: Request, res: Response) => {
     sharpStatus = `fail: ${err.message}`;
   }
   res.json({
-    version: "v3-raw-upload",  // 원본 파일 직접 업로드 + 서버 EXIF 회전
+    version: "v4-ai-orientation",  // AI 방향 감지 + 자동 회전 후 OCR
     timestamp: new Date().toISOString(),
     sharp: sharpStatus,
     node: process.version,
@@ -38,36 +38,67 @@ function getAnthropicClient(): Anthropic | null {
 }
 
 // ─── 헬퍼: 이미지 → base64 + MIME ────────────────────────────────────────────
-// sharp.rotate() (인자 없음): EXIF orientation 태그를 읽어 실제 픽셀을 회전한 뒤 태그 제거
-// - 스마트폰 사진(EXIF 있음): 올바른 방향으로 자동 회전
-// - Canvas 거친 이미지(EXIF 없음): 아무 변경 없음 (안전)
-async function loadImageBase64(filePath: string): Promise<{ base64: string; mediaType: string }> {
+function loadImageBase64Raw(filePath: string): { base64: string; mediaType: string } {
   const ext = path.extname(filePath).toLowerCase();
   const mimeMap: Record<string, string> = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
   };
+  const imageBuffer = fs.readFileSync(filePath);
+  return {
+    base64: imageBuffer.toString("base64"),
+    mediaType: mimeMap[ext] || "image/jpeg",
+  };
+}
 
+// ─── AI 방향 감지: Claude Vision으로 이미지 회전 각도 판별 ──────────────────
+// haiku 모델로 빠르고 저렴하게 방향만 판별 → 0/90/180/270 반환
+async function detectAndFixOrientation(filePath: string, anthropic: Anthropic): Promise<void> {
   try {
-    // EXIF orientation 기반 자동 회전 + 태그 제거
-    // .rotate() (인자 없음) = EXIF 방향대로 픽셀을 실제 회전 후 태그 삭제
-    // → EXIF가 없으면 아무것도 안 함 (Canvas 거친 이미지도 안전)
-    const cleanBuffer = await sharp(filePath)
-      .rotate()
-      .toBuffer();
-    console.log(`[OCR] EXIF 자동회전 완료: ${path.basename(filePath)} (${(cleanBuffer.length / 1024).toFixed(0)}KB)`);
-    return {
-      base64: cleanBuffer.toString("base64"),
-      mediaType: mimeMap[ext] || "image/jpeg",
-    };
-  } catch (err) {
-    // sharp 실패 시 원본 그대로 사용
-    console.warn(`[OCR] sharp 처리 실패, 원본 사용: ${path.basename(filePath)}`, err);
-    const imageBuffer = fs.readFileSync(filePath);
-    return {
-      base64: imageBuffer.toString("base64"),
-      mediaType: mimeMap[ext] || "image/jpeg",
-    };
+    // 1. EXIF 자동 회전 먼저 시도 (EXIF 태그가 있으면 이것만으로 해결)
+    const exifRotated = await sharp(filePath).rotate().toBuffer();
+    fs.writeFileSync(filePath, exifRotated);
+    console.log(`[OCR] EXIF 자동회전 적용: ${path.basename(filePath)} (${(exifRotated.length / 1024).toFixed(0)}KB)`);
+  } catch {
+    console.warn(`[OCR] EXIF 회전 실패 (무시): ${path.basename(filePath)}`);
+  }
+
+  // 2. AI 방향 감지: EXIF 회전 후에도 여전히 옆으로 되어 있을 수 있음
+  //    (브라우저가 Canvas로 EXIF 스트립한 경우, EXIF 없는 이미지 등)
+  const { base64, mediaType } = loadImageBase64Raw(filePath);
+
+  const orientationRes = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 64,
+    messages: [{
+      role: "user",
+      content: [
+        {
+          type: "image",
+          source: { type: "base64", media_type: mediaType as any, data: base64 },
+        },
+        {
+          type: "text",
+          text: `이 이미지의 텍스트/문서가 정방향인지 확인하세요.
+정방향으로 읽으려면 시계방향으로 몇 도 회전해야 하나요?
+숫자 하나만 답하세요: 0, 90, 180, 270`,
+        },
+      ],
+    }],
+  });
+
+  const orientText = extractText(orientationRes)?.trim() || "0";
+  // 응답에서 숫자만 추출
+  const angleMatch = orientText.match(/\b(0|90|180|270)\b/);
+  const angle = angleMatch ? parseInt(angleMatch[1], 10) : 0;
+
+  console.log(`[OCR] AI 방향 감지: ${path.basename(filePath)} → ${angle}° (원문: "${orientText}")`);
+
+  if (angle > 0) {
+    // 회전 필요 → sharp로 회전 후 파일 덮어쓰기
+    const rotated = await sharp(filePath).rotate(angle).toBuffer();
+    fs.writeFileSync(filePath, rotated);
+    console.log(`[OCR] AI 기반 ${angle}° 회전 완료: ${path.basename(filePath)} (${(rotated.length / 1024).toFixed(0)}KB)`);
   }
 }
 
@@ -318,7 +349,10 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       return;
     }
 
-    const { base64, mediaType } = await loadImageBase64(filePath);
+    // ── AI 방향 감지 + 자동 회전 (OCR 전 전처리) ──────────────────────
+    await detectAndFixOrientation(filePath, anthropic);
+
+    const { base64, mediaType } = loadImageBase64Raw(filePath);
     const imageContent: Anthropic.ImageBlockParam = {
       type: "image",
       source: {

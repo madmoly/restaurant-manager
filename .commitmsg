@@ -1,12 +1,9 @@
-fix: 오픈탭 출근인원 시간표시를 근무유형 라벨로 변경
+feat: AI 방향 감지 자동화 — 수동 회전 제거, 원스텝 OCR 복원
 
-기존: "09:00~18:00 · 9h" 시간 범위 표시
-변경: shiftPreset + 반차 여부 기반 라벨 표시
-  - full → 풀타임 / 반차
-  - open → 오픈 / 오픈반차
-  - close → 마감 / 마감반차
-  - custom → 커스텀 / 반차
-
-반차는 amber 색상으로 강조 표시.
+- OCR 전 Claude Vision(haiku)으로 이미지 방향 자동 감지 (0/90/180/270°)
+- 회전 필요 시 sharp로 서버에서 자동 회전 후 OCR 분석
+- 클라이언트: 수동 회전 버튼/AI 판독 버튼 제거
+- 사진 촬영 → 업로드 → AI 방향 감지 → 자동 회전 → OCR → 결과 표시 (원스텝)
+- EXIF 회전도 병행 (EXIF 태그 있으면 먼저 적용, 없으면 AI 감지)
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
