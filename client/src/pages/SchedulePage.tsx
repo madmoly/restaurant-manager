@@ -720,9 +720,9 @@ export default function SchedulePage() {
           직원 배정 바텀시트
           ═══════════════════════════════════════════════════════════════════════ */}
       {assignDate && (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={closeAssignModal} />
-          <div className="relative z-10 bg-card border-t md:border border-border rounded-t-2xl md:rounded-xl shadow-xl w-full max-w-md md:mx-4 max-h-[75vh] flex flex-col">
+          <div className="relative z-10 bg-card border-t md:border border-border rounded-t-2xl md:rounded-xl shadow-xl w-full max-w-md md:mx-4 max-h-[75vh] flex flex-col mb-[88px] md:mb-0">
             {/* 핸들바 (모바일) */}
             <div className="flex justify-center pt-2 md:hidden">
               <div className="w-10 h-1 rounded-full bg-border" />
@@ -1034,9 +1034,9 @@ export default function SchedulePage() {
           스케줄 수정/삭제 모달
           ═══════════════════════════════════════════════════════════════════════ */}
       {editSchedule && (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setEditSchedule(null)} />
-          <div className="relative z-10 bg-card border-t md:border border-border rounded-t-2xl md:rounded-xl shadow-xl w-full max-w-md md:mx-4">
+          <div className="relative z-10 bg-card border-t md:border border-border rounded-t-2xl md:rounded-xl shadow-xl w-full max-w-md md:mx-4 mb-[88px] md:mb-0">
             <div className="flex justify-center pt-2 md:hidden">
               <div className="w-10 h-1 rounded-full bg-border" />
             </div>
