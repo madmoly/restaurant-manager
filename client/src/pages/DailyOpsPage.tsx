@@ -926,13 +926,13 @@ function PurchaseTab({
       setOcrProcessing(true);
       setOcrError(null);
 
-      // 미리보기 생성
-      const previewReader = new FileReader();
-      previewReader.onload = (e) => setOcrPreviewUrl(e.target?.result as string);
-      previewReader.readAsDataURL(file);
-
       // 1단계: 고품질 이미지로 업로드 (OCR 분석용)
       const highQuality = await resizeImage(file, OCR_HIGH);
+
+      // 미리보기 생성 (리사이징된 이미지 사용 — EXIF 회전 보정됨)
+      const previewReader = new FileReader();
+      previewReader.onload = (e) => setOcrPreviewUrl(e.target?.result as string);
+      previewReader.readAsDataURL(highQuality);
       const formData = new FormData();
       formData.append('photo', highQuality);
 
