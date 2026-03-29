@@ -18,9 +18,9 @@ function getAnthropicClient(): Anthropic | null {
 }
 
 // ─── 헬퍼: 이미지 → base64 + MIME ────────────────────────────────────────────
-// 참고: 스마트폰 사진의 EXIF orientation 태그가 있어도 실제 픽셀은 이미 정방향으로
-// 저장되는 경우가 대부분. EXIF 회전을 적용하면 오히려 정상 이미지를 뒤집게 됨.
-// 따라서 원본 픽셀 그대로 사용하고, EXIF 태그만 제거하여 API 혼동 방지.
+// sharp.rotate() (인자 없음): EXIF orientation 태그를 읽어 실제 픽셀을 회전한 뒤 태그 제거
+// - 스마트폰 사진(EXIF 있음): 올바른 방향으로 자동 회전
+// - Canvas 거친 이미지(EXIF 없음): 아무 변경 없음 (안전)
 async function loadImageBase64(filePath: string): Promise<{ base64: string; mediaType: string }> {
   const ext = path.extname(filePath).toLowerCase();
   const mimeMap: Record<string, string> = {
@@ -29,11 +29,13 @@ async function loadImageBase64(filePath: string): Promise<{ base64: string; medi
   };
 
   try {
-    // EXIF 메타데이터 제거 (회전 태그 포함) — 픽셀은 변경하지 않음
+    // EXIF orientation 기반 자동 회전 + 태그 제거
+    // .rotate() (인자 없음) = EXIF 방향대로 픽셀을 실제 회전 후 태그 삭제
+    // → EXIF가 없으면 아무것도 안 함 (Canvas 거친 이미지도 안전)
     const cleanBuffer = await sharp(filePath)
-      .rotate(0)  // 0도 = 회전 안 함, 하지만 EXIF orientation 태그를 제거함
+      .rotate()
       .toBuffer();
-    console.log(`[OCR] EXIF 제거 완료: ${path.basename(filePath)} (${(cleanBuffer.length / 1024).toFixed(0)}KB)`);
+    console.log(`[OCR] EXIF 자동회전 완료: ${path.basename(filePath)} (${(cleanBuffer.length / 1024).toFixed(0)}KB)`);
     return {
       base64: cleanBuffer.toString("base64"),
       mediaType: mimeMap[ext] || "image/jpeg",
@@ -433,6 +435,28 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       Array.isArray(parsed.items) ? parsed.items : [],
       parsed.summary || null
     );
+
+    // ── 빈 항목 제거 + 완전 중복 제거 ──────────────────────────────────
+    items = items.filter((item) => {
+      // 품목명이 없는 항목 제거
+      if (!item.shortName.trim()) return false;
+      // 합계/소계 행이 품목으로 잘못 들어온 경우 제거
+      const lowerName = item.shortName.trim().toLowerCase();
+      if (/^(합계|소계|총합|total|subtotal|합\s*계)$/i.test(lowerName)) return false;
+      return true;
+    });
+
+    // 완전 동일한 항목 중복 제거 (품명+수량+단가+합계 모두 같으면 중복)
+    const seen = new Set<string>();
+    items = items.filter((item) => {
+      const key = `${item.shortName}|${item.quantity}|${item.unitPrice}|${item.lineTotal}`;
+      if (seen.has(key)) {
+        console.log(`[OCR] 중복 항목 제거: ${item.shortName} (qty=${item.quantity}, price=${item.unitPrice})`);
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
 
     // ── 거래처 품목 매칭 (기존 DB와 단가 비교) ──────────────────────────
     const counterpartyName = parsed.counterpartyName || null;

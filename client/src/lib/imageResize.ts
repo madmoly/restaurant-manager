@@ -55,14 +55,7 @@ export async function resizeImage(
   const img = await loadImage(file);
   const { width, height } = img;
 
-  // 리사이징 불필요 시 원본 반환
-  if (width <= maxSize && height <= maxSize) {
-    // 단, JPEG 변환/품질 압축은 수행
-    if (file.type === mimeType && file.size < 1024 * 1024) {
-      return file;
-    }
-  }
-
+  // 항상 Canvas를 통과시킴 (EXIF orientation 자동 적용 + 태그 제거 보장)
   // 비율 유지 축소 계산
   let newWidth = width;
   let newHeight = height;
