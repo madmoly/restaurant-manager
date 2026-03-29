@@ -42,6 +42,14 @@ export default function ProfitPage() {
     { restaurantId, year, month },
     { enabled: restaurantId > 0 }
   );
+  const { data: salesTotal } = trpc.sales.monthlyTotal.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 }
+  );
+  const { data: purchaseTotal } = trpc.purchases.monthlyTotal.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 }
+  );
   const { data: fixedTotal } = trpc.fixedCosts.monthlyTotal.useQuery(
     { restaurantId, year, month },
     { enabled: restaurantId > 0 }
@@ -67,12 +75,24 @@ export default function ProfitPage() {
   if (!restaurantId) return <EmptyState icon={<TrendingUp size={40} />} title="매장을 선택해주세요" />;
   if (isLoading) return <ProfitPageSkeleton />;
 
-  // 마감 기준 합산 (마감된 날짜만 반영)
-  const sales = Number(summary?.salesTotal ?? 0);
-  const purchases = Number(summary?.purchasesTotal ?? 0);
-  const fixed = Number(fixedTotal?.total ?? 0);
+  // 마감 기준 합산 (정산에 반영)
+  const closedSales = Number(summary?.salesTotal ?? 0);
+  const closedPurchases = Number(summary?.purchasesTotal ?? 0);
   const labor = Number(summary?.laborCost ?? 0);
+  const fixed = Number(fixedTotal?.total ?? 0);
+
+  // 전체 합산 (마감+미마감 포함)
+  const totalSalesAll = Number(salesTotal?.total ?? 0);
+  const totalPurchasesAll = Number(purchaseTotal?.total ?? 0);
+
+  // 정산 기준: 마감된 매출 사용
+  const sales = closedSales;
+  const purchases = closedPurchases;
   const profit = sales - purchases - labor - fixed;
+
+  // 미마감분 차이
+  const unclosedSalesDiff = totalSalesAll - closedSales;
+  const unclosedPurchasesDiff = totalPurchasesAll - closedPurchases;
 
   // 미반영 현황
   const unclosedDates = summary?.unclosedDates ?? [];
@@ -216,7 +236,7 @@ export default function ProfitPage() {
       <Card className={`p-5 mb-5 ${profit >= 0 ? "border-emerald-200" : "border-red-200"}`}>
         <div className="flex items-center gap-2 mb-2">
           {profit >= 0 ? <TrendingUp size={18} className="text-emerald-600" /> : <TrendingDown size={18} className="text-red-500" />}
-          <span className="text-sm font-medium text-muted-foreground">이번 달 추정 순이익</span>
+          <span className="text-sm font-medium text-muted-foreground">이번 달 순이익 ({closedDays}일 마감 기준)</span>
         </div>
         <p className={`text-3xl font-bold tabular-nums ${profit >= 0 ? "text-emerald-700" : "text-red-600"}`}>
           {profit >= 0 ? "+" : ""}{profit.toLocaleString()}
@@ -360,7 +380,7 @@ export default function ProfitPage() {
       )}
 
       {/* 미반영 항목 */}
-      {(unclosedDates.length > 0 || zeroLaborDates.length > 0) && (
+      {(unclosedDates.length > 0 || zeroLaborDates.length > 0 || unclosedSalesDiff > 0 || unclosedPurchasesDiff > 0) && (
         <Card className="p-4 border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
             <AlertTriangle size={14} className="text-amber-500" />
@@ -381,6 +401,22 @@ export default function ProfitPage() {
                 </div>
               </div>
             )}
+            {unclosedSalesDiff > 0 && (
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-medium">매출</span>
+                <div className="text-muted-foreground">
+                  미마감 매출 <span className="font-medium text-foreground">+{unclosedSalesDiff.toLocaleString()}원</span> 미반영
+                </div>
+              </div>
+            )}
+            {unclosedPurchasesDiff > 0 && (
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 font-medium">매입</span>
+                <div className="text-muted-foreground">
+                  미마감 매입 <span className="font-medium text-foreground">+{unclosedPurchasesDiff.toLocaleString()}원</span> 미반영
+                </div>
+              </div>
+            )}
             {zeroLaborDates.length > 0 && (
               <div className="flex items-start gap-2">
                 <span className="shrink-0 px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 font-medium">인건비</span>
@@ -396,7 +432,7 @@ export default function ProfitPage() {
               </div>
             )}
             <p className="text-muted-foreground pt-1 border-t border-amber-200/50 dark:border-amber-800/50">
-              위 항목이 반영되지 않은 {closedDays}일 마감 기준 정산입니다
+              {closedDays}일 마감 기준 정산 · 미마감분은 마감 처리 후 반영됩니다
             </p>
           </div>
         </Card>

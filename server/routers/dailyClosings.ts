@@ -148,71 +148,74 @@ export const dailyClosingsRouter = router({
           between(dailyClosings.closingDate, start, end)
         ));
 
-      // 마감된 날짜 목록 + 인건비 0인 마감일
-      const closedRows = await db
-        .select({
-          closingDate: dailyClosings.closingDate,
-          laborCost: dailyClosings.laborCost,
-        })
-        .from(dailyClosings)
-        .where(and(
-          eq(dailyClosings.restaurantId, input.restaurantId),
-          between(dailyClosings.closingDate, start, end)
-        ));
+      // 미마감/인건비 미확정 분석 (실패해도 기본 합산은 반환)
+      let unclosedDates: string[] = [];
+      let zeroLaborDates: string[] = [];
 
-      const closedDateSet = new Set(
-        closedRows.map(r => {
-          const d = r.closingDate;
-          return typeof d === "string" ? d : new Date(d).toISOString().slice(0, 10);
-        })
-      );
-      const zeroLaborDates = closedRows
-        .filter(r => Number(r.laborCost) === 0)
-        .map(r => {
-          const d = r.closingDate;
-          return typeof d === "string" ? d : new Date(d).toISOString().slice(0, 10);
-        });
+      try {
+        // 마감된 날짜 목록 + 인건비 0인 마감일
+        const closedRows = await db
+          .select({
+            closingDate: dailyClosings.closingDate,
+            laborCost: dailyClosings.laborCost,
+          })
+          .from(dailyClosings)
+          .where(and(
+            eq(dailyClosings.restaurantId, input.restaurantId),
+            between(dailyClosings.closingDate, start, end)
+          ));
 
-      // 매장 휴무일 (임시휴무 + 정기휴무)
-      const closedDayRows = await db.select({ closedDate: storeClosedDays.closedDate })
-        .from(storeClosedDays)
-        .where(and(
-          eq(storeClosedDays.restaurantId, input.restaurantId),
-          between(storeClosedDays.closedDate, start, end)
-        ));
-      const storeClosedSet = new Set(
-        closedDayRows.map(r => {
-          const d = r.closedDate;
-          return typeof d === "string" ? d : new Date(d).toISOString().slice(0, 10);
-        })
-      );
+        const toDateStr = (d: any): string => {
+          if (typeof d === "string") return d.slice(0, 10);
+          return new Date(d).toISOString().slice(0, 10);
+        };
 
-      const weeklyClosureRows = await db.select({ weekday: storeWeeklyClosures.weekday })
-        .from(storeWeeklyClosures)
-        .where(and(
-          eq(storeWeeklyClosures.restaurantId, input.restaurantId),
-          eq(storeWeeklyClosures.isClosed, true)
-        ));
-      const closedWeekdays = new Set(weeklyClosureRows.map(r => r.weekday));
+        const closedDateSet = new Set(closedRows.map(r => toDateStr(r.closingDate)));
+        zeroLaborDates = closedRows
+          .filter(r => Number(r.laborCost) === 0)
+          .map(r => toDateStr(r.closingDate));
 
-      // 1일~오늘(또는 월말) 중 미마감 영업일 계산
-      const today = new Date();
-      const lastDay = today.getFullYear() === input.year && today.getMonth() + 1 === input.month
-        ? today.getDate()
-        : end.getDate();
+        // 매장 휴무일 (임시휴무 + 정기휴무)
+        const storeClosedSet = new Set<string>();
+        const closedWeekdays = new Set<number>();
 
-      const unclosedDates: string[] = [];
-      for (let d = 1; d <= lastDay; d++) {
-        const dt = new Date(input.year, input.month - 1, d);
-        const dateStr = `${input.year}-${String(input.month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        // 정기 휴무요일 스킵
-        if (closedWeekdays.has(dt.getDay())) continue;
-        // 임시 휴무 스킵
-        if (storeClosedSet.has(dateStr)) continue;
-        // 마감 안 된 날
-        if (!closedDateSet.has(dateStr)) {
-          unclosedDates.push(dateStr);
+        try {
+          const closedDayRows = await db.select({ closedDate: storeClosedDays.closedDate })
+            .from(storeClosedDays)
+            .where(and(
+              eq(storeClosedDays.restaurantId, input.restaurantId),
+              between(storeClosedDays.closedDate, start, end)
+            ));
+          closedDayRows.forEach(r => storeClosedSet.add(toDateStr(r.closedDate)));
+        } catch { /* 테이블 미존재 무시 */ }
+
+        try {
+          const weeklyClosureRows = await db.select({ weekday: storeWeeklyClosures.weekday })
+            .from(storeWeeklyClosures)
+            .where(and(
+              eq(storeWeeklyClosures.restaurantId, input.restaurantId),
+              eq(storeWeeklyClosures.isClosed, true)
+            ));
+          weeklyClosureRows.forEach(r => closedWeekdays.add(r.weekday));
+        } catch { /* 테이블 미존재 무시 */ }
+
+        // 1일~오늘(또는 월말) 중 미마감 영업일 계산
+        const now = new Date();
+        const lastDay = now.getFullYear() === input.year && now.getMonth() + 1 === input.month
+          ? now.getDate()
+          : end.getDate();
+
+        for (let d = 1; d <= lastDay; d++) {
+          const dt = new Date(input.year, input.month - 1, d);
+          const dateStr = `${input.year}-${String(input.month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          if (closedWeekdays.has(dt.getDay())) continue;
+          if (storeClosedSet.has(dateStr)) continue;
+          if (!closedDateSet.has(dateStr)) {
+            unclosedDates.push(dateStr);
+          }
         }
+      } catch (e) {
+        console.error("monthlySummary 미마감 분석 오류:", e);
       }
 
       return {
@@ -223,8 +226,8 @@ export const dailyClosingsRouter = router({
         profit: row?.profit ?? "0",
         closedDays: row?.closedDays ?? 0,
         daysInMonth: end.getDate(),
-        unclosedDates,            // 미마감 영업일
-        zeroLaborDates,           // 인건비 미확정 마감일
+        unclosedDates,
+        zeroLaborDates,
       };
     }),
 });
