@@ -445,6 +445,59 @@ app.use(express.json());
       WHERE isTutorial = 1 AND role != 'admin' AND parentId IS NULL
     `).catch(() => {});
 
+    // 5) 기본 체크리스트 시드 — 매장별로 체크리스트가 없으면 기본 항목 등록
+    try {
+      const [restaurants] = await conn.query(`SELECT id FROM restaurants`) as any[];
+      for (const store of restaurants) {
+        const [existing] = await conn.query(
+          `SELECT COUNT(*) as cnt FROM store_checklist_templates WHERE restaurantId = ? AND isActive = 1`,
+          [store.id]
+        ) as any[];
+        if (existing[0].cnt > 0) continue; // 이미 있으면 스킵
+
+        const defaultTemplates: { targetTab: string; checkType: string; itemText: string; sortOrder: number }[] = [
+          // 오픈 체크리스트
+          { targetTab: 'open', checkType: 'open', itemText: '매장 조명 및 간판 점등', sortOrder: 1 },
+          { targetTab: 'open', checkType: 'open', itemText: '에어컨/난방 및 환기 시스템 가동', sortOrder: 2 },
+          { targetTab: 'open', checkType: 'open', itemText: '홀 테이블/의자 정리 및 세팅', sortOrder: 3 },
+          { targetTab: 'open', checkType: 'open', itemText: '화장실 청소 및 비품(휴지/비누) 확인', sortOrder: 4 },
+          { targetTab: 'open', checkType: 'open', itemText: '식재료 유통기한 및 상태 확인', sortOrder: 5 },
+          { targetTab: 'open', checkType: 'open', itemText: 'POS 시스템 정상 작동 확인', sortOrder: 6 },
+          { targetTab: 'open', checkType: 'open', itemText: '전일 마감 사항 인수인계 확인', sortOrder: 7 },
+          // 매입 체크리스트
+          { targetTab: 'purchase', checkType: 'order', itemText: '금일 발주서/입고 예정 확인', sortOrder: 1 },
+          { targetTab: 'purchase', checkType: 'order', itemText: '입고 식재료 수량 검수', sortOrder: 2 },
+          { targetTab: 'purchase', checkType: 'order', itemText: '유통기한 및 신선도 확인', sortOrder: 3 },
+          { targetTab: 'purchase', checkType: 'order', itemText: '냉장/냉동 보관 온도 확인', sortOrder: 4 },
+          { targetTab: 'purchase', checkType: 'order', itemText: '전표/명세서 대조 및 보관', sortOrder: 5 },
+          // 일간보고 체크리스트
+          { targetTab: 'midday', checkType: 'other', itemText: '중간 매출 현황 기록', sortOrder: 1 },
+          { targetTab: 'midday', checkType: 'other', itemText: '주요 식재료 재고 현황 확인', sortOrder: 2 },
+          { targetTab: 'midday', checkType: 'other', itemText: '피크타임 인원 배치 확인', sortOrder: 3 },
+          { targetTab: 'midday', checkType: 'other', itemText: '고객 클레임/특이사항 기록', sortOrder: 4 },
+          // 마감 체크리스트
+          { targetTab: 'close', checkType: 'cleaning', itemText: '당일 매출 정산 (현금/카드/이체 확인)', sortOrder: 1 },
+          { targetTab: 'close', checkType: 'cleaning', itemText: '냉장/냉동고 온도 기록 확인', sortOrder: 2 },
+          { targetTab: 'close', checkType: 'cleaning', itemText: '주방 청소 및 정리 완료', sortOrder: 3 },
+          { targetTab: 'close', checkType: 'cleaning', itemText: '홀 청소 및 테이블 정리', sortOrder: 4 },
+          { targetTab: 'close', checkType: 'cleaning', itemText: '쓰레기 분리수거 및 반출', sortOrder: 5 },
+          { targetTab: 'close', checkType: 'cleaning', itemText: '가스 밸브 차단 확인', sortOrder: 6 },
+          { targetTab: 'close', checkType: 'cleaning', itemText: '전기 점검 (불필요 기기 OFF)', sortOrder: 7 },
+          { targetTab: 'close', checkType: 'cleaning', itemText: '문단속 및 보안 확인', sortOrder: 8 },
+        ];
+
+        for (const t of defaultTemplates) {
+          await conn.query(
+            `INSERT INTO store_checklist_templates (restaurantId, targetTab, checkType, itemText, requirementType, sortOrder, repeatType, isActive) VALUES (?, ?, ?, ?, 'none', ?, 'daily', 1)`,
+            [store.id, t.targetTab, t.checkType, t.itemText, t.sortOrder]
+          );
+        }
+        console.log(`[migrate] seeded default checklists for restaurant ${store.id}`);
+      }
+    } catch (e: any) {
+      console.log("[migrate] checklist seed skipped:", e.message);
+    }
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

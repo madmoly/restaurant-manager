@@ -1,8 +1,8 @@
-fix: require user confirmation before date change and counterparty update
+fix: 운영캘린더 다크모드 대비 개선 + 기본 체크리스트 시드
 
-- Invoice date: shows toast with "변경" button instead of auto-applying
-- Counterparty info: shows toast with "반영" button, calls dedicated API
-- Added POST /api/ocr/update-counterparty-info endpoint (user-initiated)
-- Removed auto-update of counterparty info from OCR flow
+- DayDetailContent: text-foreground/70 → text-muted-foreground, bg-muted/30 → bg-muted/50
+- 다크모드 emerald/blue 색상에 dark: variant 추가
+- 서버 마이그레이션에 기본 체크리스트 시드 추가 (오픈7/매입5/일간보고4/마감8)
+- 매장별 체크리스트 없으면 자동 등록
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
