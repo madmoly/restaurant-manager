@@ -23,11 +23,15 @@ export const businessGroupsRouter = router({
           .where(eq(users.id, g.adminId))
           .limit(1);
 
-        // 소속 매장
+        // 소속 매장 (tutorial 그룹은 tutorial 매장 포함)
+        const storeConditions = [
+          eq(restaurants.ownerAdminId, g.adminId),
+          isNull(restaurants.deletedAt),
+        ];
         const storeRows = await db
-          .select({ id: restaurants.id, name: restaurants.name, isActive: restaurants.isActive })
+          .select({ id: restaurants.id, name: restaurants.name, isActive: restaurants.isActive, isTutorial: restaurants.isTutorial })
           .from(restaurants)
-          .where(and(eq(restaurants.ownerAdminId, g.adminId), eq(restaurants.isTutorial, false), isNull(restaurants.deletedAt)));
+          .where(and(...storeConditions));
 
         // 소속 직원 (매장 경유)
         const storeIds = storeRows.map((s) => s.id);

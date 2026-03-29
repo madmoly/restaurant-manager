@@ -388,6 +388,40 @@ app.use(express.json());
         AND NOT EXISTS (SELECT 1 FROM business_groups bg WHERE bg.adminId = u.id)
     `).catch(() => {});
 
+    // ─── Tutorial 사업그룹: tutorial 데이터를 사업그룹 구조로 물리적 분리 ──────
+    // 1) Tutorial 전용 admin 생성 (없으면)
+    await conn.query(`
+      INSERT INTO users (username, passwordHash, name, role, isTutorial, isActive)
+      SELECT 'tutorial_admin', '$2a$10$placeholder_hash_not_for_login', 'Tutorial', 'admin', 1, 0
+      FROM dual
+      WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'tutorial_admin')
+    `).catch(() => {});
+
+    // 2) Tutorial 사업그룹 생성 (없으면)
+    await conn.query(`
+      INSERT INTO business_groups (name, adminId, description, isActive)
+      SELECT 'Tutorial 사업그룹', u.id, '튜토리얼 데이터 격리용 사업그룹 — 실 집계에서 자동 제외', 0
+      FROM users u
+      WHERE u.username = 'tutorial_admin'
+        AND NOT EXISTS (SELECT 1 FROM business_groups bg WHERE bg.adminId = u.id)
+    `).catch(() => {});
+
+    // 3) Tutorial 매장 → tutorial_admin 소유로 배정
+    await conn.query(`
+      UPDATE restaurants
+      SET ownerAdminId = (SELECT id FROM users WHERE username = 'tutorial_admin' LIMIT 1)
+      WHERE isTutorial = 1 AND (ownerAdminId IS NULL OR ownerAdminId != (
+        SELECT id FROM users WHERE username = 'tutorial_admin' LIMIT 1
+      ))
+    `).catch(() => {});
+
+    // 4) Tutorial 유저 parentId → tutorial_admin (아직 미설정인 tutorial 유저)
+    await conn.query(`
+      UPDATE users
+      SET parentId = (SELECT id FROM (SELECT id FROM users WHERE username = 'tutorial_admin') t)
+      WHERE isTutorial = 1 AND role != 'admin' AND parentId IS NULL
+    `).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

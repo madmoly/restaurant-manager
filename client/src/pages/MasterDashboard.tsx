@@ -434,7 +434,14 @@ function BusinessGroupManager() {
                   <div className="flex items-center gap-3 min-w-0">
                     <div className={`w-2 h-10 rounded-full ${g.isActive ? "bg-primary" : "bg-muted"}`} />
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate">{g.name}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-semibold text-foreground truncate">{g.name}</p>
+                        {!g.isActive && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 font-medium shrink-0">
+                            Tutorial
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[10px] text-muted-foreground">
                         대표: {g.admin?.name ?? "—"} (@{g.admin?.username ?? "—"})
                         {g.subAdminCount > 0 && ` · SUB대표 ${g.subAdminCount}명`}

@@ -1,25 +1,15 @@
-feat: 사업그룹 엔티티 신설 — 대표+매장+직원 최상위 조직 단위
+feat: Tutorial 데이터를 사업그룹 구조로 물리적 분리
 
-사업그룹(business_groups) = 대표(admin) + 소속 매장 + 소속 직원을 묶는 공식 엔티티.
-기존 ownerAdminId 기반 암묵적 그룹핑을 명시적 조직 구조로 격상.
+Migration (server/index.ts):
+- tutorial_admin 전용 계정 자동 생성 (isTutorial=1, isActive=0, 로그인 불가)
+- "Tutorial 사업그룹" 생성 → tutorial_admin 소유, isActive=0
+- tutorial 매장 ownerAdminId → tutorial_admin으로 배정
+- tutorial 유저 parentId → tutorial_admin으로 연결
 
-Schema:
-- business_groups 테이블: id, name, adminId, description, isActive
-
-Migration:
-- CREATE TABLE IF NOT EXISTS business_groups
-- 기존 admin 자동 백필: "{admin.name} 사업그룹" 자동 생성
-
-Router (server/routers/businessGroups.ts):
-- list: 그룹별 대표명/매장수/직원수/SUB대표수 집계
-- create: 사업그룹 + 대표 계정 한번에 생성 (또는 기존 admin 연결)
-- update: 그룹명/설명/활성상태 수정
-- assignStore: 매장→사업그룹 배정 (ownerAdminId 설정)
+Router (businessGroups.ts):
+- list: 소속 매장 조회에서 isTutorial 필터 제거 → tutorial 그룹도 매장 표시
 
 UI (MasterDashboard):
-- OwnershipManager → BusinessGroupManager 전면 교체
-- 사업그룹 카드: 접기/펼치기, 대표정보/소속매장/직원수 표시
-- 사업그룹 생성 폼: 그룹명 + 대표 계정 통합 생성
-- 미배정 매장: 그룹 선택 드롭다운으로 배정
+- isActive=false 그룹에 "Tutorial" 뱃지 표시
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
