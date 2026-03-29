@@ -136,13 +136,6 @@ const STORE_NAV_GROUPS: NavGroup[] = [
     label: "재무",
     items: [
       {
-        label: "인건비 정산", href: "/labor-cost",
-        icon: <Coins className="h-4 w-4" />,
-        mobileIcon: <Coins className="h-5 w-5" />,
-        roles: ["master", "admin", "manager"],
-        requireStoreRole: ["owner", "store_manager"],  // 점장만 (매니져 제외)
-      },
-      {
         label: "수익 분석",
         href: "/profitability",
         icon: <BarChart3 className="h-4 w-4" />,
@@ -151,16 +144,23 @@ const STORE_NAV_GROUPS: NavGroup[] = [
         mobileTabPriority: { master: 4, admin: 4, manager: 4 },
       },
       {
-        label: "고정비 관리", href: "/fixed-costs",
-        icon: <Receipt className="h-4 w-4" />,
-        mobileIcon: <Receipt className="h-5 w-5" />,
+        label: "인건비 정산", href: "/labor-cost",
+        icon: <Coins className="h-4 w-4" />,
+        mobileIcon: <Coins className="h-5 w-5" />,
         roles: ["master", "admin", "manager"],
+        requireStoreRole: ["owner", "store_manager"],  // 점장만 (매니져 제외)
       },
       {
         label: "매입 관리", href: "/purchase-management",
         icon: <ShoppingCart className="h-4 w-4" />,
         mobileIcon: <ShoppingCart className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "staff"],
+      },
+      {
+        label: "고정비 관리", href: "/fixed-costs",
+        icon: <Receipt className="h-4 w-4" />,
+        mobileIcon: <Receipt className="h-5 w-5" />,
+        roles: ["master", "admin", "manager"],
       },
     ],
   },
