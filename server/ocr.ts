@@ -23,7 +23,7 @@ ocrRouter.get("/debug", async (_req: Request, res: Response) => {
     sharpStatus = `fail: ${err.message}`;
   }
   res.json({
-    version: "61598d8",  // 커밋 해시 — 배포 확인용
+    version: "67ea495",  // 커밋 해시 — 배포 확인용
     timestamp: new Date().toISOString(),
     sharp: sharpStatus,
     node: process.version,
