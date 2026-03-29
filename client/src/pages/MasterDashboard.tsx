@@ -50,6 +50,55 @@ export default function MasterDashboard() {
         description={`${year}년 ${month}월 · 개발자 콘솔`}
       />
 
+      {/* 전체 매장 금일 현황 */}
+      {todayStatuses && todayStatuses.length > 0 && (
+        <Card className="p-5">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
+            <Activity size={14} className="text-primary" />
+            전체 매장 금일 현황
+            <span className="text-xs font-normal text-muted-foreground ml-1">{todayStr}</span>
+          </h3>
+          <div className="space-y-2">
+            {todayStatuses.map((st: any) => (
+              <div key={st.restaurantId} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card/50">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <Store size={14} className="text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{st.name}</p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${st.isOpenChecked ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>
+                        {st.isOpenChecked ? '오픈✓' : '오픈✗'}
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${st.isCloseDone ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>
+                        {st.isCloseDone ? '마감✓' : '미마감'}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">{st.staffCount}명 출근</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-3">
+                  {st.midSalesTotal > 0 ? (
+                    <>
+                      <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(st.midSalesTotal)}원</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {st.midSalesReceipts > 0 && `${st.midSalesReceipts}건 · `}
+                        {st.lastMidSalesTime && new Date(st.lastMidSalesTime).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </>
+                  ) : st.isCloseDone && st.closingTotal != null ? (
+                    <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(st.closingTotal)}원</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">매출 미입력</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* 시스템 KPI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
@@ -137,55 +186,6 @@ export default function MasterDashboard() {
           </div>
         </Card>
       </div>
-
-      {/* 전체 매장 금일 현황 */}
-      {todayStatuses && todayStatuses.length > 0 && (
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
-            <Activity size={14} className="text-primary" />
-            전체 매장 금일 현황
-            <span className="text-xs font-normal text-muted-foreground ml-1">{todayStr}</span>
-          </h3>
-          <div className="space-y-2">
-            {todayStatuses.map((st: any) => (
-              <div key={st.restaurantId} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card/50">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <Store size={14} className="text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{st.name}</p>
-                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${st.isOpenChecked ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>
-                        {st.isOpenChecked ? '오픈✓' : '오픈✗'}
-                      </span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${st.isCloseDone ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>
-                        {st.isCloseDone ? '마감✓' : '미마감'}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">{st.staffCount}명 출근</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right shrink-0 ml-3">
-                  {st.midSalesTotal > 0 ? (
-                    <>
-                      <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(st.midSalesTotal)}원</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {st.midSalesReceipts > 0 && `${st.midSalesReceipts}건 · `}
-                        {st.lastMidSalesTime && new Date(st.lastMidSalesTime).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </>
-                  ) : st.isCloseDone && st.closingTotal != null ? (
-                    <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(st.closingTotal)}원</p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">매출 미입력</p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
 
       {/* 매장 현황 + 시스템 알림 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
