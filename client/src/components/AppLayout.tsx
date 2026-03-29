@@ -79,12 +79,12 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
 
 // ─── 매장별 운영 메뉴 (점장 기준, master/admin도 매장 선택 시 동일하게 표시) ──
 // 모바일 하단탭 목표:
-//   master/admin: 사업현황(1), 사용자관리/전체매장(2), 스케줄(3), 매출캘린더(4)
-//   manager:      대시보드(1), 일일운영(2), 스케줄(3), 매출캘린더(4)
+//   master/admin: 사업현황(1), 사용자관리/전체매장(2), 스케줄(3), 수익분석(4)
+//   manager:      대시보드(1), 일일운영(2), 스케줄(3), 수익분석(4)
 //   staff:        대시보드(1), 일일운영(2), 스케줄(3)
 const STORE_NAV_GROUPS: NavGroup[] = [
   {
-    label: "일일 운영",
+    label: "운영",
     items: [
       {
         label: "대시보드", href: "/",
@@ -115,7 +115,7 @@ const STORE_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "인사 관리",
+    label: "인사",
     items: [
       {
         label: "스케줄", href: "/schedule",
@@ -133,7 +133,7 @@ const STORE_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "재무 분석",
+    label: "재무",
     items: [
       {
         label: "인건비 정산", href: "/labor-cost",
@@ -143,7 +143,7 @@ const STORE_NAV_GROUPS: NavGroup[] = [
         requireStoreRole: ["owner", "store_manager"],  // 점장만 (매니져 제외)
       },
       {
-        label: "매출캘린더",
+        label: "수익 분석",
         href: "/profitability",
         icon: <BarChart3 className="h-4 w-4" />,
         mobileIcon: <BarChart3 className="h-5 w-5" />,
