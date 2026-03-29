@@ -279,6 +279,7 @@ export const schedules = mysqlTable("schedules", {
   // DB enum에 published/scheduled 잔존 (하위호환), 신규 코드에서는 사용하지 않음
   status: mysqlEnum("status", ["draft", "scheduled", "published", "completed", "confirmed", "canceled"]).default("draft").notNull(),
   shiftPreset: mysqlEnum("shiftPreset", ["open", "full", "close", "custom"]).default("custom"),
+  breakMinutes: int("breakMinutes").default(0),
   note: text("note"),
   editReason: text("editReason"),
   payrollRecheckRequired: boolean("payrollRecheckRequired").default(false).notNull(),

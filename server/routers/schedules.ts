@@ -256,11 +256,15 @@ export const schedulesRouter = router({
       };
       const p = presets[input.preset];
 
+      // 풀타임이면 기본 휴게시간 60분
+      const breakMinutes = input.preset === "fullday" ? 60 : 0;
+
       const [result] = await db.insert(schedules).values({
         userId: input.userId,
         restaurantId: input.restaurantId,
         startTime: new Date(`${input.workDate}T${p.start}:00+09:00`),
         endTime: new Date(`${input.workDate}T${p.end}:00+09:00`),
+        breakMinutes,
         note: input.note,
         createdBy: ctx.user.userId,
         status: "draft",
@@ -283,6 +287,7 @@ export const schedulesRouter = router({
           .enum(["draft", "completed", "confirmed", "canceled"])
           .optional(),
         shiftPreset: z.enum(["open", "full", "close", "custom"]).optional(),
+        breakMinutes: z.number().min(0).max(240).optional(),
         note: z.string().optional(),
         editReason: z.string().optional(),
       })
@@ -727,7 +732,9 @@ export const schedulesRouter = router({
           };
         }
 
-        const hours = (new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 3600000;
+        const grossHours = (new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 3600000;
+        const breakHours = ((r as any).breakMinutes ?? 0) / 60;
+        const hours = Math.max(0, grossHours - breakHours);
         let wage = 0;
         if (r.tempWageType === "hourly" && r.tempWageAmount) {
           wage = hours * Number(r.tempWageAmount);

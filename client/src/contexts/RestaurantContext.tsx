@@ -9,6 +9,9 @@ interface Restaurant {
   phone?: string | null;
   latitude?: string | null;
   longitude?: string | null;
+  openTime?: string | null;
+  closeTime?: string | null;
+  monthlyTargetSales?: string | null;
   storeRole?: string | null;
 }
 
@@ -50,6 +53,9 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
         phone: r.phone,
         latitude: r.latitude,
         longitude: r.longitude,
+        openTime: r.openTime,
+        closeTime: r.closeTime,
+        monthlyTargetSales: r.monthlyTargetSales,
       }))
     : (myStoresQuery.data ?? []).map((s: any) => ({
         id: s.restaurant?.id ?? s.id,
@@ -58,6 +64,9 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
         phone: s.restaurant?.phone ?? s.phone,
         latitude: s.restaurant?.latitude ?? s.latitude,
         longitude: s.restaurant?.longitude ?? s.longitude,
+        openTime: s.restaurant?.openTime ?? s.openTime,
+        closeTime: s.restaurant?.closeTime ?? s.closeTime,
+        monthlyTargetSales: s.restaurant?.monthlyTargetSales ?? s.monthlyTargetSales,
         storeRole: s.storeRole ?? null,
       }));
 

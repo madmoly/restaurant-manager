@@ -241,11 +241,13 @@ export const dailyOpsRouter = router({
       const fullHours = closeH - openH; // 매장 전체 운영 시간
       const threshold = (store?.halfShiftThreshold ?? 60) / 100;
 
-      // 각 스케줄의 근무시간 계산 + 반차 판별
+      // 각 스케줄의 근무시간 계산 + 반차 판별 (휴게시간 차감)
       const staffWithHours = rows.map((r) => {
         const st = r.startTime ? new Date(r.startTime) : null;
         const et = r.endTime ? new Date(r.endTime) : null;
-        const hours = st && et ? (et.getTime() - st.getTime()) / 3600000 : 0;
+        const grossHours = st && et ? (et.getTime() - st.getTime()) / 3600000 : 0;
+        const breakHours = ((r as any).breakMinutes ?? 0) / 60;
+        const hours = Math.max(0, grossHours - breakHours);
         const isHalf = fullHours > 0 ? (hours / fullHours) < threshold : false;
         return { ...r, hours: Math.round(hours * 10) / 10, isHalf };
       });

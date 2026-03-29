@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import {
   Plus, X, Edit3, Trash2, Pin, Megaphone, DoorOpen, Phone, BookOpen,
-  MoreHorizontal, Info,
+  MoreHorizontal, Info, Clock, Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -19,6 +19,118 @@ const CARD_TYPES = [
 
 function getCardType(val: string) {
   return CARD_TYPES.find((t) => t.value === val) ?? CARD_TYPES[4];
+}
+
+// ─── 매장 기본정보 섹션 ──────────────────────────────────────────────────────
+function StoreBasicInfo({ restaurantId, isManager }: { restaurantId: number; isManager: boolean }) {
+  const { selectedRestaurant: current } = useRestaurant();
+  const utils = trpc.useUtils();
+  const [editing, setEditing] = useState(false);
+  const [openTime, setOpenTime] = useState(current?.openTime ?? "09:00");
+  const [closeTime, setCloseTime] = useState(current?.closeTime ?? "22:00");
+
+  const updateMut = trpc.restaurants.update.useMutation({
+    onSuccess() {
+      toast.success("영업시간이 변경되었습니다");
+      utils.restaurants.list.invalidate();
+      utils.restaurants.listMine.invalidate();
+      setEditing(false);
+    },
+    onError(e) { toast.error(e.message); },
+  });
+
+  const handleSave = () => {
+    if (!restaurantId) return;
+    updateMut.mutate({ id: restaurantId, openTime, closeTime });
+  };
+
+  if (!current) return null;
+
+  return (
+    <div className="border border-border rounded-lg bg-card overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 bg-muted/30 border-b border-border">
+        <Settings className="w-4 h-4 text-primary" />
+        <span className="font-semibold text-sm text-foreground">매장 기본정보</span>
+      </div>
+      <div className="p-4 space-y-3">
+        {/* 매장명 */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">매장명</span>
+          <span className="text-sm font-medium text-foreground">{current.name}</span>
+        </div>
+        {/* 주소 */}
+        {current.address && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">주소</span>
+            <span className="text-sm text-foreground">{current.address}</span>
+          </div>
+        )}
+        {/* 연락처 */}
+        {current.phone && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">연락처</span>
+            <span className="text-sm text-foreground">{current.phone}</span>
+          </div>
+        )}
+        {/* 영업시간 */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Clock className="w-3 h-3" /> 영업시간
+          </span>
+          {!editing ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">
+                {current.openTime ?? "09:00"} ~ {current.closeTime ?? "22:00"}
+              </span>
+              {isManager && (
+                <button
+                  onClick={() => {
+                    setOpenTime(current.openTime ?? "09:00");
+                    setCloseTime(current.closeTime ?? "22:00");
+                    setEditing(true);
+                  }}
+                  className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="time"
+                value={openTime}
+                onChange={(e) => setOpenTime(e.target.value)}
+                className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm"
+              />
+              <span className="text-muted-foreground text-xs">~</span>
+              <input
+                type="time"
+                value={closeTime}
+                onChange={(e) => setCloseTime(e.target.value)}
+                className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm"
+              />
+              <Button size="sm" variant="default" onClick={handleSave} disabled={updateMut.isPending} className="h-7 px-2 text-xs">
+                저장
+              </Button>
+              <button onClick={() => setEditing(false)} className="p-1 rounded hover:bg-accent text-muted-foreground">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+        {/* 월 매출 목표 */}
+        {current.monthlyTargetSales && Number(current.monthlyTargetSales) > 0 && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">월 매출목표</span>
+            <span className="text-sm text-foreground">
+              {Number(current.monthlyTargetSales).toLocaleString()}원
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function StoreInfoPage() {
@@ -55,6 +167,9 @@ export default function StoreInfoPage() {
 
   return (
     <div className="max-w-2xl mx-auto py-6 px-4 space-y-4">
+      {/* 매장 기본정보 섹션 */}
+      <StoreBasicInfo restaurantId={restaurantId} isManager={isManager} />
+
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

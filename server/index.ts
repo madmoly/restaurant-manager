@@ -445,6 +445,11 @@ app.use(express.json());
       WHERE isTutorial = 1 AND role != 'admin' AND parentId IS NULL
     `).catch(() => {});
 
+    // 5-a) schedules 테이블에 breakMinutes 컬럼 추가
+    await conn.query(`
+      ALTER TABLE schedules ADD COLUMN IF NOT EXISTS breakMinutes INT DEFAULT 0
+    `).catch(() => {});
+
     // 5) 기본 체크리스트 시드 — 매장별로 체크리스트가 없으면 기본 항목 등록
     try {
       const [restaurants] = await conn.query(`SELECT id FROM restaurants`) as any[];

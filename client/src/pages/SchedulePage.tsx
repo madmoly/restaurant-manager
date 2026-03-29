@@ -93,6 +93,7 @@ type ScheduleItem = {
   endTime: string | Date;
   status: string;
   shiftPreset: string | null;
+  breakMinutes: number | null;
   note: string | null;
   editReason: string | null;
   payrollRecheckRequired: boolean | null;
@@ -340,7 +341,7 @@ export default function SchedulePage() {
   });
 
   const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
-  const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "", shiftPreset: "custom" as string });
+  const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "", shiftPreset: "custom" as string, breakMinutes: 0 });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   // showBulkMenu 삭제 — 버튼이 헤더에 직접 노출됨
@@ -559,6 +560,7 @@ export default function SchedulePage() {
       note: schedule.note ?? "",
       editReason: "",
       shiftPreset: schedule.shiftPreset ?? "custom",
+      breakMinutes: schedule.breakMinutes ?? 0,
     });
     setDeleteConfirm(false);
   };
@@ -573,6 +575,7 @@ export default function SchedulePage() {
       startTime: editForm.startTime,
       endTime: editForm.endTime,
       shiftPreset: editForm.shiftPreset as "open" | "full" | "close" | "custom",
+      breakMinutes: editForm.breakMinutes,
       note: editForm.note || undefined,
       editReason: editForm.editReason || undefined,
     });
@@ -677,7 +680,15 @@ export default function SchedulePage() {
                   {daySchedules.length > 0 && (() => {
                     const headcount = daySchedules.reduce((sum, s) =>
                       sum + (s.shiftPreset === "open" || s.shiftPreset === "close" ? 0.5 : 1), 0);
-                    return <span className="ml-1 text-[10px] md:text-xs font-normal">({headcount % 1 === 0 ? headcount : headcount.toFixed(1)}명)</span>;
+                    const totalHours = daySchedules.reduce((sum, s) => {
+                      const st = new Date(s.startTime).getTime();
+                      const et = new Date(s.endTime).getTime();
+                      const gross = (et - st) / 3600000;
+                      const brk = (s.breakMinutes ?? 0) / 60;
+                      return sum + Math.max(0, gross - brk);
+                    }, 0);
+                    const hDisp = totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1);
+                    return <span className="ml-1 text-[10px] md:text-xs font-normal">({headcount % 1 === 0 ? headcount : headcount.toFixed(1)}명 {hDisp}h)</span>;
                   })()}
                 </span>
                 {daySchedules.some((s) => s.status === "draft") && (
@@ -708,6 +719,7 @@ export default function SchedulePage() {
                         </span>
                         <span className="text-muted-foreground text-[10px] md:text-[11px] shrink-0">
                           {presetInfo ? presetInfo.label : `${fmtTime(s.startTime)}~${fmtTime(s.endTime)}`}
+                          {(s.breakMinutes ?? 0) > 0 && <span className="ml-0.5 text-orange-500">(휴{s.breakMinutes}분)</span>}
                         </span>
                       </div>
                       {(s.status === "draft" || s.status === "canceled") && (
@@ -1112,10 +1124,11 @@ export default function SchedulePage() {
                       type="button"
                       onClick={() => {
                         const times = getPresetTimes(key);
+                        const brk = key === "full" ? 60 : 0;
                         if (times) {
-                          setEditForm({ ...editForm, shiftPreset: key, startTime: times.startTime, endTime: times.endTime });
+                          setEditForm({ ...editForm, shiftPreset: key, startTime: times.startTime, endTime: times.endTime, breakMinutes: brk });
                         } else {
-                          setEditForm({ ...editForm, shiftPreset: key });
+                          setEditForm({ ...editForm, shiftPreset: key, breakMinutes: brk });
                         }
                       }}
                       className={`flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg border text-xs font-medium transition-colors ${
@@ -1149,6 +1162,35 @@ export default function SchedulePage() {
                     value={editForm.endTime}
                     onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value, shiftPreset: "custom" })}
                   />
+                </div>
+              </div>
+
+              {/* 휴게시간 */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">휴게시간 (분)</label>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="number"
+                    min={0}
+                    max={240}
+                    step={10}
+                    className="w-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={editForm.breakMinutes}
+                    onChange={(e) => setEditForm({ ...editForm, breakMinutes: Math.max(0, Number(e.target.value)) })}
+                  />
+                  <span className="text-xs text-muted-foreground">분</span>
+                  {editForm.breakMinutes > 0 && (() => {
+                    const [sh, sm] = editForm.startTime.split(":").map(Number);
+                    const [eh, em] = editForm.endTime.split(":").map(Number);
+                    const totalMin = (eh * 60 + em) - (sh * 60 + sm);
+                    const netMin = totalMin - editForm.breakMinutes;
+                    if (netMin > 0) {
+                      const h = Math.floor(netMin / 60);
+                      const m = netMin % 60;
+                      return <span className="text-xs text-muted-foreground">(실근무 {h}시간{m > 0 ? ` ${m}분` : ""})</span>;
+                    }
+                    return null;
+                  })()}
                 </div>
               </div>
 
