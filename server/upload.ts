@@ -168,6 +168,34 @@ uploadRouter.post("/fixed-cost-attachment", fixedCostUpload.single("file"), (req
 });
 
 /**
+ * POST /api/upload/rotate-image
+ * 업로드된 이미지를 90° 시계방향 회전 → 파일 덮어쓰기
+ * Body: { url: "/uploads/orders/..." }
+ */
+uploadRouter.post("/rotate-image", async (req: Request, res: Response) => {
+  const { url } = req.body;
+  if (!url || typeof url !== "string") {
+    res.status(400).json({ error: "url이 필요합니다" });
+    return;
+  }
+  try {
+    const relativePath = url.replace(/^\/uploads\//, "");
+    const filePath = path.join(UPLOAD_ROOT, relativePath);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: "파일을 찾을 수 없습니다" });
+      return;
+    }
+    const rotated = await sharp(filePath).rotate(90).toBuffer();
+    fs.writeFileSync(filePath, rotated);
+    console.log(`[upload] 수동 90° 회전: ${path.basename(filePath)} (${(rotated.length / 1024).toFixed(0)}KB)`);
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error("[upload] 회전 실패:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * POST /api/upload/order-image-replace
  * OCR 분석 완료 후 고품질 이미지를 저품질로 교체 (저장 공간 절약)
  * Body: multipart { photo: File, replaceUrl: string }

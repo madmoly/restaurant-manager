@@ -22,6 +22,7 @@ import {
   Users,
   ZoomIn,
   Pencil,
+  RotateCw,
 } from 'lucide-react';
 
 // ============================================================================
@@ -1302,27 +1303,53 @@ function PurchaseTab({
 
           {/* OCR 미리보기 이미지 */}
           {ocrPreviewUrl && !ocrProcessing && (
-            <div className="relative">
-              <img
-                src={ocrPreviewUrl}
-                alt="전표 이미지"
-                className="w-full rounded-lg border border-border max-h-40 object-contain bg-muted/20 cursor-pointer"
-                onClick={() => setViewerImage(ocrPreviewUrl)}
-              />
-              <button
-                onClick={() => setViewerImage(ocrPreviewUrl)}
-                className="absolute top-2 left-2 bg-black/50 text-white rounded-full p-1.5"
-                title="확대 보기"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => { setOcrPreviewUrl(null); setAttachmentUrl(undefined); }}
-                className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
-              >
-                <X className="w-3 h-3" />
-              </button>
-              <span className="absolute bottom-2 left-2 text-[10px] text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-1.5 py-0.5 rounded">AI 추출 — 확인 필요</span>
+            <div className="space-y-1">
+              <div className="relative">
+                <img
+                  src={ocrPreviewUrl + (ocrPreviewUrl.startsWith('/') ? `?t=${Date.now()}` : '')}
+                  alt="전표 이미지"
+                  className="w-full rounded-lg border border-border max-h-40 object-contain bg-muted/20 cursor-pointer"
+                  onClick={() => setViewerImage(ocrPreviewUrl + (ocrPreviewUrl.startsWith('/') ? `?t=${Date.now()}` : ''))}
+                />
+                <button
+                  onClick={() => setViewerImage(ocrPreviewUrl + (ocrPreviewUrl.startsWith('/') ? `?t=${Date.now()}` : ''))}
+                  className="absolute top-2 left-2 bg-black/50 text-white rounded-full p-1.5"
+                  title="확대 보기"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+                {/* 90° 회전 버튼 */}
+                <button
+                  onClick={async () => {
+                    if (!attachmentUrl) return;
+                    try {
+                      const resp = await fetch('/api/upload/rotate-image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: attachmentUrl }),
+                      });
+                      if (!resp.ok) throw new Error('회전 실패');
+                      // 캐시 무효화: 같은 URL에 타임스탬프 추가
+                      setOcrPreviewUrl(attachmentUrl);
+                      toast.success('이미지 90° 회전 완료');
+                    } catch {
+                      toast.error('이미지 회전 실패');
+                    }
+                  }}
+                  className="absolute top-2 left-10 bg-black/50 text-white rounded-full p-1.5"
+                  title="90° 회전"
+                >
+                  <RotateCw className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => { setOcrPreviewUrl(null); setAttachmentUrl(undefined); }}
+                  className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+                <span className="absolute bottom-2 left-2 text-[10px] text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-1.5 py-0.5 rounded">AI 추출 — 확인 필요</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground text-center">이미지가 옆으로 보이면 <RotateCw className="w-3 h-3 inline" /> 버튼으로 정방향으로 돌려주세요</p>
             </div>
           )}
 
