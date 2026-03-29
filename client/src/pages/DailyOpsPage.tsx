@@ -926,10 +926,10 @@ function PurchaseTab({
       setOcrProcessing(true);
       setOcrError(null);
 
-      // 1단계: 고품질 이미지로 업로드 (서버에서 EXIF 회전 적용)
-      const highQuality = await resizeImage(file, OCR_HIGH);
+      // 1단계: 원본 파일 그대로 업로드 (서버에서 EXIF 회전 + 리사이즈 처리)
+      // Canvas를 거치면 EXIF가 소실되어 서버에서 회전 불가능하므로 원본 전송
       const formData = new FormData();
-      formData.append('photo', highQuality);
+      formData.append('photo', file);
 
       const uploadRes = await fetch('/api/upload/order-image', {
         method: 'POST',

@@ -23,7 +23,7 @@ ocrRouter.get("/debug", async (_req: Request, res: Response) => {
     sharpStatus = `fail: ${err.message}`;
   }
   res.json({
-    version: "67ea495",  // 커밋 해시 — 배포 확인용
+    version: "v3-raw-upload",  // 원본 파일 직접 업로드 + 서버 EXIF 회전
     timestamp: new Date().toISOString(),
     sharp: sharpStatus,
     node: process.version,

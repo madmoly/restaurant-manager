@@ -101,14 +101,23 @@ uploadRouter.post("/order-image", orderUpload.single("photo"), async (req: Reque
     return;
   }
 
-  // EXIF orientation 기반 자동 회전 → 파일 덮어쓰기
+  // EXIF orientation 기반 자동 회전 + OCR용 리사이즈 → 파일 덮어쓰기
+  // 원본 파일(EXIF 포함)을 직접 받으므로 서버에서 회전 처리
   // 이후 OCR, 프리뷰, 저장 모두 정방향 이미지 사용
   try {
-    const rotated = await sharp(req.file.path).rotate().toBuffer();
-    fs.writeFileSync(req.file.path, rotated);
-    console.log(`[upload] EXIF 회전 적용: ${path.basename(req.file.path)} (${(rotated.length / 1024).toFixed(0)}KB)`);
+    const original = fs.readFileSync(req.file.path);
+    console.log(`[upload] 원본 크기: ${path.basename(req.file.path)} (${(original.length / 1024).toFixed(0)}KB)`);
+
+    const processed = await sharp(req.file.path)
+      .rotate()  // EXIF orientation 기반 자동 회전 + 태그 제거
+      .resize(2560, 2560, { fit: "inside", withoutEnlargement: true })  // OCR용 최대 2560px
+      .jpeg({ quality: 92 })
+      .toBuffer();
+
+    fs.writeFileSync(req.file.path, processed);
+    console.log(`[upload] EXIF 회전+리사이즈 완료: ${path.basename(req.file.path)} (${(original.length / 1024).toFixed(0)}KB → ${(processed.length / 1024).toFixed(0)}KB)`);
   } catch (err) {
-    console.warn(`[upload] EXIF 회전 실패 (원본 유지): ${path.basename(req.file.path)}`, err);
+    console.warn(`[upload] 이미지 처리 실패 (원본 유지): ${path.basename(req.file.path)}`, err);
   }
 
   const relativePath = path.relative(UPLOAD_ROOT, req.file.path).replace(/\\/g, "/");
