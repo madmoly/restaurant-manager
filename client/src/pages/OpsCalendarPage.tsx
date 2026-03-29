@@ -45,27 +45,27 @@ function DayDetailContent({ restaurantId, date }: {
     <div className="space-y-4">
       {/* 일일운영 상태 */}
       <section>
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <h4 className="text-xs font-semibold text-foreground/70 uppercase tracking-wider mb-2 flex items-center gap-1.5">
           <ClipboardCheck className="w-3.5 h-3.5" /> 일일 운영
         </h4>
-        <div className="bg-muted/50 rounded-lg p-3 space-y-1.5">
+        <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground">오픈</span>
+            <span className="text-foreground/70">오픈</span>
             {data.operation?.openCheckedAt ? (
               <span className="text-emerald-600 font-medium flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3" />
                 {fmtTime(data.operation.openCheckedAt)} · {data.operation.openHeadcount ?? 0}명
               </span>
-            ) : <span className="text-muted-foreground/50">미완료</span>}
+            ) : <span className="text-muted-foreground">미완료</span>}
           </div>
           <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground">마감</span>
+            <span className="text-foreground/70">마감</span>
             {data.operation?.closeCheckedAt ? (
               <span className="text-emerald-600 font-medium flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3" />
                 {fmtTime(data.operation.closeCheckedAt)} · {data.operation.closeHeadcount ?? 0}명{data.operation.closedByName ? ` · ${data.operation.closedByName}` : ""}
               </span>
-            ) : <span className="text-muted-foreground/50">미완료</span>}
+            ) : <span className="text-muted-foreground">미완료</span>}
           </div>
           {data.checklists.length > 0 && (
             <div className="pt-1 border-t border-border/50 mt-1">
@@ -74,8 +74,8 @@ function DayDetailContent({ restaurantId, date }: {
                 const label = tabLabels[c.targetTab] ?? c.targetTab ?? c.checkType;
                 return (
                   <div key={i} className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">{label} 체크</span>
-                    <span className={c.checkedCount > 0 ? "text-emerald-600" : "text-muted-foreground/50"}>
+                    <span className="text-foreground/70">{label} 체크</span>
+                    <span className={c.checkedCount > 0 ? "text-emerald-600 font-medium" : "text-muted-foreground"}>
                       {c.checkedCount}항목 완료
                     </span>
                   </div>
@@ -88,18 +88,18 @@ function DayDetailContent({ restaurantId, date }: {
 
       {/* 스케줄 */}
       <section>
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <h4 className="text-xs font-semibold text-foreground/70 uppercase tracking-wider mb-2 flex items-center gap-1.5">
           <Users className="w-3.5 h-3.5" /> 스케줄 ({data.schedules.length}명)
         </h4>
         {data.schedules.length === 0 ? (
-          <p className="text-xs text-muted-foreground/50 pl-1">등록된 스케줄 없음</p>
+          <p className="text-xs text-muted-foreground pl-1">등록된 스케줄 없음</p>
         ) : (
           <div className="space-y-1">
             {data.schedules.map((s: any) => (
-              <div key={s.id} className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
+              <div key={s.id} className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2">
                 <span className="text-xs font-medium text-foreground">{s.name}</span>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-[11px] text-foreground/60">
                     {fmtTime(s.startTime)}~{fmtTime(s.endTime)}
                   </span>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
@@ -116,34 +116,34 @@ function DayDetailContent({ restaurantId, date }: {
 
       {/* 매출 */}
       <section>
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <h4 className="text-xs font-semibold text-foreground/70 uppercase tracking-wider mb-2 flex items-center gap-1.5">
           <Receipt className="w-3.5 h-3.5" /> 매출
         </h4>
         {!data.sales ? (
-          <p className="text-xs text-muted-foreground/50 pl-1">매출 입력 없음</p>
+          <p className="text-xs text-muted-foreground pl-1">매출 입력 없음</p>
         ) : (
-          <div className="bg-muted/50 rounded-lg p-3 space-y-1.5">
+          <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">총 매출</span>
+              <span className="text-xs text-foreground/70">총 매출</span>
               <span className="text-sm font-bold text-foreground">₩{data.sales.totalAmount.toLocaleString()}</span>
             </div>
             <div className="grid grid-cols-2 gap-1 pt-1 border-t border-border/50">
               {data.sales.cashAmount > 0 && (
-                <div className="text-[11px]"><span className="text-muted-foreground">현금</span> <span className="font-medium">{fmtWon(data.sales.cashAmount)}</span></div>
+                <div className="text-[11px]"><span className="text-foreground/60">현금</span> <span className="font-medium text-foreground">{fmtWon(data.sales.cashAmount)}</span></div>
               )}
               {data.sales.cardAmount > 0 && (
-                <div className="text-[11px]"><span className="text-muted-foreground">카드</span> <span className="font-medium">{fmtWon(data.sales.cardAmount)}</span></div>
+                <div className="text-[11px]"><span className="text-foreground/60">카드</span> <span className="font-medium text-foreground">{fmtWon(data.sales.cardAmount)}</span></div>
               )}
               {data.sales.giftCardAmount > 0 && (
-                <div className="text-[11px]"><span className="text-muted-foreground">상항권</span> <span className="font-medium">{fmtWon(data.sales.giftCardAmount)}</span></div>
+                <div className="text-[11px]"><span className="text-foreground/60">상품권</span> <span className="font-medium text-foreground">{fmtWon(data.sales.giftCardAmount)}</span></div>
               )}
               {data.sales.transferAmount > 0 && (
-                <div className="text-[11px]"><span className="text-muted-foreground">이체</span> <span className="font-medium">{fmtWon(data.sales.transferAmount)}</span></div>
+                <div className="text-[11px]"><span className="text-foreground/60">이체</span> <span className="font-medium text-foreground">{fmtWon(data.sales.transferAmount)}</span></div>
               )}
             </div>
             {data.midSalesTotal > 0 && (
               <div className="text-[11px] pt-1 border-t border-border/50">
-                <span className="text-muted-foreground">중간매출 합계</span> <span className="font-medium">₩{data.midSalesTotal.toLocaleString()}</span>
+                <span className="text-foreground/60">중간매출 합계</span> <span className="font-medium text-foreground">₩{data.midSalesTotal.toLocaleString()}</span>
               </div>
             )}
           </div>
@@ -152,21 +152,21 @@ function DayDetailContent({ restaurantId, date }: {
 
       {/* 매입 */}
       <section>
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <h4 className="text-xs font-semibold text-foreground/70 uppercase tracking-wider mb-2 flex items-center gap-1.5">
           <ShoppingCart className="w-3.5 h-3.5" /> 매입 ({data.purchases.length}건)
         </h4>
         {data.purchases.length === 0 ? (
-          <p className="text-xs text-muted-foreground/50 pl-1">매입 내역 없음</p>
+          <p className="text-xs text-muted-foreground pl-1">매입 내역 없음</p>
         ) : (
           <div className="space-y-1">
             {data.purchases.map((p: any) => (
-              <div key={p.id} className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
+              <div key={p.id} className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2">
                 <span className="text-xs font-medium text-foreground">{p.counterparty}</span>
                 <span className="text-xs text-foreground font-medium">₩{p.amount.toLocaleString()}</span>
               </div>
             ))}
             <div className="flex items-center justify-between px-3 pt-1">
-              <span className="text-xs text-muted-foreground font-medium">매입 합계</span>
+              <span className="text-xs text-foreground/70 font-medium">매입 합계</span>
               <span className="text-xs font-bold text-foreground">₩{data.purchaseTotal.toLocaleString()}</span>
             </div>
           </div>
@@ -177,7 +177,7 @@ function DayDetailContent({ restaurantId, date }: {
       {data.sales && (
         <section className="border-t border-border pt-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground">일일 매출 - 매입</span>
+            <span className="text-xs font-semibold text-foreground/70">일일 매출 - 매입</span>
             <span className={`text-sm font-bold ${data.sales.totalAmount - data.purchaseTotal >= 0 ? "text-emerald-600" : "text-red-500"}`}>
               ₩{(data.sales.totalAmount - data.purchaseTotal).toLocaleString()}
             </span>
