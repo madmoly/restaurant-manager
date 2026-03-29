@@ -705,21 +705,13 @@ function emptyPurchaseItem(): PurchaseItemRow {
   return { rawItemName: '', quantity: '', unitName: '개', unitPrice: '', lineTotal: '' };
 }
 
-type PurchaseInputMode = 'none' | 'input';
+type PurchaseInputMode = 'none' | 'order' | 'receive';
 
-function PendingOrdersBanner({ restaurantId }: { restaurantId: number }) {
+function PendingOrdersBanner({ restaurantId, onReceive }: { restaurantId: number; onReceive?: (orderId: number) => void }) {
   const pendingQuery = trpc.purchasesV2.pendingOrders.useQuery(
     { restaurantId },
     { enabled: restaurantId > 0 },
   );
-  const utils = trpc.useUtils();
-  const updateOrder = trpc.purchasesV2.updateOrder.useMutation({
-    onSuccess() {
-      toast.success('입고 처리 완료');
-      pendingQuery.refetch();
-      utils.purchasesV2.listByDate.invalidate();
-    },
-  });
 
   const pending = pendingQuery.data || [];
   if (pending.length === 0) return null;
@@ -733,19 +725,21 @@ function PendingOrdersBanner({ restaurantId }: { restaurantId: number }) {
         <div key={order.id} className="flex items-center justify-between text-xs">
           <div className="min-w-0">
             <span className="text-foreground font-medium">{order.counterpartyName || '미지정'}</span>
-            <span className="text-muted-foreground ml-1.5">₩{Number(order.totalAmount).toLocaleString()}</span>
-            <span className="text-muted-foreground ml-1.5">
-              {fmtShortDate(order.purchaseDate)}
-            </span>
+            {Number(order.totalAmount) > 0 && (
+              <span className="text-muted-foreground ml-1.5">{fmtNum(Number(order.totalAmount))}원</span>
+            )}
+            <span className="text-muted-foreground ml-1.5">{fmtShortDate(order.purchaseDate)}</span>
+            {order.itemCount > 0 && (
+              <span className="text-muted-foreground ml-1">({order.itemCount}품목)</span>
+            )}
           </div>
           <Button
             size="sm"
             variant="outline"
             className="text-[10px] h-6 px-2 gap-0.5 border-green-300 text-green-600 hover:bg-green-50 dark:border-green-700 dark:text-green-400"
-            onClick={() => updateOrder.mutate({ id: order.id, status: 'received' })}
-            disabled={updateOrder.isPending}
+            onClick={() => onReceive?.(order.id)}
           >
-            <Check className="w-2.5 h-2.5" /> 입고
+            <Check className="w-2.5 h-2.5" /> 입고전환
           </Button>
         </div>
       ))}
@@ -763,12 +757,12 @@ function PurchaseTab({
   const [inputMode, setInputMode] = useState<PurchaseInputMode>('none');
   const [simpleMode, setSimpleMode] = useState(false);
   const [simpleTotalAmount, setSimpleTotalAmount] = useState('');
-  const [orderStatus, setOrderStatus] = useState<'received' | 'ordered'>('received');
   const [counterpartyId, setCounterpartyId] = useState<number | undefined>(undefined);
   const [note, setNote] = useState('');
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemRow[]>([emptyPurchaseItem()]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [attachmentUrl, setAttachmentUrl] = useState<string | undefined>(undefined);
+  const [receivingOrderId, setReceivingOrderId] = useState<number | null>(null); // 입고전환 대상 발주 ID
 
   // OCR 상태
   const [ocrProcessing, setOcrProcessing] = useState(false);
@@ -802,11 +796,22 @@ function PurchaseTab({
 
   const createOrder = trpc.purchasesV2.createOrder.useMutation({
     onSuccess() {
-      toast.success('매입 전표가 등록되었습니다.');
+      toast.success(inputMode === 'order' ? '발주가 등록되었습니다.' : '입고가 등록되었습니다.');
       utils.purchasesV2.listByDate.invalidate();
+      utils.purchasesV2.pendingOrders.invalidate();
       resetForm();
     },
     onError(err: any) { toast.error(`등록 실패: ${err.message}`); },
+  });
+
+  const receiveOrderMutation = trpc.purchasesV2.receiveOrder.useMutation({
+    onSuccess() {
+      toast.success('입고 전환 완료');
+      utils.purchasesV2.listByDate.invalidate();
+      utils.purchasesV2.pendingOrders.invalidate();
+      resetForm();
+    },
+    onError(err: any) { toast.error(`입고 전환 실패: ${err.message}`); },
   });
 
   const deleteOrder = trpc.purchasesV2.deleteOrder.useMutation({
@@ -822,13 +827,38 @@ function PurchaseTab({
     setInputMode('none');
     setSimpleMode(false);
     setSimpleTotalAmount('');
-    setOrderStatus('received');
     setCounterpartyId(undefined);
     setNote('');
     setPurchaseItems([emptyPurchaseItem()]);
     setAttachmentUrl(undefined);
     setOcrPreviewUrl(null);
     setOcrError(null);
+    setReceivingOrderId(null);
+  };
+
+  // 미입고 발주 → 입고 전환 시작
+  const startReceiveFromOrder = async (orderId: number) => {
+    setInputMode('receive');
+    setReceivingOrderId(orderId);
+    // 기존 발주의 품목 로드
+    const items = await utils.purchasesV2.getOrderItems.fetch({ orderId });
+    if (items && items.length > 0) {
+      setPurchaseItems(
+        items.map((item: any) => ({
+          rawItemName: item.rawItemName || item.itemName || '',
+          quantity: item.quantity || '',
+          unitName: item.unitName || '개',
+          unitPrice: item.unitPrice || '',
+          lineTotal: item.lineTotal || '',
+          counterpartyItemId: item.counterpartyItemId || undefined,
+        })),
+      );
+    }
+    // 발주의 거래처도 프리필
+    const pendingOrders = utils.purchasesV2.pendingOrders.getData({ restaurantId });
+    const order = pendingOrders?.find((o: any) => o.id === orderId);
+    if (order?.counterpartyId) setCounterpartyId(order.counterpartyId);
+    if (order?.note) setNote(order.note);
   };
 
   const updateItem = (idx: number, field: keyof PurchaseItemRow, value: string) => {
@@ -959,49 +989,88 @@ function PurchaseTab({
   };
 
   const handleCreate = () => {
+    const isOrderMode = inputMode === 'order';
+    const isReceiveFromOrder = inputMode === 'receive' && receivingOrderId;
+
     if (simpleMode) {
       const total = parseFloat(simpleTotalAmount || '0');
-      if (total <= 0) {
+      if (!isOrderMode && total <= 0) {
         toast.error('금액을 입력하세요.');
+        return;
+      }
+      if (isReceiveFromOrder) {
+        // 입고전환 (간편모드)
+        receiveOrderMutation.mutate({
+          id: receivingOrderId,
+          totalAmount: simpleTotalAmount || '0',
+        });
         return;
       }
       createOrder.mutate({
         restaurantId,
         purchaseDate: date,
         counterpartyId,
-        status: orderStatus,
+        status: isOrderMode ? 'ordered' : 'received',
         note: note || undefined,
         attachmentUrl,
         items: [{
           rawItemName: counterpartyId
             ? (counterpartiesQuery.data?.find((cp: any) => cp.id === counterpartyId)?.name || '매입')
             : '매입',
-          lineTotal: simpleTotalAmount,
+          lineTotal: simpleTotalAmount || '0',
         }],
       });
       return;
     }
-    const validItems = purchaseItems.filter(i => i.rawItemName.trim() && parseFloat(i.lineTotal || '0') > 0);
-    if (validItems.length === 0) {
-      toast.error('최소 1개 항목을 입력하세요.');
+
+    // 상세 모드
+    const itemsWithName = purchaseItems.filter(i => i.rawItemName.trim());
+    const validItems = isOrderMode
+      ? itemsWithName  // 발주: 품명만 있으면 OK (금액 0 허용)
+      : itemsWithName.filter(i => parseFloat(i.lineTotal || '0') > 0);  // 입고: 금액 필수
+
+    // 발주: 거래처 또는 품목 또는 사진 중 하나만 있으면 OK
+    if (isOrderMode) {
+      if (!counterpartyId && validItems.length === 0 && !attachmentUrl) {
+        toast.error('거래처, 품목, 또는 발주서 사진 중 하나는 입력하세요.');
+        return;
+      }
+    } else if (validItems.length === 0) {
+      toast.error('최소 1개 항목 (품명+금액)을 입력하세요.');
       return;
     }
-    createOrder.mutate({
-      restaurantId,
-      purchaseDate: date,
-      counterpartyId,
-      status: orderStatus,
-      note: note || undefined,
-      attachmentUrl,
-      items: validItems.map(i => ({
-        rawItemName: i.rawItemName,
-        counterpartyItemId: i.counterpartyItemId,
-        quantity: i.quantity || undefined,
-        unitName: i.unitName || undefined,
-        unitPrice: i.unitPrice || undefined,
-        lineTotal: i.lineTotal,
-      })),
-    });
+
+    if (isReceiveFromOrder) {
+      // 입고전환 (상세모드)
+      receiveOrderMutation.mutate({
+        id: receivingOrderId,
+        items: validItems.map(i => ({
+          rawItemName: i.rawItemName,
+          counterpartyItemId: i.counterpartyItemId,
+          quantity: i.quantity || undefined,
+          unitName: i.unitName || undefined,
+          unitPrice: i.unitPrice || undefined,
+          lineTotal: i.lineTotal || '0',
+        })),
+      });
+    } else {
+      createOrder.mutate({
+        restaurantId,
+        purchaseDate: date,
+        counterpartyId,
+        status: isOrderMode ? 'ordered' : 'received',
+        note: note || undefined,
+        attachmentUrl,
+        items: validItems.map(i => ({
+          rawItemName: i.rawItemName,
+          counterpartyItemId: i.counterpartyItemId,
+          quantity: i.quantity || undefined,
+          unitName: i.unitName || undefined,
+          unitPrice: i.unitPrice || undefined,
+          lineTotal: i.lineTotal || '0',
+        })),
+      });
+    }
 
     // OCR 수정 데이터 비동기 제출 (품질 개선용, 실패해도 무시)
     if (ocrOriginalItems && attachmentUrl) {
@@ -1021,7 +1090,7 @@ function PurchaseTab({
             lineTotal: i.lineTotal || '',
           })),
         }),
-      }).catch(() => {}); // 무시
+      }).catch(() => {});
       setOcrOriginalItems(null);
     }
   };
@@ -1097,20 +1166,28 @@ function PurchaseTab({
         )}
       </Card>
 
-      {/* ─── 매입 입력 버튼 ─── */}
+      {/* ─── 발주/입고 입력 버튼 ─── */}
       {inputMode === 'none' && (
-        <Button onClick={() => setInputMode('input')} variant="secondary" className="w-full h-12 flex gap-2">
-          <Plus className="w-4 h-4" />
-          <span className="text-sm font-medium">매입 입력</span>
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setInputMode('order')} variant="secondary" className="flex-1 h-12 flex gap-2">
+            <Plus className="w-4 h-4" />
+            <span className="text-sm font-medium">발주 입력</span>
+          </Button>
+          <Button onClick={() => setInputMode('receive')} variant="default" className="flex-1 h-12 flex gap-2">
+            <Check className="w-4 h-4" />
+            <span className="text-sm font-medium">입고 입력</span>
+          </Button>
+        </div>
       )}
 
-      {/* ─── 통합 매입 입력 ─── */}
-      {inputMode === 'input' && (
-        <Card className="bg-card border-border p-4 space-y-3">
+      {/* ─── 발주/입고 입력 폼 ─── */}
+      {inputMode !== 'none' && (
+        <Card className={`border p-4 space-y-3 ${inputMode === 'order' ? 'bg-amber-50/30 dark:bg-amber-900/5 border-amber-200 dark:border-amber-800' : 'bg-card border-border'}`}>
           {/* 헤더: 제목 + 간편입력 토글 + 닫기 */}
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-foreground text-sm">매입 입력</h3>
+            <h3 className="font-semibold text-foreground text-sm">
+              {receivingOrderId ? '입고 전환' : inputMode === 'order' ? '발주 입력' : '입고 입력'}
+            </h3>
             <div className="flex items-center gap-3">
               <label className="flex items-center gap-1.5 cursor-pointer">
                 <span className="text-xs text-muted-foreground">간편입력</span>
@@ -1129,6 +1206,18 @@ function PurchaseTab({
               </button>
             </div>
           </div>
+
+          {/* 발주 모드 안내 */}
+          {inputMode === 'order' && !receivingOrderId && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/20 px-2 py-1 rounded">
+              거래처, 품목, 또는 발주서 사진만으로도 등록 가능 — 금액은 입고 시 입력
+            </p>
+          )}
+          {receivingOrderId && (
+            <p className="text-[11px] text-green-600 dark:text-green-400 bg-green-100/50 dark:bg-green-900/20 px-2 py-1 rounded">
+              발주 #{receivingOrderId} 입고 전환 — 품목을 확인하고 금액을 입력하세요
+            </p>
+          )}
 
           {/* 전표 촬영 영역 (항상 표시) */}
           {!ocrPreviewUrl && !ocrProcessing && (
@@ -1353,40 +1442,23 @@ function PurchaseTab({
             </span>
           </div>
 
-          {/* 발주/입고 상태 선택 */}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setOrderStatus('received')}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                orderStatus === 'received'
-                  ? 'bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-700 text-green-700 dark:text-green-400'
-                  : 'bg-muted/20 border-border text-muted-foreground'
-              }`}
-            >
-              입고 (매입완료)
-            </button>
-            <button
-              type="button"
-              onClick={() => setOrderStatus('ordered')}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                orderStatus === 'ordered'
-                  ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400'
-                  : 'bg-muted/20 border-border text-muted-foreground'
-              }`}
-            >
-              발주 (미입고)
-            </button>
-          </div>
-
-          <Button onClick={handleCreate} disabled={createOrder.isPending} className="w-full">
-            {createOrder.isPending ? '등록 중...' : orderStatus === 'ordered' ? '발주 전표 등록' : '매입 전표 등록'}
+          <Button
+            onClick={handleCreate}
+            disabled={createOrder.isPending || receiveOrderMutation.isPending}
+            className="w-full"
+            variant={inputMode === 'order' ? 'secondary' : 'default'}
+          >
+            {createOrder.isPending || receiveOrderMutation.isPending
+              ? '등록 중...'
+              : receivingOrderId ? '입고 확인'
+              : inputMode === 'order' ? '발주 등록'
+              : '입고 등록'}
           </Button>
         </Card>
       )}
 
       {/* 미입고 발주 전표 요약 (매입탭 최하단) */}
-      <PendingOrdersBanner restaurantId={restaurantId} />
+      <PendingOrdersBanner restaurantId={restaurantId} onReceive={startReceiveFromOrder} />
 
       {/* 이미지 확대보기 모달 */}
       {viewerImage && (

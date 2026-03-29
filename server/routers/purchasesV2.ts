@@ -49,7 +49,7 @@ export const purchasesV2Router = router({
         .orderBy(desc(purchaseOrdersV2.purchaseDate));
     }),
 
-  /** 일별 매입 전표 목록 */
+  /** 일별 매입 전표 목록 (발주+입고 모두) */
   listByDate: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
     .query(async ({ input }) => {
@@ -61,8 +61,10 @@ export const purchasesV2Router = router({
           counterpartyId: purchaseOrdersV2.counterpartyId,
           counterpartyName: counterparties.name,
           purchaseDate: purchaseOrdersV2.purchaseDate,
+          receivedAt: purchaseOrdersV2.receivedAt,
           status: purchaseOrdersV2.status,
           note: purchaseOrdersV2.note,
+          attachmentUrl: purchaseOrdersV2.attachmentUrl,
           totalAmount: purchaseOrdersV2.totalAmount,
           createdByName: users.name,
           createdAt: purchaseOrdersV2.createdAt,
@@ -127,7 +129,10 @@ export const purchasesV2Router = router({
         .limit(input.limit);
     }),
 
-  /** 매입 전표 생성 (헤더 + 항목 + lastPrice 갱신) */
+  /** 매입 전표 생성 (헤더 + 항목 + lastPrice 갱신)
+   *  발주(ordered): items 없어도 가능 (거래처/사진만으로 등록)
+   *  입고(received): 기존과 동일
+   */
   createOrder: protectedProcedure
     .input(
       z.object({
@@ -146,11 +151,11 @@ export const purchasesV2Router = router({
             quantity: z.string().optional(),
             unitName: z.string().optional(),
             unitPrice: z.string().optional(),
-            lineTotal: z.string(),
+            lineTotal: z.string().default("0"),
             costingCategory: z.string().optional(),
             note: z.string().optional(),
           }),
-        ),
+        ).default([]),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -171,6 +176,7 @@ export const purchasesV2Router = router({
           attachmentUrl: input.attachmentUrl,
           totalAmount: String(totalAmount),
           createdBy: ctx.user.userId,
+          receivedAt: input.status === "received" ? new Date() : null,
         })
         .$returningId();
       const orderId = orderResult.id;
@@ -193,7 +199,79 @@ export const purchasesV2Router = router({
           })),
         );
 
-        // counterpartyItems의 lastPrice 갱신
+        // counterpartyItems의 lastPrice 갱신 (입고 시에만)
+        if (input.status === "received") {
+          for (const item of input.items) {
+            if (item.counterpartyItemId && item.unitPrice) {
+              await db
+                .update(counterpartyItems)
+                .set({ lastPrice: item.unitPrice })
+                .where(eq(counterpartyItems.id, item.counterpartyItemId));
+            }
+          }
+        }
+      }
+
+      return { id: orderId };
+    }),
+
+  /** 발주 → 입고 전환 (품목/금액 갱신 포함) */
+  receiveOrder: protectedProcedure
+    .input(
+      z.object({
+        id: z.number(),
+        totalAmount: z.string().optional(),
+        items: z.array(
+          z.object({
+            itemId: z.number().optional(),
+            counterpartyItemId: z.number().optional(),
+            rawItemName: z.string().optional(),
+            itemType: z.enum(["product", "service", "misc"]).default("product"),
+            quantity: z.string().optional(),
+            unitName: z.string().optional(),
+            unitPrice: z.string().optional(),
+            lineTotal: z.string().default("0"),
+            costingCategory: z.string().optional(),
+            note: z.string().optional(),
+          }),
+        ).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // 기존 발주 조회
+      const [existing] = await db
+        .select()
+        .from(purchaseOrdersV2)
+        .where(eq(purchaseOrdersV2.id, input.id))
+        .limit(1);
+      if (!existing) {
+        const { TRPCError } = await import("@trpc/server");
+        throw new TRPCError({ code: "NOT_FOUND", message: "발주를 찾을 수 없습니다" });
+      }
+
+      // 품목 교체: 새 items가 있으면 기존 삭제 후 삽입
+      if (input.items && input.items.length > 0) {
+        await db
+          .delete(purchaseOrderItemsV2)
+          .where(eq(purchaseOrderItemsV2.purchaseOrderId, input.id));
+
+        await db.insert(purchaseOrderItemsV2).values(
+          input.items.map((item) => ({
+            purchaseOrderId: input.id,
+            itemId: item.itemId,
+            counterpartyItemId: item.counterpartyItemId,
+            rawItemName: item.rawItemName,
+            itemType: item.itemType,
+            quantity: item.quantity,
+            unitName: item.unitName,
+            unitPrice: item.unitPrice,
+            lineTotal: item.lineTotal,
+            costingCategory: item.costingCategory,
+            note: item.note,
+          })),
+        );
+
+        // lastPrice 갱신
         for (const item of input.items) {
           if (item.counterpartyItemId && item.unitPrice) {
             await db
@@ -204,7 +282,32 @@ export const purchasesV2Router = router({
         }
       }
 
-      return { id: orderId };
+      const newTotal = input.items
+        ? input.items.reduce((sum, item) => sum + parseFloat(item.lineTotal || "0"), 0)
+        : input.totalAmount ? parseFloat(input.totalAmount) : Number(existing.totalAmount);
+
+      // 이력 기록
+      const prevHistory = (existing.editHistory as any[]) ?? [];
+      const newEntry = {
+        userId: ctx.user.userId,
+        userName: ctx.user.username ?? String(ctx.user.userId),
+        at: new Date().toISOString(),
+        summary: `입고 전환 (${Number(existing.totalAmount).toLocaleString()}원 → ${newTotal.toLocaleString()}원)`,
+      };
+
+      await db
+        .update(purchaseOrdersV2)
+        .set({
+          status: "received",
+          receivedAt: new Date(),
+          totalAmount: String(newTotal),
+          lastModifiedBy: ctx.user.userId,
+          lastModifiedAt: new Date(),
+          editHistory: [...prevHistory, newEntry],
+        })
+        .where(eq(purchaseOrdersV2.id, input.id));
+
+      return { ok: true };
     }),
 
   /** 전표 헤더 수정 + 수정이력 기록 */
@@ -264,6 +367,11 @@ export const purchasesV2Router = router({
         lastModifiedAt: new Date(),
         editHistory: [...prevHistory, newEntry],
       };
+
+      // 발주→입고 전환 시 receivedAt 자동 설정
+      if (rest.status === "received" && existing.status === "ordered") {
+        updatePayload.receivedAt = new Date();
+      }
 
       if (rest.purchaseDate) {
         updatePayload.purchaseDate = new Date(rest.purchaseDate + "T00:00:00");
@@ -461,11 +569,11 @@ export const purchasesV2Router = router({
       return Array.from(map.values()).sort((a, b) => (b.totalReceived + b.totalOrdered) - (a.totalReceived + a.totalOrdered));
     }),
 
-  /** 미입고 발주 전표 목록 */
+  /** 미입고 발주 전표 목록 (품목 수 포함) */
   pendingOrders: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
     .query(async ({ input }) => {
-      return db
+      const orders = await db
         .select({
           id: purchaseOrdersV2.id,
           counterpartyId: purchaseOrdersV2.counterpartyId,
@@ -473,6 +581,7 @@ export const purchasesV2Router = router({
           purchaseDate: purchaseOrdersV2.purchaseDate,
           totalAmount: purchaseOrdersV2.totalAmount,
           note: purchaseOrdersV2.note,
+          attachmentUrl: purchaseOrdersV2.attachmentUrl,
           createdAt: purchaseOrdersV2.createdAt,
         })
         .from(purchaseOrdersV2)
@@ -484,5 +593,18 @@ export const purchasesV2Router = router({
           ),
         )
         .orderBy(desc(purchaseOrdersV2.purchaseDate));
+
+      // 각 발주의 품목 수 조회
+      const withItemCount = await Promise.all(
+        orders.map(async (order) => {
+          const [countRow] = await db
+            .select({ cnt: sql<number>`COUNT(*)` })
+            .from(purchaseOrderItemsV2)
+            .where(eq(purchaseOrderItemsV2.purchaseOrderId, order.id));
+          return { ...order, itemCount: Number(countRow?.cnt ?? 0) };
+        }),
+      );
+
+      return withItemCount;
     }),
 });

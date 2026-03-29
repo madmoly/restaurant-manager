@@ -537,11 +537,13 @@ export const counterpartyItems = mysqlTable("counterparty_items", {
 export type CounterpartyItem = typeof counterpartyItems.$inferSelect;
 
 // ─── PurchaseOrdersV2 (매입 헤더 v2) ─────────────────────────────────────────
+// purchaseDate = 발주일 (정산 귀속 기준), receivedAt = 입고 확인 시점
 export const purchaseOrdersV2 = mysqlTable("purchase_orders_v2", {
   id: int("id").autoincrement().primaryKey(),
   restaurantId: int("restaurantId").notNull(),
   counterpartyId: int("counterpartyId"),
-  purchaseDate: date("purchaseDate").notNull(),
+  purchaseDate: date("purchaseDate").notNull(), // 발주일 = 정산 귀속 기준
+  receivedAt: timestamp("receivedAt"),          // 입고 확인 시점 (NULL = 미입고)
   status: mysqlEnum("status", ["received", "ordered"]).default("received").notNull(),
   note: text("note"),
   attachmentUrl: text("attachmentUrl"),

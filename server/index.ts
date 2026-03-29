@@ -271,6 +271,14 @@ app.use(express.json());
       ) WHERE isTutorial = 0 AND ownerAdminId IS NULL
     `).catch(() => {});
 
+    // ─── 발주/입고 분할: receivedAt 컬럼 추가 ─────────────────────────────────
+    await addColumnIfNotExists("purchase_orders_v2", "receivedAt", "TIMESTAMP DEFAULT NULL");
+    // 기존 received 상태 주문 → receivedAt을 updatedAt으로 백필
+    await conn.query(`
+      UPDATE purchase_orders_v2 SET receivedAt = updatedAt
+      WHERE status = 'received' AND receivedAt IS NULL
+    `).catch(() => {});
+
     // ─── Phase 5: 초대코드 + 비밀번호 강제변경 ─────────────────────────────────
     // users.mustChangePassword
     await addColumnIfNotExists("users", "mustChangePassword", "BOOLEAN NOT NULL DEFAULT FALSE");
