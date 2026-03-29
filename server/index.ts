@@ -411,7 +411,18 @@ app.use(express.json());
       ORDER BY id ASC LIMIT 1
     `).catch(() => {});
 
-    // ─── Tutorial 사업그룹: tutorial 데이터를 사업그룹 구조로 물리적 분리 ──────
+    // ─── Tutorial 데이터 강제 격리 ─────────────────────────────────────────────
+    // 0) Tutorial 사용자/매장의 isTutorial 플래그 강제 설정 (시드 이후 누락 대응)
+    await conn.query(`
+      UPDATE users SET isTutorial = 1
+      WHERE username IN ('owner1','supervisor1','staff1','staff2','tutorial_admin')
+        AND isTutorial = 0
+    `).catch(() => {});
+    await conn.query(`
+      UPDATE restaurants SET isTutorial = 1
+      WHERE name LIKE 'Tutorial%' AND isTutorial = 0
+    `).catch(() => {});
+
     // 1) Tutorial 전용 admin 생성 (없으면)
     await conn.query(`
       INSERT INTO users (username, passwordHash, name, role, isTutorial, isActive)
@@ -423,7 +434,7 @@ app.use(express.json());
     // 2) Tutorial 사업그룹 생성 (없으면)
     await conn.query(`
       INSERT INTO business_groups (name, adminId, description, isActive)
-      SELECT 'Tutorial 사업그룹', u.id, '튜토리얼 데이터 격리용 사업그룹 — 실 집계에서 자동 제외', 0
+      SELECT 'Tutorial', u.id, '튜토리얼 데이터 격리용 사업그룹 — 실 집계에서 자동 제외', 0
       FROM users u
       WHERE u.username = 'tutorial_admin'
         AND NOT EXISTS (SELECT 1 FROM business_groups bg WHERE bg.adminId = u.id)
@@ -443,6 +454,20 @@ app.use(express.json());
       UPDATE users
       SET parentId = (SELECT id FROM (SELECT id FROM users WHERE username = 'tutorial_admin') t)
       WHERE isTutorial = 1 AND role != 'admin' AND parentId IS NULL
+    `).catch(() => {});
+
+    // 5-0) 사업자 그룹명 확정: 331컴퍼니 / Tutorial
+    await conn.query(`
+      UPDATE business_groups bg
+      JOIN users u ON bg.adminId = u.id
+      SET bg.name = '331컴퍼니'
+      WHERE u.username = '331admin' AND bg.name != '331컴퍼니'
+    `).catch(() => {});
+    await conn.query(`
+      UPDATE business_groups bg
+      JOIN users u ON bg.adminId = u.id
+      SET bg.name = 'Tutorial'
+      WHERE u.username = 'tutorial_admin' AND bg.name != 'Tutorial'
     `).catch(() => {});
 
     // 5-a) schedules 테이블에 breakMinutes 컬럼 추가
