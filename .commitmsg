@@ -1,9 +1,14 @@
-feat: AI 방향 감지 자동화 — 수동 회전 제거, 원스텝 OCR 복원
+feat: OCR Phase 2-3 구현 + 합계 위치 이동
 
-- OCR 전 Claude Vision(haiku)으로 이미지 방향 자동 감지 (0/90/180/270°)
-- 회전 필요 시 sharp로 서버에서 자동 회전 후 OCR 분석
-- 클라이언트: 수동 회전 버튼/AI 판독 버튼 제거
-- 사진 촬영 → 업로드 → AI 방향 감지 → 자동 회전 → OCR → 결과 표시 (원스텝)
-- EXIF 회전도 병행 (EXIF 태그 있으면 먼저 적용, 없으면 AI 감지)
+Phase 2: 거래처별 OCR 프로파일 DB
+- counterparty_ocr_profiles 테이블 (양식유형, 열구조, 자주등장품목)
+- OCR 결과 기반 자동 프로파일 업데이트 (이동평균 단가)
+- 스키마 + 자동 마이그레이션 추가
+
+Phase 3: 동적 프롬프트 주입
+- 거래처 프로파일의 품목/단가를 OCR 프롬프트에 힌트로 주입
+- 같은 거래처 반복 사용 시 점진적 정확도 향상
+
+UI: 매입액 합계를 거래처 선택 바로 아래로 이동
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

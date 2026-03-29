@@ -244,6 +244,21 @@ app.use(express.json());
 
     // ─── OCR 수정 데이터 축적 테이블 ─────────────────────────────────────────
     await conn.query(`
+      CREATE TABLE IF NOT EXISTS counterparty_ocr_profiles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        counterpartyId INT NOT NULL,
+        documentType VARCHAR(50),
+        columnOrder VARCHAR(255),
+        frequentItems JSON,
+        sampleCount INT NOT NULL DEFAULT 0,
+        lastUsedAt TIMESTAMP NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE INDEX idx_ocr_profile_cp (counterpartyId)
+      )
+    `);
+
+    await conn.query(`
       CREATE TABLE IF NOT EXISTS ocr_corrections (
         id INT AUTO_INCREMENT PRIMARY KEY,
         restaurantId INT NOT NULL,

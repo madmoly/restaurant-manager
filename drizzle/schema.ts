@@ -717,6 +717,38 @@ export const dailyClosingSpecialTypes = mysqlTable("daily_closing_special_types"
 
 export type DailyClosingSpecialType = typeof dailyClosingSpecialTypes.$inferSelect;
 
+// ─── Counterparty OCR Profiles (거래처별 OCR 프로파일) ───────────────────────
+// 거래처↔전표 양식은 고정관계 — 양식 유형, 열 구조, 자주 쓰는 품목/단가를 저장
+// OCR 시 이 데이터를 프롬프트에 주입하여 정확도 향상
+export const counterpartyOcrProfiles = mysqlTable("counterparty_ocr_profiles", {
+  id: int("id").autoincrement().primaryKey(),
+  counterpartyId: int("counterpartyId").notNull(),
+  documentType: varchar("documentType", { length: 50 }),  // 거래명세표, 거래명세서, 영수증 등
+  columnOrder: varchar("columnOrder", { length: 255 }),    // 열 순서 (예: "품목|수량|단가|공급가액")
+  // 자주 등장하는 품목 목록 (JSON: [{name, avgPrice, unit}])
+  frequentItems: json("frequentItems"),
+  sampleCount: int("sampleCount").default(0).notNull(),    // 누적 처리 건수
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type CounterpartyOcrProfile = typeof counterpartyOcrProfiles.$inferSelect;
+
+// ─── OCR Corrections (사용자 수정 이력) ─────────────────────────────────────
+// 사용자가 OCR 결과를 수정한 기록 → 학습 데이터로 활용
+export const ocrCorrections = mysqlTable("ocr_corrections", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  counterpartyId: int("counterpartyId"),
+  imageUrl: varchar("imageUrl", { length: 500 }).notNull(),
+  originalItems: json("originalItems").notNull(),    // OCR 원본 결과
+  correctedItems: json("correctedItems").notNull(),  // 사용자 수정 결과
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type OcrCorrection = typeof ocrCorrections.$inferSelect;
+
 // ─── 에러 로그 ────────────────────────────────────────────────────────────────
 export const errorLogs = mysqlTable("error_logs", {
   id: int("id").autoincrement().primaryKey(),

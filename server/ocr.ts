@@ -5,7 +5,7 @@ import path from "path";
 import sharp from "sharp";
 import { UPLOAD_ROOT } from "./upload";
 import { db } from "./db";
-import { counterpartyItems, counterparties } from "../drizzle/schema";
+import { counterpartyItems, counterparties, counterpartyOcrProfiles } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 
 export const ocrRouter = Router();
@@ -325,6 +325,124 @@ async function findCounterpartyId(name: string, restaurantId?: number): Promise<
   }
 }
 
+// ─── 거래처 OCR 프로파일 조회 ──────────────────────────────────────────────
+async function getOcrProfile(counterpartyId: number | null): Promise<{
+  documentType?: string;
+  columnOrder?: string;
+  frequentItems?: { name: string; avgPrice: number; unit: string }[];
+} | null> {
+  if (!counterpartyId) return null;
+  try {
+    const rows = await db
+      .select()
+      .from(counterpartyOcrProfiles)
+      .where(eq(counterpartyOcrProfiles.counterpartyId, counterpartyId))
+      .limit(1);
+    if (rows.length === 0) return null;
+    const profile = rows[0];
+    return {
+      documentType: profile.documentType || undefined,
+      columnOrder: profile.columnOrder || undefined,
+      frequentItems: (profile.frequentItems as any) || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── 거래처 OCR 프로파일 업데이트 (OCR 결과 기반 자동 학습) ────────────────
+async function updateOcrProfile(
+  counterpartyId: number | null,
+  documentType: string | null,
+  items: OcrItem[]
+): Promise<void> {
+  if (!counterpartyId || items.length === 0) return;
+  try {
+    const existing = await db
+      .select()
+      .from(counterpartyOcrProfiles)
+      .where(eq(counterpartyOcrProfiles.counterpartyId, counterpartyId))
+      .limit(1);
+
+    // 현재 품목 → frequentItems로 변환
+    const currentItems = items
+      .filter(i => i.shortName && parseFloat(i.unitPrice) > 0)
+      .map(i => ({
+        name: i.shortName,
+        avgPrice: parseFloat(i.unitPrice),
+        unit: i.unit || "",
+      }));
+
+    if (existing.length === 0) {
+      // 신규 생성
+      await db.insert(counterpartyOcrProfiles).values({
+        counterpartyId,
+        documentType: documentType || null,
+        frequentItems: currentItems,
+        sampleCount: 1,
+        lastUsedAt: new Date(),
+      });
+      console.log(`[OCR] 프로파일 신규 생성: counterpartyId=${counterpartyId}`);
+    } else {
+      // 기존 프로파일 업데이트: frequentItems 병합 (이동평균 단가)
+      const oldItems = (existing[0].frequentItems as any[]) || [];
+      const merged = [...oldItems];
+      for (const ci of currentItems) {
+        const found = merged.find(m => m.name === ci.name);
+        if (found) {
+          // 이동평균: (기존단가 × 0.7) + (새단가 × 0.3)
+          found.avgPrice = Math.round(found.avgPrice * 0.7 + ci.avgPrice * 0.3);
+          found.unit = ci.unit || found.unit;
+        } else {
+          merged.push(ci);
+        }
+      }
+      // 최근 50개만 유지 (오래된 것부터 제거)
+      const trimmed = merged.slice(-50);
+
+      await db.update(counterpartyOcrProfiles)
+        .set({
+          documentType: documentType || existing[0].documentType,
+          frequentItems: trimmed,
+          sampleCount: (existing[0].sampleCount || 0) + 1,
+          lastUsedAt: new Date(),
+        })
+        .where(eq(counterpartyOcrProfiles.counterpartyId, counterpartyId));
+      console.log(`[OCR] 프로파일 업데이트: counterpartyId=${counterpartyId}, items=${trimmed.length}`);
+    }
+  } catch (err) {
+    console.warn("[OCR] 프로파일 업데이트 실패:", err);
+  }
+}
+
+// ─── 동적 프롬프트 생성: 거래처 프로파일 기반 힌트 ──────────────────────────
+function buildProfileHint(profile: {
+  documentType?: string;
+  columnOrder?: string;
+  frequentItems?: { name: string; avgPrice: number; unit: string }[];
+} | null): string {
+  if (!profile) return "";
+
+  const parts: string[] = [];
+  parts.push("\n\n## 이 거래처의 기존 정보 (참고용 힌트)");
+
+  if (profile.documentType) {
+    parts.push(`- 양식 유형: ${profile.documentType}`);
+  }
+  if (profile.columnOrder) {
+    parts.push(`- 열 구조: ${profile.columnOrder}`);
+  }
+  if (profile.frequentItems && profile.frequentItems.length > 0) {
+    parts.push("- 자주 등장하는 품목 (품명 → 평균 단가):");
+    for (const item of profile.frequentItems.slice(0, 20)) {
+      parts.push(`  · ${item.name}: ~${item.avgPrice.toLocaleString()}원${item.unit ? ` (${item.unit})` : ""}`);
+    }
+    parts.push("※ 위 단가는 참고용입니다. 이미지에 적힌 실제 숫자를 우선하세요.");
+  }
+
+  return parts.join("\n");
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // POST /api/ocr/extract-purchase — 단일 Vision 직접 구조화
 // ═════════════════════════════════════════════════════════════════════════════
@@ -336,7 +454,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       return;
     }
 
-    const { imageUrl, restaurantId } = req.body;
+    const { imageUrl, restaurantId, counterpartyId: clientCpId } = req.body;
     if (!imageUrl || typeof imageUrl !== "string") {
       res.status(400).json({ error: "imageUrl이 필요합니다" });
       return;
@@ -351,6 +469,10 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
     // ── AI 방향 감지 + 자동 회전 (OCR 전 전처리) ──────────────────────
     await detectAndFixOrientation(filePath, anthropic);
+
+    // ── 거래처 프로파일 조회 (동적 프롬프트 힌트용) ──────────────────────
+    const ocrProfile = await getOcrProfile(clientCpId ? Number(clientCpId) : null);
+    const profileHint = buildProfileHint(ocrProfile);
 
     const { base64, mediaType } = loadImageBase64Raw(filePath);
     const imageContent: Anthropic.ImageBlockParam = {
@@ -459,7 +581,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     "grandTotal": "총합계(숫자) 또는 null"
   },
   "note": "비고 또는 null"
-}`,
+}${profileHint}`,
           },
         ],
       }],
@@ -514,8 +636,12 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
     // ── 거래처 품목 매칭 (기존 DB와 단가 비교) ──────────────────────────
     const counterpartyName = parsed.counterpartyName || null;
-    const cpId = await findCounterpartyId(counterpartyName, restaurantId ? Number(restaurantId) : undefined);
+    const cpId = clientCpId ? Number(clientCpId)
+      : await findCounterpartyId(counterpartyName, restaurantId ? Number(restaurantId) : undefined);
     items = await matchCounterpartyItems(cpId, items);
+
+    // ── 거래처 OCR 프로파일 자동 업데이트 (학습) ───────────────────────
+    updateOcrProfile(cpId, parsed.documentType || null, items).catch(() => {});
 
     const result = {
       counterpartyName,

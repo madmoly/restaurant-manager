@@ -1385,6 +1385,16 @@ function PurchaseTab({
             )}
           </div>
 
+          {/* 합계 표시 (거래처 아래) */}
+          {!simpleMode && purchaseItems.some(i => parseFloat(i.lineTotal || '0') > 0) && (
+            <div className="bg-blue-500/5 p-2.5 rounded flex justify-between items-center">
+              <span className="text-xs text-muted-foreground">{purchaseItems.filter(i => i.rawItemName.trim()).length}개 항목</span>
+              <span className="text-sm font-bold text-blue-600 tabular-nums">
+                합계 ₩{formTotal.toLocaleString()}
+              </span>
+            </div>
+          )}
+
           {/* ── 간편입력 모드: 금액만 ── */}
           {simpleMode ? (
             <div>
