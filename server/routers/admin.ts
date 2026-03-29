@@ -4,7 +4,8 @@ import { router, adminProcedure, protectedProcedure } from "../trpc";
 import { db } from "../db";
 import {
   restaurants, restaurantUsers, users, sales, purchaseOrders,
-  dailyClosings, fixedCosts,
+  dailyClosings, fixedCosts, dailyOperations, intermediateSales,
+  schedules, dailySalesDetail,
 } from "../../drizzle/schema";
 import { ROLE_LEVEL } from "@shared/permissions";
 
@@ -94,6 +95,61 @@ export const adminRouter = router({
           storeCount: storeData.length,
         },
       };
+    }),
+
+  /**
+   * 전체 매장 금일 운영 현황
+   */
+  allStoresTodayStatus: adminProcedure
+    .input(z.object({ date: z.string() }))
+    .query(async ({ input }) => {
+      const allRestaurants = await db.select()
+        .from(restaurants)
+        .where(and(isNull(restaurants.deletedAt), eq(restaurants.isTutorial, false)));
+
+      const storeStatuses = await Promise.all(
+        allRestaurants.map(async (r) => {
+          // 오픈 체크
+          const [ops] = await db.select({ openCheckedAt: dailyOperations.openCheckedAt, closeCheckedAt: dailyOperations.closeCheckedAt })
+            .from(dailyOperations)
+            .where(and(eq(dailyOperations.restaurantId, r.id), sql`${dailyOperations.operationDate} = ${input.date}`))
+            .limit(1);
+
+          // 중간매출
+          const midSales = await db.select({ amount: intermediateSales.amount, receiptCount: intermediateSales.receiptCount, recordedAt: intermediateSales.recordedAt })
+            .from(intermediateSales)
+            .where(and(eq(intermediateSales.restaurantId, r.id), sql`${intermediateSales.saleDate} = ${input.date}`));
+
+          const midTotal = midSales.reduce((s, m) => s + Number(m.amount), 0);
+          const midReceipts = midSales.reduce((s, m) => s + (m.receiptCount || 0), 0);
+
+          // 마감 여부
+          const [closing] = await db.select({ id: dailySalesDetail.id, totalAmount: dailySalesDetail.totalAmount })
+            .from(dailySalesDetail)
+            .where(and(eq(dailySalesDetail.restaurantId, r.id), sql`${dailySalesDetail.saleDate} = ${input.date}`))
+            .limit(1);
+
+          // 출근 인원
+          const [staffRow] = await db.select({ count: sql<number>`COUNT(*)` })
+            .from(schedules)
+            .where(and(eq(schedules.restaurantId, r.id), sql`DATE(${schedules.startTime}) = ${input.date}`, sql`${schedules.status} != 'canceled'`));
+
+          return {
+            restaurantId: r.id,
+            name: r.name,
+            isOpenChecked: !!ops?.openCheckedAt,
+            isCloseDone: !!closing,
+            closingTotal: closing ? Number(closing.totalAmount) : null,
+            midSalesTotal: midTotal,
+            midSalesReceipts: midReceipts,
+            midSalesCount: midSales.length,
+            lastMidSalesTime: midSales.length > 0 ? midSales[midSales.length - 1].recordedAt : null,
+            staffCount: staffRow?.count ?? 0,
+          };
+        })
+      );
+
+      return storeStatuses;
     }),
 
   /**

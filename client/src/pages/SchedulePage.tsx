@@ -680,24 +680,22 @@ export default function SchedulePage() {
                     <button
                       key={s.id}
                       onClick={() => openEditModal(s)}
-                      className={`w-full text-left p-1.5 md:p-2 rounded bg-background border-l-2 ${st.bgCard} border border-border/50 text-xs md:text-sm active:bg-accent/50 transition-colors`}
+                      className={`w-full text-left p-1 md:p-1.5 rounded bg-background border-l-2 ${st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors`}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-foreground truncate">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-medium text-foreground truncate text-[11px] md:text-xs">
                           {s.userName ?? s.tempWorkerName ?? "미배정"}
-                          {s.tempWorkerName && <span className="text-orange-500 ml-1">(임시)</span>}
+                          {s.tempWorkerName && <span className="text-orange-500 ml-0.5">(임시)</span>}
                         </span>
-                        <span className={`px-1 py-0.5 rounded text-[10px] md:text-xs font-medium shrink-0 ${st.color}`}>
+                        <span className="text-muted-foreground text-[10px] md:text-[11px] shrink-0">
+                          {presetInfo ? presetInfo.label : `${fmtTime(s.startTime)}~${fmtTime(s.endTime)}`}
+                        </span>
+                      </div>
+                      {(s.status === "draft" || s.status === "canceled") && (
+                        <span className={`inline-block px-1 py-0.5 rounded text-[9px] md:text-[10px] font-medium mt-0.5 ${st.color}`}>
                           {st.label}
                         </span>
-                      </div>
-                      <div className="text-muted-foreground flex items-center gap-1 mt-0.5">
-                        <Clock className="w-3 h-3 md:w-3.5 md:h-3.5 shrink-0" />
-                        <span>
-                          {fmtTime(s.startTime)}~{fmtTime(s.endTime)}
-                          {presetInfo && <span className="ml-1 opacity-60">({presetInfo.label})</span>}
-                        </span>
-                      </div>
+                      )}
                     </button>
                   );
                 })}

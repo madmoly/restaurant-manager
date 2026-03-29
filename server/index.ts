@@ -85,6 +85,12 @@ app.use(express.json());
     // employment_electronic_contracts 소속회사
     await addColumnIfNotExists("employment_electronic_contracts", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");
 
+    // 계좌이체 입금자명
+    await addColumnIfNotExists("daily_sales_detail", "transferDepositor", "VARCHAR(100) DEFAULT NULL");
+
+    // 중간매출 영수건수
+    await addColumnIfNotExists("intermediate_sales", "receiptCount", "INT DEFAULT 0");
+
     // ─── 역할 체계 재정의: store_manager→owner, manager→supervisor, employee→staff ───
     try {
       await conn.query(`ALTER TABLE restaurant_users MODIFY COLUMN role ENUM('manager','sub_manager','employee','store_manager','owner','supervisor','staff') NOT NULL DEFAULT 'staff'`);

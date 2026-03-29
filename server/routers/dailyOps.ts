@@ -248,6 +248,7 @@ export const dailyOpsRouter = router({
         restaurantId: z.number(),
         date: z.string(),
         amount: z.number(),
+        receiptCount: z.number().default(0),
         note: z.string().optional(),
       })
     )
@@ -256,6 +257,7 @@ export const dailyOpsRouter = router({
         restaurantId: input.restaurantId,
         saleDate: input.date,
         amount: String(input.amount),
+        receiptCount: input.receiptCount,
         note: input.note,
         recordedBy: ctx.user.userId,
       } as any);
@@ -350,6 +352,7 @@ export const dailyOpsRouter = router({
         cardAmount: z.number(),
         giftCardAmount: z.number().default(0),
         transferAmount: z.number().default(0),
+        transferDepositor: z.string().optional(),
         otherItems: z.array(z.object({ itemName: z.string(), amount: z.number() })).default([]),
         specialItems: z.array(z.object({ typeName: z.string(), amount: z.number(), note: z.string().optional() })).default([]),
         note: z.string().optional(),
@@ -379,6 +382,7 @@ export const dailyOpsRouter = router({
         cardAmount: String(input.cardAmount),
         giftCardAmount: String(input.giftCardAmount),
         transferAmount: String(input.transferAmount),
+        transferDepositor: input.transferDepositor ?? null,
         otherAmount: String(otherTotal),
         discountAmount: String(specialTotal),
         totalAmount: String(totalAmount),
@@ -734,6 +738,7 @@ export const dailyOpsRouter = router({
           cardAmount: Number(salesDetail.cardAmount),
           giftCardAmount: Number(salesDetail.giftCardAmount),
           transferAmount: Number(salesDetail.transferAmount),
+          transferDepositor: salesDetail.transferDepositor ?? null,
           otherAmount: Number(salesDetail.otherAmount),
           status: salesDetail.status,
           note: salesDetail.note,

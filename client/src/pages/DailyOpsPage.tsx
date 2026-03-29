@@ -1344,6 +1344,7 @@ function MiddayTab({
   date: string;
 }) {
   const [midAmount, setMidAmount] = useState('');
+  const [midReceiptCount, setMidReceiptCount] = useState('');
   const [midNote, setMidNote] = useState('');
   const [uploading, setUploading] = useState(false);
   const [viewerImage, setViewerImage] = useState<string | null>(null);
@@ -1411,6 +1412,7 @@ function MiddayTab({
       restaurantId,
       date,
       amount,
+      receiptCount: parseInt(midReceiptCount, 10) || 0,
       note: midNote || undefined,
     });
   };
@@ -1460,18 +1462,33 @@ function MiddayTab({
       <Card className="bg-card border-border p-4">
         <h3 className="font-semibold text-foreground mb-4">중간 매출</h3>
         <div className="space-y-3 mb-4">
-          <div>
-            <Label htmlFor="mid-amount" className="text-sm">
-              매출액
-            </Label>
-            <Input
-              id="mid-amount"
-              type="number"
-              placeholder="0"
-              value={midAmount}
-              onChange={(e) => setMidAmount(e.target.value)}
-              className="mt-1"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="mid-amount" className="text-sm">
+                매출액
+              </Label>
+              <Input
+                id="mid-amount"
+                type="number"
+                placeholder="금액"
+                value={midAmount}
+                onChange={(e) => setMidAmount(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="mid-receipt" className="text-sm">
+                영수건수
+              </Label>
+              <Input
+                id="mid-receipt"
+                type="number"
+                placeholder="건수"
+                value={midReceiptCount}
+                onChange={(e) => setMidReceiptCount(e.target.value)}
+                className="mt-1"
+              />
+            </div>
           </div>
           <div>
             <Label htmlFor="mid-note" className="text-sm">
@@ -1505,7 +1522,8 @@ function MiddayTab({
                 >
                   <div>
                     <div className="font-medium text-foreground">
-                      ₩{sale.amount.toLocaleString()}
+                      ₩{Number(sale.amount).toLocaleString()}
+                      {sale.receiptCount > 0 && <span className="text-xs text-muted-foreground ml-1">({sale.receiptCount}건)</span>}
                     </div>
                     {sale.note && (
                       <div className="text-xs text-muted-foreground">{sale.note}</div>
@@ -1620,6 +1638,7 @@ function CloseTab({
   const [cardAmount, setCardAmount] = useState('');
   const [giftCardAmount, setGiftCardAmount] = useState('');
   const [transferAmount, setTransferAmount] = useState('');
+  const [transferDepositor, setTransferDepositor] = useState('');
   const [otherItems, setOtherItems] = useState<OtherItem[]>([]);
   const [specialItems, setSpecialItems] = useState<SpecialItem[]>([]);
   const [closeNote, setCloseNote] = useState('');
@@ -1709,6 +1728,7 @@ function CloseTab({
       setCardAmount(salesQuery.data.cardAmount?.toString() || '');
       setGiftCardAmount(salesQuery.data.giftCardAmount?.toString() || '');
       setTransferAmount(salesQuery.data.transferAmount?.toString() || '');
+      setTransferDepositor(salesQuery.data.transferDepositor || '');
       setOtherItems((salesQuery.data.otherItems || []).map((i: any) => ({
         itemName: i.itemName,
         amount: typeof i.amount === 'string' ? parseInt(i.amount, 10) : i.amount,
@@ -1735,6 +1755,7 @@ function CloseTab({
       cardAmount: card,
       giftCardAmount: giftCard,
       transferAmount: transfer,
+      transferDepositor: transferDepositor || undefined,
       otherItems,
       specialItems,
       note: closeNote || undefined,
@@ -1843,14 +1864,22 @@ function CloseTab({
             <Label htmlFor="transfer" className="text-sm">
               계좌이체 매출
             </Label>
-            <Input
-              id="transfer"
-              type="number"
-              placeholder="0"
-              value={transferAmount}
-              onChange={(e) => setTransferAmount(e.target.value)}
-              className="mt-1"
-            />
+            <div className="flex gap-2 mt-1">
+              <Input
+                id="transfer"
+                type="number"
+                placeholder="금액"
+                value={transferAmount}
+                onChange={(e) => setTransferAmount(e.target.value)}
+                className="flex-1"
+              />
+              <Input
+                placeholder="입금자명"
+                value={transferDepositor}
+                onChange={(e) => setTransferDepositor(e.target.value)}
+                className="w-28"
+              />
+            </div>
           </div>
 
           {/* 기타 매출 */}
@@ -1871,7 +1900,7 @@ function CloseTab({
                 <Input
                   type="number"
                   placeholder="금액"
-                  value={item.amount}
+                  value={item.amount || ''}
                   onChange={(e) => {
                     const newItems = [...otherItems];
                     newItems[idx].amount = parseInt(e.target.value || '0', 10);

@@ -49,6 +49,11 @@ export default function ManagerDashboard() {
     { restaurantId }, { enabled }
   );
 
+  // ─── 중간매출 ───────────────────────────────────────────────────────────
+  const { data: midSalesData } = trpc.dailyOps.getMidSales.useQuery(
+    { restaurantId, date: todayStr }, { enabled }
+  );
+
   // ─── 알림 ────────────────────────────────────────────────────────────────
   const { data: notifications } = trpc.notifications.listMine.useQuery({ limit: 5 });
 
@@ -155,8 +160,16 @@ export default function ManagerDashboard() {
           <StatusRow
             icon={<Receipt size={14} />}
             label="중간 매출"
-            value={dailyClosing ? formatKRW(Number(dailyClosing.salesTotal ?? 0)) + "원" : "입력 없음"}
-            status={dailyClosing?.salesTotal ? "ok" : "neutral"}
+            value={midSalesData && midSalesData.length > 0
+              ? (() => {
+                  const latest = midSalesData[midSalesData.length - 1] as any;
+                  const totalAmt = midSalesData.reduce((s: number, m: any) => s + Number(m.amount), 0);
+                  const totalReceipts = midSalesData.reduce((s: number, m: any) => s + (m.receiptCount || 0), 0);
+                  const time = new Date(latest.recordedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                  return `${time} ${formatKRW(totalAmt)}원${totalReceipts > 0 ? ` (${totalReceipts}건)` : ''}`;
+                })()
+              : "입력 없음"}
+            status={midSalesData && midSalesData.length > 0 ? "ok" : "neutral"}
             onClick={() => setLocation("/daily-ops")}
           />
           {/* 매입 현황 */}
