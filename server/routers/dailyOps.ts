@@ -204,7 +204,7 @@ export const dailyOpsRouter = router({
       return { avg: Math.round(total / rows.length), count: rows.length };
     }),
 
-  // ─── 금일 출근 인원 (확정 스케줄 기반) ──────────────────────────────────
+  // ─── 금일 출근 인원 (draft/published/confirmed 스케줄 기반) ───────────────
   getTodayStaff: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
     .query(async ({ input }) => {
@@ -221,7 +221,7 @@ export const dailyOpsRouter = router({
           and(
             eq(schedules.restaurantId, input.restaurantId),
             sql`DATE(${schedules.startTime}) = ${input.date}`,
-            eq(schedules.status, "confirmed")
+            sql`${schedules.status} IN ('draft', 'published', 'confirmed')`,
           )
         );
 

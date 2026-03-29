@@ -577,13 +577,15 @@ export const schedulesRouter = router({
       return { success: true };
     }),
 
-  /** 향후 7일 (대시보드용) */
+  /** 향후 7일 (대시보드용) — 오늘 포함, draft/published/confirmed 모두 표시 */
   getUpcoming7Days: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      const now = new Date();
-      const end = new Date(now);
+      // 오늘 00:00부터 (이미 시작된 오늘 근무도 포함)
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const end = new Date(todayStart);
       end.setDate(end.getDate() + 7);
       return db
         .select({
@@ -600,9 +602,9 @@ export const schedulesRouter = router({
         .where(
           and(
             eq(schedules.restaurantId, input.restaurantId),
-            gte(schedules.startTime, now),
+            gte(schedules.startTime, todayStart),
             sql`${schedules.startTime} <= ${end}`,
-            eq(schedules.status, "confirmed")
+            sql`${schedules.status} IN ('draft', 'published', 'confirmed')`,
           )
         )
         .orderBy(schedules.startTime);
