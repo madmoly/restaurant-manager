@@ -347,16 +347,14 @@ function TodayStaffCard({
 
   return (
     <Card className="bg-card border-border p-4">
-      <h4 className="text-sm font-semibold text-foreground mb-2">금일 출근 인원</h4>
-      <p className="text-lg font-bold text-blue-600 mb-2">{headcount}명</p>
+      <div className="flex items-center justify-between mb-1">
+        <h4 className="text-sm font-semibold text-foreground">금일 출근 인원</h4>
+        <span className="text-lg font-bold text-blue-600">{headcount}명</span>
+      </div>
       {staff.length > 0 && (
-        <div className="space-y-1">
-          {staff.map((s: any) => (
-            <div key={s.userName} className="text-xs text-muted-foreground">
-              {s.userName} ({s.startTime} - {s.endTime})
-            </div>
-          ))}
-        </div>
+        <p className="text-xs text-muted-foreground">
+          {staff.map((s: any) => s.userName).join(', ')}
+        </p>
       )}
     </Card>
   );
@@ -385,14 +383,29 @@ function YesterdayClosingCard({
     );
   }
 
+  // 시간을 HH:mm 형태로 축약
+  const fmtTime = (raw: string | null) => {
+    if (!raw) return '-';
+    try {
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) {
+        // "HH:mm:ss" 등 이미 짧은 형태면 앞 5자만
+        return raw.length > 5 ? raw.slice(0, 5) : raw;
+      }
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    } catch {
+      return raw;
+    }
+  };
+
   return (
     <Card className="bg-card border-border p-4">
       <h4 className="text-sm font-semibold text-foreground mb-2">어제 마감 요약</h4>
-      <div className="space-y-1 text-xs text-muted-foreground">
-        <div>마감 시간: {data.closeCheckedAt || '-'}</div>
-        <div>매출: ₩{(data.totalSales || 0).toLocaleString()}</div>
-        {data.closeNote && <div>메모: {data.closeNote}</div>}
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <span>마감 {fmtTime(data.closeCheckedAt)}</span>
+        <span className="font-medium text-foreground">₩{(data.totalSales || 0).toLocaleString()}</span>
       </div>
+      {data.closeNote && <p className="text-xs text-muted-foreground mt-1">메모: {data.closeNote}</p>}
     </Card>
   );
 }
@@ -1346,15 +1359,7 @@ function MiddayTab({
   const [midAmount, setMidAmount] = useState('');
   const [midReceiptCount, setMidReceiptCount] = useState('');
   const [midNote, setMidNote] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [viewerImage, setViewerImage] = useState<string | null>(null);
-
   const midSalesQuery = trpc.dailyOps.getMidSales.useQuery({
-    restaurantId,
-    date,
-  });
-
-  const orderImagesQuery = trpc.dailyOps.getOrderImages.useQuery({
     restaurantId,
     date,
   });
@@ -1381,26 +1386,6 @@ function MiddayTab({
     },
   });
 
-  const saveOrderImageMutation = trpc.dailyOps.saveOrderImage.useMutation({
-    onSuccess: () => {
-      toast.success('이미지가 저장되었습니다.');
-      orderImagesQuery.refetch();
-    },
-    onError: (error: any) => {
-      toast.error(`저장 실패: ${error.message}`);
-    },
-  });
-
-  const deleteOrderImageMutation = trpc.dailyOps.deleteOrderImage.useMutation({
-    onSuccess: () => {
-      toast.success('삭제되었습니다.');
-      orderImagesQuery.refetch();
-    },
-    onError: (error: any) => {
-      toast.error(`삭제 실패: ${error.message}`);
-    },
-  });
-
   const handleSaveMidSales = async () => {
     const amount = parseInt(midAmount, 10);
     if (isNaN(amount) || amount <= 0) {
@@ -1417,37 +1402,7 @@ function MiddayTab({
     });
   };
 
-  const handleImageUpload = async (file: File) => {
-    try {
-      setUploading(true);
-      const resized = await resizeImage(file, { maxSize: 800 });
-      const formData = new FormData();
-      formData.append('photo', resized);
-
-      const response = await fetch('/api/upload/order-image', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('업로드 실패');
-      }
-
-      const { url } = await response.json();
-      saveOrderImageMutation.mutate({
-        restaurantId,
-        date,
-        imageUrl: url,
-      });
-    } catch (error) {
-      toast.error('이미지 업로드 실패');
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const midSales = midSalesQuery.data || [];
-  const orderImages = orderImagesQuery.data || [];
 
   return (
     <div className="space-y-4 p-4">
@@ -1547,67 +1502,6 @@ function MiddayTab({
         )}
       </Card>
 
-      {/* 발주 이미지 */}
-      <Card className="bg-card border-border p-4">
-        <h3 className="font-semibold text-foreground mb-4">발주 이미지</h3>
-        <div className="mb-4">
-          <label className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-6 cursor-pointer hover:bg-card/50 transition">
-            <Camera className="w-8 h-8 text-muted-foreground mb-2" />
-            <p className="text-sm text-foreground">사진을 선택하세요</p>
-            <p className="text-xs text-muted-foreground">또는 드래그하여 업로드</p>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => {
-                if (e.target.files?.[0]) {
-                  handleImageUpload(e.target.files[0]);
-                }
-              }}
-              disabled={uploading}
-              className="hidden"
-            />
-          </label>
-        </div>
-
-        {orderImages.length > 0 && (
-          <div className="grid grid-cols-2 gap-2">
-            {orderImages.map((img: any) => (
-              <div
-                key={img.id}
-                className="relative rounded-lg overflow-hidden bg-muted h-20 cursor-pointer group"
-                onClick={() => setViewerImage(img.imageUrl)}
-              >
-                <img
-                  src={img.imageUrl}
-                  alt="발주 이미지"
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                  <ZoomIn className="w-5 h-5 text-white opacity-0 group-hover:opacity-80 transition-opacity" />
-                </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); deleteOrderImageMutation.mutate({ id: img.id }); }}
-                  disabled={deleteOrderImageMutation.isPending}
-                  className="absolute top-1 right-1 bg-red-500 rounded-full p-1"
-                >
-                  <X className="w-3 h-3 text-white" />
-                </button>
-                {img.note && (
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 truncate">
-                    {img.note}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* 이미지 확대보기 모달 */}
-      {viewerImage && (
-        <ImageViewer src={viewerImage} onClose={() => setViewerImage(null)} />
-      )}
-
     </div>
   );
 }
@@ -1687,11 +1581,6 @@ function CloseTab({
     date,
   });
 
-  const purchasesQuery = trpc.dailyOps.getOrderImages.useQuery({
-    restaurantId,
-    date,
-  });
-
   const salesQuery = trpc.dailyOps.getDailySales.useQuery({
     restaurantId,
     date,
@@ -1767,8 +1656,6 @@ function CloseTab({
     0
   );
 
-  const purchaseCount = (purchasesQuery.data || []).length;
-
   const totalAmount =
     (parseInt(cashAmount || '0', 10) +
       parseInt(cardAmount || '0', 10) +
@@ -1806,10 +1693,6 @@ function CloseTab({
           <div className="flex justify-between">
             <span className="text-muted-foreground">중간 매출:</span>
             <span className="text-foreground">₩{midSalesTotal.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">발주 사진 수:</span>
-            <span className="text-foreground">{purchaseCount}장</span>
           </div>
         </div>
       </Card>
