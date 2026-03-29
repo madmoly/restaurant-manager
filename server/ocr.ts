@@ -710,14 +710,12 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     // ── 거래처 OCR 프로파일 자동 업데이트 (학습) ───────────────────────
     updateOcrProfile(cpId, parsed.documentType || null, items).catch(() => {});
 
-    // ── 거래처 정보 변경 감지 → DB 자동 반영 ──────────────────────────
+    // ── 거래처 정보는 클라이언트에서 확인 후 별도 API로 업데이트 ──────
     const cpInfo = parsed.counterpartyInfo || {};
-    if (cpId && (cpInfo.contactName || cpInfo.contactPhone)) {
-      updateCounterpartyInfo(cpId, cpInfo).catch(() => {});
-    }
 
     const result = {
       counterpartyName,
+      counterpartyId: cpId,
       transactionDate: parsed.transactionDate || null,
       counterpartyInfo: cpInfo.contactName || cpInfo.contactPhone ? cpInfo : null,
       items,
@@ -807,6 +805,24 @@ ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error("[OCR] extract-health-cert error:", err);
     res.status(500).json({ error: `보건증 분석 오류: ${err.message}` });
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// POST /api/ocr/update-counterparty-info — 사용자 확인 후 거래처 정보 반영
+// ═════════════════════════════════════════════════════════════════════════════
+ocrRouter.post("/update-counterparty-info", async (req: Request, res: Response) => {
+  try {
+    const { counterpartyId, contactName, contactPhone } = req.body;
+    if (!counterpartyId) {
+      res.status(400).json({ error: "counterpartyId 필요" });
+      return;
+    }
+    await updateCounterpartyInfo(Number(counterpartyId), { contactName, contactPhone });
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error("[OCR] update-counterparty-info error:", err);
+    res.json({ ok: false, error: err.message });
   }
 });
 

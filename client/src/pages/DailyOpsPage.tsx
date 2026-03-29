@@ -973,12 +973,52 @@ function PurchaseTab({
         if (matched) setCounterpartyId(matched.id);
       }
 
-      // 명세서 날짜가 현재와 다르면 해당일로 자동 이동
+      // 명세서 날짜가 현재와 다르면 확인 후 적용
       if (ocrData.transactionDate && onDateChange) {
         const ocrDate = ocrData.transactionDate; // "YYYY-MM-DD"
         if (ocrDate !== date) {
-          onDateChange(ocrDate);
-          toast.info(`명세서 날짜(${ocrDate})로 입고일이 변경되었습니다.`);
+          toast(`명세서 날짜가 ${ocrDate}입니다. 입고일을 변경할까요?`, {
+            duration: 15000,
+            action: {
+              label: '변경',
+              onClick: () => {
+                onDateChange(ocrDate);
+                toast.success(`입고일이 ${ocrDate}로 변경되었습니다.`);
+              },
+            },
+          });
+        }
+      }
+
+      // 거래처 정보 변경 감지 → 확인 후 반영
+      if (ocrData.counterpartyInfo && ocrData.counterpartyId) {
+        const ci = ocrData.counterpartyInfo;
+        const changes: string[] = [];
+        if (ci.contactName) changes.push(`담당자: ${ci.contactName}`);
+        if (ci.contactPhone) changes.push(`연락처: ${ci.contactPhone}`);
+        if (changes.length > 0) {
+          toast(`거래처 정보가 감지되었습니다.\n${changes.join(', ')}`, {
+            duration: 15000,
+            action: {
+              label: '반영',
+              onClick: async () => {
+                try {
+                  await fetch('/api/ocr/update-counterparty-info', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      counterpartyId: ocrData.counterpartyId,
+                      contactName: ci.contactName || undefined,
+                      contactPhone: ci.contactPhone || undefined,
+                    }),
+                  });
+                  toast.success('거래처 정보가 업데이트되었습니다.');
+                } catch {
+                  toast.error('거래처 정보 업데이트 실패');
+                }
+              },
+            },
+          });
         }
       }
 

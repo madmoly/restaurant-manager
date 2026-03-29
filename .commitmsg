@@ -1,9 +1,8 @@
-feat: OCR auto-date and counterparty info sync
+fix: require user confirmation before date change and counterparty update
 
-1. Transaction date extraction: OCR reads invoice date and auto-sets
-   purchase date if different from current (with toast notification)
-2. Counterparty info sync: OCR extracts contact name/phone from invoice,
-   auto-updates counterparty DB if changed
-3. Added transactionDate and counterpartyInfo to OCR prompt and response
+- Invoice date: shows toast with "변경" button instead of auto-applying
+- Counterparty info: shows toast with "반영" button, calls dedicated API
+- Added POST /api/ocr/update-counterparty-info endpoint (user-initiated)
+- Removed auto-update of counterparty info from OCR flow
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
