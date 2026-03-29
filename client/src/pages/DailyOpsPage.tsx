@@ -770,6 +770,8 @@ function PurchaseTab({
   const [simpleMode, setSimpleMode] = useState(false);
   const [simpleTotalAmount, setSimpleTotalAmount] = useState('');
   const [counterpartyId, setCounterpartyId] = useState<number | undefined>(undefined);
+  const [cpSearchText, setCpSearchText] = useState('');
+  const [showCpDropdown, setShowCpDropdown] = useState(false);
   const [note, setNote] = useState('');
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemRow[]>([emptyPurchaseItem()]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -835,11 +837,25 @@ function PurchaseTab({
     onError(err: any) { toast.error(`삭제 실패: ${err.message}`); },
   });
 
+  // 거래처 신규 생성
+  const createCounterparty = trpc.counterparties.create.useMutation({
+    onSuccess(data: any) {
+      setCounterpartyId(data.id);
+      setCpSearchText('');
+      setShowCpDropdown(false);
+      utils.counterparties.list.invalidate();
+      toast.success('거래처가 등록되었습니다');
+    },
+    onError(err: any) { toast.error(`거래처 등록 실패: ${err.message}`); },
+  });
+
   const resetForm = () => {
     setInputMode('none');
     setSimpleMode(false);
     setSimpleTotalAmount('');
     setCounterpartyId(undefined);
+    setCpSearchText('');
+    setShowCpDropdown(false);
     setNote('');
     setPurchaseItems([emptyPurchaseItem()]);
     setAttachmentUrl(undefined);
@@ -1312,19 +1328,75 @@ function PurchaseTab({
             </div>
           )}
 
-          {/* 거래처 선택 (항상 표시) */}
-          <div>
+          {/* 거래처 선택/입력 (검색 + 신규 생성) */}
+          <div className="relative">
             <Label className="text-xs">거래처</Label>
-            <select
-              value={counterpartyId ?? ''}
-              onChange={(e) => setCounterpartyId(e.target.value ? Number(e.target.value) : undefined)}
-              className="mt-1 w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
-            >
-              <option value="">미지정</option>
-              {counterpartiesList.map((cp: any) => (
-                <option key={cp.id} value={cp.id}>{cp.name}</option>
-              ))}
-            </select>
+            {counterpartyId ? (
+              <div className="mt-1 flex items-center gap-2 h-9 rounded-md border border-border bg-background px-3">
+                <span className="text-sm text-foreground flex-1">
+                  {counterpartiesList.find((cp: any) => cp.id === counterpartyId)?.name ?? '거래처'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setCounterpartyId(undefined); setCpSearchText(''); }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={cpSearchText}
+                  onChange={(e) => { setCpSearchText(e.target.value); setShowCpDropdown(true); }}
+                  onFocus={() => setShowCpDropdown(true)}
+                  onBlur={() => setTimeout(() => setShowCpDropdown(false), 200)}
+                  placeholder="거래처 검색 또는 입력"
+                  className="mt-1 w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+                />
+                {showCpDropdown && (
+                  <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-card border border-border rounded-md shadow-lg">
+                    {counterpartiesList
+                      .filter((cp: any) => !cpSearchText || cp.name.toLowerCase().includes(cpSearchText.toLowerCase()))
+                      .map((cp: any) => (
+                        <button
+                          key={cp.id}
+                          type="button"
+                          onClick={() => {
+                            setCounterpartyId(cp.id);
+                            setCpSearchText('');
+                            setShowCpDropdown(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          {cp.name}
+                        </button>
+                      ))}
+                    {cpSearchText.trim() && !counterpartiesList.some((cp: any) => cp.name === cpSearchText.trim()) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          createCounterparty.mutate({
+                            restaurantId,
+                            name: cpSearchText.trim(),
+                            counterpartyType: 'supplier',
+                          });
+                        }}
+                        disabled={createCounterparty.isPending}
+                        className="w-full text-left px-3 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 transition-colors border-t border-border font-medium"
+                      >
+                        <Plus className="w-3.5 h-3.5 inline mr-1" />
+                        "{cpSearchText.trim()}" 새 거래처 등록
+                      </button>
+                    )}
+                    {counterpartiesList.filter((cp: any) => !cpSearchText || cp.name.toLowerCase().includes(cpSearchText.toLowerCase())).length === 0 && !cpSearchText.trim() && (
+                      <div className="px-3 py-2 text-xs text-muted-foreground">등록된 거래처가 없습니다</div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {/* ── 간편입력 모드: 금액만 ── */}
