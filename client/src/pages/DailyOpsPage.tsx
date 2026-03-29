@@ -926,13 +926,8 @@ function PurchaseTab({
       setOcrProcessing(true);
       setOcrError(null);
 
-      // 1단계: 고품질 이미지로 업로드 (OCR 분석용)
+      // 1단계: 고품질 이미지로 업로드 (서버에서 EXIF 회전 적용)
       const highQuality = await resizeImage(file, OCR_HIGH);
-
-      // 미리보기 생성 (리사이징된 이미지 사용 — EXIF 회전 보정됨)
-      const previewReader = new FileReader();
-      previewReader.onload = (e) => setOcrPreviewUrl(e.target?.result as string);
-      previewReader.readAsDataURL(highQuality);
       const formData = new FormData();
       formData.append('photo', highQuality);
 
@@ -943,6 +938,9 @@ function PurchaseTab({
       if (!uploadRes.ok) throw new Error('이미지 업로드 실패');
       const { url } = await uploadRes.json();
       setAttachmentUrl(url);
+
+      // 미리보기: 서버에서 EXIF 보정된 이미지 URL 사용 (항상 정방향)
+      setOcrPreviewUrl(url);
 
       // 2단계: AI OCR 추출 요청 (고품질 이미지로 분석)
       const ocrRes = await fetch('/api/ocr/extract-purchase', {

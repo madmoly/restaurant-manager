@@ -1,6 +1,7 @@
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import sharp from "sharp";
 import { Request, Response, Router } from "express";
 
 // ─── 업로드 디렉토리 ──────────────────────────────────────────────────────────
@@ -94,11 +95,22 @@ const orderUpload = multer({
   },
 });
 
-uploadRouter.post("/order-image", orderUpload.single("photo"), (req: Request, res: Response) => {
+uploadRouter.post("/order-image", orderUpload.single("photo"), async (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ error: "파일이 없습니다" });
     return;
   }
+
+  // EXIF orientation 기반 자동 회전 → 파일 덮어쓰기
+  // 이후 OCR, 프리뷰, 저장 모두 정방향 이미지 사용
+  try {
+    const rotated = await sharp(req.file.path).rotate().toBuffer();
+    fs.writeFileSync(req.file.path, rotated);
+    console.log(`[upload] EXIF 회전 적용: ${path.basename(req.file.path)} (${(rotated.length / 1024).toFixed(0)}KB)`);
+  } catch (err) {
+    console.warn(`[upload] EXIF 회전 실패 (원본 유지): ${path.basename(req.file.path)}`, err);
+  }
+
   const relativePath = path.relative(UPLOAD_ROOT, req.file.path).replace(/\\/g, "/");
   const url = `/uploads/${relativePath}`;
   res.json({ url });
