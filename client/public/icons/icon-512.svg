@@ -1,4 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="102.4" fill="#10b981"/>
-  <text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="179.2" fill="white">331</text>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <!-- 숫자 331 크게 -->
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="'Segoe UI','Arial Black','Arial',sans-serif" font-weight="900" font-size="200" fill="white" letter-spacing="-6">331</text>
+  <!-- 하단 점 3개 (매장 상징) -->
+  <circle cx="216" cy="380" r="10" fill="white" opacity="0.6"/>
+  <circle cx="256" cy="380" r="10" fill="white" opacity="0.6"/>
+  <circle cx="296" cy="380" r="10" fill="white" opacity="0.6"/>
 </svg>
