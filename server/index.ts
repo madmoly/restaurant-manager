@@ -456,6 +456,24 @@ app.use(express.json());
       WHERE isTutorial = 1 AND role != 'admin' AND parentId IS NULL
     `).catch(() => {});
 
+    // 4-b) Tutorial 유저 → Tutorial 매장 restaurant_users 배정 (점장/매니져/직원 종속)
+    await conn.query(`
+      INSERT INTO restaurant_users (restaurantId, userId, role)
+      SELECT r.id, u.id,
+        CASE u.username
+          WHEN 'owner1' THEN 'owner'
+          WHEN 'supervisor1' THEN 'supervisor'
+          ELSE 'staff'
+        END
+      FROM users u
+      CROSS JOIN restaurants r
+      WHERE u.isTutorial = 1 AND u.role != 'admin'
+        AND r.isTutorial = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM restaurant_users ru WHERE ru.userId = u.id AND ru.restaurantId = r.id
+        )
+    `).catch(() => {});
+
     // 5-0) 사업자 그룹명 확정: 331컴퍼니 / Tutorial
     await conn.query(`
       UPDATE business_groups bg

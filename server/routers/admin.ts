@@ -5,7 +5,7 @@ import { db } from "../db";
 import {
   restaurants, restaurantUsers, users, sales, purchaseOrders,
   dailyClosings, fixedCosts, dailyOperations, intermediateSales,
-  schedules, dailySalesDetail,
+  schedules, dailySalesDetail, businessGroups,
 } from "../../drizzle/schema";
 import { ROLE_LEVEL } from "@shared/permissions";
 import { getOwnedRestaurants, getOwnedRestaurantIds, realStoreCondition } from "../helpers/restaurantScope";
@@ -23,6 +23,13 @@ export const adminRouter = router({
 
       // 소유 매장 목록
       const allRestaurants = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
+
+      // 사업그룹명 매핑 (master용)
+      const groupMap = new Map<number, string>();
+      if (ctx.user.role === "master") {
+        const groups = await db.select({ adminId: businessGroups.adminId, name: businessGroups.name }).from(businessGroups);
+        for (const g of groups) groupMap.set(g.adminId, g.name);
+      }
 
       const storeData = await Promise.all(
         allRestaurants.map(async (r) => {          // 매출 합계
@@ -63,6 +70,8 @@ export const adminRouter = router({
             restaurantName: r.name,
             address: r.address,
             isActive: r.isActive,
+            ownerAdminId: r.ownerAdminId,
+            groupName: r.ownerAdminId ? (groupMap.get(r.ownerAdminId) ?? null) : null,
             salesTotal,
             purchasesTotal,
             laborCost,
@@ -104,6 +113,13 @@ export const adminRouter = router({
     .query(async ({ input, ctx }) => {
       const allRestaurants = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
 
+      // 사업그룹명 매핑 (master용)
+      const groupMap = new Map<number, string>();
+      if (ctx.user.role === "master") {
+        const groups = await db.select({ adminId: businessGroups.adminId, name: businessGroups.name }).from(businessGroups);
+        for (const g of groups) groupMap.set(g.adminId, g.name);
+      }
+
       const storeStatuses = await Promise.all(
         allRestaurants.map(async (r) => {
           // 오픈 체크
@@ -134,6 +150,7 @@ export const adminRouter = router({
           return {
             restaurantId: r.id,
             name: r.name,
+            groupName: r.ownerAdminId ? (groupMap.get(r.ownerAdminId) ?? null) : null,
             isOpenChecked: !!ops?.openCheckedAt,
             isCloseDone: !!closing,
             closingTotal: closing ? Number(closing.totalAmount) : null,

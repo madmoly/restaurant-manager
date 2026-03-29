@@ -1,8 +1,10 @@
-fix: Tutorial 데이터 격리 강제 적용 + 사업그룹명 확정
+feat: 사업그룹별 데이터 분리 + Tutorial 매장 종속 + 그룹관리 라우팅
 
-- Tutorial 매장/사용자의 isTutorial 플래그가 false로 남아있던 문제 수정
-- username 패턴 기반으로 isTutorial = 1 강제 설정 (owner1, supervisor1, staff1, staff2)
-- Tutorial 매장(name LIKE 'Tutorial%')도 isTutorial = 1 강제 설정
-- 사업그룹명 확정: 331admin → '331컴퍼니', tutorial_admin → 'Tutorial'
+- AdminDashboard: master 역할 시 사업그룹 필터(전체/331컴퍼니/Tutorial) 추가
+- 금일현황/매장목록/손익테이블 모두 그룹별 필터링 + 그룹명 표시
+- KPI/차트도 선택된 그룹 기준 집계로 전환
+- Tutorial 사용자(owner1,supervisor1,staff1,staff2) → Tutorial 매장 restaurant_users 자동 배정 마이그레이션
+- /groups 라우트 추가 → MasterDashboard (사업그룹 생성/배정/관리 UI)
+- AppLayout 사이드바에 '사업그룹' 메뉴 추가 (master 전용)
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

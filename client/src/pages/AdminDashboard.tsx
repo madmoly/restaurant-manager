@@ -1,10 +1,11 @@
 import { useState, useMemo } from "react";
 import { trpc } from "../lib/trpc";
+import { useAuth } from "../hooks/useAuth";
 import { useLocation } from "wouter";
 import {
   Store, Users, TrendingUp, TrendingDown, DollarSign, Package,
   AlertTriangle, CheckCircle, ClipboardCheck,
-  Wallet, Receipt, Bell, ChevronRight, BarChart3,
+  Wallet, Receipt, Bell, ChevronRight, BarChart3, Building2, Filter,
 } from "lucide-react";
 import { Card, StatCard, PageHeader } from "@/components/ui/compat";
 import { DashboardSkeleton } from "@/components/ui/skeletons";
@@ -25,9 +26,12 @@ const fmtShort = (n: number) => {
 // ─── 메인: 대표(admin) 대시보드 ──────────────────────────────────────────────
 export default function AdminDashboard() {
   const [, setLocation] = useLocation();
+  const { user } = useAuth();
+  const isMaster = user?.role === "master";
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
+  const [selectedGroup, setSelectedGroup] = useState<string>("전체");
   // 이전 달
   const prevMonth = month === 1 ? 12 : month - 1;
   const prevYear = month === 1 ? year - 1 : year;
@@ -45,31 +49,71 @@ export default function AdminDashboard() {
   const todayStr = today.toISOString().slice(0, 10);
   const { data: todayStatuses } = trpc.admin.allStoresTodayStatus.useQuery({ date: todayStr });
 
-  // ─── 집계 ──────────────────────────────────────────────────────────────
+  // ─── 사업그룹 필터 (master 전용) ──────────────────────────────────────
+  const groupNames = useMemo(() => {
+    if (!isMaster || !summary?.stores) return [];
+    const names = new Set<string>();
+    for (const s of summary.stores) {
+      names.add((s as any).groupName ?? "미배정");
+    }
+    return Array.from(names);
+  }, [isMaster, summary?.stores]);
+
+  // 필터된 매장 데이터
+  const filteredStores = useMemo(() => {
+    if (!summary?.stores) return [];
+    if (!isMaster || selectedGroup === "전체") return summary.stores;
+    return summary.stores.filter((s) =>
+      ((s as any).groupName ?? "미배정") === selectedGroup
+    );
+  }, [summary?.stores, isMaster, selectedGroup]);
+
+  const filteredTodayStatuses = useMemo(() => {
+    if (!todayStatuses) return [];
+    if (!isMaster || selectedGroup === "전체") return todayStatuses;
+    return todayStatuses.filter((s: any) =>
+      (s.groupName ?? "미배정") === selectedGroup
+    );
+  }, [todayStatuses, isMaster, selectedGroup]);
+
+  // ─── 집계 (필터된 매장 기준) ──────────────────────────────────────────
   const isLoading = loadingSummary || loadingU;
 
-  const t = summary?.totals;
-  const totalSales = t?.salesTotal ?? 0;
-  const totalPurchases = t?.purchasesTotal ?? 0;
-  const totalLabor = t?.laborCost ?? 0;
-  const totalFixed = t?.fixedCostTotal ?? 0;
-  const totalProfit = t?.profit ?? 0;
-  const profitRate = t?.profitRate ?? 0;
-  const storeCount = t?.storeCount ?? 0;
+  const filteredTotals = useMemo(() => {
+    const stores = filteredStores;
+    const salesTotal = stores.reduce((a, s) => a + s.salesTotal, 0);
+    const purchasesTotal = stores.reduce((a, s) => a + s.purchasesTotal, 0);
+    const laborCost = stores.reduce((a, s) => a + s.laborCost, 0);
+    const fixedCostTotal = stores.reduce((a, s) => a + s.fixedCostTotal, 0);
+    const profit = stores.reduce((a, s) => a + s.profit, 0);
+    return {
+      salesTotal, purchasesTotal, laborCost, fixedCostTotal, profit,
+      profitRate: salesTotal > 0 ? (profit / salesTotal * 100) : 0,
+      storeCount: stores.length,
+    };
+  }, [filteredStores]);
+
+  const totalSales = filteredTotals.salesTotal;
+  const totalPurchases = filteredTotals.purchasesTotal;
+  const totalLabor = filteredTotals.laborCost;
+  const totalFixed = filteredTotals.fixedCostTotal;
+  const totalProfit = filteredTotals.profit;
+  const profitRate = filteredTotals.profitRate;
+  const storeCount = filteredTotals.storeCount;
 
   const prevTotalSales = prevSummary?.totals?.salesTotal ?? 0;
   const salesGrowth = prevTotalSales > 0 ? ((totalSales - prevTotalSales) / prevTotalSales * 100) : 0;
   // 매장별 매출 데이터 (차트용)
   const storeRevenueData = useMemo(() => {
-    if (!summary?.stores) return [];
-    return [...summary.stores]
+    if (!filteredStores.length) return [];
+    return [...filteredStores]
       .sort((a, b) => b.salesTotal - a.salesTotal)
       .map((s) => ({
         name: s.restaurantName,
         매출: s.salesTotal,
         매입: s.purchasesTotal,
       }));
-  }, [summary?.stores]);
+  }, [filteredStores]);
 
   // 비용 구성 (파이 차트)
   const costBreakdown = useMemo(() => [
@@ -110,23 +154,58 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* 사업그룹 필터 (master 전용) */}
+      {isMaster && groupNames.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Filter size={14} className="text-muted-foreground shrink-0" />
+          <button
+            onClick={() => setSelectedGroup("전체")}
+            className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+              selectedGroup === "전체"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "border-border text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            전체
+          </button>
+          {groupNames.map((gn) => (
+            <button
+              key={gn}
+              onClick={() => setSelectedGroup(gn)}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                selectedGroup === gn
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-border text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              {gn}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* 전체 매장 금일 현황 */}
-      {todayStatuses && todayStatuses.length > 0 && (
+      {filteredTodayStatuses && filteredTodayStatuses.length > 0 && (
         <Card className="p-5">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
             <ClipboardCheck size={14} className="text-primary" />
-            전체 매장 금일 현황
+            {selectedGroup === "전체" ? "전체 매장" : selectedGroup} 금일 현황
             <span className="text-xs font-normal text-muted-foreground ml-1">{todayStr}</span>
           </h3>
           <div className="space-y-2">
-            {todayStatuses.map((s: any) => (
+            {filteredTodayStatuses.map((s: any) => (
               <div key={s.restaurantId} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card/50">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                     <Store size={14} className="text-primary" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{s.name}</p>
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {s.name}
+                      {isMaster && selectedGroup === "전체" && s.groupName && (
+                        <span className="text-[10px] text-muted-foreground ml-1.5 font-normal">({s.groupName})</span>
+                      )}
+                    </p>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${s.isOpenChecked ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>
                         {s.isOpenChecked ? '오픈✓' : '오픈✗'}
@@ -287,7 +366,7 @@ export default function AdminDashboard() {
               </button>
             </div>
             <div className="space-y-2">
-              {(summary?.stores ?? []).map((s) => (
+              {filteredStores.map((s) => (
                 <div
                   key={s.restaurantId}
                   className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/30 cursor-pointer transition-all"
@@ -298,7 +377,12 @@ export default function AdminDashboard() {
                       <Store size={14} className="text-primary" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{s.restaurantName}</p>
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {s.restaurantName}
+                        {isMaster && selectedGroup === "전체" && (s as any).groupName && (
+                          <span className="text-[10px] text-muted-foreground ml-1.5 font-normal">({(s as any).groupName})</span>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground truncate">{s.address || "—"}</p>
                     </div>
                   </div>
@@ -310,7 +394,7 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               ))}
-              {(!summary?.stores || summary.stores.length === 0) && (
+              {filteredStores.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-6">등록된 매장이 없습니다</p>
               )}            </div>
           </Card>
@@ -367,17 +451,22 @@ export default function AdminDashboard() {
             <thead>
               <tr className="border-b border-border text-left text-muted-foreground">
                 <th className="py-2 px-3 font-medium">매장</th>
+                {isMaster && selectedGroup === "전체" && <th className="py-2 px-3 font-medium">그룹</th>}
                 <th className="py-2 px-3 font-medium text-right">매출</th>
                 <th className="py-2 px-3 font-medium text-right">매입</th>
-                <th className="py-2 px-3 font-medium text-right">인건비</th>                <th className="py-2 px-3 font-medium text-right">고정비</th>
+                <th className="py-2 px-3 font-medium text-right">인건비</th>
+                <th className="py-2 px-3 font-medium text-right">고정비</th>
                 <th className="py-2 px-3 font-medium text-right">영업이익</th>
                 <th className="py-2 px-3 font-medium text-right">이익률</th>
               </tr>
             </thead>
             <tbody>
-              {(summary?.stores ?? []).map((s) => (
+              {filteredStores.map((s) => (
                 <tr key={s.restaurantId} className="border-b border-border/50 hover:bg-accent/30 transition-colors">
                   <td className="py-2.5 px-3 font-medium text-foreground">{s.restaurantName}</td>
+                  {isMaster && selectedGroup === "전체" && (
+                    <td className="py-2.5 px-3 text-xs text-muted-foreground">{(s as any).groupName ?? "미배정"}</td>
+                  )}
                   <td className="py-2.5 px-3 text-right tabular-nums">{fmt(s.salesTotal)}</td>
                   <td className="py-2.5 px-3 text-right tabular-nums">{fmt(s.purchasesTotal)}</td>
                   <td className="py-2.5 px-3 text-right tabular-nums">{fmt(s.laborCost)}</td>
@@ -391,10 +480,11 @@ export default function AdminDashboard() {
                 </tr>
               ))}
             </tbody>
-            {(summary?.stores?.length ?? 0) > 0 && (
+            {filteredStores.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-border font-semibold text-foreground">
                   <td className="py-2.5 px-3">합계</td>
+                  {isMaster && selectedGroup === "전체" && <td className="py-2.5 px-3"></td>}
                   <td className="py-2.5 px-3 text-right tabular-nums">{fmt(totalSales)}</td>
                   <td className="py-2.5 px-3 text-right tabular-nums">{fmt(totalPurchases)}</td>
                   <td className="py-2.5 px-3 text-right tabular-nums">{fmt(totalLabor)}</td>

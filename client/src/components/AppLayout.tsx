@@ -70,6 +70,12 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
     roles: ["master", "admin"],
   },
   {
+    label: "사업그룹", href: "/groups",
+    icon: <Building2 className="h-4 w-4" />,
+    mobileIcon: <Building2 className="h-5 w-5" />,
+    roles: ["master"],
+  },
+  {
     label: "시스템 관리", href: "/system",
     icon: <Activity className="h-4 w-4" />,
     mobileIcon: <Activity className="h-5 w-5" />,

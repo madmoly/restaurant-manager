@@ -71,6 +71,7 @@ function RoleRouter() {
           <>
             <Route path="/" component={ManagerDashboard} />
             <Route path="/business" component={AdminDashboard} />
+            <Route path="/groups" component={MasterDashboard} />
             <Route path="/users" component={UsersPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
             <Route path="/profitability" component={ProfitPage} />
