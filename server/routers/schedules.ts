@@ -397,6 +397,7 @@ export const schedulesRouter = router({
       prevEnd.setDate(prevEnd.getDate() + 6);
       prevEnd.setHours(23, 59, 59);
 
+      // 지난주 스케줄 조회 (canceled 제외, 모든 상태 포함)
       const prevSchedules = await db
         .select()
         .from(schedules)
@@ -405,18 +406,18 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             gte(schedules.startTime, prevStart),
             sql`${schedules.startTime} <= ${prevEnd}`,
-            eq(schedules.status, "draft")
+            sql`${schedules.status} != 'canceled'`
           )
         );
 
       const diff = 7 * 24 * 3600 * 1000;
 
-      // 대상 주에 이미 존재하는 스케줄 조회 (중복 필터링용)
+      // 대상 주에 이미 존재하는 스케줄 조회 — 날짜 단위로 중복 판단
       const targetEnd = new Date(targetStart);
       targetEnd.setDate(targetEnd.getDate() + 6);
       targetEnd.setHours(23, 59, 59);
       const existingTargetWeek = await db
-        .select({ userId: schedules.userId, startTime: schedules.startTime })
+        .select({ startTime: schedules.startTime })
         .from(schedules)
         .where(
           and(
@@ -426,8 +427,9 @@ export const schedulesRouter = router({
             sql`${schedules.status} != 'canceled'`
           )
         );
-      const existingKeys = new Set(
-        existingTargetWeek.map((e) => `${e.userId}_${toKSTDateString(new Date(e.startTime))}`)
+      // 이미 스케줄이 존재하는 날짜 Set
+      const existingDates = new Set(
+        existingTargetWeek.map((e) => toKSTDateString(new Date(e.startTime)))
       );
 
       const inserts = prevSchedules
@@ -441,8 +443,9 @@ export const schedulesRouter = router({
           status: "draft" as const,
         }))
         .filter((s) => {
-          const key = `${s.userId}_${toKSTDateString(s.startTime)}`;
-          return !existingKeys.has(key);
+          // 해당 날짜에 이미 스케줄이 하나라도 있으면 건너뜀
+          const dateKey = toKSTDateString(s.startTime);
+          return !existingDates.has(dateKey);
         });
 
       if (inserts.length > 0) await db.insert(schedules).values(inserts);
