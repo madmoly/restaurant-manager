@@ -100,7 +100,10 @@ export const errorLogsRouter = router({
         })
         .from(errorLogs)
         .leftJoin(restaurants, eq(errorLogs.restaurantId, restaurants.id))
-        .where(gte(errorLogs.createdAt, since))
+        .where(and(
+          gte(errorLogs.createdAt, since),
+          sql`(${restaurants.isTutorial} = false OR ${errorLogs.restaurantId} IS NULL)`,
+        ))
         .groupBy(errorLogs.restaurantId, restaurants.name)
         .orderBy(desc(sql`COUNT(*)`));
       return rows;

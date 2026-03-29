@@ -189,14 +189,15 @@ export const adminRouter = router({
           employees: sql<number>`SUM(CASE WHEN ${users.role} = 'staff' THEN 1 ELSE 0 END)`,        })
         .from(users);
 
-      // 매장 통계
+      // 매장 통계 (tutorial 제외)
       const storeStats = await db
         .select({
           total: sql<number>`COUNT(*)`,
           active: sql<number>`SUM(CASE WHEN ${restaurants.deletedAt} IS NULL THEN 1 ELSE 0 END)`,
           archived: sql<number>`SUM(CASE WHEN ${restaurants.deletedAt} IS NOT NULL THEN 1 ELSE 0 END)`,
         })
-        .from(restaurants);
+        .from(restaurants)
+        .where(eq(restaurants.isTutorial, false));
 
       // 최근 로그인한 사용자 5명
       const recentLogins = await db
@@ -211,12 +212,15 @@ export const adminRouter = router({
         .orderBy(desc(users.lastSignedIn))
         .limit(5);
 
-      // 매장별 직원 수
+      // 매장별 직원 수 (tutorial 매장 제외)
       const storeStaffCounts = await db
         .select({
-          restaurantId: restaurantUsers.restaurantId,          count: sql<number>`COUNT(*)`,
+          restaurantId: restaurantUsers.restaurantId,
+          count: sql<number>`COUNT(*)`,
         })
         .from(restaurantUsers)
+        .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
+        .where(eq(restaurants.isTutorial, false))
         .groupBy(restaurantUsers.restaurantId);
 
       return {

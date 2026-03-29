@@ -1,6 +1,9 @@
-PDF 내보내기 autoTable 호출 방식 수정
+fix: tutorial 데이터가 실매장 집계에 포함되는 버그 수정
 
-- doc.autoTable(opts) 프로토타입 메서드 → autoTable(doc, opts) 함수형 호출로 복원
-- Vite ESM 빌드에서 side-effect import로는 프로토타입 등록이 안됨
-- atModule.default || atModule.autoTable fallback으로 ESM/CJS 양쪽 호환
-- 빌드된 chunk에서 default/autoTable 모두 named export 확인됨
+- restaurants.list / listMine: isTutorial=false 필터 추가
+- admin.systemStatus: 매장 통계 COUNT에서 tutorial 제외
+- admin.systemStatus: storeStaffCounts에 restaurants JOIN + tutorial 필터
+- users.listWithAssignments: 배정 조회에서 tutorial 매장 제외
+- errorLogs.summaryByRestaurant: tutorial 매장 에러 집계 제외
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

@@ -29,7 +29,8 @@ export const usersRouter = router({
       storeRole: restaurantUsers.role,
     })
       .from(restaurantUsers)
-      .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId));
+      .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
+      .where(eq(restaurants.isTutorial, false));
 
     const assignmentMap: Record<number, Array<{ restaurantId: number; restaurantName: string; storeRole: string }>> = {};
     for (const a of assignments) {

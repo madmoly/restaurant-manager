@@ -48,9 +48,9 @@ async function geocodeAddress(address: string, userId?: number, restaurantId?: n
 }
 
 export const restaurantsRouter = router({
-  /** 전체 매장 목록 (master/admin: 전체) */
+  /** 전체 매장 목록 (tutorial 제외) */
   list: protectedProcedure.query(async ({ ctx }) => {
-    return db.select().from(restaurants).where(eq(restaurants.isActive, true));
+    return db.select().from(restaurants).where(and(eq(restaurants.isActive, true), eq(restaurants.isTutorial, false)));
   }),
 
   /** 소유 매장 + 직원수 + 당월 매출 요약 (admin 이상) */
@@ -105,13 +105,17 @@ export const restaurantsRouter = router({
     }));
   }),
 
-  /** 내 매장 + 역할 (admin 미만) */
+  /** 내 매장 + 역할 (admin 미만, tutorial 제외) */
   listMine: protectedProcedure.query(async ({ ctx }) => {
     return db
       .select({ restaurant: restaurants, storeRole: restaurantUsers.role })
       .from(restaurantUsers)
       .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
-      .where(and(eq(restaurantUsers.userId, ctx.user.userId), eq(restaurants.isActive, true)));
+      .where(and(
+        eq(restaurantUsers.userId, ctx.user.userId),
+        eq(restaurants.isActive, true),
+        eq(restaurants.isTutorial, false),
+      ));
   }),
 
   get: protectedProcedure
