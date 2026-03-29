@@ -282,6 +282,7 @@ export const schedulesRouter = router({
         status: z
           .enum(["draft", "completed", "confirmed", "canceled"])
           .optional(),
+        shiftPreset: z.enum(["open", "full", "close", "custom"]).optional(),
         note: z.string().optional(),
         editReason: z.string().optional(),
       })

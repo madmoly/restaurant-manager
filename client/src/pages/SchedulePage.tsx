@@ -340,7 +340,7 @@ export default function SchedulePage() {
   });
 
   const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
-  const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "" });
+  const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "", shiftPreset: "custom" as string });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   // showBulkMenu 삭제 — 버튼이 헤더에 직접 노출됨
@@ -534,6 +534,23 @@ export default function SchedulePage() {
     });
   };
 
+  // 매장 영업시간 기반 프리셋 시간 계산
+  const getPresetTimes = (preset: string) => {
+    const openTime = current?.openTime ?? "09:00";
+    const closeTime = current?.closeTime ?? "22:00";
+    const [oh, om] = openTime.split(":").map(Number);
+    const [ch, cm] = closeTime.split(":").map(Number);
+    const totalMinutes = (ch * 60 + cm) - (oh * 60 + om);
+    const midMinutes = oh * 60 + om + Math.floor(totalMinutes / 2);
+    const midTime = `${String(Math.floor(midMinutes / 60)).padStart(2, "0")}:${String(midMinutes % 60).padStart(2, "0")}`;
+    switch (preset) {
+      case "full": return { startTime: openTime, endTime: closeTime };
+      case "open": return { startTime: openTime, endTime: midTime };
+      case "close": return { startTime: midTime, endTime: closeTime };
+      default: return null;
+    }
+  };
+
   const openEditModal = (schedule: ScheduleItem) => {
     setEditSchedule(schedule);
     setEditForm({
@@ -541,6 +558,7 @@ export default function SchedulePage() {
       endTime: fmtTime(schedule.endTime),
       note: schedule.note ?? "",
       editReason: "",
+      shiftPreset: schedule.shiftPreset ?? "custom",
     });
     setDeleteConfirm(false);
   };
@@ -554,6 +572,7 @@ export default function SchedulePage() {
       workDate: dateStr,
       startTime: editForm.startTime,
       endTime: editForm.endTime,
+      shiftPreset: editForm.shiftPreset as "open" | "full" | "close" | "custom",
       note: editForm.note || undefined,
       editReason: editForm.editReason || undefined,
     });
@@ -1078,6 +1097,40 @@ export default function SchedulePage() {
                 </div>
               )}
 
+              {/* 근무유형 선택 */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">근무유형</label>
+                <div className="grid grid-cols-4 gap-1.5 mt-1">
+                  {([
+                    { key: "full", label: "풀타임", icon: Maximize2 },
+                    { key: "open", label: "오픈", icon: Sun },
+                    { key: "close", label: "마감", icon: Moon },
+                    { key: "custom", label: "직접입력", icon: Clock },
+                  ] as const).map(({ key, label, icon: Icon }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        const times = getPresetTimes(key);
+                        if (times) {
+                          setEditForm({ ...editForm, shiftPreset: key, startTime: times.startTime, endTime: times.endTime });
+                        } else {
+                          setEditForm({ ...editForm, shiftPreset: key });
+                        }
+                      }}
+                      className={`flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                        editForm.shiftPreset === key
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "border-border text-muted-foreground hover:bg-muted/50"
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">시작</label>
@@ -1085,7 +1138,7 @@ export default function SchedulePage() {
                     type="time"
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={editForm.startTime}
-                    onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value })}
+                    onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value, shiftPreset: "custom" })}
                   />
                 </div>
                 <div>
@@ -1094,7 +1147,7 @@ export default function SchedulePage() {
                     type="time"
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={editForm.endTime}
-                    onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value })}
+                    onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value, shiftPreset: "custom" })}
                   />
                 </div>
               </div>
