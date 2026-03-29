@@ -705,7 +705,8 @@ const UNIT_OPTIONS = ['개', '박스', 'kg', 'g', '리터', 'ml', '팩', '봉', 
 
 interface PurchaseItemRow {
   rawItemName: string;
-  originalName?: string; // OCR 원본 전체명칭
+  spec?: string;          // 규격 (용량/중량/사이즈)
+  originalName?: string;  // OCR 원본 전체명칭
   quantity: string;
   unitName: string;
   unitPrice: string;
@@ -974,6 +975,7 @@ function PurchaseTab({
         setPurchaseItems(
           ocrData.items.map((item: any) => ({
             rawItemName: item.shortName || item.name || '',
+            spec: item.spec || '',
             originalName: item.originalName || item.name || '',
             quantity: item.quantity || '',
             unitName: item.unit || '개',
@@ -1453,14 +1455,28 @@ function PurchaseTab({
                         {isLowConf ? '판독 불확실 — 확인 필요' : '합계 보정됨 — 확인 필요'}
                       </div>
                     )}
-                    {/* 품명 */}
+                    {/* 품명 + 규격 */}
                     <div>
-                      <Input
-                        placeholder="품명"
-                        value={item.rawItemName}
-                        onChange={(e) => updateItem(idx, 'rawItemName', e.target.value)}
-                        className="w-full text-sm h-9 font-medium"
-                      />
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <Input
+                            placeholder="품명"
+                            value={item.rawItemName}
+                            onChange={(e) => updateItem(idx, 'rawItemName', e.target.value)}
+                            className="w-full text-sm h-9 font-medium"
+                          />
+                        </div>
+                        {(item.spec || ocrPreviewUrl) && (
+                          <div className="w-24">
+                            <Input
+                              placeholder="규격"
+                              value={item.spec || ''}
+                              onChange={(e) => updateItem(idx, 'spec', e.target.value)}
+                              className="w-full text-sm h-9 text-muted-foreground"
+                            />
+                          </div>
+                        )}
+                      </div>
                       {item.originalName && item.originalName !== item.rawItemName && (
                         <p className="text-[10px] text-muted-foreground mt-0.5 px-1 truncate">원본: {item.originalName}</p>
                       )}

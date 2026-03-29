@@ -144,6 +144,7 @@ function extractText(message: Anthropic.Message): string | null {
 // ─── 헬퍼: 합계 검증 + 신뢰도 산정 (서버사이드) ────────────────────────────
 interface OcrItem {
   shortName: string;
+  spec: string;
   originalName: string;
   name: string;
   quantity: string;
@@ -156,6 +157,7 @@ interface OcrItem {
 function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; grandTotal?: string } | null): OcrItem[] {
   const enriched = items.map((item: any) => {
     const shortName = String(item.shortName || item.name || "");
+    const spec = String(item.spec || "");
     const originalName = String(item.originalName || item.name || "");
     // 수량: 소수점 끝의 불필요한 0 제거 (예: "6.000" → "6")
     let qtyStr = String(item.quantity || "").replace(/,/g, "");
@@ -234,6 +236,7 @@ function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; 
 
     return {
       shortName: shortName.replace(/\[\?\]/g, "").trim(),
+      spec: spec.trim(),
       originalName: originalName.replace(/\[\?\]/g, "").trim(),
       name: shortName.replace(/\[\?\]/g, "").trim(),
       quantity: qtyStr,
@@ -542,10 +545,23 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
    - "공급받는자"가 아닌 "공급자" 측입니다.
 
 2. **각 품목별 추출:**
-   - shortName: 핵심 품목명만 (예: "핫철리소스/CHOLIMEX/250g(250g*24ea)/막소" → "핫철리소스")
+   - shortName: **품목명/규격** 형식으로 분리 표기. 품목명은 핵심 이름만, 규격은 용량·중량·사이즈·포장단위 등.
+     예시:
+     · "핫철리소스/CHOLIMEX/250g(250g*24ea)/막소" → shortName: "핫철리소스/250g*24ea"
+     · "무항생제 계란(대란) 30구" → shortName: "무항생제 계란/대란 30구"
+     · "코카콜라 1.5L PET" → shortName: "코카콜라/1.5L"
+     · "양파(국내산) 10kg" → shortName: "양파/10kg"
+     · "일회용장갑(L)" → shortName: "일회용장갑/L"
+     · 규격 정보가 없으면 품목명만: "소금" → shortName: "소금"
+   - spec: 규격 부분만 별도 추출 (용량, 중량, 사이즈, 포장단위). 없으면 빈 문자열.
+     예시: "250g*24ea", "대란 30구", "1.5L", "10kg", "L", ""
    - originalName: 이미지에 적힌 전체 품목/규격 텍스트 그대로
    - quantity: **수량 열의 숫자** (순수 숫자, 콤마 제거). 소수점 유지. 예: "6.000" → "6", "0.500" → "0.5"
-   - unit: 단위 (EA, kg, 박스, 봉, 병, 판, 개, 묶 등)
+   - unit: 단위. **규격에서 단위를 유추할 수 있으면 반영하세요.**
+     · 규격이 "10kg"이면 unit: "kg"
+     · 규격이 "250g*24ea"이면 unit: "ea" (박스 안의 개별 단위)
+     · 규격이 "1.5L"이면 unit: "병" 또는 "개"
+     · 규격 없고 단위 열에 적힌 값이 있으면 그대로: "EA", "박스", "봉", "병", "판", "개", "묶" 등
    - unitPrice: **단가 열의 숫자** (순수 숫자, 콤마 제거). 예: "1,200" → "1200"
    - lineTotal: **공급가액/금액 열의 숫자** (순수 숫자, 콤마 제거). 예: "6,546" → "6546"
    - uncertain: 글씨가 불명확하거나 숫자 판독이 애매하면 true, 아니면 false
@@ -566,10 +582,11 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
   "documentType": "거래명세표|거래명세서|영수증|간이영수증|수기전표|배달정산서|기타",
   "items": [
     {
-      "shortName": "품목 축약명",
+      "shortName": "품목명/규격 (규격 없으면 품목명만)",
+      "spec": "규격 (용량/중량/사이즈/포장단위, 없으면 빈 문자열)",
       "originalName": "이미지 원본 텍스트",
       "quantity": "수량(숫자)",
-      "unit": "단위",
+      "unit": "단위 (규격에서 유추 가능하면 반영)",
       "unitPrice": "단가(숫자)",
       "lineTotal": "공급가액(숫자)",
       "uncertain": false
