@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { eq, and, between, sql, desc } from "drizzle-orm";
+import { eq, and, between, sql, desc, inArray } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
-import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders } from "../../drizzle/schema";
+import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, storeClosedDays, storeWeeklyClosures } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 
 export const dailyClosingsRouter = router({
@@ -148,6 +148,73 @@ export const dailyClosingsRouter = router({
           between(dailyClosings.closingDate, start, end)
         ));
 
+      // 마감된 날짜 목록 + 인건비 0인 마감일
+      const closedRows = await db
+        .select({
+          closingDate: dailyClosings.closingDate,
+          laborCost: dailyClosings.laborCost,
+        })
+        .from(dailyClosings)
+        .where(and(
+          eq(dailyClosings.restaurantId, input.restaurantId),
+          between(dailyClosings.closingDate, start, end)
+        ));
+
+      const closedDateSet = new Set(
+        closedRows.map(r => {
+          const d = r.closingDate;
+          return typeof d === "string" ? d : new Date(d).toISOString().slice(0, 10);
+        })
+      );
+      const zeroLaborDates = closedRows
+        .filter(r => Number(r.laborCost) === 0)
+        .map(r => {
+          const d = r.closingDate;
+          return typeof d === "string" ? d : new Date(d).toISOString().slice(0, 10);
+        });
+
+      // 매장 휴무일 (임시휴무 + 정기휴무)
+      const closedDayRows = await db.select({ closedDate: storeClosedDays.closedDate })
+        .from(storeClosedDays)
+        .where(and(
+          eq(storeClosedDays.restaurantId, input.restaurantId),
+          between(storeClosedDays.closedDate, start, end)
+        ));
+      const storeClosedSet = new Set(
+        closedDayRows.map(r => {
+          const d = r.closedDate;
+          return typeof d === "string" ? d : new Date(d).toISOString().slice(0, 10);
+        })
+      );
+
+      const weeklyClosureRows = await db.select({ weekday: storeWeeklyClosures.weekday })
+        .from(storeWeeklyClosures)
+        .where(and(
+          eq(storeWeeklyClosures.restaurantId, input.restaurantId),
+          eq(storeWeeklyClosures.isClosed, true)
+        ));
+      const closedWeekdays = new Set(weeklyClosureRows.map(r => r.weekday));
+
+      // 1일~오늘(또는 월말) 중 미마감 영업일 계산
+      const today = new Date();
+      const lastDay = today.getFullYear() === input.year && today.getMonth() + 1 === input.month
+        ? today.getDate()
+        : end.getDate();
+
+      const unclosedDates: string[] = [];
+      for (let d = 1; d <= lastDay; d++) {
+        const dt = new Date(input.year, input.month - 1, d);
+        const dateStr = `${input.year}-${String(input.month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        // 정기 휴무요일 스킵
+        if (closedWeekdays.has(dt.getDay())) continue;
+        // 임시 휴무 스킵
+        if (storeClosedSet.has(dateStr)) continue;
+        // 마감 안 된 날
+        if (!closedDateSet.has(dateStr)) {
+          unclosedDates.push(dateStr);
+        }
+      }
+
       return {
         salesTotal: row?.salesTotal ?? "0",
         purchasesTotal: row?.purchasesTotal ?? "0",
@@ -156,6 +223,8 @@ export const dailyClosingsRouter = router({
         profit: row?.profit ?? "0",
         closedDays: row?.closedDays ?? 0,
         daysInMonth: end.getDate(),
+        unclosedDates,            // 미마감 영업일
+        zeroLaborDates,           // 인건비 미확정 마감일
       };
     }),
 });

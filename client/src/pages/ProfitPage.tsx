@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/hooks/useAuth";
-import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download, FileText, Lock } from "lucide-react";
+import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download, FileText, Lock, AlertTriangle } from "lucide-react";
 import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { ProfitPageSkeleton } from "@/components/ui/skeletons";
@@ -42,14 +42,6 @@ export default function ProfitPage() {
     { restaurantId, year, month },
     { enabled: restaurantId > 0 }
   );
-  const { data: salesTotal } = trpc.sales.monthlyTotal.useQuery(
-    { restaurantId, year, month },
-    { enabled: restaurantId > 0 }
-  );
-  const { data: purchaseTotal } = trpc.purchases.monthlyTotal.useQuery(
-    { restaurantId, year, month },
-    { enabled: restaurantId > 0 }
-  );
   const { data: fixedTotal } = trpc.fixedCosts.monthlyTotal.useQuery(
     { restaurantId, year, month },
     { enabled: restaurantId > 0 }
@@ -75,11 +67,18 @@ export default function ProfitPage() {
   if (!restaurantId) return <EmptyState icon={<TrendingUp size={40} />} title="매장을 선택해주세요" />;
   if (isLoading) return <ProfitPageSkeleton />;
 
-  const sales = Number(salesTotal?.total ?? 0);
-  const purchases = Number(purchaseTotal?.total ?? 0);
+  // 마감 기준 합산 (마감된 날짜만 반영)
+  const sales = Number(summary?.salesTotal ?? 0);
+  const purchases = Number(summary?.purchasesTotal ?? 0);
   const fixed = Number(fixedTotal?.total ?? 0);
   const labor = Number(summary?.laborCost ?? 0);
   const profit = sales - purchases - labor - fixed;
+
+  // 미반영 현황
+  const unclosedDates = summary?.unclosedDates ?? [];
+  const zeroLaborDates = summary?.zeroLaborDates ?? [];
+  const closedDays = summary?.closedDays ?? 0;
+  const daysInMonth = summary?.daysInMonth ?? 30;
 
   const costRatio = sales > 0 ? (purchases / sales * 100) : 0;
   const laborRatio = sales > 0 ? (labor / sales * 100) : 0;
@@ -339,7 +338,7 @@ export default function ProfitPage() {
       {targetSales > 0 && (
         <>
           <h3 className="text-sm font-semibold text-foreground mb-3">월 목표 대비</h3>
-          <Card className="p-4">
+          <Card className="p-4 mb-5">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-muted-foreground">매출 목표 달성률</span>
               <span className="text-sm font-bold text-foreground">
@@ -358,6 +357,49 @@ export default function ProfitPage() {
             </div>
           </Card>
         </>
+      )}
+
+      {/* 미반영 항목 */}
+      {(unclosedDates.length > 0 || zeroLaborDates.length > 0) && (
+        <Card className="p-4 border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+            <AlertTriangle size={14} className="text-amber-500" />
+            정산 미반영 항목
+          </h3>
+          <div className="space-y-2 text-xs">
+            {unclosedDates.length > 0 && (
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 font-medium">미마감</span>
+                <div className="text-muted-foreground">
+                  <span className="font-medium text-foreground">{unclosedDates.length}일</span> 미마감
+                  <span className="ml-1">
+                    ({unclosedDates.map(d => {
+                      const day = parseInt(d.split("-")[2], 10);
+                      return `${day}일`;
+                    }).join(", ")})
+                  </span>
+                </div>
+              </div>
+            )}
+            {zeroLaborDates.length > 0 && (
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 font-medium">인건비</span>
+                <div className="text-muted-foreground">
+                  <span className="font-medium text-foreground">{zeroLaborDates.length}일</span> 인건비 미확정
+                  <span className="ml-1">
+                    ({zeroLaborDates.map(d => {
+                      const day = parseInt(d.split("-")[2], 10);
+                      return `${day}일`;
+                    }).join(", ")})
+                  </span>
+                </div>
+              </div>
+            )}
+            <p className="text-muted-foreground pt-1 border-t border-amber-200/50 dark:border-amber-800/50">
+              위 항목이 반영되지 않은 {closedDays}일 마감 기준 정산입니다
+            </p>
+          </div>
+        </Card>
       )}
     </div>
   );
