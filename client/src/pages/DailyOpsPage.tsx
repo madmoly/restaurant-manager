@@ -1447,7 +1447,9 @@ function PurchaseTab({
                         ? 'border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10'
                         : 'border-border bg-card/50';
                   return (
-                  <div key={idx} className={`space-y-2 border rounded-lg p-3 ${cardBorder}`}>
+                  <div key={idx} className={`space-y-2 border rounded-lg p-3 ${cardBorder} relative`}>
+                    {/* 항목 번호 */}
+                    <span className="absolute -top-2 -left-1 bg-primary text-primary-foreground text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full shadow-sm">{idx + 1}</span>
                     {/* 신뢰도 배지 */}
                     {(isLowConf || isMedConf) && (
                       <div className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded w-fit ${isLowConf ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'}`}>
