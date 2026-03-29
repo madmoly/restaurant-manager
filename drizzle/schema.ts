@@ -39,6 +39,23 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
+// ─── Business Groups (사업그룹) ──────────────────────────────────────────────
+// 대표(admin) + 소속 매장 + 소속 직원을 묶는 최상위 조직 단위.
+// restaurants.ownerAdminId = businessGroups.adminId 로 매장 귀속.
+export const businessGroups = mysqlTable("business_groups", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  // 대표(admin) userId — 그룹의 소유자
+  adminId: int("adminId").notNull(),
+  description: varchar("description", { length: 500 }),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type BusinessGroup = typeof businessGroups.$inferSelect;
+export type InsertBusinessGroup = typeof businessGroups.$inferInsert;
+
 // ─── Restaurants ─────────────────────────────────────────────────────────────
 export const restaurants = mysqlTable("restaurants", {
   id: int("id").autoincrement().primaryKey(),

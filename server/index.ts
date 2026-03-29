@@ -366,6 +366,28 @@ app.use(express.json());
       )
     `);
 
+    // ─── 사업그룹 (대표+매장+직원 최상위 조직 단위) ──────────────────────────
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS business_groups (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        adminId INT NOT NULL,
+        description VARCHAR(500),
+        isActive BOOLEAN NOT NULL DEFAULT TRUE,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_bg_admin (adminId)
+      )
+    `);
+    // 기존 admin 중 business_groups 미등록 → 자동 백필 (이름 = admin.name + " 사업그룹")
+    await conn.query(`
+      INSERT INTO business_groups (name, adminId)
+      SELECT CONCAT(u.name, ' 사업그룹'), u.id
+      FROM users u
+      WHERE u.role = 'admin' AND u.parentId IS NULL AND u.isTutorial = 0
+        AND NOT EXISTS (SELECT 1 FROM business_groups bg WHERE bg.adminId = u.id)
+    `).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

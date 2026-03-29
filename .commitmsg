@@ -1,17 +1,25 @@
-refactor: tutorial 데이터 분리를 중앙 스코핑 구조로 전환
+feat: 사업그룹 엔티티 신설 — 대표+매장+직원 최상위 조직 단위
 
-server/helpers/restaurantScope.ts 신규 — 매장 스코핑 단일 진실 원천:
-- getOwnedRestaurants(): 대표 기준 소유 매장 조회 (master/admin/sub-admin)
-- getOwnedRestaurantIds(): 경량 ID 목록 (IN절 용도)
-- activeRealStoreCondition(): isActive + isTutorial=false 공통 조건
-- realStoreCondition(): deletedAt IS NULL + isTutorial=false 공통 조건
+사업그룹(business_groups) = 대표(admin) + 소속 매장 + 소속 직원을 묶는 공식 엔티티.
+기존 ownerAdminId 기반 암묵적 그룹핑을 명시적 조직 구조로 격상.
 
-기존 산발적 isTutorial 필터 → 중앙 헬퍼로 교체:
-- admin.ts: 로컬 getOwnedRestaurants 삭제, 헬퍼 import
-- admin.ts systemStatus: storeStaffCounts → getOwnedRestaurantIds 사용
-- restaurants.ts: list/listMine → activeRealStoreCondition() 사용
-- restaurants.ts: listWithSummary → getOwnedRestaurants() 사용
-- users.ts: listWithAssignments → activeRealStoreCondition() 사용
-- errorLogs.ts: summaryByRestaurant → getOwnedRestaurantIds() 사용
+Schema:
+- business_groups 테이블: id, name, adminId, description, isActive
+
+Migration:
+- CREATE TABLE IF NOT EXISTS business_groups
+- 기존 admin 자동 백필: "{admin.name} 사업그룹" 자동 생성
+
+Router (server/routers/businessGroups.ts):
+- list: 그룹별 대표명/매장수/직원수/SUB대표수 집계
+- create: 사업그룹 + 대표 계정 한번에 생성 (또는 기존 admin 연결)
+- update: 그룹명/설명/활성상태 수정
+- assignStore: 매장→사업그룹 배정 (ownerAdminId 설정)
+
+UI (MasterDashboard):
+- OwnershipManager → BusinessGroupManager 전면 교체
+- 사업그룹 카드: 접기/펼치기, 대표정보/소속매장/직원수 표시
+- 사업그룹 생성 폼: 그룹명 + 대표 계정 통합 생성
+- 미배정 매장: 그룹 선택 드롭다운으로 배정
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

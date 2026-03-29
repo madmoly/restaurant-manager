@@ -30,6 +30,7 @@ import { invitesRouter } from "./invites";
 import { leaveBalanceRouter } from "./leaveBalance";
 import { recipesRouter } from "./recipes";
 import { storeInfoRouter } from "./storeInfo";
+import { businessGroupsRouter } from "./businessGroups";
 
 export const appRouter = router({
   auth: authRouter,
@@ -63,6 +64,7 @@ export const appRouter = router({
   leaveBalance: leaveBalanceRouter,
   recipes: recipesRouter,
   storeInfo: storeInfoRouter,
+  businessGroups: businessGroupsRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -5,6 +5,7 @@ import {
   Server, Users, Store, Shield, Activity, Clock,
   ChevronRight, AlertCircle, CheckCircle2, UserCheck,
   Database, TrendingUp, DollarSign, UserPlus, Building2,
+  Plus, ChevronDown, ChevronUp, Briefcase,
 } from "lucide-react";
 import { Card, StatCard, PageHeader } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
@@ -295,147 +296,230 @@ export default function MasterDashboard() {
         </div>
       </div>
 
-      {/* 매장 소유권 + SUB대표 관리 */}
-      <OwnershipManager />
+      {/* 사업그룹 관리 */}
+      <BusinessGroupManager />
     </div>
   );
 }
 
-// ─── 매장 소유권 + SUB대표 관리 패널 ──────────────────────────────────────────
-function OwnershipManager() {
+// ─── 사업그룹 관리 패널 ──────────────────────────────────────────────────────
+function BusinessGroupManager() {
   const utils = trpc.useUtils();
-  const { data } = trpc.restaurants.listAllWithOwner.useQuery();
-  const { data: subAdmins } = trpc.users.listSubAdmins.useQuery();
-  const updateOwnerMut = trpc.restaurants.updateOwner.useMutation({
-    onSuccess: () => utils.restaurants.listAllWithOwner.invalidate(),
-  });
-  const createSubAdminMut = trpc.users.createSubAdmin.useMutation({
+  const { data: groups, isLoading } = trpc.businessGroups.list.useQuery();
+  const { data: storeOwnerData } = trpc.restaurants.listAllWithOwner.useQuery();
+
+  const createMut = trpc.businessGroups.create.useMutation({
     onSuccess: () => {
-      utils.users.listSubAdmins.invalidate();
-      setShowForm(false);
-      setForm({ username: "", password: "", name: "", phone: "" });
+      utils.businessGroups.list.invalidate();
+      utils.restaurants.listAllWithOwner.invalidate();
+      setShowCreate(false);
+      setCreateForm({ groupName: "", username: "", password: "", name: "", phone: "" });
+    },
+  });
+  const assignMut = trpc.businessGroups.assignStore.useMutation({
+    onSuccess: () => {
+      utils.businessGroups.list.invalidate();
+      utils.restaurants.listAllWithOwner.invalidate();
     },
   });
 
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ username: "", password: "", name: "", phone: "" });
+  const [showCreate, setShowCreate] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [createForm, setCreateForm] = useState({
+    groupName: "", username: "", password: "", name: "", phone: "",
+  });
 
-  if (!data) return null;
+  // 미배정 매장 목록
+  const unassignedStores = (storeOwnerData?.stores ?? []).filter(
+    (s) => !s.isTutorial && !s.ownerAdminId
+  );
 
-  const adminMap = new Map(data.admins.map(a => [a.id, a]));
-  const realStores = data.stores.filter(s => !s.isTutorial);
-  const tutorialStores = data.stores.filter(s => s.isTutorial);
+  const handleCreate = () => {
+    createMut.mutate({
+      groupName: createForm.groupName,
+      newAdmin: {
+        username: createForm.username,
+        password: createForm.password,
+        name: createForm.name,
+        phone: createForm.phone || undefined,
+      },
+    });
+  };
 
-  const handleOwnerChange = (restaurantId: number, val: string) => {
-    const ownerAdminId = val === "" ? null : Number(val);
-    updateOwnerMut.mutate({ restaurantId, ownerAdminId });
+  const handleAssign = (restaurantId: number, groupIdStr: string) => {
+    const groupId = groupIdStr === "" ? null : Number(groupIdStr);
+    assignMut.mutate({ restaurantId, groupId });
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {/* 매장 소유권 */}
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
-          <Building2 size={14} className="text-primary" />
-          매장 소유권 관리
+    <Card className="p-5">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <Briefcase size={14} className="text-primary" />
+          사업그룹 관리
         </h3>
+        <Button variant="outline" size="sm" onClick={() => setShowCreate(!showCreate)}>
+          {showCreate ? "취소" : <><Plus size={12} className="mr-1" /> 사업그룹 생성</>}
+        </Button>
+      </div>
+
+      {/* 생성 폼 */}
+      {showCreate && (
+        <div className="p-4 mb-4 rounded-lg border border-primary/20 bg-primary/5 space-y-3">
+          <p className="text-xs font-semibold text-foreground">새 사업그룹 + 대표 계정 생성</p>
+          <input
+            placeholder="사업그룹명 (예: 홍길동 사업그룹)"
+            value={createForm.groupName}
+            onChange={(e) => setCreateForm((f) => ({ ...f, groupName: e.target.value }))}
+            className="w-full text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              placeholder="대표 아이디"
+              value={createForm.username}
+              onChange={(e) => setCreateForm((f) => ({ ...f, username: e.target.value }))}
+              className="text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground"
+            />
+            <input
+              placeholder="비밀번호"
+              type="password"
+              value={createForm.password}
+              onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
+              className="text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              placeholder="대표 이름"
+              value={createForm.name}
+              onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
+              className="text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground"
+            />
+            <input
+              placeholder="전화번호 (선택)"
+              value={createForm.phone}
+              onChange={(e) => setCreateForm((f) => ({ ...f, phone: e.target.value }))}
+              className="text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground"
+            />
+          </div>
+          <Button
+            size="sm"
+            className="w-full"
+            disabled={
+              !createForm.groupName || !createForm.username || !createForm.password || !createForm.name || createMut.isPending
+            }
+            onClick={handleCreate}
+          >
+            {createMut.isPending ? "생성 중..." : "사업그룹 생성"}
+          </Button>
+          {createMut.error && <p className="text-xs text-red-500">{createMut.error.message}</p>}
+        </div>
+      )}
+
+      {/* 그룹 목록 */}
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground text-center py-6">불러오는 중...</p>
+      ) : (
         <div className="space-y-2">
-          {realStores.map(store => {
-            const owner = store.ownerAdminId ? adminMap.get(store.ownerAdminId) : null;
+          {(groups ?? []).map((g: any) => {
+            const isExpanded = expandedId === g.id;
             return (
-              <div key={store.id} className="flex items-center justify-between p-3 rounded-lg border border-border">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{store.name}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {owner ? `${owner.name}${owner.parentId ? ' (SUB)' : ''}` : '미배정'}
-                  </p>
+              <div key={g.id} className="rounded-lg border border-border overflow-hidden">
+                {/* 그룹 요약 행 */}
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : g.id)}
+                  className="w-full flex items-center justify-between p-3 hover:bg-accent/30 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`w-2 h-10 rounded-full ${g.isActive ? "bg-primary" : "bg-muted"}`} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{g.name}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        대표: {g.admin?.name ?? "—"} (@{g.admin?.username ?? "—"})
+                        {g.subAdminCount > 0 && ` · SUB대표 ${g.subAdminCount}명`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <p className="text-xs text-muted-foreground">
+                        매장 <span className="font-semibold text-foreground">{g.storeCount}</span>개
+                        {" · "}직원 <span className="font-semibold text-foreground">{g.staffCount}</span>명
+                      </p>
+                    </div>
+                    {isExpanded ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
+                  </div>
+                </button>
+
+                {/* 펼침 상세 */}
+                {isExpanded && (
+                  <div className="px-4 pb-3 border-t border-border/50 bg-accent/10">
+                    {/* 소속 매장 */}
+                    <p className="text-[10px] font-semibold text-muted-foreground mt-3 mb-1.5 uppercase tracking-wide">소속 매장</p>
+                    {g.stores.length > 0 ? (
+                      <div className="space-y-1">
+                        {g.stores.map((s: any) => (
+                          <div key={s.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-background/50">
+                            <div className="flex items-center gap-2">
+                              <Store size={12} className="text-muted-foreground" />
+                              <span className="text-xs text-foreground">{s.name}</span>
+                            </div>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${s.isActive ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-gray-100 text-gray-500"}`}>
+                              {s.isActive ? "활성" : "비활성"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground py-2">소속 매장 없음</p>
+                    )}
+
+                    {/* 대표 정보 */}
+                    <p className="text-[10px] font-semibold text-muted-foreground mt-3 mb-1.5 uppercase tracking-wide">대표 정보</p>
+                    <div className="py-1.5 px-2 rounded bg-background/50 text-xs text-foreground">
+                      {g.admin?.name} · @{g.admin?.username} · {g.admin?.phone ?? "전화번호 없음"}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {(!groups || groups.length === 0) && !showCreate && (
+            <p className="text-xs text-muted-foreground text-center py-6">등록된 사업그룹이 없습니다</p>
+          )}
+        </div>
+      )}
+
+      {/* 미배정 매장 */}
+      {unassignedStores.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-border/50">
+          <p className="text-xs font-semibold text-muted-foreground mb-2">미배정 매장 ({unassignedStores.length}개)</p>
+          <div className="space-y-1.5">
+            {unassignedStores.map((s) => (
+              <div key={s.id} className="flex items-center justify-between p-2.5 rounded-lg border border-dashed border-border">
+                <div className="flex items-center gap-2">
+                  <Store size={12} className="text-muted-foreground" />
+                  <span className="text-xs text-foreground">{s.name}</span>
                 </div>
                 <select
-                  value={store.ownerAdminId ?? ""}
-                  onChange={(e) => handleOwnerChange(store.id, e.target.value)}
-                  className="text-xs border border-border rounded px-2 py-1 bg-background text-foreground min-w-[100px]"
+                  defaultValue=""
+                  onChange={(e) => handleAssign(s.id, e.target.value)}
+                  className="text-[11px] border border-border rounded px-2 py-1 bg-background text-foreground min-w-[120px]"
                 >
-                  <option value="">미배정</option>
-                  {data.admins.filter(a => !a.parentId).map(a => (
-                    <option key={a.id} value={a.id}>{a.name} (대표)</option>
+                  <option value="">그룹 선택...</option>
+                  {(groups ?? []).map((g: any) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
                   ))}
                 </select>
               </div>
-            );
-          })}
-          {tutorialStores.length > 0 && (
-            <div className="pt-2 border-t border-border/50">
-              <p className="text-[10px] text-muted-foreground mb-1">Tutorial 매장 ({tutorialStores.length}개) — 합산 제외</p>
-              {tutorialStores.map(s => (
-                <p key={s.id} className="text-xs text-muted-foreground pl-2">• {s.name}</p>
-              ))}
-            </div>
-          )}
-        </div>
-      </Card>
-
-      {/* SUB대표 관리 */}
-      <Card className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-            <UserPlus size={14} className="text-primary" />
-            SUB대표 관리
-          </h3>
-          <Button variant="outline" size="sm" onClick={() => setShowForm(!showForm)}>
-            {showForm ? "취소" : "+ 추가"}
-          </Button>
-        </div>
-
-        {showForm && (
-          <div className="p-3 mb-3 rounded-lg border border-primary/20 bg-primary/5 space-y-2">
-            <input placeholder="아이디" value={form.username} onChange={e => setForm(f => ({...f, username: e.target.value}))}
-              className="w-full text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground" />
-            <input placeholder="비밀번호" type="password" value={form.password} onChange={e => setForm(f => ({...f, password: e.target.value}))}
-              className="w-full text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground" />
-            <input placeholder="이름" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))}
-              className="w-full text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground" />
-            <input placeholder="전화번호 (선택)" value={form.phone} onChange={e => setForm(f => ({...f, phone: e.target.value}))}
-              className="w-full text-sm border border-border rounded px-2.5 py-1.5 bg-background text-foreground" />
-            <Button
-              size="sm"
-              className="w-full"
-              disabled={!form.username || !form.password || !form.name || createSubAdminMut.isPending}
-              onClick={() => createSubAdminMut.mutate({
-                username: form.username, password: form.password, name: form.name,
-                phone: form.phone || undefined,
-              })}
-            >
-              {createSubAdminMut.isPending ? "생성 중..." : "SUB대표 생성"}
-            </Button>
-            {createSubAdminMut.error && (
-              <p className="text-xs text-red-500">{createSubAdminMut.error.message}</p>
-            )}
+            ))}
           </div>
-        )}
-
-        <div className="space-y-2">
-          {(subAdmins ?? []).map((sa: any) => {
-            const parent = sa.parentId ? adminMap.get(sa.parentId) : null;
-            return (
-              <div key={sa.id} className="flex items-center justify-between p-3 rounded-lg border border-border">
-                <div>
-                  <p className="text-sm font-medium text-foreground">{sa.name}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    @{sa.username} · {parent ? `상위: ${parent.name}` : '독립'}
-                  </p>
-                </div>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${sa.isActive ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' : 'bg-gray-100 text-gray-500'}`}>
-                  {sa.isActive ? '활성' : '비활성'}
-                </span>
-              </div>
-            );
-          })}
-          {(!subAdmins || subAdmins.length === 0) && !showForm && (
-            <p className="text-xs text-muted-foreground text-center py-4">등록된 SUB대표가 없습니다</p>
-          )}
         </div>
-      </Card>
-    </div>
+      )}
+    </Card>
   );
 }
 
