@@ -68,6 +68,16 @@ function fmtShortDate(raw: string | Date | null | undefined, withDay = false): s
   return `${m}/${day}`;
 }
 
+/** 근무유형 라벨: shiftPreset + 반차 여부 → "풀타임", "오픈반차" 등 */
+function getShiftLabel(preset: string | null | undefined, isHalf: boolean): string {
+  switch (preset) {
+    case 'full':  return isHalf ? '반차' : '풀타임';
+    case 'open':  return isHalf ? '오픈반차' : '오픈';
+    case 'close': return isHalf ? '마감반차' : '마감';
+    default:      return isHalf ? '반차' : '커스텀';
+  }
+}
+
 // ============================================================================
 // 이미지 확대보기 모달 (핀치줌/스와이프 지원)
 // ============================================================================
@@ -411,15 +421,15 @@ function TodayStaffCard({
       </div>
       {staff.length > 0 && (
         <div className="space-y-0.5">
-          {staff.map((s: any, i: number) => (
-            <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>
-                {s.userName ?? '미배정'}
-                {s.isHalf && <span className="ml-1 text-amber-500 font-medium">(반차)</span>}
-              </span>
-              <span>{fmtTs(s.startTime)}~{fmtTs(s.endTime)} · {s.hours ?? 0}h</span>
-            </div>
-          ))}
+          {staff.map((s: any, i: number) => {
+            const label = getShiftLabel(s.shiftPreset, s.isHalf);
+            return (
+              <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{s.userName ?? '미배정'}</span>
+                <span className={s.isHalf ? 'text-amber-500 font-medium' : ''}>{label}</span>
+              </div>
+            );
+          })}
         </div>
       )}
     </Card>

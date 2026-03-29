@@ -1,11 +1,12 @@
-fix: 대시보드 스케줄 0명 표시 — confirmed만 조회하던 필터 확장
+fix: 오픈탭 출근인원 시간표시를 근무유형 라벨로 변경
 
-문제: getUpcoming7Days/getTodayStaff가 status='confirmed'만 조회
-→ draft/published 상태 스케줄이 전부 누락되어 0명 표시
+기존: "09:00~18:00 · 9h" 시간 범위 표시
+변경: shiftPreset + 반차 여부 기반 라벨 표시
+  - full → 풀타임 / 반차
+  - open → 오픈 / 오픈반차
+  - close → 마감 / 마감반차
+  - custom → 커스텀 / 반차
 
-수정:
-- schedules.getUpcoming7Days: IN ('draft','published','confirmed') + 오늘 00:00부터 조회
-- dailyOps.getTodayStaff: IN ('draft','published','confirmed')
-- admin.allStoresTodayStatus는 이미 != 'canceled'로 정상
+반차는 amber 색상으로 강조 표시.
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
