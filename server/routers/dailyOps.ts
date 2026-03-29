@@ -18,6 +18,7 @@ import {
   purchaseOrdersV2,
   purchaseOrderItemsV2,
   counterparties,
+  restaurants,
 } from "../../drizzle/schema";
 
 export const dailyOpsRouter = router({
@@ -212,6 +213,7 @@ export const dailyOpsRouter = router({
           userName: users.name,
           startTime: schedules.startTime,
           endTime: schedules.endTime,
+          shiftPreset: schedules.shiftPreset,
         })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
@@ -223,7 +225,36 @@ export const dailyOpsRouter = router({
           )
         );
 
-      return { headcount: rows.length, staff: rows };
+      // 매장 운영시간 & 반차 기준 조회
+      const [store] = await db
+        .select({
+          openTime: restaurants.openTime,
+          closeTime: restaurants.closeTime,
+          halfShiftThreshold: restaurants.halfShiftThreshold,
+        })
+        .from(restaurants)
+        .where(eq(restaurants.id, input.restaurantId))
+        .limit(1);
+
+      const openH = store?.openTime ? parseInt(store.openTime.split(':')[0], 10) : 9;
+      const closeH = store?.closeTime ? parseInt(store.closeTime.split(':')[0], 10) : 22;
+      const fullHours = closeH - openH; // 매장 전체 운영 시간
+      const threshold = (store?.halfShiftThreshold ?? 60) / 100;
+
+      // 각 스케줄의 근무시간 계산 + 반차 판별
+      const staffWithHours = rows.map((r) => {
+        const st = r.startTime ? new Date(r.startTime) : null;
+        const et = r.endTime ? new Date(r.endTime) : null;
+        const hours = st && et ? (et.getTime() - st.getTime()) / 3600000 : 0;
+        const isHalf = fullHours > 0 ? (hours / fullHours) < threshold : false;
+        return { ...r, hours: Math.round(hours * 10) / 10, isHalf };
+      });
+
+      const effectiveCount = staffWithHours.reduce(
+        (sum, s) => sum + (s.isHalf ? 0.5 : 1), 0
+      );
+
+      return { headcount: rows.length, effectiveCount, staff: staffWithHours };
     }),
 
   // ─── 중간매출 ──────────────────────────────────────────────────────────

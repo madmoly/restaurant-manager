@@ -23,6 +23,52 @@ import {
 } from 'lucide-react';
 
 // ============================================================================
+// 공통 포맷 헬퍼
+// ============================================================================
+
+/** 숫자를 000,000 형식 문자열로 변환 */
+function fmtNum(v: number | string): string {
+  const n = typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, '') || '0', 10) : Math.round(v);
+  return n.toLocaleString('ko-KR');
+}
+
+/** 콤마 포함 문자열 → 정수 */
+function parseNum(v: string): number {
+  return parseInt(v.replace(/[^0-9-]/g, '') || '0', 10);
+}
+
+/** 금액 입력용: 숫자만 허용 + 콤마 포맷 반환 */
+function handleWonInput(raw: string): string {
+  const digits = raw.replace(/[^0-9]/g, '');
+  if (!digits) return '';
+  return parseInt(digits, 10).toLocaleString('ko-KR');
+}
+
+/** ISO 타임스탬프 → "HH:mm" 요약 */
+function fmtTs(raw: string | Date | null | undefined): string {
+  if (!raw) return '-';
+  try {
+    const d = typeof raw === 'string' ? new Date(raw) : raw;
+    if (isNaN(d.getTime())) return typeof raw === 'string' ? raw : '-';
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  } catch {
+    return typeof raw === 'string' ? raw : '-';
+  }
+}
+
+/** 날짜 요약: 년도 생략, 필요 시 뒷 2자리만. "3/27" 또는 "3/27(목)" */
+function fmtShortDate(raw: string | Date | null | undefined, withDay = false): string {
+  if (!raw) return '-';
+  const d = typeof raw === 'string' ? new Date(raw.length === 10 ? raw + 'T00:00:00' : raw) : raw;
+  if (isNaN(d.getTime())) return typeof raw === 'string' ? raw : '-';
+  const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  if (withDay) return `${m}/${day}(${dayNames[d.getDay()]})`;
+  return `${m}/${day}`;
+}
+
+// ============================================================================
 // 이미지 확대보기 모달 (핀치줌/스와이프 지원)
 // ============================================================================
 function ImageViewer({ src, onClose }: { src: string; onClose: () => void }) {
@@ -342,19 +388,39 @@ function TodayStaffCard({
     date,
   });
 
-  const staff = query.data?.staff || [];
+  const staff: any[] = query.data?.staff || [];
   const headcount = query.data?.headcount || 0;
+  const effectiveCount = query.data?.effectiveCount ?? headcount;
+  const totalHours = staff.reduce((sum: number, s: any) => sum + (s.hours ?? 0), 0);
+  const hasHalf = staff.some((s: any) => s.isHalf);
 
   return (
     <Card className="bg-card border-border p-4">
       <div className="flex items-center justify-between mb-1">
         <h4 className="text-sm font-semibold text-foreground">금일 출근 인원</h4>
-        <span className="text-lg font-bold text-blue-600">{headcount}명</span>
+        <div className="text-right">
+          <span className="text-lg font-bold text-blue-600">
+            {hasHalf ? `${effectiveCount}명` : `${headcount}명`}
+          </span>
+          {totalHours > 0 && (
+            <span className="text-xs text-muted-foreground ml-1.5">
+              ({totalHours}h)
+            </span>
+          )}
+        </div>
       </div>
       {staff.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {staff.map((s: any) => s.userName).join(', ')}
-        </p>
+        <div className="space-y-0.5">
+          {staff.map((s: any, i: number) => (
+            <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                {s.userName ?? '미배정'}
+                {s.isHalf && <span className="ml-1 text-amber-500 font-medium">(반차)</span>}
+              </span>
+              <span>{fmtTs(s.startTime)}~{fmtTs(s.endTime)} · {s.hours ?? 0}h</span>
+            </div>
+          ))}
+        </div>
       )}
     </Card>
   );
@@ -383,26 +449,13 @@ function YesterdayClosingCard({
     );
   }
 
-  // 시간을 HH:mm 형태로 축약
-  const fmtTime = (raw: string | null) => {
-    if (!raw) return '-';
-    try {
-      const d = new Date(raw);
-      if (isNaN(d.getTime())) {
-        // "HH:mm:ss" 등 이미 짧은 형태면 앞 5자만
-        return raw.length > 5 ? raw.slice(0, 5) : raw;
-      }
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    } catch {
-      return raw;
-    }
-  };
+
 
   return (
     <Card className="bg-card border-border p-4">
       <h4 className="text-sm font-semibold text-foreground mb-2">어제 마감 요약</h4>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span>마감 {fmtTime(data.closeCheckedAt)}</span>
+        <span>마감 {fmtTs(data.closeCheckedAt)}</span>
         <span className="font-medium text-foreground">₩{(data.totalSales || 0).toLocaleString()}</span>
       </div>
       {data.closeNote && <p className="text-xs text-muted-foreground mt-1">메모: {data.closeNote}</p>}
@@ -625,7 +678,7 @@ function OpenTab({
         size="lg"
       >
         {operation?.openCheckedAt
-          ? `오픈 완료 (${operation.openCheckedAt})`
+          ? `오픈 완료 (${fmtTs(operation.openCheckedAt)})`
           : '오픈 체크 완료'}
       </Button>
     </div>
@@ -682,9 +735,7 @@ function PendingOrdersBanner({ restaurantId }: { restaurantId: number }) {
             <span className="text-foreground font-medium">{order.counterpartyName || '미지정'}</span>
             <span className="text-muted-foreground ml-1.5">₩{Number(order.totalAmount).toLocaleString()}</span>
             <span className="text-muted-foreground ml-1.5">
-              {typeof order.purchaseDate === 'string'
-                ? order.purchaseDate.substring(0, 10)
-                : new Date(order.purchaseDate).toISOString().substring(0, 10)}
+              {fmtShortDate(order.purchaseDate)}
             </span>
           </div>
           <Button
@@ -1484,7 +1535,7 @@ function MiddayTab({
                       <div className="text-xs text-muted-foreground">{sale.note}</div>
                     )}
                     <div className="text-xs text-muted-foreground">
-                      {new Date(sale.recordedAt).toLocaleTimeString('ko-KR')}
+                      {fmtTs(sale.recordedAt)}
                     </div>
                   </div>
                   <Button
@@ -1613,10 +1664,11 @@ function CloseTab({
   // Initialize from saved sales
   useEffect(() => {
     if (salesQuery.data) {
-      setCashAmount(salesQuery.data.cashAmount?.toString() || '');
-      setCardAmount(salesQuery.data.cardAmount?.toString() || '');
-      setGiftCardAmount(salesQuery.data.giftCardAmount?.toString() || '');
-      setTransferAmount(salesQuery.data.transferAmount?.toString() || '');
+      const fmtSaved = (v: any) => { const n = Number(v); return n ? fmtNum(n) : ''; };
+      setCashAmount(fmtSaved(salesQuery.data.cashAmount));
+      setCardAmount(fmtSaved(salesQuery.data.cardAmount));
+      setGiftCardAmount(fmtSaved(salesQuery.data.giftCardAmount));
+      setTransferAmount(fmtSaved(salesQuery.data.transferAmount));
       setTransferDepositor(salesQuery.data.transferDepositor || '');
       setOtherItems((salesQuery.data.otherItems || []).map((i: any) => ({
         itemName: i.itemName,
@@ -1632,10 +1684,10 @@ function CloseTab({
   }, [salesQuery.data]);
 
   const handleSaveSales = async () => {
-    const cash = parseInt(cashAmount || '0', 10);
-    const card = parseInt(cardAmount || '0', 10);
-    const giftCard = parseInt(giftCardAmount || '0', 10);
-    const transfer = parseInt(transferAmount || '0', 10);
+    const cash = parseNum(cashAmount);
+    const card = parseNum(cardAmount);
+    const giftCard = parseNum(giftCardAmount);
+    const transfer = parseNum(transferAmount);
 
     saveSalesMutation.mutate({
       restaurantId,
@@ -1657,10 +1709,10 @@ function CloseTab({
   );
 
   const totalAmount =
-    (parseInt(cashAmount || '0', 10) +
-      parseInt(cardAmount || '0', 10) +
-      parseInt(giftCardAmount || '0', 10) +
-      parseInt(transferAmount || '0', 10) +
+    (parseNum(cashAmount) +
+      parseNum(cardAmount) +
+      parseNum(giftCardAmount) +
+      parseNum(transferAmount) +
       otherItems.reduce((sum, item) => sum + item.amount, 0));
 
   const templates = templatesQuery.data || [];
@@ -1681,7 +1733,7 @@ function CloseTab({
           <div className="flex justify-between">
             <span className="text-muted-foreground">오픈 시간:</span>
             <span className="text-foreground">
-              {operationQuery.data?.openCheckedAt || '미확인'}
+              {operationQuery.data?.openCheckedAt ? fmtTs(operationQuery.data.openCheckedAt) : '미확인'}
             </span>
           </div>
           <div className="flex justify-between">
@@ -1710,11 +1762,12 @@ function CloseTab({
             </Label>
             <Input
               id="cash"
-              type="number"
+              type="text"
+              inputMode="numeric"
               placeholder="0"
               value={cashAmount}
-              onChange={(e) => setCashAmount(e.target.value)}
-              className="mt-1"
+              onChange={(e) => setCashAmount(handleWonInput(e.target.value))}
+              className="mt-1 text-right"
             />
           </div>
           <div>
@@ -1723,11 +1776,12 @@ function CloseTab({
             </Label>
             <Input
               id="card"
-              type="number"
+              type="text"
+              inputMode="numeric"
               placeholder="0"
               value={cardAmount}
-              onChange={(e) => setCardAmount(e.target.value)}
-              className="mt-1"
+              onChange={(e) => setCardAmount(handleWonInput(e.target.value))}
+              className="mt-1 text-right"
             />
           </div>
           <div>
@@ -1736,11 +1790,12 @@ function CloseTab({
             </Label>
             <Input
               id="giftcard"
-              type="number"
+              type="text"
+              inputMode="numeric"
               placeholder="0"
               value={giftCardAmount}
-              onChange={(e) => setGiftCardAmount(e.target.value)}
-              className="mt-1"
+              onChange={(e) => setGiftCardAmount(handleWonInput(e.target.value))}
+              className="mt-1 text-right"
             />
           </div>
           <div>
@@ -1750,11 +1805,12 @@ function CloseTab({
             <div className="flex gap-2 mt-1">
               <Input
                 id="transfer"
-                type="number"
+                type="text"
+                inputMode="numeric"
                 placeholder="금액"
                 value={transferAmount}
-                onChange={(e) => setTransferAmount(e.target.value)}
-                className="flex-1"
+                onChange={(e) => setTransferAmount(handleWonInput(e.target.value))}
+                className="flex-1 text-right"
               />
               <Input
                 placeholder="입금자명"
@@ -1781,15 +1837,16 @@ function CloseTab({
                   className="text-sm h-8"
                 />
                 <Input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   placeholder="금액"
-                  value={item.amount || ''}
+                  value={item.amount ? fmtNum(item.amount) : ''}
                   onChange={(e) => {
                     const newItems = [...otherItems];
-                    newItems[idx].amount = parseInt(e.target.value || '0', 10);
+                    newItems[idx].amount = parseNum(e.target.value);
                     setOtherItems(newItems);
                   }}
-                  className="text-sm h-8 w-24"
+                  className="text-sm h-8 w-28 text-right"
                 />
                 <Button
                   variant="ghost"
@@ -1863,15 +1920,16 @@ function CloseTab({
                   className="text-sm h-8 w-20"
                 />
                 <Input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   placeholder="금액"
-                  value={item.amount}
+                  value={item.amount ? fmtNum(item.amount) : ''}
                   onChange={(e) => {
                     const newItems = [...specialItems];
-                    newItems[idx].amount = parseInt(e.target.value || '0', 10);
+                    newItems[idx].amount = parseNum(e.target.value);
                     setSpecialItems(newItems);
                   }}
-                  className="text-sm h-8 w-24"
+                  className="text-sm h-8 w-28 text-right"
                 />
                 <Input
                   placeholder="메모"
@@ -1915,7 +1973,7 @@ function CloseTab({
             <div className="flex justify-between items-center">
               <span className="font-semibold text-foreground">합계:</span>
               <span className="text-lg font-bold text-blue-600">
-                ₩{totalAmount.toLocaleString()}
+                {fmtNum(totalAmount)}원
               </span>
             </div>
           </div>
@@ -1965,7 +2023,7 @@ function CloseTab({
         variant={operationQuery.data?.closeCheckedAt ? 'secondary' : 'primary'}
       >
         {operationQuery.data?.closeCheckedAt
-          ? `마감 완료 (${operationQuery.data.closeCheckedAt})`
+          ? `마감 완료 (${fmtTs(operationQuery.data.closeCheckedAt)})`
           : checklistStatus.totalItems > 0 && !checklistStatus.allDone
             ? `체크리스트 완료 후 마감 가능 (${checklistStatus.totalChecked}/${checklistStatus.totalItems})`
             : '마감 체크 완료'}
@@ -1980,10 +2038,7 @@ function CloseTab({
 
 const SHIFT_LABELS: Record<string, string> = { open: '오픈', close: '마감', full: '풀타임' };
 
-function fmtTimeShort(d: Date | string) {
-  const date = typeof d === 'string' ? new Date(d) : d;
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
+
 
 function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; date: string }) {
   const [expanded, setExpanded] = useState(false);
@@ -2085,7 +2140,7 @@ function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; 
                       {s.tempWorkerName && <span className="text-orange-500 ml-1 text-xs">(임시)</span>}
                     </span>
                     <span className="text-xs text-muted-foreground shrink-0">
-                      {fmtTimeShort(s.startTime)}~{fmtTimeShort(s.endTime)}
+                      {fmtTs(s.startTime)}~{fmtTs(s.endTime)}
                       {s.shiftPreset && <span className="ml-1 opacity-70">({SHIFT_LABELS[s.shiftPreset] ?? s.shiftPreset})</span>}
                     </span>
                   </div>
