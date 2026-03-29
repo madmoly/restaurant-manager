@@ -19,10 +19,10 @@ export const authRouter = router({
 
       await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
 
-      const token = await createToken({ userId: user.id, username: user.username, role: user.role });
+      const token = await createToken({ userId: user.id, username: user.username, role: user.role, parentId: user.parentId });
       return {
         token,
-        user: { id: user.id, username: user.username, name: user.name, role: user.role },
+        user: { id: user.id, username: user.username, name: user.name, role: user.role, parentId: user.parentId },
         mustChangePassword: !!user.mustChangePassword,
       };
     }),

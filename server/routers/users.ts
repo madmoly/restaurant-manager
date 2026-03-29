@@ -137,6 +137,58 @@ export const usersRouter = router({
       return { ok: true };
     }),
 
+  /** SUB대표 생성 — admin만 가능 (자기 하위에 admin 권한 사용자 추가) */
+  createSubAdmin: adminProcedure
+    .input(z.object({
+      username: z.string().min(2),
+      password: z.string().min(4),
+      name: z.string().min(1),
+      email: z.string().email().optional(),
+      phone: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      // master는 parentId 없이 admin 생성 (기존 create로 처리)
+      // admin(대표)만 SUB대표 생성 가능
+      if (ctx.user.role !== "admin" && ctx.user.role !== "master") {
+        throw new Error("대표 이상만 SUB대표를 생성할 수 있습니다");
+      }
+      const existing = await db.select().from(users).where(eq(users.username, input.username)).limit(1);
+      if (existing.length > 0) throw new Error("이미 존재하는 아이디입니다");
+
+      const hash = await hashPassword(input.password);
+      // SUB대표의 parentId = 생성한 admin의 userId
+      // master가 생성하면 parentId = null (독립 admin)
+      const parentId = ctx.user.role === "admin" ? ctx.user.userId : null;
+      const [result] = await db.insert(users).values({
+        username: input.username,
+        passwordHash: hash,
+        name: input.name,
+        role: "admin",
+        email: input.email,
+        phone: input.phone,
+        parentId,
+      }).$returningId();
+      return { id: result.id };
+    }),
+
+  /** SUB대표 목록 — 자기 하위 SUB대표만 조회 */
+  listSubAdmins: adminProcedure.query(async ({ ctx }) => {
+    if (ctx.user.role === "master") {
+      // master: parentId가 있는 모든 admin (전체 SUB대표)
+      return db.select({
+        id: users.id, username: users.username, name: users.name,
+        email: users.email, phone: users.phone, isActive: users.isActive,
+        parentId: users.parentId, createdAt: users.createdAt,
+      }).from(users).where(and(eq(users.role, "admin"), sql`${users.parentId} IS NOT NULL`));
+    }
+    // admin: 자기 하위 SUB대표만
+    return db.select({
+      id: users.id, username: users.username, name: users.name,
+      email: users.email, phone: users.phone, isActive: users.isActive,
+      parentId: users.parentId, createdAt: users.createdAt,
+    }).from(users).where(and(eq(users.role, "admin"), eq(users.parentId, ctx.user.userId)));
+  }),
+
   /** 보건증 정보 업데이트 */
   updateHealthCert: managerProcedure
     .input(z.object({

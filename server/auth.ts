@@ -8,6 +8,7 @@ export interface TokenPayload {
   userId: number;
   username: string;
   role: string;
+  parentId?: number | null; // SUB대표: 상위 대표 userId
 }
 
 export async function createToken(payload: TokenPayload): Promise<string> {

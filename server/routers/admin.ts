@@ -9,21 +9,41 @@ import {
 } from "../../drizzle/schema";
 import { ROLE_LEVEL } from "@shared/permissions";
 
+/**
+ * 대표/SUB대표의 소유 매장 목록 조회
+ * - master: 전체 실매장 (isTutorial=false)
+ * - admin (parentId=null): ownerAdminId = 본인
+ * - admin (parentId=X, SUB대표): ownerAdminId = parentId (상위 대표)
+ */
+async function getOwnedRestaurants(userId: number, role: string) {
+  if (role === "master") {
+    return db.select().from(restaurants)
+      .where(and(isNull(restaurants.deletedAt), eq(restaurants.isTutorial, false)));
+  }
+  // admin 또는 sub-admin: parentId 확인
+  const [me] = await db.select({ parentId: users.parentId }).from(users).where(eq(users.id, userId)).limit(1);
+  const ownerAdminId = me?.parentId ?? userId; // SUB대표면 parentId, 아니면 본인
+  return db.select().from(restaurants)
+    .where(and(
+      isNull(restaurants.deletedAt),
+      eq(restaurants.isTutorial, false),
+      eq(restaurants.ownerAdminId, ownerAdminId),
+    ));
+}
+
 export const adminRouter = router({
   /**
-   * 전체 매장 월간 집계 — 대표(admin) 대시보드용
-   * 한 번의 호출로 모든 매장의 매출/매입/인건비/고정비를 반환
+   * 소유 매장 월간 집계 — 대표(admin) 대시보드용
+   * 대표별 소유 매장만 합산 (master는 전체)
    */
   multiStoreMonthlySummary: adminProcedure
     .input(z.object({ year: z.number(), month: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const start = new Date(input.year, input.month - 1, 1);
       const end = new Date(input.year, input.month, 0);
 
-      // 활성 매장 목록
-      const allRestaurants = await db.select()
-        .from(restaurants)
-        .where(and(isNull(restaurants.deletedAt), eq(restaurants.isTutorial, false)));
+      // 소유 매장 목록
+      const allRestaurants = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
 
       const storeData = await Promise.all(
         allRestaurants.map(async (r) => {          // 매출 합계
@@ -102,10 +122,8 @@ export const adminRouter = router({
    */
   allStoresTodayStatus: adminProcedure
     .input(z.object({ date: z.string() }))
-    .query(async ({ input }) => {
-      const allRestaurants = await db.select()
-        .from(restaurants)
-        .where(and(isNull(restaurants.deletedAt), eq(restaurants.isTutorial, false)));
+    .query(async ({ input, ctx }) => {
+      const allRestaurants = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
 
       const storeStatuses = await Promise.all(
         allRestaurants.map(async (r) => {

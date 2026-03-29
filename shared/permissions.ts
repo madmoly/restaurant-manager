@@ -101,7 +101,7 @@ export function canManageStaff(effectiveRole: string, storeRole?: string | null)
 /** 역할 표시 라벨 */
 export const ROLE_LABELS: Record<string, string> = {
   master: "개발자",
-  admin: "대표",
+  admin: "대표", // parentId가 있으면 "SUB대표"로 표시 (UI에서 분기)
   manager: "매장관리자",
   owner: "점장",
   supervisor: "매니져",

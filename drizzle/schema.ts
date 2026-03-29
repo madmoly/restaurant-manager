@@ -29,6 +29,8 @@ export const users = mysqlTable("users", {
   healthCertUrl: varchar("healthCertUrl", { length: 500 }),
   healthCertExpiry: date("healthCertExpiry"),
   mustChangePassword: boolean("mustChangePassword").default(false).notNull(),
+  // SUB대표: 상위 대표(admin) userId. NULL = 최상위 대표 또는 일반 사용자
+  parentId: int("parentId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn"),
@@ -54,6 +56,8 @@ export const restaurants = mysqlTable("restaurants", {
   halfShiftThreshold: int("halfShiftThreshold").default(60).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   isTutorial: boolean("isTutorial").default(false).notNull(),
+  // 소유 대표 userId (NULL = tutorial/미배정, 설정 시 해당 대표만 합산에 포함)
+  ownerAdminId: int("ownerAdminId"),
   // 소프트 삭제 일시 (null이면 활성)
   deletedAt: timestamp("deletedAt"),
   // 매출 입력 허용 시간대 (null이면 제한 없음)

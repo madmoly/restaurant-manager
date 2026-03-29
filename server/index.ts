@@ -261,6 +261,16 @@ app.use(express.json());
     await addColumnIfNotExists("users", "isTutorial", "BOOLEAN NOT NULL DEFAULT FALSE");
     await addColumnIfNotExists("restaurants", "isTutorial", "BOOLEAN NOT NULL DEFAULT FALSE");
 
+    // ─── 대표 기준 매장 소유권 + SUB대표 ─────────────────────────────────────
+    await addColumnIfNotExists("restaurants", "ownerAdminId", "INT DEFAULT NULL");
+    await addColumnIfNotExists("users", "parentId", "INT DEFAULT NULL");
+    // 기존 실매장(isTutorial=false)에 ownerAdminId 미설정 시 기본 admin 배정
+    await conn.query(`
+      UPDATE restaurants SET ownerAdminId = (
+        SELECT id FROM users WHERE role = 'admin' AND isTutorial = 0 ORDER BY id LIMIT 1
+      ) WHERE isTutorial = 0 AND ownerAdminId IS NULL
+    `).catch(() => {});
+
     // ─── Phase 5: 초대코드 + 비밀번호 강제변경 ─────────────────────────────────
     // users.mustChangePassword
     await addColumnIfNotExists("users", "mustChangePassword", "BOOLEAN NOT NULL DEFAULT FALSE");

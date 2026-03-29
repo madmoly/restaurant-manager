@@ -53,15 +53,25 @@ export const restaurantsRouter = router({
     return db.select().from(restaurants).where(eq(restaurants.isActive, true));
   }),
 
-  /** 전체 매장 + 직원수 + 당월 매출 요약 (admin 이상) */
-  listWithSummary: adminProcedure.query(async () => {
+  /** 소유 매장 + 직원수 + 당월 매출 요약 (admin 이상) */
+  listWithSummary: adminProcedure.query(async ({ ctx }) => {
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
     const nextMonth = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
-    const allRestaurants = await db.select().from(restaurants).where(and(eq(restaurants.isActive, true), eq(restaurants.isTutorial, false)));
+    // 소유 매장 필터 (master=전체, admin/sub-admin=소유분만)
+    let allRestaurants;
+    if (ctx.user.role === "master") {
+      allRestaurants = await db.select().from(restaurants).where(and(eq(restaurants.isActive, true), eq(restaurants.isTutorial, false)));
+    } else {
+      const [me] = await db.select({ parentId: users.parentId }).from(users).where(eq(users.id, ctx.user.userId)).limit(1);
+      const ownerAdminId = me?.parentId ?? ctx.user.userId;
+      allRestaurants = await db.select().from(restaurants).where(and(
+        eq(restaurants.isActive, true), eq(restaurants.isTutorial, false), eq(restaurants.ownerAdminId, ownerAdminId),
+      ));
+    }
 
     const staffCounts = await db
       .select({
@@ -132,7 +142,7 @@ export const restaurantsRouter = router({
       openTime: z.string().optional(),
       closeTime: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       // 주소가 있으면 좌표 자동 설정
       let insertData: any = { ...input };
       if (input.address) {
@@ -141,6 +151,11 @@ export const restaurantsRouter = router({
           insertData.latitude = coords.latitude;
           insertData.longitude = coords.longitude;
         }
+      }
+      // 소유 대표 자동 설정: admin이면 본인, sub-admin이면 parentId, master면 null
+      if (ctx.user.role === "admin") {
+        const [me] = await db.select({ parentId: users.parentId }).from(users).where(eq(users.id, ctx.user.userId)).limit(1);
+        insertData.ownerAdminId = me?.parentId ?? ctx.user.userId;
       }
       const [result] = await db.insert(restaurants).values(insertData).$returningId();
       return { id: result.id };
