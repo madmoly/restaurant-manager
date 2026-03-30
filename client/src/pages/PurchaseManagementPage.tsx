@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   ArrowUpDown, TrendingUp, TrendingDown, Minus,
   Package, Wallet, Truck, AlertTriangle, Check,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, Pencil, X, Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -67,17 +67,60 @@ export default function PurchaseManagementPage() {
 // ═══════════════════════════════════════════════════════════════════════
 // 거래처 관리 탭 (기존 CounterpartiesPage 기능 임베드)
 // ═══════════════════════════════════════════════════════════════════════
+const CP_TYPE_LABELS: Record<string, string> = {
+  supplier: "공급업체", online: "온라인", mart: "마트", repair: "수리/AS", other: "기타",
+};
+const CP_TYPES = ["supplier", "online", "mart", "repair", "other"] as const;
+
 function SuppliersTab({ restaurantId }: { restaurantId: number }) {
   const { data: list, isLoading } = trpc.counterparties.list.useQuery(
     { restaurantId },
     { enabled: restaurantId > 0 },
   );
   const utils = trpc.useUtils();
+  const updateCp = trpc.counterparties.update.useMutation({
+    onSuccess() { toast.success("거래처 정보 저장됨"); utils.counterparties.list.invalidate(); setEditingId(null); },
+    onError(err: any) { toast.error(err.message || "저장 실패"); },
+  });
   const deactivate = trpc.counterparties.deactivate.useMutation({
-    onSuccess() { toast.success("비활성화됨"); utils.counterparties.list.invalidate(); },
+    onSuccess() { toast.success("비활성화됨"); utils.counterparties.list.invalidate(); setEditingId(null); },
+  });
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "", counterpartyType: "supplier" as string,
+    phone: "", address: "", contactName: "", contactPhone: "", note: "",
   });
 
   const counterpartiesList = list || [];
+
+  const startEdit = (cp: any) => {
+    setEditingId(cp.id);
+    setEditForm({
+      name: cp.name || "",
+      counterpartyType: cp.counterpartyType || "supplier",
+      phone: cp.phone || "",
+      address: cp.address || "",
+      contactName: cp.contactName || "",
+      contactPhone: cp.contactPhone || "",
+      note: cp.note || "",
+    });
+  };
+
+  const saveEdit = () => {
+    if (!editingId || !editForm.name.trim()) { toast.error("거래처명은 필수입니다"); return; }
+    updateCp.mutate({
+      id: editingId,
+      restaurantId,
+      name: editForm.name.trim(),
+      counterpartyType: editForm.counterpartyType as any,
+      phone: editForm.phone.trim() || null,
+      address: editForm.address.trim() || null,
+      contactName: editForm.contactName.trim() || null,
+      contactPhone: editForm.contactPhone.trim() || null,
+      note: editForm.note.trim() || null,
+    });
+  };
 
   return (
     <div className="space-y-3">
@@ -92,19 +135,83 @@ function SuppliersTab({ restaurantId }: { restaurantId: number }) {
       ) : (
         counterpartiesList.map((cp: any) => (
           <Card key={cp.id} className="p-3">
-            <div className="flex items-center justify-between">
-              <div className="min-w-0">
-                <p className="font-medium text-foreground truncate">{cp.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {cp.counterpartyType === "supplier" ? "공급업체" :
-                   cp.counterpartyType === "online" ? "온라인" :
-                   cp.counterpartyType === "mart" ? "마트" :
-                   cp.counterpartyType === "repair" ? "수리/AS" : "기타"}
-                  {cp.contactName && ` · ${cp.contactName}`}
-                  {cp.contactPhone && ` · ${cp.contactPhone}`}
-                </p>
+            {editingId === cp.id ? (
+              /* ── 수정 모드 ── */
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground">거래처 정보 수정</span>
+                  <button onClick={() => setEditingId(null)} className="text-muted-foreground hover:text-foreground">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground">거래처명 *</label>
+                  <Input value={editForm.name} onChange={(e) => setEditForm(f => ({ ...f, name: e.target.value }))} className="h-8 text-sm mt-0.5" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground">유형</label>
+                  <select
+                    value={editForm.counterpartyType}
+                    onChange={(e) => setEditForm(f => ({ ...f, counterpartyType: e.target.value }))}
+                    className="w-full h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground mt-0.5"
+                  >
+                    {CP_TYPES.map(t => <option key={t} value={t}>{CP_TYPE_LABELS[t]}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-muted-foreground">대표 연락처</label>
+                    <Input value={editForm.phone} onChange={(e) => setEditForm(f => ({ ...f, phone: e.target.value }))} placeholder="02-XXX-XXXX" className="h-8 text-sm mt-0.5" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-muted-foreground">주소</label>
+                    <Input value={editForm.address} onChange={(e) => setEditForm(f => ({ ...f, address: e.target.value }))} placeholder="주소" className="h-8 text-sm mt-0.5" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-muted-foreground">담당자명</label>
+                    <Input value={editForm.contactName} onChange={(e) => setEditForm(f => ({ ...f, contactName: e.target.value }))} placeholder="담당자" className="h-8 text-sm mt-0.5" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-muted-foreground">담당자 연락처</label>
+                    <Input value={editForm.contactPhone} onChange={(e) => setEditForm(f => ({ ...f, contactPhone: e.target.value }))} placeholder="010-XXXX-XXXX" className="h-8 text-sm mt-0.5" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground">메모</label>
+                  <Input value={editForm.note} onChange={(e) => setEditForm(f => ({ ...f, note: e.target.value }))} placeholder="비고/메모" className="h-8 text-sm mt-0.5" />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" onClick={saveEdit} disabled={updateCp.isPending} className="flex-1 h-8 text-xs">
+                    <Save className="w-3.5 h-3.5 mr-1" /> 저장
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => { if (confirm(`"${cp.name}" 거래처를 비활성화할까요?`)) deactivate.mutate({ id: cp.id, restaurantId }); }} className="h-8 text-xs px-3">
+                    삭제
+                  </Button>
+                </div>
               </div>
-            </div>
+            ) : (
+              /* ── 보기 모드 ── */
+              <div className="flex items-start justify-between gap-2" onClick={() => startEdit(cp)} role="button">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-foreground truncate">{cp.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {CP_TYPE_LABELS[cp.counterpartyType] || "기타"}
+                    {cp.phone && ` · ${cp.phone}`}
+                  </p>
+                  {(cp.contactName || cp.contactPhone || cp.address) && (
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {cp.contactName && `담당: ${cp.contactName}`}
+                      {cp.contactPhone && ` ${cp.contactPhone}`}
+                      {cp.address && ` · ${cp.address}`}
+                    </p>
+                  )}
+                  {cp.note && <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{cp.note}</p>}
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-1" />
+              </div>
+            )}
           </Card>
         ))
       )}

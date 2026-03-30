@@ -596,6 +596,10 @@ app.use(express.json());
       await conn.query(`ALTER TABLE restaurant_shift_presets MODIFY COLUMN presetType VARCHAR(30) NOT NULL`);
     } catch (e: any) { /* already done */ }
 
+    // 거래처 세부정보 컬럼 추가
+    await addColumnIfNotExists("counterparties", "phone", "VARCHAR(30) DEFAULT NULL");
+    await addColumnIfNotExists("counterparties", "address", "VARCHAR(200) DEFAULT NULL");
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

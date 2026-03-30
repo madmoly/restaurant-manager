@@ -134,6 +134,8 @@ export const counterparties = mysqlTable("counterparties", {
   name: varchar("name", { length: 100 }).notNull(),
   counterpartyType: mysqlEnum("counterpartyType", ["supplier", "online", "mart", "repair", "other"])
     .default("supplier").notNull(),
+  phone: varchar("phone", { length: 30 }),
+  address: varchar("address", { length: 200 }),
   contactName: varchar("contactName", { length: 50 }),
   contactPhone: varchar("contactPhone", { length: 30 }),
   note: text("note"),
