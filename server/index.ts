@@ -548,6 +548,9 @@ app.use(express.json());
       console.log("[migrate] checklist seed skipped:", e.message);
     }
 
+    // ─── schedules 누락 컬럼 추가 ───
+    await addColumnIfNotExists("schedules", "payrollRecheckRequired", "BOOLEAN NOT NULL DEFAULT FALSE");
+
     // ─── 매장별 근무 프리셋 시간 테이블 ───
     await conn.query(`
       CREATE TABLE IF NOT EXISTS restaurant_shift_presets (
