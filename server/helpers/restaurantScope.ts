@@ -28,11 +28,14 @@ export function realStoreCondition() {
   );
 }
 
-/** 활성 실매장 조건: isActive + tutorial 제외 */
-export function activeRealStoreCondition() {
+/** 활성 매장 조건: isActive + tutorial 분기
+ *  - isTutorial 미지정(기본): 실매장만 (isTutorial=false)
+ *  - isTutorial=true: Tutorial 매장만
+ */
+export function activeRealStoreCondition(isTutorial: boolean = false) {
   return and(
     eq(restaurants.isActive, true),
-    eq(restaurants.isTutorial, false),
+    eq(restaurants.isTutorial, isTutorial),
   );
 }
 
