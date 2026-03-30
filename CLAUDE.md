@@ -1,6 +1,6 @@
 # 331매장관리 (Restaurant Manager) — 프로젝트 문서
 
-> 마지막 갱신: 2026-03-26 (프로젝트 정리 후 현행 기준 전면 갱신)
+> 마지막 갱신: 2026-03-30 (코드 기준 전면 최신화)
 
 ## 배포 환경
 
@@ -78,9 +78,9 @@ restaurant-manager/
 │   ├── ocr.ts                 # OCR 엔드포인트 (/api/ocr/*)
 │   ├── upload.ts              # 파일 업로드 (/api/upload)
 │   ├── middleware/storeAuth.ts # 매장 접근 검증
-│   └── routers/               # tRPC 라우터 24개
+│   └── routers/               # tRPC 라우터 29개 (+ index.ts)
 ├── drizzle/
-│   └── schema.ts              # 전체 DB 스키마 (34 테이블, 701줄)
+│   └── schema.ts              # 전체 DB 스키마 (48 테이블, ~905줄)
 ├── shared/
 │   └── permissions.ts         # 역할/권한 모델 (서버+클라이언트 공유)
 ├── scripts/
@@ -153,32 +153,40 @@ master(개발자) > admin(대표) > owner(점장) > supervisor(매니져) > staf
 | 경로 | 페이지 | effectiveRole |
 |------|--------|---------------|
 | `/` | MasterDashboard / AdminDashboard / ManagerDashboard / EmployeeDashboard | 역할별 분기 |
-| `/business` | AdminDashboard (사업 대시보드) | master만 (사업현황 바로가기) |
+| `/business` | AdminDashboard (사업 대시보드) | master, admin |
+| `/groups` | MasterDashboard (사업그룹 관리) | master |
 | `/users` | UsersPage (사용자 관리) | master |
 | `/restaurants` | RestaurantsPage (매장 관리) | master, admin, manager |
 | `/sales` | SalesPage (매출) | 전체 |
+| `/daily-closing` | SalesPage (일마감 — 별칭) | admin |
 | `/profitability` | ProfitPage (수익분석/분석캘린더) | master, admin, manager, staff |
 | `/counterparties` | CounterpartiesPage (거래처) | master, admin, manager |
 | `/purchase-management` | PurchaseManagementPage (매입) | 전체 |
 | `/fixed-costs` | FixedCostsPage (고정비) | master, admin, manager |
 | `/schedule` | SchedulePage (스케줄+휴무신청) | 전체 |
 | `/daily-ops` | DailyOpsPage (일일운영) | 전체 |
-| `/ops-calendar` | OpsCalendarPage (운영캘린더) | admin, manager |
+| `/ops-calendar` | OpsCalendarPage (운영캘린더) | master, admin, manager |
 | `/task-management` | TaskManagementPage (업무관리) | admin, manager |
 | `/labor-cost` | LaborCostPage (인건비) | admin, manager |
 | `/staff` | StaffPage (직원관리) | master, admin, manager |
 | `/recipes` | RecipesPage (레시피 정보) | 전체 (편집: manager 이상) |
 | `/store-info` | StoreInfoPage (업무정보) | 전체 (편집: manager 이상) |
+| `/system` | SystemPage (시스템 관리) | master |
 | `/sign/:token` | ContractSignPage (전자서명) | 비로그인 접근 |
+| `/join/:code` | JoinPage (초대코드 가입) | 비로그인 접근 |
+| `/change-password` | ChangePasswordPage (비밀번호 변경) | 로그인 필요 |
+| `/login` | Login (로그인) | 비로그인 접근 |
 
-## DB 테이블 (36개)
+## DB 테이블 (48개)
 
 ### 핵심 테이블
 | 변수명 | DB 테이블명 | 설명 |
 |--------|------------|------|
-| users | users | 사용자 (username, passwordHash, name, email, phone, role, healthCertUrl, healthCertExpiry) |
-| restaurants | restaurants | 매장 (name, address, monthlyTargetSales, targetLaborRatio, targetCostRatio, openTime, closeTime) |
-| restaurantUsers | restaurant_users | 매장-사용자 배정 (restaurantId, userId, role, affiliatedCompany) |
+| users | users | 사용자 (username, passwordHash, name, email, phone, role, isTutorial, parentId, healthCertUrl, healthCertExpiry, mustChangePassword) |
+| businessGroups | business_groups | 사업그룹 (name, adminId — 대표별 조직 단위) |
+| restaurants | restaurants | 매장 (name, address, monthlyTargetSales, targetLaborRatio, targetCostRatio, openTime, closeTime, halfShiftThreshold, isTutorial, ownerAdminId, deletedAt, salesInputStartTime/EndTime) |
+| restaurantUsers | restaurant_users | 매장-사용자 배정 (restaurantId, userId, role, affiliatedCompany, roleChangedAt/By) |
+| restaurantShiftPresets | restaurant_shift_presets | 매장별 근무 프리셋 시간 (presetType: open/full/close, dayType: weekday/weekend, startTime, endTime, breakMinutes) |
 
 ### 매출/마감
 | 변수명 | DB 테이블명 | 설명 |
@@ -209,17 +217,18 @@ master(개발자) > admin(대표) > owner(점장) > supervisor(매니져) > staf
 ### 인사/스케줄
 | 변수명 | DB 테이블명 | 설명 |
 |--------|------------|------|
-| schedules | schedules | 근무 스케줄 (중복방지, 상태: draft→published→confirmed→completed) |
+| schedules | schedules | 근무 스케줄 (상태: draft→confirmed→completed/canceled, shiftPreset: open/full/close/custom, breakMinutes) |
 | scheduleChangeRequests | schedule_change_requests | 스케줄 변경 요청 |
 | leaveRequests | leave_requests | 휴무 신청 (dayoff/half_morning/half_evening, 5일전 제한) |
 | employeeContracts | employee_contracts | 직원 근로계약 |
 | employeeLeaves | employee_leaves | 직원 휴가 기록 |
+| leaveTransactions | leave_transactions | 대체휴무/연차 상세 이력 (earn/use, 공휴일 근무 기반) |
 
 ### 운영
 | 변수명 | DB 테이블명 | 설명 |
 |--------|------------|------|
 | dailyOperations | daily_operations | 일일 운영 기록 (오픈/마감 체크) |
-| storeChecklistTemplates | store_checklist_templates | 체크리스트 템플릿 |
+| storeChecklistTemplates | store_checklist_templates | 체크리스트 템플릿 (태그, 반복유형, requirementType) |
 | dailyChecklistLogs | daily_checklist_logs | 체크리스트 실행 로그 |
 | dailyOrderImages | daily_order_images | 발주서 이미지 (OCR) |
 | storeClosedDays | store_closed_days | 매장 휴무일 |
@@ -238,6 +247,83 @@ master(개발자) > admin(대표) > owner(점장) > supervisor(매니져) > staf
 |--------|------------|------|
 | recipes | recipes | 레시피 게시판 (restaurantId, title, category, imageUrl, content, sortOrder) |
 | storeInfoCards | store_info_cards | 업무정보 카드 (restaurantId, cardType, title, content, isPinned, sortOrder) |
+
+### OCR/학습
+| 변수명 | DB 테이블명 | 설명 |
+|--------|------------|------|
+| counterpartyOcrProfiles | counterparty_ocr_profiles | 거래처별 OCR 프로파일 (documentType, columnOrder, frequentItems) |
+| ocrCorrections | ocr_corrections | OCR 사용자 수정 이력 (originalItems, correctedItems) |
+
+### 시스템/감사
+| 변수명 | DB 테이블명 | 설명 |
+|--------|------------|------|
+| auditLogs | audit_logs | 감사 로그 (action, target, details — before/after) |
+| systemSettings | system_settings | 시스템 설정 (key-value) |
+| apiUsageLogs | api_usage_logs | API 사용량 로그 (ocr, geocoding 등) |
+| dbBackupLogs | db_backup_logs | DB 백업 이력 |
+| restaurantInvites | restaurant_invites | 매장 초대 코드 (code, role, expiresAt) |
+
+## 사업그룹 구조 (2026-03-30 적용)
+
+- `business_groups` 테이블: adminId로 대표(admin)에 연결되는 조직 단위
+- `restaurants.ownerAdminId`: 매장이 어느 대표(사업그룹)에 속하는지
+- `users.isTutorial` / `restaurants.isTutorial`: Tutorial 데이터 격리 플래그
+- `users.parentId`: SUB대표 계층 (상위 대표 userId, NULL = 최상위)
+- master 로그인 시 `/business`에서 사업그룹 필터(전체/개별그룹/Tutorial) 사용
+- `/groups` 경로에서 사업그룹 생성/매장배정/관리
+
+### 매장 추가 컬럼 (restaurants)
+- `halfShiftThreshold`: 반차 판별 기준 (운영시간 대비 %, 기본 60)
+- `deletedAt`: 소프트 삭제 일시 (null이면 활성)
+- `salesInputStartTime`/`salesInputEndTime`: 매출 입력 허용 시간대
+
+### 스케줄 추가 컬럼 (schedules)
+- `shiftPreset`: 근무유형 (open/full/close/custom)
+- `breakMinutes`: 휴게시간 (분, 풀타임 기본 60)
+- `tempWorkerName`/`tempWageType`/`tempWageAmount`: 임시 근로자 지원
+
+### 매장별 근무 프리셋 (restaurant_shift_presets)
+- 매장 영업시간(openTime/closeTime)과 **독립적으로** 근무유형별 시간 설정 가능
+- `presetType`: open(오픈), full(풀타임), close(마감)
+- `dayType`: weekday(평일), weekend(주말) — 같은 프리셋이라도 요일별로 다른 시간 설정 가능
+- UNIQUE KEY: (restaurantId, presetType, dayType) — ON DUPLICATE KEY UPDATE로 upsert
+- 스케줄 배정 시 우선순위: 커스텀 프리셋 → (없으면) 영업시간 기반 자동 계산 (폴백)
+- 설정 UI: 업무정보 페이지(StoreInfoPage) > 매장 기본정보 > 근무 프리셋 시간
+- 예시: 매장 영업시간 10:30~19:30이지만 풀타임 근무는 09:30~20:30으로 별도 설정
+
+## tRPC 라우터 목록 (29개)
+
+| 라우터 | 파일 | 설명 |
+|--------|------|------|
+| auth | auth.ts | 로그인/회원가입/토큰 |
+| users | users.ts | 사용자 CRUD |
+| restaurants | restaurants.ts | 매장 CRUD |
+| sales | sales.ts | 매출 |
+| counterparties | counterparties.ts | 거래처 |
+| purchases | purchases.ts | 매입 (레거시) |
+| fixedCosts | fixedCosts.ts | 고정비 |
+| dailyClosings | dailyClosings.ts | 일일 마감 |
+| schedules | schedules.ts | 근무 스케줄 |
+| scheduleChangeRequests | scheduleChangeRequests.ts | 스케줄 변경 요청 |
+| dailyOps | dailyOps.ts | 일일운영 |
+| storeClosures | storeClosures.ts | 매장 휴무 |
+| storeChecklists | storeChecklists.ts | 체크리스트 |
+| items | items.ts | 품목 마스터 |
+| counterpartyItems | counterpartyItems.ts | 거래처별 품목 |
+| purchasesV2 | purchasesV2.ts | 매입 v2 (현재 사용) |
+| pricing | pricing.ts | 가격 관련 |
+| monthlyClosings | monthlyClosings.ts | 월간 마감 |
+| notifications | notifications.ts | 알림 |
+| electronicContracts | electronicContracts.ts | 전자 근로계약서 |
+| leaveRequests | leaveRequests.ts | 휴무 신청 |
+| errorLogs | errorLogs.ts | 에러 로그 |
+| admin | admin.ts | 대표/관리자 기능 |
+| system | system.ts | 시스템 관리 (master 전용) |
+| invites | invites.ts | 매장 초대 코드 |
+| leaveBalance | leaveBalance.ts | 연차/대체휴무 잔여 |
+| recipes | recipes.ts | 레시피 |
+| storeInfo | storeInfo.ts | 업무정보 카드 |
+| businessGroups | businessGroups.ts | 사업그룹 CRUD |
 
 ## 자동 마이그레이션
 
@@ -313,7 +399,10 @@ git add -A && git commit --file=.commitmsg && git push origin main
 ### OCR 개선 TODO (우선순위순)
 - [x] Phase 1: 프롬프트 강화 (회전 대응 + 양식 세분화 + 수량/단가 휴리스틱)
 - [x] Phase 1: 서버 검증 (수량↔단가 뒤바뀜 감지, 수량 이상치 경고)
-- [ ] Phase 2: 거래처별 OCR 프로파일 DB 테이블 설계 및 구현
+- [x] Phase 2 (스키마): `counterparty_ocr_profiles` + `ocr_corrections` 테이블 생성 완료
+- [x] Phase 2 (프로파일): 거래처별 OCR 프로파일 자동 생성/업데이트 + 이동평균 단가 학습
+- [x] Phase 2 (수정 축적): 사용자 OCR 수정 데이터 INSERT + corrections 조회/통계 API (GET /api/ocr/corrections, /corrections/stats)
+- [x] Phase 2 (모니터링): SystemPage > OCR학습 탭에서 수정 빈도/프로파일 현황 조회 가능
 - [ ] Phase 2: 클라이언트 이미지 회전 UI (촬영 후 방향 보정)
 - [ ] Phase 3: 동적 프롬프트 주입 (거래처 품목/단가 힌트)
 - [ ] Phase 3: 사용자 수정 데이터 기반 학습 파이프라인

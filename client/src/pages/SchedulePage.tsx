@@ -358,6 +358,12 @@ export default function SchedulePage() {
     { enabled: restaurantId > 0 }
   ) as { data: StaffItem[] };
 
+  // 매장별 커스텀 근무 프리셋
+  const { data: shiftPresets = [] } = trpc.restaurants.getShiftPresets.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 }
+  );
+
   // ─── Mutations ─────────────────────────────
   const quickAssign = trpc.schedules.quickAssign.useMutation({
     onSuccess() {
@@ -535,8 +541,21 @@ export default function SchedulePage() {
     });
   };
 
-  // 매장 영업시간 기반 프리셋 시간 계산
-  const getPresetTimes = (preset: string) => {
+  // 매장별 커스텀 프리셋 우선 → 없으면 영업시간 기반 계산
+  const getPresetTimes = (preset: string, dateStr?: string) => {
+    // 커스텀 프리셋 조회
+    if (shiftPresets.length > 0) {
+      const d = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+      const dow = d.getDay();
+      const dayType = (dow === 0 || dow === 6) ? "weekend" : "weekday";
+      const custom = shiftPresets.find(
+        (p: any) => p.presetType === preset && p.dayType === dayType
+      );
+      if (custom) {
+        return { startTime: custom.startTime, endTime: custom.endTime, breakMinutes: custom.breakMinutes };
+      }
+    }
+    // 폴백: 영업시간 기반
     const openTime = current?.openTime ?? "09:00";
     const closeTime = current?.closeTime ?? "22:00";
     const [oh, om] = openTime.split(":").map(Number);
@@ -875,9 +894,14 @@ export default function SchedulePage() {
                       <div className="text-left">
                         <div className="font-medium text-foreground text-sm">{info.label}</div>
                         <div className="text-xs text-muted-foreground">
-                          {preset === "fullday" && "영업시간 전체 근무"}
-                          {preset === "open" && "오픈 ~ 중간시간"}
-                          {preset === "close" && "중간시간 ~ 마감"}
+                          {(() => {
+                            const presetKey = preset === "fullday" ? "full" : preset;
+                            const times = getPresetTimes(presetKey, assignDate ?? undefined);
+                            if (times) return `${times.startTime} ~ ${times.endTime}`;
+                            if (preset === "fullday") return "영업시간 전체 근무";
+                            if (preset === "open") return "오픈 ~ 중간시간";
+                            return "중간시간 ~ 마감";
+                          })()}
                         </div>
                       </div>
                     </button>
@@ -1123,8 +1147,9 @@ export default function SchedulePage() {
                       key={key}
                       type="button"
                       onClick={() => {
-                        const times = getPresetTimes(key);
-                        const brk = key === "full" ? 60 : 0;
+                        const editDateStr = editSchedule ? fmtDate(new Date(editSchedule.startTime)) : undefined;
+                        const times = getPresetTimes(key, editDateStr);
+                        const brk = times?.breakMinutes ?? (key === "full" ? 60 : 0);
                         if (times) {
                           setEditForm({ ...editForm, shiftPreset: key, startTime: times.startTime, endTime: times.endTime, breakMinutes: brk });
                         } else {

@@ -888,3 +888,17 @@ export const storeInfoCards = mysqlTable("store_info_cards", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type StoreInfoCard = typeof storeInfoCards.$inferSelect;
+
+// ─── 매장별 근무 프리셋 시간 ─────────────────────────────────────────────────
+export const restaurantShiftPresets = mysqlTable("restaurant_shift_presets", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  presetType: varchar("presetType", { length: 20 }).notNull(),   // open, full, close
+  dayType: varchar("dayType", { length: 20 }).notNull().default("weekday"), // weekday, weekend
+  startTime: varchar("startTime", { length: 5 }).notNull(),       // HH:MM
+  endTime: varchar("endTime", { length: 5 }).notNull(),           // HH:MM
+  breakMinutes: int("breakMinutes").default(0).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RestaurantShiftPreset = typeof restaurantShiftPresets.$inferSelect;

@@ -11,6 +11,7 @@ import {
   storeWeeklyClosures,
   restaurantUsers,
   employeeContracts,
+  restaurantShiftPresets,
 } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -235,29 +236,51 @@ export const schedulesRouter = router({
       if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { userId: input.userId })) {
         throw new TRPCError({ code: "CONFLICT", message: "해당 직원은 이 날짜에 이미 스케줄이 등록되어 있습니다." });
       }
-      // 매장 운영시간 조회
-      const [rest] = await db
-        .select({ openTime: restaurants.openTime, closeTime: restaurants.closeTime })
-        .from(restaurants)
-        .where(eq(restaurants.id, input.restaurantId))
+      // 매장별 커스텀 프리셋 조회 (우선) → 없으면 운영시간 기반 계산
+      const presetKey = input.preset === "fullday" ? "full" : input.preset;
+      const workDate = new Date(input.workDate + "T00:00:00+09:00");
+      const dow = workDate.getDay(); // 0=일, 6=토
+      const dayType = (dow === 0 || dow === 6) ? "weekend" : "weekday";
+
+      const customPresets = await db.select()
+        .from(restaurantShiftPresets)
+        .where(and(
+          eq(restaurantShiftPresets.restaurantId, input.restaurantId),
+          eq(restaurantShiftPresets.presetType, presetKey),
+          eq(restaurantShiftPresets.dayType, dayType),
+        ))
         .limit(1);
-      const openTime = rest?.openTime ?? "09:00";
-      const closeTime = rest?.closeTime ?? "22:00";
 
-      const [oh, om] = openTime.split(":").map(Number);
-      const [ch, cm] = closeTime.split(":").map(Number);
-      const midMins = Math.round((oh * 60 + om + ch * 60 + cm) / 2);
-      const midTime = `${String(Math.floor(midMins / 60)).padStart(2, "0")}:${String(midMins % 60).padStart(2, "0")}`;
+      let p: { start: string; end: string };
+      let breakMinutes: number;
 
-      const presets: Record<string, { start: string; end: string }> = {
-        open: { start: openTime, end: midTime },
-        fullday: { start: openTime, end: closeTime },
-        close: { start: midTime, end: closeTime },
-      };
-      const p = presets[input.preset];
+      if (customPresets.length > 0) {
+        // 커스텀 프리셋 사용
+        p = { start: customPresets[0].startTime, end: customPresets[0].endTime };
+        breakMinutes = customPresets[0].breakMinutes;
+      } else {
+        // 폴백: 매장 운영시간 기반 계산
+        const [rest] = await db
+          .select({ openTime: restaurants.openTime, closeTime: restaurants.closeTime })
+          .from(restaurants)
+          .where(eq(restaurants.id, input.restaurantId))
+          .limit(1);
+        const openTime = rest?.openTime ?? "09:00";
+        const closeTime = rest?.closeTime ?? "22:00";
 
-      // 풀타임이면 기본 휴게시간 60분
-      const breakMinutes = input.preset === "fullday" ? 60 : 0;
+        const [oh, om] = openTime.split(":").map(Number);
+        const [ch, cm] = closeTime.split(":").map(Number);
+        const midMins = Math.round((oh * 60 + om + ch * 60 + cm) / 2);
+        const midTime = `${String(Math.floor(midMins / 60)).padStart(2, "0")}:${String(midMins % 60).padStart(2, "0")}`;
+
+        const fallbackPresets: Record<string, { start: string; end: string }> = {
+          open: { start: openTime, end: midTime },
+          fullday: { start: openTime, end: closeTime },
+          close: { start: midTime, end: closeTime },
+        };
+        p = fallbackPresets[input.preset];
+        breakMinutes = input.preset === "fullday" ? 60 : 0;
+      }
 
       const [result] = await db.insert(schedules).values({
         userId: input.userId,

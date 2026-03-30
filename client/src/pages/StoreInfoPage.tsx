@@ -28,13 +28,17 @@ function StoreBasicInfo({ restaurantId, isManager }: { restaurantId: number; isM
   const [editing, setEditing] = useState(false);
   const [openTime, setOpenTime] = useState(current?.openTime ?? "09:00");
   const [closeTime, setCloseTime] = useState(current?.closeTime ?? "22:00");
+  const [editingSalesTime, setEditingSalesTime] = useState(false);
+  const [salesStartTime, setSalesStartTime] = useState(current?.salesInputStartTime ?? "");
+  const [salesEndTime, setSalesEndTime] = useState(current?.salesInputEndTime ?? "");
 
   const updateMut = trpc.restaurants.update.useMutation({
     onSuccess() {
-      toast.success("영업시간이 변경되었습니다");
+      toast.success("설정이 변경되었습니다");
       utils.restaurants.list.invalidate();
       utils.restaurants.listMine.invalidate();
       setEditing(false);
+      setEditingSalesTime(false);
     },
     onError(e) { toast.error(e.message); },
   });
@@ -42,6 +46,15 @@ function StoreBasicInfo({ restaurantId, isManager }: { restaurantId: number; isM
   const handleSave = () => {
     if (!restaurantId) return;
     updateMut.mutate({ id: restaurantId, openTime, closeTime });
+  };
+
+  const handleSaveSalesTime = () => {
+    if (!restaurantId) return;
+    updateMut.mutate({
+      id: restaurantId,
+      salesInputStartTime: salesStartTime || null,
+      salesInputEndTime: salesEndTime || null,
+    });
   };
 
   if (!current) return null;
@@ -119,6 +132,69 @@ function StoreBasicInfo({ restaurantId, isManager }: { restaurantId: number; isM
             </div>
           )}
         </div>
+        {/* 매출 입력 허용 시간대 */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Clock className="w-3 h-3" /> 매출입력 시간
+          </span>
+          {!editingSalesTime ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">
+                {current.salesInputStartTime && current.salesInputEndTime
+                  ? `${current.salesInputStartTime} ~ ${current.salesInputEndTime}`
+                  : "제한 없음"}
+              </span>
+              {isManager && (
+                <button
+                  onClick={() => {
+                    setSalesStartTime(current.salesInputStartTime ?? "");
+                    setSalesEndTime(current.salesInputEndTime ?? "");
+                    setEditingSalesTime(true);
+                  }}
+                  className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="time"
+                value={salesStartTime}
+                onChange={(e) => setSalesStartTime(e.target.value)}
+                className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm"
+                placeholder="미설정"
+              />
+              <span className="text-muted-foreground text-xs">~</span>
+              <input
+                type="time"
+                value={salesEndTime}
+                onChange={(e) => setSalesEndTime(e.target.value)}
+                className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm"
+                placeholder="미설정"
+              />
+              <Button size="sm" variant="default" onClick={handleSaveSalesTime} disabled={updateMut.isPending} className="h-7 px-2 text-xs">
+                저장
+              </Button>
+              <button
+                onClick={() => {
+                  // 초기화 (제한 없음으로)
+                  setSalesStartTime("");
+                  setSalesEndTime("");
+                  handleSaveSalesTime();
+                }}
+                className="p-1 rounded hover:bg-accent text-muted-foreground text-xs"
+                title="제한 해제"
+              >
+                해제
+              </button>
+              <button onClick={() => setEditingSalesTime(false)} className="p-1 rounded hover:bg-accent text-muted-foreground">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
         {/* 월 매출 목표 */}
         {current.monthlyTargetSales && Number(current.monthlyTargetSales) > 0 && (
           <div className="flex items-center justify-between">
@@ -129,6 +205,174 @@ function StoreBasicInfo({ restaurantId, isManager }: { restaurantId: number; isM
           </div>
         )}
       </div>
+      {/* 근무 프리셋 시간 설정 */}
+      {isManager && restaurantId > 0 && (
+        <ShiftPresetSettings restaurantId={restaurantId} />
+      )}
+    </div>
+  );
+}
+
+// ─── 근무 프리셋 시간 설정 ──────────────────────────────────────────────────
+const PRESET_TYPES = [
+  { value: "open", label: "오픈" },
+  { value: "full", label: "풀타임" },
+  { value: "close", label: "마감" },
+] as const;
+const DAY_TYPES = [
+  { value: "weekday", label: "평일" },
+  { value: "weekend", label: "주말" },
+] as const;
+
+type PresetForm = { presetType: string; dayType: string; startTime: string; endTime: string; breakMinutes: number };
+
+function ShiftPresetSettings({ restaurantId }: { restaurantId: number }) {
+  const utils = trpc.useUtils();
+  const { data: presets, isLoading } = trpc.restaurants.getShiftPresets.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const [editing, setEditing] = useState(false);
+  const [forms, setForms] = useState<PresetForm[]>([]);
+
+  const saveMut = trpc.restaurants.saveShiftPresets.useMutation({
+    onSuccess() {
+      toast.success("근무시간 프리셋이 저장되었습니다");
+      utils.restaurants.getShiftPresets.invalidate({ restaurantId });
+      setEditing(false);
+    },
+    onError(e: any) { toast.error(e.message); },
+  });
+
+  const startEdit = () => {
+    // 기존 데이터로 폼 초기화, 없는 조합은 빈 값
+    const initial: PresetForm[] = [];
+    for (const pt of PRESET_TYPES) {
+      for (const dt of DAY_TYPES) {
+        const existing = presets?.find(
+          (p: any) => p.presetType === pt.value && p.dayType === dt.value
+        );
+        initial.push({
+          presetType: pt.value,
+          dayType: dt.value,
+          startTime: existing?.startTime ?? "",
+          endTime: existing?.endTime ?? "",
+          breakMinutes: existing?.breakMinutes ?? (pt.value === "full" ? 60 : 0),
+        });
+      }
+    }
+    setForms(initial);
+    setEditing(true);
+  };
+
+  const updateForm = (idx: number, field: keyof PresetForm, value: string | number) => {
+    setForms((prev) => prev.map((f, i) => (i === idx ? { ...f, [field]: value } : f)));
+  };
+
+  const handleSave = () => {
+    // startTime, endTime이 모두 입력된 것만 저장
+    const valid = forms.filter((f) => f.startTime && f.endTime);
+    if (valid.length === 0) {
+      toast.error("최소 1개 프리셋의 시간을 입력해주세요");
+      return;
+    }
+    saveMut.mutate({
+      restaurantId,
+      presets: valid.map((f) => ({
+        presetType: f.presetType as "open" | "full" | "close",
+        dayType: f.dayType as "weekday" | "weekend",
+        startTime: f.startTime,
+        endTime: f.endTime,
+        breakMinutes: f.breakMinutes,
+      })),
+    });
+  };
+
+  const presetLabel = (type: string) => PRESET_TYPES.find((p) => p.value === type)?.label ?? type;
+  const dayLabel = (type: string) => DAY_TYPES.find((d) => d.value === type)?.label ?? type;
+
+  return (
+    <div className="border-t border-border">
+      <div className="flex items-center justify-between px-4 py-2 bg-muted/20">
+        <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+          <Clock className="w-3 h-3" /> 근무 프리셋 시간
+        </span>
+        {!editing && (
+          <button onClick={startEdit} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground">
+            <Edit3 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {!editing ? (
+        <div className="px-4 pb-3">
+          {isLoading ? (
+            <p className="text-xs text-muted-foreground">불러오는 중...</p>
+          ) : !presets || presets.length === 0 ? (
+            <p className="text-xs text-muted-foreground">미설정 (매장 영업시간 기반 자동 계산)</p>
+          ) : (
+            <div className="space-y-1">
+              {PRESET_TYPES.map((pt) => {
+                const rows = presets.filter((p: any) => p.presetType === pt.value);
+                if (rows.length === 0) return null;
+                return rows.map((r: any) => (
+                  <div key={r.id} className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">
+                      {pt.label} ({dayLabel(r.dayType)})
+                    </span>
+                    <span className="font-medium text-foreground">
+                      {r.startTime} ~ {r.endTime}
+                      {r.breakMinutes > 0 && <span className="text-muted-foreground ml-1">(휴게 {r.breakMinutes}분)</span>}
+                    </span>
+                  </div>
+                ));
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="px-4 pb-3 space-y-2">
+          <p className="text-xs text-muted-foreground">비워두면 해당 프리셋은 매장 영업시간 기반으로 자동 계산됩니다.</p>
+          {forms.map((f, idx) => (
+            <div key={`${f.presetType}-${f.dayType}`} className="flex items-center gap-1.5 text-xs">
+              <span className="w-20 font-medium text-foreground shrink-0">
+                {presetLabel(f.presetType)} ({dayLabel(f.dayType)})
+              </span>
+              <input
+                type="time"
+                value={f.startTime}
+                onChange={(e) => updateForm(idx, "startTime", e.target.value)}
+                className="w-[90px] rounded border border-input bg-background px-1.5 py-0.5 text-xs"
+              />
+              <span className="text-muted-foreground">~</span>
+              <input
+                type="time"
+                value={f.endTime}
+                onChange={(e) => updateForm(idx, "endTime", e.target.value)}
+                className="w-[90px] rounded border border-input bg-background px-1.5 py-0.5 text-xs"
+              />
+              <span className="text-muted-foreground shrink-0">휴게</span>
+              <input
+                type="number"
+                value={f.breakMinutes}
+                onChange={(e) => updateForm(idx, "breakMinutes", Number(e.target.value) || 0)}
+                className="w-[50px] rounded border border-input bg-background px-1.5 py-0.5 text-xs text-center"
+                min={0}
+                max={180}
+              />
+              <span className="text-muted-foreground">분</span>
+            </div>
+          ))}
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" variant="default" onClick={handleSave} disabled={saveMut.isPending} className="h-7 px-3 text-xs">
+              저장
+            </Button>
+            <button onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground">
+              취소
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

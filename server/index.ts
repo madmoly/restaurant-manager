@@ -548,6 +548,22 @@ app.use(express.json());
       console.log("[migrate] checklist seed skipped:", e.message);
     }
 
+    // ─── 매장별 근무 프리셋 시간 테이블 ───
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS restaurant_shift_presets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        presetType VARCHAR(20) NOT NULL,
+        dayType VARCHAR(20) NOT NULL DEFAULT 'weekday',
+        startTime VARCHAR(5) NOT NULL,
+        endTime VARCHAR(5) NOT NULL,
+        breakMinutes INT NOT NULL DEFAULT 0,
+        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_store_preset_day (restaurantId, presetType, dayType)
+      )
+    `);
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

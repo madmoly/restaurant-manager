@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, sql, count } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
-import { restaurants, restaurantUsers, users, sales, apiUsageLogs } from "../../drizzle/schema";
+import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { activeRealStoreCondition, getOwnedRestaurants } from "../helpers/restaurantScope";
 
@@ -168,6 +168,8 @@ export const restaurantsRouter = router({
       targetCostRatio: z.string().optional(),
       openTime: z.string().optional(),
       closeTime: z.string().optional(),
+      salesInputStartTime: z.string().nullable().optional(),
+      salesInputEndTime: z.string().nullable().optional(),
     }))
     .mutation(async ({ input }) => {
       const { id, ...data } = input;
@@ -284,6 +286,31 @@ export const restaurantsRouter = router({
       return { ok: true };
     }),
 
+  /** 매장 소프트 삭제 (admin 이상) */
+  softDelete: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      // admin인 경우 자기 소유 매장만 삭제 가능
+      if (ctx.user.role === "admin") {
+        const [store] = await db.select({ ownerAdminId: restaurants.ownerAdminId })
+          .from(restaurants).where(eq(restaurants.id, input.id)).limit(1);
+        if (!store) throw new TRPCError({ code: "NOT_FOUND", message: "매장을 찾을 수 없습니다" });
+        if (store.ownerAdminId !== ctx.user.userId) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "본인 소유 매장만 삭제할 수 있습니다" });
+        }
+      }
+      await db.update(restaurants).set({ deletedAt: new Date() }).where(eq(restaurants.id, input.id));
+      return { ok: true };
+    }),
+
+  /** 매장 복구 (master 전용) */
+  restore: masterProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await db.update(restaurants).set({ deletedAt: null }).where(eq(restaurants.id, input.id));
+      return { ok: true };
+    }),
+
   /** [master] 전체 매장 + 소유 대표 조회 */
   listAllWithOwner: masterProcedure.query(async () => {
     const allStores = await db.select({
@@ -307,6 +334,48 @@ export const restaurantsRouter = router({
     .input(z.object({ restaurantId: z.number(), ownerAdminId: z.number().nullable() }))
     .mutation(async ({ input }) => {
       await db.update(restaurants).set({ ownerAdminId: input.ownerAdminId }).where(eq(restaurants.id, input.restaurantId));
+      return { ok: true };
+    }),
+
+  // ─── 매장별 근무 프리셋 시간 ─────────────────────────────────────────────
+
+  /** 매장 프리셋 조회 */
+  getShiftPresets: protectedProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input }) => {
+      return db.select().from(restaurantShiftPresets)
+        .where(eq(restaurantShiftPresets.restaurantId, input.restaurantId));
+    }),
+
+  /** 매장 프리셋 일괄 저장 (upsert) */
+  saveShiftPresets: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      presets: z.array(z.object({
+        presetType: z.enum(["open", "full", "close"]),
+        dayType: z.enum(["weekday", "weekend"]),
+        startTime: z.string().regex(/^\d{2}:\d{2}$/),
+        endTime: z.string().regex(/^\d{2}:\d{2}$/),
+        breakMinutes: z.number().min(0).default(0),
+      })),
+    }))
+    .mutation(async ({ input }) => {
+      for (const p of input.presets) {
+        // MySQL ON DUPLICATE KEY UPDATE (unique key: restaurantId + presetType + dayType)
+        await db.execute(sql`
+          INSERT INTO restaurant_shift_presets (restaurantId, presetType, dayType, startTime, endTime, breakMinutes)
+          VALUES (${input.restaurantId}, ${p.presetType}, ${p.dayType}, ${p.startTime}, ${p.endTime}, ${p.breakMinutes})
+          ON DUPLICATE KEY UPDATE startTime = VALUES(startTime), endTime = VALUES(endTime), breakMinutes = VALUES(breakMinutes)
+        `);
+      }
+      return { ok: true };
+    }),
+
+  /** 매장 프리셋 삭제 */
+  deleteShiftPreset: managerProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await db.delete(restaurantShiftPresets).where(eq(restaurantShiftPresets.id, input.id));
       return { ok: true };
     }),
 });
