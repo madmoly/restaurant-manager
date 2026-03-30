@@ -204,6 +204,7 @@ export const restaurantsRouter = router({
           healthCertUrl: users.healthCertUrl,
           healthCertExpiry: users.healthCertExpiry,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
+          hireDate: restaurantUsers.hireDate,
           createdAt: restaurantUsers.createdAt,
         })
         .from(restaurantUsers)
@@ -255,6 +256,24 @@ export const restaurantsRouter = router({
       await db
         .update(restaurantUsers)
         .set({ affiliatedCompany: input.affiliatedCompany })
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId)
+        ));
+      return { ok: true };
+    }),
+
+  /** 직원 입사일 변경 */
+  updateStaffHireDate: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      userId: z.number(),
+      hireDate: z.string().nullable(), // YYYY-MM-DD or null
+    }))
+    .mutation(async ({ input }) => {
+      await db
+        .update(restaurantUsers)
+        .set({ hireDate: input.hireDate })
         .where(and(
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, input.userId)

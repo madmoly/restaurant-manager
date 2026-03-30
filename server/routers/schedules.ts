@@ -13,6 +13,8 @@ import {
   employeeContracts,
   restaurantShiftPresets,
   leaveRequests,
+  leaveTransactions,
+  employmentElectronicContracts,
 } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -727,6 +729,7 @@ export const schedulesRouter = router({
           tempWageType: schedules.tempWageType,
           tempWageAmount: schedules.tempWageAmount,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
+          hireDate: restaurantUsers.hireDate,
           wageType: employeeContracts.wageType,
           wageAmount: employeeContracts.wageAmount,
           position: employeeContracts.position,
@@ -816,6 +819,7 @@ export const schedulesRouter = router({
           wageType: string | null; wageAmount: string | null;
           position: string | null; contractStart: string | null; contractEnd: string | null;
           daysOff: number; approvedLeaves: number;
+          hireDate: string | null;
           userId: number | null;
         }>;
         totalHours: number;
@@ -841,6 +845,7 @@ export const schedulesRouter = router({
             contractEnd: r.contractEnd ? String(r.contractEnd) : null,
             daysOff: 0, // 아래에서 최종 계산
             approvedLeaves: uid ? (approvedLeavesMap[uid] || 0) : 0,
+            hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
           };
         }
@@ -868,13 +873,53 @@ export const schedulesRouter = router({
         companyMap[company].totalWage += wage;
       }
 
+      // ── 5인 이상 사업장 직원의 대체휴무/연차 잔여 조회 ──
+      const allUserIds = new Set<number>();
+      for (const c of Object.values(companyMap)) {
+        for (const emp of Object.values(c.employees)) {
+          if (emp.userId) allUserIds.add(emp.userId);
+        }
+      }
+      // 대체휴무 잔여: earn - use (해당 연도)
+      const leaveTxRows = allUserIds.size > 0
+        ? await db.select({
+            userId: leaveTransactions.userId,
+            leaveType: leaveTransactions.leaveType,
+            txType: leaveTransactions.txType,
+            days: leaveTransactions.days,
+          })
+          .from(leaveTransactions)
+          .where(and(
+            eq(leaveTransactions.restaurantId, input.restaurantId),
+            eq(leaveTransactions.year, input.year),
+          ))
+        : [];
+      // 유저별 { substitute: {earned, used}, annual: {earned, used} }
+      const leaveMap: Record<number, { substitute: { earned: number; used: number }; annual: { earned: number; used: number } }> = {};
+      for (const tx of leaveTxRows) {
+        if (!tx.userId) continue;
+        if (!leaveMap[tx.userId]) {
+          leaveMap[tx.userId] = { substitute: { earned: 0, used: 0 }, annual: { earned: 0, used: 0 } };
+        }
+        const lt = tx.leaveType === "substitute" ? "substitute" : "annual";
+        const d = parseFloat(String(tx.days));
+        if (tx.txType === "earn") leaveMap[tx.userId][lt].earned += d;
+        else leaveMap[tx.userId][lt].used += d;
+      }
+
       return Object.values(companyMap).map(c => ({
         ...c,
-        employees: Object.values(c.employees).map(emp => ({
-          ...emp,
-          daysOff: Math.max(0, operatingDays - emp.shifts),
-          userId: undefined, // 클라이언트에 노출하지 않음
-        })),
+        employees: Object.values(c.employees).map(emp => {
+          const uid = emp.userId;
+          const lb = uid ? leaveMap[uid] : null;
+          return {
+            ...emp,
+            daysOff: Math.max(0, operatingDays - emp.shifts),
+            substituteLeave: lb ? { earned: lb.substitute.earned, used: lb.substitute.used, remaining: lb.substitute.earned - lb.substitute.used } : null,
+            annualLeave: lb ? { earned: lb.annual.earned, used: lb.annual.used, remaining: lb.annual.earned - lb.annual.used } : null,
+            userId: undefined, // 클라이언트에 노출하지 않음
+          };
+        }),
       }));
     }),
 

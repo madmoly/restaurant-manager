@@ -47,6 +47,7 @@ export default function StaffPage() {
   const [expandedStaff, setExpandedStaff] = useState<number | null>(null);
   const [editingCredentials, setEditingCredentials] = useState<any>(null);
   const [editingCompany, setEditingCompany] = useState<{ userId: number; value: string } | null>(null);
+  const [editingHireDate, setEditingHireDate] = useState<{ userId: number; value: string } | null>(null);
   const [renewTarget, setRenewTarget] = useState<{ userId: number; name: string; affiliatedCompany?: string } | null>(null);
 
   const utils = trpc.useUtils();
@@ -103,6 +104,11 @@ export default function StaffPage() {
 
   const updateCompany = trpc.restaurants.updateStaffCompany.useMutation({
     onSuccess() { toast.success("소속회사 변경됨"); setEditingCompany(null); utils.restaurants.getStaff.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const updateHireDate = trpc.restaurants.updateStaffHireDate.useMutation({
+    onSuccess() { toast.success("입사일 변경됨"); setEditingHireDate(null); utils.restaurants.getStaff.invalidate(); },
     onError(err) { toast.error(err.message); },
   });
 
@@ -419,6 +425,39 @@ export default function StaffPage() {
                           <span className="text-xs text-foreground">{s.affiliatedCompany || "(미지정)"}</span>
                           <button
                             onClick={() => setEditingCompany({ userId: s.userId, value: s.affiliatedCompany || "" })}
+                            className="p-1 rounded hover:bg-accent text-muted-foreground"
+                          ><Edit3 className="w-3 h-3" /></button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 입사일 */}
+                    <div className="flex items-center gap-3">
+                      <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
+                        <CalendarDays className="w-3 h-3" /> 입사일
+                      </label>
+                      {editingHireDate?.userId === s.userId ? (
+                        <div className="flex items-center gap-2 flex-1">
+                          <input
+                            type="date"
+                            className="text-xs px-2 py-1 rounded border border-input bg-background"
+                            value={editingHireDate!.value}
+                            onChange={(e) => setEditingHireDate({ userId: s.userId, value: e.target.value })}
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => updateHireDate.mutate({ restaurantId, userId: s.userId, hireDate: editingHireDate!.value || null })}
+                            className="p-1 rounded hover:bg-accent text-green-600"
+                          ><Check className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => setEditingHireDate(null)} className="p-1 rounded hover:bg-accent text-muted-foreground">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-foreground">{s.hireDate || "(미설정)"}</span>
+                          <button
+                            onClick={() => setEditingHireDate({ userId: s.userId, value: s.hireDate || "" })}
                             className="p-1 rounded hover:bg-accent text-muted-foreground"
                           ><Edit3 className="w-3 h-3" /></button>
                         </div>

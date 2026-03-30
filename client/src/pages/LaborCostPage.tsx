@@ -250,6 +250,8 @@ export default function LaborCostPage() {
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">휴무</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">신청휴무</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">시간</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">대체</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">연차</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">인건비</th>
                         </tr>
                       </thead>
@@ -260,6 +262,9 @@ export default function LaborCostPage() {
                               <div className="font-medium text-foreground">{emp.name}</div>
                               {emp.position && (
                                 <div className="text-[10px] text-muted-foreground">{emp.position}</div>
+                              )}
+                              {emp.hireDate && (
+                                <div className="text-[10px] text-muted-foreground">입사 {emp.hireDate}</div>
                               )}
                             </td>
                             <td className="px-4 py-2">
@@ -275,6 +280,20 @@ export default function LaborCostPage() {
                             <td className="px-4 py-2 text-right text-muted-foreground">{emp.daysOff ?? 0}일</td>
                             <td className="px-4 py-2 text-right text-muted-foreground">{emp.approvedLeaves ?? 0}{typeof emp.approvedLeaves === 'number' && emp.approvedLeaves % 1 !== 0 ? '' : '일'}</td>
                             <td className="px-4 py-2 text-right text-muted-foreground">{emp.totalHours.toFixed(1)}h</td>
+                            <td className="px-4 py-2 text-right text-muted-foreground">
+                              {emp.substituteLeave ? (
+                                <span title={`발생 ${emp.substituteLeave.earned} / 사용 ${emp.substituteLeave.used}`}>
+                                  {emp.substituteLeave.remaining}일
+                                </span>
+                              ) : <span className="text-muted-foreground/50">-</span>}
+                            </td>
+                            <td className="px-4 py-2 text-right text-muted-foreground">
+                              {emp.annualLeave ? (
+                                <span title={`발생 ${emp.annualLeave.earned} / 사용 ${emp.annualLeave.used}`}>
+                                  {emp.annualLeave.remaining}일
+                                </span>
+                              ) : <span className="text-muted-foreground/50">-</span>}
+                            </td>
                             <td className="px-4 py-2 text-right font-medium text-foreground">₩{fmtWon(emp.totalWage)}</td>
                           </tr>
                         ))}

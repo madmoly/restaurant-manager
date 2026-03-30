@@ -81,6 +81,7 @@ app.use(express.json());
 
     // restaurant_users 소속회사
     await addColumnIfNotExists("restaurant_users", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");
+    await addColumnIfNotExists("restaurant_users", "hireDate", "DATE DEFAULT NULL");
 
     // employment_electronic_contracts 소속회사
     await addColumnIfNotExists("employment_electronic_contracts", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");
@@ -488,10 +489,10 @@ app.use(express.json());
       WHERE u.username = 'tutorial_admin' AND bg.name != 'Tutorial'
     `).catch(() => {});
 
-    // 5-a) schedules 테이블에 breakMinutes 컬럼 추가
+    // 5-a) schedules 테이블에 breakMinutes 컬럼 추가 (MySQL 8: IF NOT EXISTS 미지원)
     await conn.query(`
-      ALTER TABLE schedules ADD COLUMN IF NOT EXISTS breakMinutes INT DEFAULT 0
-    `).catch(() => {});
+      ALTER TABLE schedules ADD COLUMN breakMinutes INT DEFAULT 0
+    `).catch(() => {}); // 이미 존재하면 Duplicate column → 무시
 
     // 5) 기본 체크리스트 시드 — 매장별로 체크리스트가 없으면 기본 항목 등록
     try {
