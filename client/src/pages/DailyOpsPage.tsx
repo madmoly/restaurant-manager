@@ -2709,21 +2709,29 @@ export default function DailyOpsPage() {
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border p-4">
-          <h1 className="text-2xl font-bold text-foreground mb-3">
-            {selectedRestaurant.name}
-          </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between mb-1">
+            <h1 className="text-lg font-bold text-foreground">
+              {selectedRestaurant.name}
+            </h1>
             <Input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="text-sm h-9"
+              className="text-xs h-7 w-[130px] text-muted-foreground"
             />
           </div>
+          {(() => {
+            const info = formatDateWithHoliday(date);
+            return (
+              <p className="text-xl font-bold text-foreground">
+                {info.display}
+              </p>
+            );
+          })()}
         </div>
 
         {/* Tab Navigation */}
-        <div className="sticky top-[88px] z-10 bg-background/95 backdrop-blur border-b border-border">
+        <div className="sticky top-[85px] z-10 bg-background/95 backdrop-blur border-b border-border">
           <div className="max-w-2xl mx-auto px-4">
             <div className="flex gap-1 overflow-x-auto">
               {tabs.map((tab) => (
