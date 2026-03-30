@@ -501,6 +501,20 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
                   // 평일/주말 시간이 동일한지 체크
                   const sameTime = wd && we && wd.startTime === we.startTime && wd.endTime === we.endTime && wd.breakMinutes === we.breakMinutes;
 
+                  // 총 근무시간 계산 (시작~종료 - 휴게)
+                  const calcHours = (start?: string, end?: string, breakMin?: number) => {
+                    if (!start || !end) return null;
+                    const [sh, sm] = start.split(":").map(Number);
+                    const [eh, em] = end.split(":").map(Number);
+                    let totalMin = (eh * 60 + em) - (sh * 60 + sm);
+                    if (totalMin <= 0) totalMin += 24 * 60; // 야간 근무
+                    totalMin -= (breakMin || 0);
+                    return totalMin > 0 ? totalMin / 60 : 0;
+                  };
+                  const wdHours = wd ? calcHours(wd.startTime, wd.endTime, wd.breakMinutes) : null;
+                  const weHours = we ? calcHours(we.startTime, we.endTime, we.breakMinutes) : null;
+                  const fmtHours = (h: number | null) => h !== null ? (Number.isInteger(h) ? `${h}h` : `${h.toFixed(1)}h`) : null;
+
                   return (
                     <div
                       key={pt.value}
@@ -525,12 +539,15 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
                             <span>
                               {sameTime ? "" : "평 "}{wd.startTime}~{wd.endTime}
                               {wd.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">(휴{wd.breakMinutes})</span>}
+                              {sameTime && wdHours !== null && <span className="text-primary font-medium ml-1">{fmtHours(wdHours)}</span>}
+                              {!sameTime && wdHours !== null && <span className="text-primary/70 ml-0.5">{fmtHours(wdHours)}</span>}
                             </span>
                           )}
                           {we && !sameTime && (
                             <span className="ml-1">
                               주 {we.startTime}~{we.endTime}
                               {we.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">(휴{we.breakMinutes})</span>}
+                              {weHours !== null && <span className="text-primary/70 ml-0.5">{fmtHours(weHours)}</span>}
                             </span>
                           )}
                           {!wd && !we && <span className="italic text-muted-foreground/60">미설정</span>}
@@ -574,6 +591,10 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
                             onEndChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekdayEnd: v } }))}
                             onBreakChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekdayBreak: v } }))}
                           />
+                          {editForms[pt.value].weekdayStart && editForms[pt.value].weekdayEnd && (() => {
+                            const h = calcHours(editForms[pt.value].weekdayStart, editForms[pt.value].weekdayEnd, editForms[pt.value].weekdayBreak);
+                            return h !== null ? <p className="text-[10px] text-primary font-medium pl-9">실근무 {fmtHours(h)}</p> : null;
+                          })()}
 
                           {/* 주말 시간 */}
                           <div>
@@ -586,6 +607,10 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
                               onEndChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekendEnd: v } }))}
                               onBreakChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekendBreak: v } }))}
                             />
+                            {editForms[pt.value].weekendStart && editForms[pt.value].weekendEnd && (() => {
+                              const h = calcHours(editForms[pt.value].weekendStart, editForms[pt.value].weekendEnd, editForms[pt.value].weekendBreak);
+                              return h !== null ? <p className="text-[10px] text-primary font-medium pl-9">실근무 {fmtHours(h)}</p> : null;
+                            })()}
                           </div>
 
                           {/* 저장/삭제 버튼 */}
