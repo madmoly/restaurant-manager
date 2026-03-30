@@ -530,9 +530,9 @@ app.use(express.json());
       for (const store of restaurants) {
         let added = 0;
         for (const t of defaultTemplates) {
-          // 탭+항목명 기준 중복 체크 — 없는 항목만 추가
+          // 탭+항목명 기준 중복 체크 — isActive 무관, 존재하면 재생성 안 함
           const [dup] = await conn.query(
-            `SELECT COUNT(*) as cnt FROM store_checklist_templates WHERE restaurantId = ? AND targetTab = ? AND itemText = ? AND isActive = 1`,
+            `SELECT COUNT(*) as cnt FROM store_checklist_templates WHERE restaurantId = ? AND targetTab = ? AND itemText = ?`,
             [store.id, t.targetTab, t.itemText]
           ) as any[];
           if (dup[0].cnt > 0) continue;
