@@ -792,6 +792,7 @@ function PurchaseTab({
   const [ocrOriginalItems, setOcrOriginalItems] = useState<any[] | null>(null); // AI 원본 (수정 비교용)
   const [ocrRotation, setOcrRotation] = useState(0); // 사용자 수동 회전 (0/90/180/270)
   const [ocrStep, setOcrStep] = useState<'idle' | 'uploaded' | 'analyzed'>('idle'); // 업로드→확인→분석 단계
+  const [ocrDateSuggestion, setOcrDateSuggestion] = useState<string | null>(null); // OCR 감지 날짜 (인라인 알림용)
   const [viewerImage, setViewerImage] = useState<string | null>(null); // 이미지 확대보기
 
   const utils = trpc.useUtils();
@@ -872,6 +873,7 @@ function PurchaseTab({
     setOcrError(null);
     setOcrRotation(0);
     setOcrStep('idle');
+    setOcrDateSuggestion(null);
     setReceivingOrderId(null);
   };
 
@@ -979,15 +981,16 @@ function PurchaseTab({
         }),
       });
 
-      // OCR 완료 후 프리뷰 갱신 (서버에서 회전 적용됨)
-      setOcrPreviewUrl(attachmentUrl + `?t=${Date.now()}`);
-
       if (!ocrRes.ok) {
         const errData = await ocrRes.json().catch(() => ({}));
         throw new Error(errData.error || 'OCR 처리 실패');
       }
 
       const ocrData = await ocrRes.json();
+
+      // 서버에서 실제 파일 회전 완료 → CSS 회전 리셋 + 프리뷰 갱신
+      setOcrRotation(0);
+      setOcrPreviewUrl(attachmentUrl + `?t=${Date.now()}`);
       setOcrStep('analyzed');
 
       // OCR 원본 저장
@@ -1003,20 +1006,11 @@ function PurchaseTab({
         if (matched) setCounterpartyId(matched.id);
       }
 
-      // 날짜 확인
+      // 날짜 확인 → 인라인 알림 (toast 대신 — 모바일에서 버튼 가림 방지)
       if (ocrData.transactionDate && onDateChange) {
         const ocrDate = ocrData.transactionDate;
         if (ocrDate !== date) {
-          toast(`명세서 날짜가 ${ocrDate}입니다. 입고일을 변경할까요?`, {
-            duration: 15000,
-            action: {
-              label: '변경',
-              onClick: () => {
-                onDateChange(ocrDate);
-                toast.success(`입고일이 ${ocrDate}로 변경되었습니다.`);
-              },
-            },
-          });
+          setOcrDateSuggestion(ocrDate);
         }
       }
 
@@ -1448,6 +1442,35 @@ function PurchaseTab({
                   전표 분석 시작
                 </button>
               )}
+            </div>
+          )}
+
+          {/* OCR 날짜 불일치 인라인 알림 */}
+          {ocrDateSuggestion && (
+            <div className="flex items-center justify-between bg-amber-500/10 border border-amber-300 dark:border-amber-700 rounded-lg px-3 py-2">
+              <span className="text-xs text-amber-700 dark:text-amber-300">
+                명세서 날짜: <strong>{ocrDateSuggestion}</strong> (현재: {date})
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    if (onDateChange) {
+                      onDateChange(ocrDateSuggestion);
+                      toast.success(`입고일이 ${ocrDateSuggestion}로 변경됨`);
+                    }
+                    setOcrDateSuggestion(null);
+                  }}
+                  className="text-[11px] font-medium bg-amber-600 text-white px-2.5 py-1 rounded hover:bg-amber-700"
+                >
+                  변경
+                </button>
+                <button
+                  onClick={() => setOcrDateSuggestion(null)}
+                  className="text-[11px] text-amber-600 dark:text-amber-400 px-1.5 py-1 hover:bg-amber-500/10 rounded"
+                >
+                  유지
+                </button>
+              </div>
             </div>
           )}
 
