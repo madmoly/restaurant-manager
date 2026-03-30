@@ -62,10 +62,8 @@ function loadImageBase64Raw(filePath: string): { base64: string; mediaType: stri
 }
 
 // ─── Tesseract 4방향 OCR 비교 기반 방향 감지 ─────────────────────────────────
-// 4방향 Tesseract TSV 출력 → 단어별 confidence 합산 → 최고 점수 방향 선택
-// 한글 문자 수만 세면 90°/270°에서 오탐 발생 → confidence 가중치가 핵심
-async function detectAndFixOrientation(filePath: string, _anthropic: Anthropic): Promise<void> {
-  // 1. EXIF 자동 회전
+// EXIF 방향 보정만 수행 (자동 회전 감지는 폐기 — 사용자 수동 회전으로 대체)
+async function fixExifOrientation(filePath: string): Promise<void> {
   try {
     const meta = await sharp(filePath).metadata();
     if (meta.orientation && meta.orientation > 1) {
@@ -75,103 +73,6 @@ async function detectAndFixOrientation(filePath: string, _anthropic: Anthropic):
     }
   } catch (exifErr: any) {
     console.warn(`[OCR] EXIF 회전 실패 (무시): ${path.basename(filePath)} — ${exifErr.message}`);
-  }
-
-  // 2. 4방향 Tesseract OCR 비교: confidence 가중 한글+숫자 점수 최대 = 정방향
-  try {
-    const angles = [0, 90, 180, 270];
-    const results: { angle: number; score: number; korCount: number; confAvg: number; sample: string }[] = [];
-
-    for (const angle of angles) {
-      const tmpPng = filePath + `.rot${angle}.png`;
-      try {
-        await sharp(filePath)
-          .rotate(angle)
-          .resize(1000, 1000, { fit: "inside" })
-          .grayscale()
-          .sharpen()
-          .png()
-          .toFile(tmpPng);
-
-        // TSV 출력으로 단어별 confidence 획득
-        let tsvOutput = "";
-        try {
-          tsvOutput = execSync(
-            `tesseract "${tmpPng}" stdout --psm 3 -l kor+eng tsv 2>/dev/null`,
-            { encoding: "utf-8", timeout: 10000 }
-          ).trim();
-        } catch {
-          try {
-            tsvOutput = execSync(
-              `tesseract "${tmpPng}" stdout --psm 3 tsv 2>/dev/null`,
-              { encoding: "utf-8", timeout: 10000 }
-            ).trim();
-          } catch {}
-        }
-
-        // TSV 파싱: 각 단어의 text와 confidence 추출
-        const lines = tsvOutput.split("\n").slice(1); // 헤더 제거
-        let totalScore = 0;
-        let korCount = 0;
-        let confSum = 0;
-        let wordCount = 0;
-        let sampleWords: string[] = [];
-
-        for (const line of lines) {
-          const cols = line.split("\t");
-          if (cols.length < 12) continue;
-          const conf = parseInt(cols[10], 10); // confidence (0-100)
-          const text = (cols[11] || "").trim();
-          if (!text || conf < 0) continue;
-
-          wordCount++;
-          confSum += conf;
-
-          // 한글 포함 단어: confidence 가중 점수
-          const korChars = (text.match(/[\uAC00-\uD7AF]/g) || []).length;
-          if (korChars > 0) {
-            korCount += korChars;
-            totalScore += korChars * (conf / 100); // confidence 가중
-          }
-
-          // 숫자 포함 단어 (영수증 특성): confidence 가중
-          const digitChars = (text.match(/\d/g) || []).length;
-          if (digitChars > 0) {
-            totalScore += digitChars * (conf / 100) * 0.3; // 숫자는 한글 대비 30% 가중
-          }
-
-          if (sampleWords.length < 5 && korChars > 0) sampleWords.push(text);
-        }
-
-        const confAvg = wordCount > 0 ? confSum / wordCount : 0;
-        results.push({
-          angle,
-          score: Math.round(totalScore * 100) / 100,
-          korCount,
-          confAvg: Math.round(confAvg * 10) / 10,
-          sample: sampleWords.join(" ") || "(no Korean)",
-        });
-      } finally {
-        try { fs.unlinkSync(tmpPng); } catch {}
-      }
-    }
-
-    // confidence 가중 점수가 가장 높은 방향 선택
-    const best = results.reduce((a, b) => b.score > a.score ? b : a, results[0]);
-
-    const summary = results.map(r => `${r.angle}°:score=${r.score}/kor=${r.korCount}/conf=${r.confAvg}`).join(", ");
-    console.log(`[OCR] 4방향 Tesseract: ${path.basename(filePath)} → best=${best.angle}° (${summary})`);
-    console.log(`[OCR] best sample(${best.angle}°): "${best.sample}"`);
-
-    if (best.angle > 0 && best.score > 0) {
-      const rotated = await sharp(filePath).rotate(best.angle).toBuffer();
-      fs.writeFileSync(filePath, rotated);
-      console.log(`[OCR] Tesseract 기반 ${best.angle}° 회전 완료: ${path.basename(filePath)} (${(rotated.length / 1024).toFixed(0)}KB)`);
-    } else if (best.angle === 0) {
-      console.log(`[OCR] 원본이 정방향: ${path.basename(filePath)}`);
-    }
-  } catch (tessErr: any) {
-    console.warn(`[OCR] Tesseract 방향감지 실패 (OCR 계속 진행): ${path.basename(filePath)} — ${tessErr.message}`);
   }
 }
 
@@ -564,7 +465,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       return;
     }
 
-    const { imageUrl, restaurantId, counterpartyId: clientCpId } = req.body;
+    const { imageUrl, restaurantId, counterpartyId: clientCpId, rotation } = req.body;
     if (!imageUrl || typeof imageUrl !== "string") {
       res.status(400).json({ error: "imageUrl이 필요합니다" });
       return;
@@ -577,8 +478,16 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       return;
     }
 
-    // ── Tesseract OSD 기반 방향 감지 + EXIF 회전 + 자동 보정 ──
-    await detectAndFixOrientation(filePath, anthropic);
+    // ── EXIF 방향 보정 ──
+    await fixExifOrientation(filePath);
+
+    // ── 사용자 수동 회전 적용 (0/90/180/270) ──
+    const rotationDeg = typeof rotation === "number" && [90, 180, 270].includes(rotation) ? rotation : 0;
+    if (rotationDeg > 0) {
+      console.log(`[OCR] 사용자 회전 적용: ${rotationDeg}°`);
+      const rotatedBuf = await sharp(filePath).rotate(rotationDeg).toBuffer();
+      fs.writeFileSync(filePath, rotatedBuf);
+    }
 
     // ── 거래처 프로파일 조회 (동적 프롬프트 힌트용) ──────────────────────
     const ocrProfile = await getOcrProfile(clientCpId ? Number(clientCpId) : null);

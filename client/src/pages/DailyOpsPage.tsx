@@ -23,6 +23,9 @@ import {
   ZoomIn,
   Pencil,
   Minus,
+  RotateCw,
+  RotateCcw,
+  Search,
 } from 'lucide-react';
 
 // ============================================================================
@@ -787,6 +790,8 @@ function PurchaseTab({
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [ocrOriginalItems, setOcrOriginalItems] = useState<any[] | null>(null); // AI 원본 (수정 비교용)
+  const [ocrRotation, setOcrRotation] = useState(0); // 사용자 수동 회전 (0/90/180/270)
+  const [ocrStep, setOcrStep] = useState<'idle' | 'uploaded' | 'analyzed'>('idle'); // 업로드→확인→분석 단계
   const [viewerImage, setViewerImage] = useState<string | null>(null); // 이미지 확대보기
 
   const utils = trpc.useUtils();
@@ -865,6 +870,8 @@ function PurchaseTab({
     setAttachmentUrl(undefined);
     setOcrPreviewUrl(null);
     setOcrError(null);
+    setOcrRotation(0);
+    setOcrStep('idle');
     setReceivingOrderId(null);
   };
 
@@ -924,13 +931,13 @@ function PurchaseTab({
     }
   };
 
-  // ── 사진 업로드 → AI 방향 자동 감지/회전 → OCR 분석 (원스텝) ───────────────
+  // ── STEP 1: 사진 업로드만 (회전/OCR 없이 프리뷰 표시) ───────────────
   const handleOcrUpload = async (file: File) => {
     try {
       setOcrProcessing(true);
       setOcrError(null);
+      setOcrRotation(0);
 
-      // 1. 원본 파일 업로드 (서버에서 EXIF 회전 + 리사이즈)
       const formData = new FormData();
       formData.append('photo', file);
 
@@ -941,18 +948,39 @@ function PurchaseTab({
       if (!uploadRes.ok) throw new Error('이미지 업로드 실패');
       const { url } = await uploadRes.json();
       setAttachmentUrl(url);
+      setOcrPreviewUrl(url + `?t=${Date.now()}`);
+      setOcrStep('uploaded');
+      toast.info('이미지 방향을 확인하세요. 필요시 회전 후 분석을 눌러주세요.');
+    } catch (error: any) {
+      setOcrError(error.message || '업로드 실패');
+      toast.error(error.message || '업로드 실패');
+    } finally {
+      setOcrProcessing(false);
+    }
+  };
 
-      // 2. OCR 분석 요청 (서버에서 AI 방향 감지 → 자동 회전 → OCR 순서로 처리)
-      toast.info('AI가 이미지 방향을 감지하고 분석 중입니다...');
+  // ── STEP 2: 회전 적용 + OCR 분석 실행 ───────────────
+  const handleOcrAnalyze = async () => {
+    if (!attachmentUrl) return;
+    try {
+      setOcrProcessing(true);
+      setOcrError(null);
+
+      toast.info('AI가 전표를 분석 중입니다...');
 
       const ocrRes = await fetch('/api/ocr/extract-purchase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: url, restaurantId }),
+        body: JSON.stringify({
+          imageUrl: attachmentUrl,
+          restaurantId,
+          rotation: ocrRotation, // 사용자가 선택한 회전 각도
+          counterpartyId: counterpartyId || undefined,
+        }),
       });
 
-      // OCR 완료 후 회전된 이미지로 프리뷰 갱신
-      setOcrPreviewUrl(url + `?t=${Date.now()}`);
+      // OCR 완료 후 프리뷰 갱신 (서버에서 회전 적용됨)
+      setOcrPreviewUrl(attachmentUrl + `?t=${Date.now()}`);
 
       if (!ocrRes.ok) {
         const errData = await ocrRes.json().catch(() => ({}));
@@ -960,23 +988,24 @@ function PurchaseTab({
       }
 
       const ocrData = await ocrRes.json();
+      setOcrStep('analyzed');
 
-      // OCR 원본 저장 (나중에 사용자 수정 비교용)
+      // OCR 원본 저장
       if (ocrData.items && ocrData.items.length > 0) {
         setOcrOriginalItems(ocrData.items);
       }
 
-      // 추출 결과로 폼 프리필
-      if (ocrData.counterpartyName) {
+      // 거래처 매칭 (사용자가 아직 선택 안 한 경우만)
+      if (!counterpartyId && ocrData.counterpartyName) {
         const matched = counterpartiesQuery.data?.find(
           (cp: any) => cp.name.includes(ocrData.counterpartyName) || ocrData.counterpartyName.includes(cp.name)
         );
         if (matched) setCounterpartyId(matched.id);
       }
 
-      // 명세서 날짜가 현재와 다르면 확인 후 적용
+      // 날짜 확인
       if (ocrData.transactionDate && onDateChange) {
-        const ocrDate = ocrData.transactionDate; // "YYYY-MM-DD"
+        const ocrDate = ocrData.transactionDate;
         if (ocrDate !== date) {
           toast(`명세서 날짜가 ${ocrDate}입니다. 입고일을 변경할까요?`, {
             duration: 15000,
@@ -991,7 +1020,7 @@ function PurchaseTab({
         }
       }
 
-      // 거래처 정보 변경 감지 → 확인 후 반영
+      // 거래처 정보 업데이트
       if (ocrData.counterpartyInfo && ocrData.counterpartyId) {
         const ci = ocrData.counterpartyInfo;
         const changes: string[] = [];
@@ -1023,6 +1052,7 @@ function PurchaseTab({
         }
       }
 
+      // 품목 프리필
       if (ocrData.items && ocrData.items.length > 0) {
         setPurchaseItems(
           ocrData.items.map((item: any) => ({
@@ -1347,30 +1377,77 @@ function PurchaseTab({
             </div>
           )}
 
-          {/* OCR 결과 프리뷰 이미지 (AI가 자동 회전 처리 완료) */}
+          {/* OCR 프리뷰 이미지 + 회전/분석 컨트롤 */}
           {ocrPreviewUrl && !ocrProcessing && (
             <div className="space-y-2">
-              <div className="relative">
+              {/* 이미지 프리뷰 */}
+              <div className="relative overflow-hidden rounded-lg border border-border bg-muted/20">
                 <img
                   src={ocrPreviewUrl}
                   alt="전표 이미지"
-                  className="w-full rounded-lg border border-border max-h-48 object-contain bg-muted/20 cursor-pointer"
+                  className="w-full max-h-48 object-contain cursor-pointer transition-transform"
+                  style={{ transform: `rotate(${ocrRotation}deg)` }}
                   onClick={() => setViewerImage(ocrPreviewUrl)}
                 />
+              </div>
+
+              {/* 컨트롤 바: 확대 / 회전 / 닫기 */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setViewerImage(ocrPreviewUrl)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/50"
+                    title="확대 보기"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  {ocrStep === 'uploaded' && (
+                    <>
+                      <button
+                        onClick={() => setOcrRotation((prev) => (prev - 90 + 360) % 360)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/50"
+                        title="왼쪽 회전"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setOcrRotation((prev) => (prev + 90) % 360)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/50"
+                        title="오른쪽 회전"
+                      >
+                        <RotateCw className="w-3.5 h-3.5" />
+                      </button>
+                      {ocrRotation !== 0 && (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 ml-1">{ocrRotation}° 회전</span>
+                      )}
+                    </>
+                  )}
+                </div>
                 <button
-                  onClick={() => setViewerImage(ocrPreviewUrl)}
-                  className="absolute top-2 left-2 bg-black/50 text-white rounded-full p-1.5"
-                  title="확대 보기"
+                  onClick={() => {
+                    setOcrPreviewUrl(null);
+                    setAttachmentUrl(undefined);
+                    setOcrStep('idle');
+                    setOcrRotation(0);
+                    setPurchaseItems([emptyPurchaseItem()]);
+                  }}
+                  className="flex items-center gap-1 text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded hover:bg-red-500/10"
                 >
-                  <ZoomIn className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => { setOcrPreviewUrl(null); setAttachmentUrl(undefined); setPurchaseItems([emptyPurchaseItem()]); }}
-                  className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
-                >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
+                  <span>삭제</span>
                 </button>
               </div>
+
+              {/* 분석 시작 버튼 (uploaded 단계에서만) */}
+              {ocrStep === 'uploaded' && (
+                <button
+                  onClick={handleOcrAnalyze}
+                  className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
+                >
+                  <Search className="w-4 h-4" />
+                  전표 분석 시작
+                </button>
+              )}
             </div>
           )}
 

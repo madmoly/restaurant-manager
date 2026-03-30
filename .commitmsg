@@ -1,10 +1,6 @@
-feat: 사업그룹별 데이터 분리 + Tutorial 매장 종속 + 그룹관리 라우팅
+OCR 수동 회전 UI + 닫기 버튼 위치 개선
 
-- AdminDashboard: master 역할 시 사업그룹 필터(전체/331컴퍼니/Tutorial) 추가
-- 금일현황/매장목록/손익테이블 모두 그룹별 필터링 + 그룹명 표시
-- KPI/차트도 선택된 그룹 기준 집계로 전환
-- Tutorial 사용자(owner1,supervisor1,staff1,staff2) → Tutorial 매장 restaurant_users 자동 배정 마이그레이션
-- /groups 라우트 추가 → MasterDashboard (사업그룹 생성/배정/관리 UI)
-- AppLayout 사이드바에 '사업그룹' 메뉴 추가 (master 전용)
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+- 자동 회전 감지(Tesseract 4방향) 폐기 → 사용자 수동 회전으로 전환
+- 업로드 후 회전 버튼(90° 좌/우) + 분석 시작 버튼 UI 추가
+- OCR 프리뷰 닫기/확대 버튼을 이미지 아래 컨트롤바로 이동 (toast 겹침 해소)
+- server: rotation 파라미터 수용, EXIF 보정만 유지
