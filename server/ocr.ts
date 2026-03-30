@@ -68,25 +68,51 @@ async function detectAndFixOrientation(filePath: string, anthropic: Anthropic): 
   }
 
   // 2. AI 방향 감지: EXIF 없거나 이미 스트립된 경우 AI로 판별
+  //    180° 오판 방지: 원본(0°)과 180° 회전본을 동시에 보여주고 비교 판별
   try {
     const { base64, mediaType } = loadImageBase64Raw(filePath);
 
+    // 180° 회전 버전 생성
+    const rotated180Buf = await sharp(filePath).rotate(180).toBuffer();
+    const base64_180 = rotated180Buf.toString("base64");
+
     const orientationRes = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 64,
+      max_tokens: 128,
       messages: [{
         role: "user",
         content: [
+          {
+            type: "text",
+            text: `한국 식당 매입 전표(거래명세서/영수증) 이미지의 방향을 판별합니다.
+아래 두 이미지를 비교하세요:
+- 이미지A: 원본
+- 이미지B: 원본을 180° 회전한 것
+
+어느 이미지에서 텍스트가 정상적으로 읽히는지 판단 기준:
+1. 한글/숫자가 위→아래, 왼→오른쪽으로 읽히는가
+2. 상단에 거래처명/날짜, 하단에 합계가 있는가
+3. 숫자 6과 9, 글자 ㄱ과 ㄴ 등이 올바른 방향인가
+
+먼저 이미지A를 봅니다:`,
+          },
           {
             type: "image",
             source: { type: "base64", media_type: mediaType as any, data: base64 },
           },
           {
             type: "text",
-            text: `이 이미지는 한국 식당 매입 전표(거래명세서/영수증)입니다.
-문서의 텍스트가 정방향(위→아래로 읽을 수 있는 상태)인지 확인하세요.
-정방향으로 읽으려면 시계방향으로 몇 도 회전해야 하나요?
-반드시 숫자 하나만 답하세요: 0, 90, 180, 270`,
+            text: `다음은 이미지B (180° 회전본)입니다:`,
+          },
+          {
+            type: "image",
+            source: { type: "base64", media_type: mediaType as any, data: base64_180 },
+          },
+          {
+            type: "text",
+            text: `두 이미지를 비교한 후, 원본 이미지를 정방향으로 만들려면 시계방향으로 몇 도 회전해야 하나요?
+반드시 아래 형식으로만 답하세요:
+ANGLE: (0 또는 90 또는 180 또는 270)`,
           },
         ],
       }],
@@ -96,7 +122,7 @@ async function detectAndFixOrientation(filePath: string, anthropic: Anthropic): 
     const angleMatch = orientText.match(/\b(0|90|180|270)\b/);
     const angle = angleMatch ? parseInt(angleMatch[1], 10) : 0;
 
-    console.log(`[OCR] AI 방향 감지: ${path.basename(filePath)} → ${angle}° (원문: "${orientText}")`);
+    console.log(`[OCR] AI 방향 감지 (2이미지 비교): ${path.basename(filePath)} → ${angle}° (원문: "${orientText}")`);
 
     if (angle > 0) {
       const rotated = await sharp(filePath).rotate(angle).toBuffer();
