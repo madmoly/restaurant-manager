@@ -1,9 +1,5 @@
-업로드 시 Tesseract OSD 1회 방향감지 → 미리보기 자동회전
+매입 입력 삭제 버튼 실수 방지
 
-- 서버: POST /api/ocr/detect-orientation 엔드포인트 추가
-  - EXIF 보정 후 Tesseract --psm 0으로 방향 감지
-  - suggestedRotation (0/90/180/270) 반환
-- 클라이언트: 업로드 직후 방향감지 API 호출
-  - 감지된 각도를 ocrRotation에 자동 반영 (CSS 미리보기)
-  - 사용자가 확인 후 회전 버튼으로 수정 가능
-  - 감지 실패 시 무시 (수동 회전으로 폴백)
+- 기존 매입 기록 삭제: confirm 필수
+- 품목 행 삭제: 1개 남으면 숨김, 내용 있으면 confirm
+- OCR 이미지 삭제: 분석 완료 후 품목 있으면 confirm

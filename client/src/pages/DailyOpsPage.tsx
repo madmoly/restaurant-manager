@@ -1301,7 +1301,7 @@ function PurchaseTab({
                     ))}
                     {order.note && <p className="text-xs text-muted-foreground mt-1">메모: {order.note}</p>}
                     <div className="flex justify-end pt-1">
-                      <Button variant="ghost" size="sm" onClick={() => deleteOrder.mutate({ id: order.id })} disabled={deleteOrder.isPending}>
+                      <Button variant="ghost" size="sm" onClick={() => { if (confirm('이 매입 기록을 삭제할까요?')) deleteOrder.mutate({ id: order.id }); }} disabled={deleteOrder.isPending}>
                         <Trash2 className="w-3.5 h-3.5 text-red-500" />
                       </Button>
                     </div>
@@ -1469,6 +1469,8 @@ function PurchaseTab({
                 </div>
                 <button
                   onClick={() => {
+                    const hasItems = purchaseItems.some(i => i.rawItemName.trim() || i.lineTotal);
+                    if (hasItems && ocrStep === 'analyzed' && !confirm('분석된 품목이 초기화됩니다. 이미지를 삭제할까요?')) return;
                     setOcrPreviewUrl(null);
                     setAttachmentUrl(undefined);
                     setOcrStep('idle');
@@ -1728,13 +1730,19 @@ function PurchaseTab({
                         <Input placeholder="0" type="number" value={item.lineTotal} onChange={(e) => updateItem(idx, 'lineTotal', e.target.value)} className="text-sm h-9 font-semibold" />
                       </div>
                     </div>
-                    {/* 삭제 */}
-                    <button
-                      onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))}
-                      className="w-full flex items-center justify-center gap-1 text-xs text-red-400 hover:text-red-500 py-1 border border-dashed border-red-200 dark:border-red-800 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                    >
-                      <Trash2 className="w-3 h-3" /> 이 항목 삭제
-                    </button>
+                    {/* 삭제 (1개 남으면 숨김, 내용 있으면 확인) */}
+                    {purchaseItems.length > 1 && (
+                      <button
+                        onClick={() => {
+                          const hasContent = item.rawItemName.trim() || item.quantity || item.unitPrice || item.lineTotal;
+                          if (hasContent && !confirm(`"${item.rawItemName || '이 항목'}" 을(를) 삭제할까요?`)) return;
+                          setPurchaseItems(purchaseItems.filter((_, i) => i !== idx));
+                        }}
+                        className="w-full flex items-center justify-center gap-1 text-xs text-red-400 hover:text-red-500 py-1 border border-dashed border-red-200 dark:border-red-800 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        <Trash2 className="w-3 h-3" /> 이 항목 삭제
+                      </button>
+                    )}
                   </div>
                   );
                 })}
