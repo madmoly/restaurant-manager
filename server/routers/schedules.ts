@@ -654,8 +654,10 @@ export const schedulesRouter = router({
     .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
     .query(async ({ input }) => {
       const monthStr = String(input.month).padStart(2, "0");
-      const from = new Date(`${input.year}-${monthStr}-01T00:00:00`);
-      const toDate = new Date(input.year, input.month, 1);
+      const from = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
+      const nm = input.month === 12 ? 1 : input.month + 1;
+      const ny = input.month === 12 ? input.year + 1 : input.year;
+      const toDate = new Date(`${ny}-${String(nm).padStart(2, "0")}-01T00:00:00+09:00`);
       const rows = await db
         .select({
           id: schedules.id,
@@ -680,7 +682,7 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             gte(schedules.startTime, from),
             sql`${schedules.startTime} < ${toDate}`,
-            sql`${schedules.status} IN ('completed','confirmed')`
+            sql`${schedules.status} IN ('draft','confirmed','completed')`
           )
         )
         .orderBy(schedules.startTime);
@@ -695,10 +697,13 @@ export const schedulesRouter = router({
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
 
       const monthStr = String(input.month).padStart(2, "0");
-      const from = new Date(`${input.year}-${monthStr}-01T00:00:00`);
-      const toDate = new Date(input.year, input.month, 1);
+      // KST 기준 월 범위
+      const from = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
+      const nm = input.month === 12 ? 1 : input.month + 1;
+      const ny = input.month === 12 ? input.year + 1 : input.year;
+      const toDate = new Date(`${ny}-${String(nm).padStart(2, "0")}-01T00:00:00+09:00`);
 
-      // 완료/확정 스케줄 + 직원 정보 + 소속회사 + 시급 조인
+      // 전체 스케줄 (draft 포함) + 직원 정보 + 소속회사 + 시급 조인
       const rows = await db
         .select({
           userId: schedules.userId,
@@ -733,7 +738,7 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             gte(schedules.startTime, from),
             sql`${schedules.startTime} < ${toDate}`,
-            sql`${schedules.status} IN ('completed','confirmed')`
+            sql`${schedules.status} IN ('draft','confirmed','completed')`
           )
         )
         .orderBy(schedules.startTime);
