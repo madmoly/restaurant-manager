@@ -1133,6 +1133,12 @@ function PurchaseTab({
     const isOrderMode = inputMode === 'order';
     const isReceiveFromOrder = inputMode === 'receive' && receivingOrderId;
 
+    // 날짜 불일치 미확인 시 저장 차단
+    if (ocrDateSuggestion) {
+      toast.error('명세서 날짜를 확인해주세요. 변경 또는 유지를 선택하세요.');
+      return;
+    }
+
     // 거래처 필수 (입고전환 제외 — 이미 거래처가 지정된 발주를 전환하는 경우)
     if (!isReceiveFromOrder && !counterpartyId) {
       toast.error('거래처를 선택하세요.');
@@ -1502,33 +1508,53 @@ function PurchaseTab({
             </div>
           )}
 
-          {/* OCR 날짜 불일치 인라인 알림 */}
-          {ocrDateSuggestion && (
-            <div className="flex items-center justify-between bg-amber-500/10 border border-amber-300 dark:border-amber-700 rounded-lg px-3 py-2">
-              <span className="text-xs text-amber-700 dark:text-amber-300">
-                명세서 날짜: <strong>{ocrDateSuggestion}</strong> (현재: {date})
-              </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => {
-                    if (onDateChange) {
-                      onDateChange(ocrDateSuggestion);
-                      toast.success(`입고일이 ${ocrDateSuggestion}로 변경됨`);
-                    }
-                    setOcrDateSuggestion(null);
-                  }}
-                  className="text-[11px] font-medium bg-amber-600 text-white px-2.5 py-1 rounded hover:bg-amber-700"
-                >
-                  변경
-                </button>
-                <button
-                  onClick={() => setOcrDateSuggestion(null)}
-                  className="text-[11px] text-amber-600 dark:text-amber-400 px-1.5 py-1 hover:bg-amber-500/10 rounded"
-                >
-                  유지
-                </button>
+          {/* OCR 날짜 불일치 — 강제 확인 (해결 전 저장 차단) */}
+          {ocrDateSuggestion && (() => {
+            const diff = Math.round((new Date(date).getTime() - new Date(ocrDateSuggestion).getTime()) / 86400000);
+            const absDiff = Math.abs(diff);
+            return (
+              <div className="bg-red-500/10 border-2 border-red-400 dark:border-red-600 rounded-lg p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-600 dark:text-red-400">
+                      날짜 불일치 — 확인 필수
+                    </p>
+                    <p className="text-xs text-red-600/80 dark:text-red-400/80 mt-0.5">
+                      명세서 날짜 <strong className="text-red-700 dark:text-red-300">{ocrDateSuggestion}</strong>
+                      {' '}/ 현재 입고일 <strong>{date}</strong>
+                      {absDiff > 0 && <span className="ml-1">({absDiff}일 차이)</span>}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (onDateChange) {
+                        onDateChange(ocrDateSuggestion);
+                        toast.success(`입고일이 ${ocrDateSuggestion}로 변경됨`);
+                      }
+                      setOcrDateSuggestion(null);
+                    }}
+                    className="flex-1 text-xs font-bold bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition-colors"
+                  >
+                    명세서 날짜({ocrDateSuggestion})로 변경
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (absDiff >= 3) {
+                        if (!confirm(`${absDiff}일 차이가 납니다. 정말 현재 날짜(${date})를 유지할까요?`)) return;
+                      }
+                      setOcrDateSuggestion(null);
+                    }}
+                    className="text-[11px] text-muted-foreground px-3 py-2 border border-border rounded-lg hover:bg-muted/50"
+                  >
+                    유지
+                  </button>
+                </div>
               </div>
-            </div>
+            );
+          })()
           )}
 
           {/* 거래처 선택/입력 (검색 + 신규 생성) */}
