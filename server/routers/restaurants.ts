@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, sql, count } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
-import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets } from "../../drizzle/schema";
+import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets, auditLogs } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { activeRealStoreCondition, getOwnedRestaurants } from "../helpers/restaurantScope";
 import { verifyStoreAccess } from "../middleware/storeAuth";
@@ -222,9 +222,22 @@ export const restaurantsRouter = router({
       role: z.enum(["owner", "supervisor", "staff", "store_manager", "manager", "employee"]).default("staff"),
     }))
     .mutation(async ({ input }) => {
-      await db.insert(restaurantUsers).values(input).onDuplicateKeyUpdate({
-        set: { role: input.role },
-      });
+      // 이미 배정된 사용자인지 확인 — 기존 역할 보호
+      const [existing] = await db
+        .select({ role: restaurantUsers.role })
+        .from(restaurantUsers)
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId)
+        ))
+        .limit(1);
+
+      if (existing) {
+        // 이미 배정됨 → 중복 추가 무시 (기존 역할 유지)
+        return { ok: true, alreadyAssigned: true };
+      }
+
+      await db.insert(restaurantUsers).values(input);
       return { ok: true };
     }),
 
@@ -272,13 +285,41 @@ export const restaurantsRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "점장 권한이 필요합니다" });
         }
       }
+      // 변경 전 역할 조회
+      const [target] = await db
+        .select({ role: restaurantUsers.role })
+        .from(restaurantUsers)
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId)
+        ))
+        .limit(1);
+
+      const prevRole = target?.role || "unknown";
+
       await db
         .update(restaurantUsers)
-        .set({ role: input.role })
+        .set({
+          role: input.role,
+          roleChangedAt: new Date(),
+          roleChangedBy: ctx.user.userId,
+        })
         .where(and(
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, input.userId)
         ));
+
+      // 감사 로그
+      await db.insert(auditLogs).values({
+        userId: ctx.user.userId,
+        userName: ctx.user.name || ctx.user.username,
+        restaurantId: input.restaurantId,
+        action: "update",
+        target: "staff_role",
+        targetId: input.userId,
+        details: { before: { role: prevRole }, after: { role: input.role } },
+      });
+
       return { ok: true };
     }),
 
