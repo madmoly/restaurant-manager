@@ -54,6 +54,60 @@ ocrRouter.get("/debug", async (_req: Request, res: Response) => {
   });
 });
 
+// ─── POST /api/ocr/detect-orientation — Tesseract OSD 1회 방향감지 ──────────
+ocrRouter.post("/detect-orientation", async (req: Request, res: Response) => {
+  try {
+    const { imageUrl } = req.body;
+    if (!imageUrl) { res.json({ suggestedRotation: 0 }); return; }
+
+    const relativePath = imageUrl.replace(/^\/uploads\//, "");
+    const filePath = path.join(UPLOAD_ROOT, relativePath);
+    if (!fs.existsSync(filePath)) { res.json({ suggestedRotation: 0 }); return; }
+
+    // EXIF 보정 먼저
+    await fixExifOrientation(filePath);
+
+    // Tesseract OSD (--psm 0) 1회 시도
+    const tmpPng = filePath + ".osd.png";
+    try {
+      await sharp(filePath)
+        .resize(1200, 1200, { fit: "inside" })
+        .grayscale()
+        .sharpen()
+        .png()
+        .toFile(tmpPng);
+
+      let osdOutput = "";
+      try {
+        osdOutput = execSync(
+          `tesseract "${tmpPng}" stdout --psm 0 -l kor+eng 2>&1`,
+          { encoding: "utf-8", timeout: 8000 }
+        );
+      } catch (e: any) {
+        osdOutput = e.stdout || e.stderr || "";
+      }
+
+      // "Orientation in degrees: 90" 패턴 파싱
+      const degMatch = osdOutput.match(/Orientation in degrees:\s*(\d+)/);
+      const osdDeg = degMatch ? parseInt(degMatch[1], 10) : 0;
+      // OSD confidence
+      const confMatch = osdOutput.match(/Orientation confidence:\s*([\d.]+)/);
+      const osdConf = confMatch ? parseFloat(confMatch[1]) : 0;
+
+      // Tesseract OSD는 "이미지를 이 각도만큼 돌려야 정방향" → 그대로 사용
+      const suggested = [0, 90, 180, 270].includes(osdDeg) ? osdDeg : 0;
+
+      console.log(`[OCR] OSD 방향감지: ${osdDeg}° (conf=${osdConf}) → suggested=${suggested}°`);
+      res.json({ suggestedRotation: suggested, osdConfidence: osdConf });
+    } finally {
+      try { fs.unlinkSync(tmpPng); } catch {}
+    }
+  } catch (err: any) {
+    console.warn("[OCR] detect-orientation error:", err.message);
+    res.json({ suggestedRotation: 0 });
+  }
+});
+
 // ─── 헬퍼: Anthropic 클라이언트 생성 ─────────────────────────────────────────
 function getAnthropicClient(): Anthropic | null {
   const apiKey = process.env.ANTHROPIC_API_KEY;

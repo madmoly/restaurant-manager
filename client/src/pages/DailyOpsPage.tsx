@@ -935,7 +935,7 @@ function PurchaseTab({
     }
   };
 
-  // ── STEP 1: 사진 업로드만 (회전/OCR 없이 프리뷰 표시) ───────────────
+  // ── STEP 1: 사진 업로드 + Tesseract 방향감지 1회 ───────────────
   const handleOcrUpload = async (file: File) => {
     try {
       setOcrProcessing(true);
@@ -954,7 +954,26 @@ function PurchaseTab({
       setAttachmentUrl(url);
       setOcrPreviewUrl(url + `?t=${Date.now()}`);
       setOcrStep('uploaded');
-      toast.info('이미지 방향을 확인하세요. 필요시 회전 후 분석을 눌러주세요.');
+
+      // Tesseract OSD 1회 방향감지 (비동기 — 실패해도 무시)
+      try {
+        const orientRes = await fetch('/api/ocr/detect-orientation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: url }),
+        });
+        if (orientRes.ok) {
+          const { suggestedRotation } = await orientRes.json();
+          if (suggestedRotation && suggestedRotation !== 0) {
+            setOcrRotation(suggestedRotation);
+            toast.info(`방향 자동감지: ${suggestedRotation}° 회전 적용됨. 확인 후 수정 가능합니다.`);
+          } else {
+            toast.info('이미지 방향을 확인하세요. 필요시 회전 후 분석을 눌러주세요.');
+          }
+        }
+      } catch {
+        // 방향감지 실패는 무시 — 사람이 직접 회전
+      }
     } catch (error: any) {
       setOcrError(error.message || '업로드 실패');
       toast.error(error.message || '업로드 실패');
