@@ -339,43 +339,147 @@ export const restaurantsRouter = router({
 
   // ─── 매장별 근무 프리셋 시간 ─────────────────────────────────────────────
 
-  /** 매장 프리셋 조회 */
+  /** 매장 프리셋 조회 (활성만 or 전체) */
   getShiftPresets: protectedProcedure
-    .input(z.object({ restaurantId: z.number() }))
+    .input(z.object({ restaurantId: z.number(), includeInactive: z.boolean().optional() }))
     .query(async ({ input }) => {
+      const conditions = [eq(restaurantShiftPresets.restaurantId, input.restaurantId)];
+      if (!input.includeInactive) {
+        conditions.push(eq(restaurantShiftPresets.isActive, true));
+      }
       return db.select().from(restaurantShiftPresets)
-        .where(eq(restaurantShiftPresets.restaurantId, input.restaurantId));
+        .where(and(...conditions))
+        .orderBy(restaurantShiftPresets.sortOrder, restaurantShiftPresets.presetType);
     }),
 
-  /** 매장 프리셋 일괄 저장 (upsert) */
+  /** 매장 프리셋 일괄 저장 (upsert) — Phase 2: label/isCustom/sortOrder/isActive 지원 */
   saveShiftPresets: managerProcedure
     .input(z.object({
       restaurantId: z.number(),
       presets: z.array(z.object({
-        presetType: z.enum(["open", "full", "close"]),
+        presetType: z.string().min(1).max(30),
         dayType: z.enum(["weekday", "weekend"]),
+        label: z.string().max(30).optional(),
         startTime: z.string().regex(/^\d{2}:\d{2}$/),
         endTime: z.string().regex(/^\d{2}:\d{2}$/),
         breakMinutes: z.number().min(0).default(0),
+        isCustom: z.boolean().optional(),
+        sortOrder: z.number().optional(),
+        isActive: z.boolean().optional(),
       })),
     }))
     .mutation(async ({ input }) => {
       for (const p of input.presets) {
-        // MySQL ON DUPLICATE KEY UPDATE (unique key: restaurantId + presetType + dayType)
+        const label = p.label ?? "";
+        const isCustom = p.isCustom ?? false;
+        const sortOrder = p.sortOrder ?? 0;
+        const isActive = p.isActive ?? true;
         await db.execute(sql`
-          INSERT INTO restaurant_shift_presets (restaurantId, presetType, dayType, startTime, endTime, breakMinutes)
-          VALUES (${input.restaurantId}, ${p.presetType}, ${p.dayType}, ${p.startTime}, ${p.endTime}, ${p.breakMinutes})
-          ON DUPLICATE KEY UPDATE startTime = VALUES(startTime), endTime = VALUES(endTime), breakMinutes = VALUES(breakMinutes)
+          INSERT INTO restaurant_shift_presets (restaurantId, presetType, dayType, label, startTime, endTime, breakMinutes, isCustom, sortOrder, isActive)
+          VALUES (${input.restaurantId}, ${p.presetType}, ${p.dayType}, ${label}, ${p.startTime}, ${p.endTime}, ${p.breakMinutes}, ${isCustom}, ${sortOrder}, ${isActive})
+          ON DUPLICATE KEY UPDATE
+            label = VALUES(label),
+            startTime = VALUES(startTime),
+            endTime = VALUES(endTime),
+            breakMinutes = VALUES(breakMinutes),
+            isCustom = VALUES(isCustom),
+            sortOrder = VALUES(sortOrder),
+            isActive = VALUES(isActive)
         `);
       }
       return { ok: true };
     }),
 
-  /** 매장 프리셋 삭제 */
+  /** 커스텀 근무유형 생성 */
+  createShiftPresetType: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      presetType: z.string().min(1).max(30),
+      label: z.string().min(1).max(30),
+      weekday: z.object({
+        startTime: z.string().regex(/^\d{2}:\d{2}$/),
+        endTime: z.string().regex(/^\d{2}:\d{2}$/),
+        breakMinutes: z.number().min(0).default(0),
+      }),
+      weekend: z.object({
+        startTime: z.string().regex(/^\d{2}:\d{2}$/),
+        endTime: z.string().regex(/^\d{2}:\d{2}$/),
+        breakMinutes: z.number().min(0).default(0),
+      }).optional(),
+      sortOrder: z.number().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      // presetType 중복 체크
+      const [existing] = await db.select({ id: restaurantShiftPresets.id })
+        .from(restaurantShiftPresets)
+        .where(and(
+          eq(restaurantShiftPresets.restaurantId, input.restaurantId),
+          eq(restaurantShiftPresets.presetType, input.presetType),
+        ))
+        .limit(1);
+      if (existing) {
+        throw new TRPCError({ code: "CONFLICT", message: `근무유형 "${input.presetType}"이(가) 이미 존재합니다.` });
+      }
+
+      const sortOrder = input.sortOrder ?? 10;
+      // 평일 프리셋 생성
+      await db.insert(restaurantShiftPresets).values({
+        restaurantId: input.restaurantId,
+        presetType: input.presetType,
+        dayType: "weekday",
+        label: input.label,
+        startTime: input.weekday.startTime,
+        endTime: input.weekday.endTime,
+        breakMinutes: input.weekday.breakMinutes,
+        isCustom: true,
+        sortOrder,
+        isActive: true,
+      });
+      // 주말 프리셋 생성 (없으면 평일과 동일)
+      const wknd = input.weekend ?? input.weekday;
+      await db.insert(restaurantShiftPresets).values({
+        restaurantId: input.restaurantId,
+        presetType: input.presetType,
+        dayType: "weekend",
+        label: input.label,
+        startTime: wknd.startTime,
+        endTime: wknd.endTime,
+        breakMinutes: wknd.breakMinutes,
+        isCustom: true,
+        sortOrder,
+        isActive: true,
+      });
+      return { ok: true };
+    }),
+
+  /** 매장 프리셋 삭제 (커스텀만 삭제 가능) */
   deleteShiftPreset: managerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
-      await db.delete(restaurantShiftPresets).where(eq(restaurantShiftPresets.id, input.id));
+      const [preset] = await db.select({ isCustom: restaurantShiftPresets.isCustom, presetType: restaurantShiftPresets.presetType, restaurantId: restaurantShiftPresets.restaurantId })
+        .from(restaurantShiftPresets)
+        .where(eq(restaurantShiftPresets.id, input.id))
+        .limit(1);
+      if (!preset) throw new TRPCError({ code: "NOT_FOUND", message: "프리셋을 찾을 수 없습니다." });
+      if (!preset.isCustom) throw new TRPCError({ code: "BAD_REQUEST", message: "기본 근무유형(오픈/풀/마감)은 삭제할 수 없습니다." });
+      // 해당 타입의 모든 dayType 레코드 삭제
+      await db.delete(restaurantShiftPresets).where(and(
+        eq(restaurantShiftPresets.restaurantId, preset.restaurantId),
+        eq(restaurantShiftPresets.presetType, preset.presetType),
+      ));
+      return { ok: true };
+    }),
+
+  /** 프리셋 활성/비활성 토글 */
+  toggleShiftPreset: managerProcedure
+    .input(z.object({ restaurantId: z.number(), presetType: z.string(), isActive: z.boolean() }))
+    .mutation(async ({ input }) => {
+      await db.update(restaurantShiftPresets)
+        .set({ isActive: input.isActive })
+        .where(and(
+          eq(restaurantShiftPresets.restaurantId, input.restaurantId),
+          eq(restaurantShiftPresets.presetType, input.presetType),
+        ));
       return { ok: true };
     }),
 });

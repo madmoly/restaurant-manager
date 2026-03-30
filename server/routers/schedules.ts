@@ -225,7 +225,7 @@ export const schedulesRouter = router({
         restaurantId: z.number(),
         userId: z.number(),
         workDate: z.string(),
-        preset: z.enum(["open", "fullday", "close"]),
+        preset: z.string().min(1),
         note: z.string().optional(),
       })
     )
@@ -248,6 +248,7 @@ export const schedulesRouter = router({
           eq(restaurantShiftPresets.restaurantId, input.restaurantId),
           eq(restaurantShiftPresets.presetType, presetKey),
           eq(restaurantShiftPresets.dayType, dayType),
+          eq(restaurantShiftPresets.isActive, true),
         ))
         .limit(1);
 
@@ -259,7 +260,7 @@ export const schedulesRouter = router({
         p = { start: customPresets[0].startTime, end: customPresets[0].endTime };
         breakMinutes = customPresets[0].breakMinutes;
       } else {
-        // 폴백: 매장 운영시간 기반 계산
+        // 폴백: 매장 운영시간 기반 계산 (기본 3종만)
         const [rest] = await db
           .select({ openTime: restaurants.openTime, closeTime: restaurants.closeTime })
           .from(restaurants)
@@ -275,11 +276,15 @@ export const schedulesRouter = router({
 
         const fallbackPresets: Record<string, { start: string; end: string }> = {
           open: { start: openTime, end: midTime },
-          fullday: { start: openTime, end: closeTime },
+          full: { start: openTime, end: closeTime },
           close: { start: midTime, end: closeTime },
         };
-        p = fallbackPresets[input.preset];
-        breakMinutes = input.preset === "fullday" ? 60 : 0;
+        const fallback = fallbackPresets[presetKey];
+        if (!fallback) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `프리셋 "${input.preset}"에 대한 시간 설정이 없습니다. 매장 설정에서 해당 근무유형의 시간을 먼저 설정해주세요.` });
+        }
+        p = fallback;
+        breakMinutes = presetKey === "full" ? 60 : 0;
       }
 
       const [result] = await db.insert(schedules).values({
@@ -291,7 +296,7 @@ export const schedulesRouter = router({
         note: input.note,
         createdBy: ctx.user.userId,
         status: "draft",
-        shiftPreset: input.preset === "fullday" ? "full" : input.preset,
+        shiftPreset: presetKey,
       });
       return { id: (result as any).insertId };
     }),
@@ -309,7 +314,7 @@ export const schedulesRouter = router({
         status: z
           .enum(["draft", "completed", "confirmed", "canceled"])
           .optional(),
-        shiftPreset: z.enum(["open", "full", "close", "custom"]).optional(),
+        shiftPreset: z.string().max(30).optional(),
         breakMinutes: z.number().min(0).max(240).optional(),
         note: z.string().optional(),
         editReason: z.string().optional(),

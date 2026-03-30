@@ -278,7 +278,7 @@ export const schedules = mysqlTable("schedules", {
   // draft(초안) → confirmed(확정/직원공개) → completed(완료/지출반영), canceled(취소)
   // DB enum에 published/scheduled 잔존 (하위호환), 신규 코드에서는 사용하지 않음
   status: mysqlEnum("status", ["draft", "scheduled", "published", "completed", "confirmed", "canceled"]).default("draft").notNull(),
-  shiftPreset: mysqlEnum("shiftPreset", ["open", "full", "close", "custom"]).default("custom"),
+  shiftPreset: varchar("shiftPreset", { length: 30 }).default("custom"),
   breakMinutes: int("breakMinutes").default(0),
   note: text("note"),
   editReason: text("editReason"),
@@ -893,11 +893,15 @@ export type StoreInfoCard = typeof storeInfoCards.$inferSelect;
 export const restaurantShiftPresets = mysqlTable("restaurant_shift_presets", {
   id: int("id").autoincrement().primaryKey(),
   restaurantId: int("restaurantId").notNull(),
-  presetType: varchar("presetType", { length: 20 }).notNull(),   // open, full, close
+  presetType: varchar("presetType", { length: 30 }).notNull(),   // open, full, close, 또는 커스텀 키
   dayType: varchar("dayType", { length: 20 }).notNull().default("weekday"), // weekday, weekend
+  label: varchar("label", { length: 30 }).notNull().default(""),  // UI 표시명
   startTime: varchar("startTime", { length: 5 }).notNull(),       // HH:MM
   endTime: varchar("endTime", { length: 5 }).notNull(),           // HH:MM
   breakMinutes: int("breakMinutes").default(0).notNull(),
+  isCustom: boolean("isCustom").default(false).notNull(),          // 기본 vs 사용자 정의
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

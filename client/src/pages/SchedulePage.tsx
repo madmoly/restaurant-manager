@@ -74,9 +74,11 @@ const STATUS_LABELS: Record<string, { label: string; color: string; bgCard: stri
   },
 };
 
-const PRESET_LABELS: Record<string, { label: string; icon: typeof Sun }> = {
-  open: { label: "오픈반차", icon: Sun },
-  close: { label: "마감반차", icon: Moon },
+// 기본 프리셋 라벨 (DB에 없을 때 폴백)
+const DEFAULT_PRESET_LABELS: Record<string, { label: string; icon: typeof Sun }> = {
+  open: { label: "오픈", icon: Sun },
+  close: { label: "마감", icon: Moon },
+  full: { label: "풀타임", icon: Maximize2 },
   fullday: { label: "풀타임", icon: Maximize2 },
 };
 
@@ -724,7 +726,11 @@ export default function SchedulePage() {
               <div className="space-y-1">
                 {daySchedules.map((s) => {
                   const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.draft;
-                  const presetInfo = s.shiftPreset ? PRESET_LABELS[s.shiftPreset === "full" ? "fullday" : s.shiftPreset] : null;
+                  const presetInfo = s.shiftPreset ? (() => {
+                    const dbPreset = shiftPresets.find((p: any) => p.presetType === s.shiftPreset);
+                    if (dbPreset?.label) return { label: dbPreset.label };
+                    return DEFAULT_PRESET_LABELS[s.shiftPreset] ?? null;
+                  })() : null;
                   return (
                     <button
                       key={s.id}
@@ -878,35 +884,75 @@ export default function SchedulePage() {
                     </div>
                   );
                 })()}
-                {(["fullday", "open", "close"] as const).map((preset) => {
-                  const info = PRESET_LABELS[preset];
-                  const Icon = info.icon;
+                {/* 동적 프리셋 버튼: DB 기본3종 + 커스텀 */}
+                {(() => {
+                  // 기본 프리셋 (DB에 있든 없든 항상 표시)
+                  const defaultTypes = [
+                    { key: "full", apiKey: "fullday", label: "풀타임", icon: Maximize2, fallbackDesc: "영업시간 전체 근무" },
+                    { key: "open", apiKey: "open", label: "오픈", icon: Sun, fallbackDesc: "오픈 ~ 중간시간" },
+                    { key: "close", apiKey: "close", label: "마감", icon: Moon, fallbackDesc: "중간시간 ~ 마감" },
+                  ];
+                  // DB 커스텀 프리셋 (isCustom=true, 중복 제거)
+                  const customTypes = shiftPresets
+                    .filter((p: any) => p.isCustom && !["open", "full", "close"].includes(p.presetType))
+                    .reduce((acc: any[], p: any) => {
+                      if (!acc.find((a: any) => a.presetType === p.presetType)) acc.push(p);
+                      return acc;
+                    }, []);
+
                   return (
-                    <button
-                      key={preset}
-                      onClick={() => handleQuickAssign(preset)}
-                      disabled={quickAssign.isPending}
-                      className="w-full flex items-center gap-3 p-4 rounded-lg border border-border hover:bg-accent active:bg-accent/70 transition-colors"
-                    >
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Icon className="w-5 h-5 text-primary" />
-                      </div>
-                      <div className="text-left">
-                        <div className="font-medium text-foreground text-sm">{info.label}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {(() => {
-                            const presetKey = preset === "fullday" ? "full" : preset;
-                            const times = getPresetTimes(presetKey, assignDate ?? undefined);
-                            if (times) return `${times.startTime} ~ ${times.endTime}`;
-                            if (preset === "fullday") return "영업시간 전체 근무";
-                            if (preset === "open") return "오픈 ~ 중간시간";
-                            return "중간시간 ~ 마감";
-                          })()}
-                        </div>
-                      </div>
-                    </button>
+                    <>
+                      {defaultTypes.map(({ key, apiKey, label: defLabel, icon: Icon, fallbackDesc }) => {
+                        const dbPreset = shiftPresets.find((p: any) => p.presetType === key);
+                        const displayLabel = dbPreset?.label || defLabel;
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => handleQuickAssign(apiKey)}
+                            disabled={quickAssign.isPending}
+                            className="w-full flex items-center gap-3 p-4 rounded-lg border border-border hover:bg-accent active:bg-accent/70 transition-colors"
+                          >
+                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                              <Icon className="w-5 h-5 text-primary" />
+                            </div>
+                            <div className="text-left">
+                              <div className="font-medium text-foreground text-sm">{displayLabel}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {(() => {
+                                  const times = getPresetTimes(key, assignDate ?? undefined);
+                                  if (times) return `${times.startTime} ~ ${times.endTime}`;
+                                  return fallbackDesc;
+                                })()}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {customTypes.map((cp: any) => (
+                        <button
+                          key={cp.presetType}
+                          onClick={() => handleQuickAssign(cp.presetType)}
+                          disabled={quickAssign.isPending}
+                          className="w-full flex items-center gap-3 p-4 rounded-lg border border-border hover:bg-accent active:bg-accent/70 transition-colors"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                            <Clock className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+                          </div>
+                          <div className="text-left">
+                            <div className="font-medium text-foreground text-sm">{cp.label || cp.presetType}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {(() => {
+                                const times = getPresetTimes(cp.presetType, assignDate ?? undefined);
+                                if (times) return `${times.startTime} ~ ${times.endTime}`;
+                                return "커스텀 근무";
+                              })()}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </>
                   );
-                })}
+                })()}
 
                 {/* 시간 직접입력 */}
                 <button
@@ -1133,39 +1179,49 @@ export default function SchedulePage() {
                 </div>
               )}
 
-              {/* 근무유형 선택 */}
+              {/* 근무유형 선택 — 동적 렌더링 */}
               <div>
                 <label className="text-xs font-medium text-muted-foreground">근무유형</label>
-                <div className="grid grid-cols-4 gap-1.5 mt-1">
-                  {([
-                    { key: "full", label: "풀타임", icon: Maximize2 },
-                    { key: "open", label: "오픈", icon: Sun },
-                    { key: "close", label: "마감", icon: Moon },
-                    { key: "custom", label: "직접입력", icon: Clock },
-                  ] as const).map(({ key, label, icon: Icon }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => {
-                        const editDateStr = editSchedule ? fmtDate(new Date(editSchedule.startTime)) : undefined;
-                        const times = getPresetTimes(key, editDateStr);
-                        const brk = times?.breakMinutes ?? (key === "full" ? 60 : 0);
-                        if (times) {
-                          setEditForm({ ...editForm, shiftPreset: key, startTime: times.startTime, endTime: times.endTime, breakMinutes: brk });
-                        } else {
-                          setEditForm({ ...editForm, shiftPreset: key, breakMinutes: brk });
-                        }
-                      }}
-                      className={`flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg border text-xs font-medium transition-colors ${
-                        editForm.shiftPreset === key
-                          ? "bg-primary/10 border-primary text-primary"
-                          : "border-border text-muted-foreground hover:bg-muted/50"
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5" />
-                      {label}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {(() => {
+                    const defaultItems = [
+                      { key: "full", label: "풀타임", icon: Maximize2 },
+                      { key: "open", label: "오픈", icon: Sun },
+                      { key: "close", label: "마감", icon: Moon },
+                    ];
+                    const customItems = shiftPresets
+                      .filter((p: any) => p.isCustom && !["open", "full", "close"].includes(p.presetType))
+                      .reduce((acc: any[], p: any) => {
+                        if (!acc.find((a: any) => a.presetType === p.presetType)) acc.push(p);
+                        return acc;
+                      }, [])
+                      .map((p: any) => ({ key: p.presetType, label: p.label || p.presetType, icon: Clock }));
+                    const allItems = [...defaultItems, ...customItems, { key: "custom", label: "직접입력", icon: Clock }];
+                    return allItems.map(({ key, label, icon: Icon }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          const editDateStr = editSchedule ? fmtDate(new Date(editSchedule.startTime)) : undefined;
+                          const times = getPresetTimes(key, editDateStr);
+                          const brk = times?.breakMinutes ?? (key === "full" ? 60 : 0);
+                          if (times) {
+                            setEditForm({ ...editForm, shiftPreset: key, startTime: times.startTime, endTime: times.endTime, breakMinutes: brk });
+                          } else {
+                            setEditForm({ ...editForm, shiftPreset: key, breakMinutes: brk });
+                          }
+                        }}
+                        className={`flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                          editForm.shiftPreset === key
+                            ? "bg-primary/10 border-primary text-primary"
+                            : "border-border text-muted-foreground hover:bg-muted/50"
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {label}
+                      </button>
+                    ));
+                  })()}
                 </div>
               </div>
 

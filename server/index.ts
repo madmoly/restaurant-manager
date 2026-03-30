@@ -551,21 +551,46 @@ app.use(express.json());
     // ─── schedules 누락 컬럼 추가 ───
     await addColumnIfNotExists("schedules", "payrollRecheckRequired", "BOOLEAN NOT NULL DEFAULT FALSE");
 
+    // ─── schedules.shiftPreset: enum → varchar 변환 ───
+    try {
+      const [cols] = await conn.query(
+        `SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedules' AND COLUMN_NAME = 'shiftPreset'`
+      ) as any[];
+      if (cols[0] && cols[0].COLUMN_TYPE.startsWith("enum")) {
+        await conn.query(`ALTER TABLE schedules MODIFY COLUMN shiftPreset VARCHAR(30) DEFAULT 'custom'`);
+        console.log("[migrate] schedules.shiftPreset enum → varchar(30)");
+      }
+    } catch (e: any) {
+      console.log("[migrate] shiftPreset conversion skipped:", e.message);
+    }
+
     // ─── 매장별 근무 프리셋 시간 테이블 ───
     await conn.query(`
       CREATE TABLE IF NOT EXISTS restaurant_shift_presets (
         id INT AUTO_INCREMENT PRIMARY KEY,
         restaurantId INT NOT NULL,
-        presetType VARCHAR(20) NOT NULL,
+        presetType VARCHAR(30) NOT NULL,
         dayType VARCHAR(20) NOT NULL DEFAULT 'weekday',
+        label VARCHAR(30) NOT NULL DEFAULT '',
         startTime VARCHAR(5) NOT NULL,
         endTime VARCHAR(5) NOT NULL,
         breakMinutes INT NOT NULL DEFAULT 0,
+        isCustom BOOLEAN NOT NULL DEFAULT FALSE,
+        sortOrder INT NOT NULL DEFAULT 0,
+        isActive BOOLEAN NOT NULL DEFAULT TRUE,
         updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_store_preset_day (restaurantId, presetType, dayType)
       )
     `);
+    // 프리셋 테이블 신규 컬럼 추가 (기존 테이블 호환)
+    await addColumnIfNotExists("restaurant_shift_presets", "label", "VARCHAR(30) NOT NULL DEFAULT ''");
+    await addColumnIfNotExists("restaurant_shift_presets", "isCustom", "BOOLEAN NOT NULL DEFAULT FALSE");
+    await addColumnIfNotExists("restaurant_shift_presets", "sortOrder", "INT NOT NULL DEFAULT 0");
+    await addColumnIfNotExists("restaurant_shift_presets", "isActive", "BOOLEAN NOT NULL DEFAULT TRUE");
+    try {
+      await conn.query(`ALTER TABLE restaurant_shift_presets MODIFY COLUMN presetType VARCHAR(30) NOT NULL`);
+    } catch (e: any) { /* already done */ }
 
     await conn.end();
     console.log("[migrate] all migrations complete");
