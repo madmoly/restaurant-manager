@@ -6,8 +6,8 @@ import sharp from "sharp";
 import { execSync } from "child_process";
 import { UPLOAD_ROOT } from "./upload";
 import { db } from "./db";
-import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs } from "../drizzle/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs, apiUsageLogs } from "../drizzle/schema";
+import { eq, and, desc, sql, gte } from "drizzle-orm";
 
 // OCR 에러를 error_logs 테이블에 저장
 async function logOcrError(message: string, metadata?: Record<string, any>, restaurantId?: number) {
@@ -20,6 +20,36 @@ async function logOcrError(message: string, metadata?: Record<string, any>, rest
     });
   } catch (e) {
     console.error("[OCR] 에러 로그 저장 실패:", e);
+  }
+}
+
+// OCR API 호출을 api_usage_logs에 기록
+async function logOcrApiUsage(opts: {
+  endpoint: string;
+  userId?: number;
+  restaurantId?: number;
+  requestPayloadSize?: number;
+  responseTimeMs: number;
+  success: boolean;
+  errorMessage?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  model?: string;
+  itemCount?: number;
+}) {
+  try {
+    await db.insert(apiUsageLogs).values({
+      apiType: "ocr",
+      endpoint: opts.endpoint,
+      userId: opts.userId || null,
+      restaurantId: opts.restaurantId || null,
+      requestPayloadSize: opts.requestPayloadSize || null,
+      responseTimeMs: opts.responseTimeMs,
+      success: opts.success,
+      errorMessage: opts.errorMessage || null,
+    });
+  } catch (e) {
+    console.error("[OCR] API 사용량 로그 저장 실패:", e);
   }
 }
 
@@ -601,6 +631,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     };
 
     // ── 단일 Vision: 이미지 → 직접 구조화 JSON ───────────────────────────
+    const ocrStartTime = Date.now();
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 8192,
@@ -758,8 +789,13 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       }],
     });
 
+    const ocrElapsed = Date.now() - ocrStartTime;
+    const inputTokens = response.usage?.input_tokens || 0;
+    const outputTokens = response.usage?.output_tokens || 0;
+
     const responseText = extractText(response);
     if (!responseText) {
+      logOcrApiUsage({ endpoint: "extract-purchase", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "AI 응답 없음", inputTokens, outputTokens, model: "sonnet" });
       res.status(500).json({ error: "AI 응답 없음" });
       return;
     }
@@ -828,6 +864,18 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       items,
       note: parsed.note || null,
     };
+
+    // API 사용량 로깅 (성공)
+    logOcrApiUsage({
+      endpoint: "extract-purchase",
+      restaurantId: restaurantId ? Number(restaurantId) : undefined,
+      responseTimeMs: ocrElapsed,
+      success: true,
+      inputTokens, outputTokens,
+      model: "sonnet",
+      itemCount: items.length,
+      requestPayloadSize: base64.length,
+    });
 
     res.json(result);
   } catch (err: any) {
@@ -1055,6 +1103,131 @@ ocrRouter.get("/corrections/stats", async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error("[OCR] corrections stats error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// GET /api/ocr/tracking — OCR 트래킹 종합 대시보드 데이터
+// ═════════════════════════════════════════════════════════════════════════════
+ocrRouter.get("/tracking", async (req: Request, res: Response) => {
+  try {
+    const days = Math.min(Number(req.query.days) || 30, 90);
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    // 1) OCR API 호출 통계 (api_usage_logs where apiType='ocr')
+    const apiStats = await db.select({
+      totalCalls: sql<number>`COUNT(*)`,
+      successCount: sql<number>`SUM(CASE WHEN ${apiUsageLogs.success} = TRUE THEN 1 ELSE 0 END)`,
+      failCount: sql<number>`SUM(CASE WHEN ${apiUsageLogs.success} = FALSE THEN 1 ELSE 0 END)`,
+      avgResponseMs: sql<number>`ROUND(AVG(${apiUsageLogs.responseTimeMs}))`,
+      maxResponseMs: sql<number>`MAX(${apiUsageLogs.responseTimeMs})`,
+      totalPayloadBytes: sql<number>`COALESCE(SUM(${apiUsageLogs.requestPayloadSize}), 0)`,
+    }).from(apiUsageLogs)
+      .where(and(
+        eq(apiUsageLogs.apiType, "ocr"),
+        gte(apiUsageLogs.createdAt, since),
+      ));
+
+    // 2) 일별 호출 추이
+    const dailyCalls = await db.select({
+      date: sql<string>`DATE(${apiUsageLogs.createdAt})`,
+      calls: sql<number>`COUNT(*)`,
+      successCount: sql<number>`SUM(CASE WHEN ${apiUsageLogs.success} = TRUE THEN 1 ELSE 0 END)`,
+      failCount: sql<number>`SUM(CASE WHEN ${apiUsageLogs.success} = FALSE THEN 1 ELSE 0 END)`,
+      avgMs: sql<number>`ROUND(AVG(${apiUsageLogs.responseTimeMs}))`,
+    }).from(apiUsageLogs)
+      .where(and(
+        eq(apiUsageLogs.apiType, "ocr"),
+        gte(apiUsageLogs.createdAt, since),
+      ))
+      .groupBy(sql`DATE(${apiUsageLogs.createdAt})`)
+      .orderBy(sql`DATE(${apiUsageLogs.createdAt})`);
+
+    // 3) OCR 에러 로그 (최근 건 + 에러 유형 분포)
+    const ocrErrors = await db.select({
+      id: errorLogs.id,
+      message: errorLogs.message,
+      metadata: errorLogs.metadata,
+      restaurantId: errorLogs.restaurantId,
+      createdAt: errorLogs.createdAt,
+    }).from(errorLogs)
+      .where(and(
+        eq(errorLogs.errorType, "ocr"),
+        gte(errorLogs.createdAt, since),
+      ))
+      .orderBy(desc(errorLogs.createdAt))
+      .limit(30);
+
+    const totalOcrErrors = await db.select({
+      count: sql<number>`COUNT(*)`,
+    }).from(errorLogs)
+      .where(and(
+        eq(errorLogs.errorType, "ocr"),
+        gte(errorLogs.createdAt, since),
+      ));
+
+    // 4) OCR 수정 통계
+    const correctionStats = await db.select({
+      totalCorrections: sql<number>`COUNT(*)`,
+    }).from(ocrCorrections)
+      .where(gte(ocrCorrections.createdAt, since));
+
+    // 5) 프로파일 수
+    const profileRows = await db.select({
+      count: sql<number>`COUNT(*)`,
+    }).from(counterpartyOcrProfiles);
+
+    // 6) 비용 추정 (Sonnet 기준)
+    // Input: ~$3/1M tokens, Output: ~$15/1M tokens
+    // 대략 1회당 input 8000 tokens, output 1200 tokens → $0.042
+    const totalCalls = Number(apiStats[0]?.totalCalls) || 0;
+    const estimatedCost = totalCalls * 0.042;
+
+    res.json({
+      period: { days, since: since.toISOString() },
+      api: {
+        totalCalls,
+        successCount: Number(apiStats[0]?.successCount) || 0,
+        failCount: Number(apiStats[0]?.failCount) || 0,
+        successRate: totalCalls > 0 ? Math.round((Number(apiStats[0]?.successCount) || 0) / totalCalls * 100) : 0,
+        avgResponseMs: Number(apiStats[0]?.avgResponseMs) || 0,
+        maxResponseMs: Number(apiStats[0]?.maxResponseMs) || 0,
+        totalPayloadMB: ((Number(apiStats[0]?.totalPayloadBytes) || 0) / 1048576).toFixed(1),
+      },
+      cost: {
+        estimatedUsd: estimatedCost.toFixed(2),
+        estimatedKrw: Math.round(estimatedCost * 1350),
+        perCallUsd: "0.042",
+        model: "claude-sonnet-4-20250514",
+      },
+      daily: dailyCalls.map(d => ({
+        date: d.date,
+        calls: Number(d.calls),
+        success: Number(d.successCount),
+        fail: Number(d.failCount),
+        avgMs: Number(d.avgMs),
+      })),
+      errors: {
+        total: Number(totalOcrErrors[0]?.count) || 0,
+        recent: ocrErrors.map(e => ({
+          id: e.id,
+          message: e.message,
+          restaurantId: e.restaurantId,
+          createdAt: e.createdAt,
+          metadata: e.metadata,
+        })),
+      },
+      corrections: {
+        total: Number(correctionStats[0]?.totalCorrections) || 0,
+      },
+      profiles: {
+        total: Number(profileRows[0]?.count) || 0,
+      },
+    });
+  } catch (err: any) {
+    console.error("[OCR] tracking error:", err);
     res.status(500).json({ error: err.message });
   }
 });

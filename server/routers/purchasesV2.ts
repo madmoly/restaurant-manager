@@ -607,4 +607,70 @@ export const purchasesV2Router = router({
 
       return withItemCount;
     }),
+
+  /** 중복 입고/발주 감지 (동일 날짜 + 동일 거래처 + 동일 금액) */
+  findDuplicates: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      month: z.string(), // "YYYY-MM"
+    }))
+    .query(async ({ input }) => {
+      const startDate = `${input.month}-01`;
+      const endDate = `${input.month}-31`;
+
+      // 동일 날짜+거래처+금액+상태 조합으로 그룹핑, 2건 이상인 것만
+      const dupes = await db.select({
+        purchaseDate: purchaseOrdersV2.purchaseDate,
+        counterpartyId: purchaseOrdersV2.counterpartyId,
+        totalAmount: purchaseOrdersV2.totalAmount,
+        status: purchaseOrdersV2.status,
+        cnt: sql<number>`COUNT(*)`,
+        ids: sql<string>`GROUP_CONCAT(${purchaseOrdersV2.id} ORDER BY ${purchaseOrdersV2.id})`,
+      }).from(purchaseOrdersV2)
+        .where(and(
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+          gte(purchaseOrdersV2.purchaseDate, startDate),
+          lte(purchaseOrdersV2.purchaseDate, endDate),
+        ))
+        .groupBy(
+          purchaseOrdersV2.purchaseDate,
+          purchaseOrdersV2.counterpartyId,
+          purchaseOrdersV2.totalAmount,
+          purchaseOrdersV2.status,
+        )
+        .having(sql`COUNT(*) >= 2`);
+
+      // 거래처명 매핑
+      const cpIds = [...new Set(dupes.map(d => d.counterpartyId).filter(Boolean))] as number[];
+      let cpMap: Record<number, string> = {};
+      if (cpIds.length > 0) {
+        const cps = await db.select({ id: counterparties.id, name: counterparties.name })
+          .from(counterparties)
+          .where(sql`${counterparties.id} IN (${sql.join(cpIds.map(id => sql`${id}`), sql`, `)})`);
+        cpMap = Object.fromEntries(cps.map(c => [c.id, c.name]));
+      }
+
+      return dupes.map(d => ({
+        purchaseDate: d.purchaseDate,
+        counterpartyId: d.counterpartyId,
+        counterpartyName: d.counterpartyId ? cpMap[d.counterpartyId] ?? "알 수 없음" : "미지정",
+        totalAmount: d.totalAmount,
+        status: d.status,
+        count: Number(d.cnt),
+        ids: String(d.ids).split(",").map(Number),
+      }));
+    }),
+
+  /** 중복 전표 삭제 (지정된 ID 삭제) */
+  deleteDuplicate: managerProcedure
+    .input(z.object({ orderId: z.number() }))
+    .mutation(async ({ input }) => {
+      // 항목 먼저 삭제
+      await db.delete(purchaseOrderItemsV2)
+        .where(eq(purchaseOrderItemsV2.purchaseOrderId, input.orderId));
+      // 전표 삭제
+      await db.delete(purchaseOrdersV2)
+        .where(eq(purchaseOrdersV2.id, input.orderId));
+      return { ok: true };
+    }),
 });

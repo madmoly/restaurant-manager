@@ -51,7 +51,7 @@ const fmtBytes = (b: number) => {
 // 메인: 시스템 관리 (7탭)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type Tab = "status" | "announce" | "audit" | "session" | "settings" | "api" | "integrity" | "backup" | "errors" | "errorList";
+type Tab = "status" | "announce" | "audit" | "session" | "settings" | "api" | "integrity" | "backup" | "errors" | "errorList" | "ocr";
 
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: "status", label: "현황", icon: <Activity size={12} /> },
@@ -64,6 +64,7 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: "backup", label: "백업", icon: <HardDrive size={12} /> },
   { key: "errors", label: "에러개요", icon: <AlertTriangle size={12} /> },
   { key: "errorList", label: "에러목록", icon: <AlertOctagon size={12} /> },
+  { key: "ocr", label: "OCR트래킹", icon: <BarChart3 size={12} /> },
 ];
 
 export default function SystemPage() {
@@ -102,6 +103,7 @@ export default function SystemPage() {
       {tab === "backup" && <BackupTab />}
       {tab === "errors" && <ErrorOverviewTab />}
       {tab === "errorList" && <ErrorListTab />}
+      {tab === "ocr" && <OcrStatsTab />}
     </div>
   );
 }
@@ -786,5 +788,310 @@ function ErrorStatCard({ label, value, sub }: { label: string; value: number; su
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
       <p className="text-xl font-bold text-foreground tabular-nums">{value}<span className="text-xs text-muted-foreground ml-0.5">{sub ?? "건"}</span></p>
     </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 탭11: OCR 트래킹
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type OcrSubTab = "overview" | "errors" | "learning";
+
+function OcrStatsTab() {
+  const [data, setData] = useState<any>(null);
+  const [corrStats, setCorrStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+  const [subTab, setSubTab] = useState<OcrSubTab>("overview");
+  const [corrections, setCorrections] = useState<any[]>([]);
+  const [showCorrections, setShowCorrections] = useState(false);
+
+  const fetchAll = async () => {
+    setLoading(true);
+    try {
+      const [trackRes, statsRes] = await Promise.all([
+        fetch(`/api/ocr/tracking?days=${days}`),
+        fetch("/api/ocr/corrections/stats"),
+      ]);
+      setData(await trackRes.json());
+      setCorrStats(await statsRes.json());
+    } catch (err) {
+      console.error("OCR tracking fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCorrections = async () => {
+    try {
+      const res = await fetch("/api/ocr/corrections?limit=30");
+      const d = await res.json();
+      setCorrections(d.corrections || []);
+      setShowCorrections(true);
+    } catch (err) {
+      console.error("OCR corrections fetch error:", err);
+    }
+  };
+
+  // 초기 로드
+  useState(() => { fetchAll(); });
+
+  if (loading) return <div className="text-center py-8 text-sm text-muted-foreground">로딩 중...</div>;
+  if (!data) return <div className="text-center py-8 text-sm text-muted-foreground">데이터 없음</div>;
+
+  const api = data.api || {};
+  const cost = data.cost || {};
+  const daily = data.daily || [];
+  const errors = data.errors || {};
+
+  return (
+    <div className="space-y-4">
+      {/* 기간 선택 + 서브탭 */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex gap-1">
+          {(["overview", "errors", "learning"] as OcrSubTab[]).map(st => (
+            <Button key={st} size="sm" variant={subTab === st ? "default" : "outline"} className="text-xs h-7 px-2.5"
+              onClick={() => setSubTab(st)}>
+              {st === "overview" ? "호출/비용" : st === "errors" ? "에러" : "학습"}
+            </Button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {[7, 30, 90].map(d => (
+            <Button key={d} size="sm" variant={days === d ? "secondary" : "ghost"} className="text-xs h-7 px-2"
+              onClick={() => { setDays(d); setTimeout(fetchAll, 0); }}>
+              {d}일
+            </Button>
+          ))}
+          <Button size="sm" variant="ghost" className="text-xs h-7 px-2" onClick={fetchAll}>
+            <RefreshCw size={12} />
+          </Button>
+        </div>
+      </div>
+
+      {/* ──── 서브탭: 호출/비용 ──── */}
+      {subTab === "overview" && (
+        <div className="space-y-4">
+          {/* 요약 카드 */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Card className="p-3 text-center">
+              <p className="text-[10px] text-muted-foreground mb-1">총 호출</p>
+              <p className="text-xl font-bold text-foreground tabular-nums">{api.totalCalls}<span className="text-xs text-muted-foreground ml-0.5">건</span></p>
+            </Card>
+            <Card className="p-3 text-center">
+              <p className="text-[10px] text-muted-foreground mb-1">성공률</p>
+              <p className="text-xl font-bold tabular-nums" style={{ color: api.successRate >= 90 ? "#16a34a" : api.successRate >= 70 ? "#d97706" : "#dc2626" }}>
+                {api.successRate}<span className="text-xs ml-0.5">%</span>
+              </p>
+            </Card>
+            <Card className="p-3 text-center">
+              <p className="text-[10px] text-muted-foreground mb-1">평균 응답</p>
+              <p className="text-xl font-bold text-foreground tabular-nums">{api.avgResponseMs ? (api.avgResponseMs / 1000).toFixed(1) : "-"}<span className="text-xs text-muted-foreground ml-0.5">초</span></p>
+            </Card>
+            <Card className="p-3 text-center">
+              <p className="text-[10px] text-muted-foreground mb-1">추정 비용</p>
+              <p className="text-xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">
+                {Number(cost.estimatedKrw).toLocaleString()}<span className="text-xs ml-0.5">원</span>
+              </p>
+              <p className="text-[10px] text-muted-foreground">${cost.estimatedUsd}</p>
+            </Card>
+          </div>
+
+          {/* 비용 상세 */}
+          <Card className="p-3">
+            <p className="text-xs font-semibold mb-2">비용 산출 기준</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>모델</span><span className="text-foreground font-mono text-[11px]">{cost.model || "sonnet"}</span>
+              <span>건당 추정 비용</span><span className="text-foreground">${cost.perCallUsd} (~{Math.round(Number(cost.perCallUsd || 0) * 1350)}원)</span>
+              <span>총 호출 수</span><span className="text-foreground">{api.totalCalls}건 (성공 {api.successCount} / 실패 {api.failCount})</span>
+              <span>최대 응답시간</span><span className="text-foreground">{api.maxResponseMs ? (api.maxResponseMs / 1000).toFixed(1) : "-"}초</span>
+              <span>전송 데이터</span><span className="text-foreground">{api.totalPayloadMB}MB</span>
+            </div>
+          </Card>
+
+          {/* 일별 추이 */}
+          {daily.length > 0 && (
+            <Card className="overflow-hidden">
+              <div className="px-4 py-3 bg-muted/30 border-b border-border">
+                <span className="text-sm font-semibold">일별 OCR 호출 추이</span>
+              </div>
+              <div className="overflow-x-auto">
+                <div className="min-w-[400px] p-3">
+                  {/* 바 차트 */}
+                  <div className="flex items-end gap-[2px] h-24">
+                    {daily.map((d: any) => {
+                      const maxCalls = Math.max(...daily.map((x: any) => x.calls), 1);
+                      const h = Math.max((d.calls / maxCalls) * 100, 4);
+                      const failRatio = d.calls > 0 ? d.fail / d.calls : 0;
+                      return (
+                        <div key={d.date} className="flex-1 flex flex-col items-center group relative">
+                          <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-foreground text-background text-[9px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-10">
+                            {d.date?.slice(5)} | {d.calls}건 | {d.avgMs ? Math.round(d.avgMs / 1000) : 0}s
+                          </div>
+                          <div className="w-full rounded-t-sm" style={{
+                            height: `${h}%`,
+                            backgroundColor: failRatio > 0.3 ? "#ef4444" : failRatio > 0 ? "#f59e0b" : "#3b82f6",
+                          }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-between text-[9px] text-muted-foreground mt-1 px-0.5">
+                    <span>{daily[0]?.date?.slice(5)}</span>
+                    <span>{daily[daily.length - 1]?.date?.slice(5)}</span>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* ──── 서브탭: 에러 ──── */}
+      {subTab === "errors" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Card className="p-3 text-center">
+              <p className="text-[10px] text-muted-foreground mb-1">OCR 에러</p>
+              <p className="text-xl font-bold text-red-600 dark:text-red-400 tabular-nums">{errors.total}<span className="text-xs text-muted-foreground ml-0.5">건</span></p>
+            </Card>
+            <Card className="p-3 text-center">
+              <p className="text-[10px] text-muted-foreground mb-1">API 실패</p>
+              <p className="text-xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">{api.failCount}<span className="text-xs text-muted-foreground ml-0.5">건</span></p>
+            </Card>
+          </div>
+
+          {errors.recent?.length > 0 && (
+            <Card className="overflow-hidden">
+              <div className="px-4 py-3 bg-muted/30 border-b border-border">
+                <span className="text-sm font-semibold">최근 OCR 에러 (최신 {errors.recent.length}건)</span>
+              </div>
+              <div className="divide-y divide-border max-h-[500px] overflow-y-auto">
+                {errors.recent.map((e: any) => (
+                  <div key={e.id} className="px-4 py-2.5 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle size={12} className="text-red-500 shrink-0" />
+                        <span className="text-muted-foreground">#{e.id}</span>
+                        {e.restaurantId && <Badge variant="outline" className="text-[10px]">매장 {e.restaurantId}</Badge>}
+                      </div>
+                      <span className="text-muted-foreground">{e.createdAt ? fmtDateTime(e.createdAt) : "-"}</span>
+                    </div>
+                    <p className="text-foreground pl-5 break-all">{e.message}</p>
+                    {e.metadata && (
+                      <details className="pl-5">
+                        <summary className="text-muted-foreground cursor-pointer hover:text-foreground">상세 메타데이터</summary>
+                        <pre className="mt-1 text-[10px] bg-muted/50 p-2 rounded overflow-x-auto max-h-32">{JSON.stringify(e.metadata, null, 2)}</pre>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+          {(!errors.recent || errors.recent.length === 0) && (
+            <Card className="p-6 text-center text-sm text-muted-foreground">
+              <CheckCircle2 size={24} className="mx-auto mb-2 text-green-500" />
+              최근 {days}일간 OCR 에러 없음
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* ──── 서브탭: 학습 ──── */}
+      {subTab === "learning" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <Card className="p-3 text-center">
+              <p className="text-[10px] text-muted-foreground mb-1">수정 건수</p>
+              <p className="text-xl font-bold text-foreground tabular-nums">{corrStats?.totalCorrections ?? 0}<span className="text-xs text-muted-foreground ml-0.5">건</span></p>
+            </Card>
+            <Card className="p-3 text-center">
+              <p className="text-[10px] text-muted-foreground mb-1">프로파일</p>
+              <p className="text-xl font-bold text-foreground tabular-nums">{corrStats?.profileCount ?? 0}<span className="text-xs text-muted-foreground ml-0.5">개</span></p>
+            </Card>
+            <Card className="p-3 text-center">
+              <p className="text-[10px] text-muted-foreground mb-1">수정 거래처</p>
+              <p className="text-xl font-bold text-foreground tabular-nums">{corrStats?.byCounterparty?.length ?? 0}<span className="text-xs text-muted-foreground ml-0.5">곳</span></p>
+            </Card>
+          </div>
+
+          {/* 거래처별 수정 빈도 */}
+          {corrStats?.byCounterparty?.length > 0 && (
+            <Card className="overflow-hidden">
+              <div className="px-4 py-3 bg-muted/30 border-b border-border">
+                <span className="text-sm font-semibold">거래처별 수정 빈도</span>
+              </div>
+              <div className="divide-y divide-border">
+                {corrStats.byCounterparty.map((cp: any, i: number) => (
+                  <div key={i} className="px-4 py-2.5 flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-foreground">{cp.counterpartyName}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground">{cp.lastCorrectedAt ? fmtDateTime(cp.lastCorrectedAt) : "-"}</span>
+                      <Badge variant="secondary" className="text-xs">{cp.correctionCount}건</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* 프로파일 목록 */}
+          {corrStats?.profiles?.length > 0 && (
+            <Card className="overflow-hidden">
+              <div className="px-4 py-3 bg-muted/30 border-b border-border">
+                <span className="text-sm font-semibold">학습된 OCR 프로파일</span>
+              </div>
+              <div className="divide-y divide-border">
+                {corrStats.profiles.map((p: any, i: number) => (
+                  <div key={i} className="px-4 py-2.5 flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="text-foreground">거래처 #{p.counterpartyId}</span>
+                      {p.documentType && <Badge variant="outline" className="text-[10px]">{p.documentType}</Badge>}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>품목 {p.frequentItemCount}개</span>
+                      <span>샘플 {p.sampleCount}건</span>
+                      {p.lastUsedAt && <span>{fmtDateTime(p.lastUsedAt)}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* 수정 이력 */}
+          <Button size="sm" variant="outline" className="text-xs" onClick={fetchCorrections}>
+            최근 수정 이력 보기
+          </Button>
+          {showCorrections && corrections.length > 0 && (
+            <Card className="overflow-hidden">
+              <div className="px-4 py-3 bg-muted/30 border-b border-border">
+                <span className="text-sm font-semibold">최근 OCR 수정 이력 (최신 {corrections.length}건)</span>
+              </div>
+              <div className="divide-y divide-border max-h-[400px] overflow-y-auto">
+                {corrections.map((c: any) => {
+                  const origCount = Array.isArray(c.originalItems) ? c.originalItems.length : 0;
+                  const corrCount = Array.isArray(c.correctedItems) ? c.correctedItems.length : 0;
+                  return (
+                    <div key={c.id} className="px-4 py-2.5 text-xs space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">#{c.id} · 거래처 {c.counterpartyId ?? "미지정"} · 매장 {c.restaurantId}</span>
+                        <span className="text-muted-foreground">{c.createdAt ? fmtDateTime(c.createdAt) : "-"}</span>
+                      </div>
+                      <div className="text-foreground">
+                        원본 {origCount}건 → 수정 {corrCount}건
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
