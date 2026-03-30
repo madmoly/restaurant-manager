@@ -1321,22 +1321,28 @@ function PurchaseTab({
 
       {/* ─── 발주/입고 입력 버튼 (항상 표시, 토글) ─── */}
       <div className="flex gap-2">
-        <Button
+        <button
           onClick={() => { resetForm(); setInputMode(inputMode === 'order' ? 'none' : 'order'); }}
-          variant={inputMode === 'order' ? 'default' : 'secondary'}
-          className={`flex-1 h-12 flex gap-2 ${inputMode === 'order' ? 'ring-2 ring-amber-400' : ''}`}
+          className={`flex-1 h-14 flex items-center justify-center gap-2 rounded-lg text-sm font-bold transition-all border-2 ${
+            inputMode === 'order'
+              ? 'bg-amber-500 text-white border-amber-600 ring-2 ring-amber-300 shadow-md'
+              : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50'
+          }`}
         >
-          <Plus className="w-4 h-4" />
-          <span className="text-sm font-medium">발주 입력</span>
-        </Button>
-        <Button
+          <Plus className="w-5 h-5" />
+          발주 입력
+        </button>
+        <button
           onClick={() => { resetForm(); setInputMode(inputMode === 'receive' ? 'none' : 'receive'); }}
-          variant={inputMode === 'receive' ? 'default' : 'secondary'}
-          className={`flex-1 h-12 flex gap-2 ${inputMode === 'receive' ? 'ring-2 ring-blue-400' : ''}`}
+          className={`flex-1 h-14 flex items-center justify-center gap-2 rounded-lg text-sm font-bold transition-all border-2 ${
+            inputMode === 'receive'
+              ? 'bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 shadow-md'
+              : 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/50'
+          }`}
         >
-          <Check className="w-4 h-4" />
-          <span className="text-sm font-medium">입고 입력</span>
-        </Button>
+          <Check className="w-5 h-5" />
+          입고 입력
+        </button>
       </div>
 
       {/* ─── 발주/입고 입력 폼 ─── */}
