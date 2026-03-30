@@ -660,10 +660,12 @@ export const schedulesRouter = router({
     .input(z.object({ restaurantId: z.number() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      // KST 기준 오늘 00:00부터 (서버가 UTC이므로 +09:00 명시)
+      // KST 기준 오늘 (새벽 3시 이전이면 전날로 취급)
       const now = new Date();
       const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-      const kstDateStr = kstNow.toISOString().slice(0, 10);
+      // 3시간 빼서 영업일 기준 날짜 계산 (0~2시 → 전날)
+      const bizKst = new Date(kstNow.getTime() - 3 * 60 * 60 * 1000);
+      const kstDateStr = bizKst.toISOString().slice(0, 10);
       const todayStart = new Date(`${kstDateStr}T00:00:00+09:00`);
       const end = new Date(todayStart.getTime() + 7 * 24 * 60 * 60 * 1000);
       return db

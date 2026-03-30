@@ -37,7 +37,8 @@ const STATUS_LABELS: Record<string, string> = {
 export default function EmployeeDashboard() {
   const { user } = useAuth();
   const { selectedRestaurantId, selectedRestaurant } = useRestaurant();
-  const today = fmtDate(new Date());
+  // 영업일 기준: 새벽 3시 이전이면 전날
+  const today = fmtDate(new Date(Date.now() - 3 * 60 * 60 * 1000));
 
   // 오늘 내 스케줄
   const weekStart = useMemo(() => {

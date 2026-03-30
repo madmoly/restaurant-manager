@@ -15,14 +15,23 @@ export default function ManagerDashboard() {
   const [, setLocation] = useLocation();
 
   const today = new Date();
-  // KST 기준 날짜 문자열 (UTC+9)
+  // KST 영업일 기준 (새벽 3시 이전이면 전날)
   const toKSTDateStr = (d: Date) => {
     const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
     return kst.toISOString().slice(0, 10);
   };
+  const toBizDateStr = (d: Date) => {
+    const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+    const biz = new Date(kst.getTime() - 3 * 60 * 60 * 1000); // 3시간 빼서 영업일 기준
+    return biz.toISOString().slice(0, 10);
+  };
   const year = today.getFullYear();
   const month = today.getMonth() + 1;
-  const todayStr = toKSTDateStr(today);
+  const todayStr = toBizDateStr(today);
+  // 영업일 기준 날짜 객체 (표시용)
+  const bizDate = new Date(todayStr + "T12:00:00+09:00");
+  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+  const bizDateLabel = `${bizDate.getMonth() + 1}월 ${bizDate.getDate()}일 ${dayNames[bizDate.getDay()]}요일`;
 
   const restaurantId = current?.id ?? 0;
   const enabled = restaurantId > 0;
@@ -146,9 +155,9 @@ export default function ManagerDashboard() {
         </div>
       </Card>
 
-      {/* ─── 섹션 2: 금일 매장 상황 ─── */}
+      {/* ─── 섹션 2: 매장 상황 ─── */}
       <Card className="p-3">
-        <h2 className="text-sm font-semibold mb-3">금일 매장 상황</h2>
+        <h2 className="text-sm font-semibold mb-3">{bizDateLabel} 매장 상황</h2>
         <div className="space-y-2">
           {/* 출근 인원 */}
           <StatusRow

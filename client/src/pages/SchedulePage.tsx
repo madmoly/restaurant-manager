@@ -355,10 +355,6 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
     onSuccess() { utils.restaurants.getShiftPresets.invalidate({ restaurantId }); },
     onError(e: any) { toast.error(e.message); },
   });
-  const applyMut = trpc.schedules.applyPresetsToSchedules.useMutation({
-    onSuccess(data: any) { toast.success(`${data.updated}건의 스케줄이 프리셋 시간으로 업데이트됨`); },
-    onError(e: any) { toast.error(e.message); },
-  });
 
   // ── 프리셋을 presetType별로 그룹화 ──
   const allTypes = useMemo(() => {
@@ -644,22 +640,8 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
                 })}
               </div>
 
-              {/* ── 기존 스케줄에 적용 버튼 ── */}
-              {(presets ?? []).length > 0 && (
-                <div className="pt-2 border-t border-border/40">
-                  <button
-                    onClick={() => {
-                      if (confirm("기존 스케줄의 시간을 현재 프리셋 설정으로 일괄 변경합니다.\n(custom 타입 제외)\n\n진행하시겠습니까?")) {
-                        applyMut.mutate({ restaurantId });
-                      }
-                    }}
-                    disabled={applyMut.isPending}
-                    className="w-full text-xs text-center py-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
-                  >
-                    {applyMut.isPending ? "적용 중..." : "기존 스케줄에 프리셋 시간 일괄 적용"}
-                  </button>
-                </div>
-              )}
+
+
           </>
         )}
       </CardContent>
