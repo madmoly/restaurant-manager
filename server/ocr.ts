@@ -532,8 +532,17 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       return;
     }
 
-    // ── AI 방향 감지 + 자동 회전 (OCR 전 전처리) ──────────────────────
-    await detectAndFixOrientation(filePath, anthropic);
+    // ── EXIF 회전만 적용 (AI 방향 감지는 비활성화 — 본 OCR 소넷이 회전 이미지를 직접 처리) ──
+    try {
+      const meta = await sharp(filePath).metadata();
+      if (meta.orientation && meta.orientation > 1) {
+        const exifRotated = await sharp(filePath).rotate().toBuffer();
+        fs.writeFileSync(filePath, exifRotated);
+        console.log(`[OCR] EXIF 자동회전 적용 (orientation=${meta.orientation}): ${path.basename(filePath)}`);
+      }
+    } catch (exifErr: any) {
+      console.warn(`[OCR] EXIF 처리 실패 (무시): ${exifErr.message}`);
+    }
 
     // ── 거래처 프로파일 조회 (동적 프롬프트 힌트용) ──────────────────────
     const ocrProfile = await getOcrProfile(clientCpId ? Number(clientCpId) : null);
@@ -563,12 +572,14 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
 당신의 임무: 이미지에서 **거래처명**과 **품목별 숫자 데이터**를 정확하게 추출하여 JSON으로 출력하세요.
 
-## ⚠ 이미지 방향 (최우선 확인)
+## ⚠ 이미지 방향 (최우선 — 반드시 먼저 수행)
 
-이미지가 90°, 180° 회전되어 있을 수 있습니다. **반드시 문서의 텍스트 방향을 먼저 파악하세요.**
-1. 문서 제목("거래명세표", "거래명세서" 등)이 어느 방향에 있는지 확인
-2. 그 기준으로 표의 열 헤더(품목, 수량, 단가, 공급가액 등)를 왼→오 순서로 읽기
-3. 열 순서 오류는 전체 데이터를 무효화하므로, 헤더를 반드시 먼저 확인
+이 이미지는 90°, 180°, 270° 회전되어 있을 수 있습니다. 촬영자가 휴대폰을 옆으로 들고 찍는 경우가 매우 흔합니다.
+**데이터를 추출하기 전에 반드시 아래 순서를 따르세요:**
+1. 이미지에서 한글 텍스트가 보이는 방향을 확인 — 텍스트가 옆으로 누워있거나 거꾸로일 수 있음
+2. 한글이 왼→오른쪽, 위→아래로 자연스럽게 읽히는 방향을 기준으로 문서를 해석
+3. 문서 제목("거래명세표", "거래명세서" 등), 표의 열 헤더(품목, 수량, 단가, 공급가액)를 확인하여 열 순서 파악
+4. **텍스트가 세로로 읽히면 90° 또는 270° 회전된 것** — 머릿속으로 회전하여 정방향 기준으로 읽으세요
 
 ## 문서 양식별 구조
 
