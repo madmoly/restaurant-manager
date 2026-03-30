@@ -24,6 +24,8 @@ import {
   Check,
   Settings,
   Plus,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -348,6 +350,10 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
     onSuccess() { toast.success("삭제됨"); utils.restaurants.getShiftPresets.invalidate({ restaurantId }); },
     onError(e: any) { toast.error(e.message); },
   });
+  const toggleMut = trpc.restaurants.toggleShiftPreset.useMutation({
+    onSuccess() { utils.restaurants.getShiftPresets.invalidate({ restaurantId }); },
+    onError(e: any) { toast.error(e.message); },
+  });
 
   const startEdit = () => {
     const initial: typeof forms = [];
@@ -380,10 +386,13 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
   };
 
   const dayLabel = (v: string) => SHIFT_DAY_TYPES.find((d) => d.value === v)?.label ?? v;
-  const presetLabel = (v: string) => { const d = SHIFT_PRESET_DEFAULTS.find((p) => p.value === v); if (d) return d.label; return presets?.find((p: any) => p.presetType === v)?.label ?? v; };
+  const presetLabel = (v: string) => { const dbRow = presets?.find((p: any) => p.presetType === v); if (dbRow?.label) return dbRow.label; const d = SHIFT_PRESET_DEFAULTS.find((p) => p.value === v); return d?.label ?? v; };
 
   const allTypes = useMemo(() => {
-    const base = SHIFT_PRESET_DEFAULTS.map((p) => ({ value: p.value, label: p.label, isCustom: false }));
+    const base = SHIFT_PRESET_DEFAULTS.map((p) => {
+      const dbRow = (presets ?? []).find((r: any) => r.presetType === p.value);
+      return { value: p.value, label: dbRow?.label || p.label, isCustom: false };
+    });
     const custom = (presets ?? []).filter((p: any) => p.isCustom).reduce((acc: { value: string; label: string; isCustom: boolean }[], p: any) => { if (!acc.find((a) => a.value === p.presetType)) acc.push({ value: p.presetType, label: p.label || p.presetType, isCustom: true }); return acc; }, []);
     return [...base, ...custom];
   }, [presets]);
@@ -452,38 +461,64 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
               {allTypes.map((pt) => {
                 const rows = (presets ?? []).filter((p: any) => p.presetType === pt.value);
                 if (rows.length === 0) return null;
-                return rows.map((r: any) => (
-                  <div key={r.id} className="flex items-center justify-between text-xs py-0.5">
-                    <span className="text-muted-foreground flex items-center gap-1">
-                      {pt.isCustom && <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500" />}
-                      {pt.label} ({dayLabel(r.dayType)})
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{r.startTime}~{r.endTime}{r.breakMinutes > 0 && <span className="text-muted-foreground ml-1">(휴게{r.breakMinutes}분)</span>}</span>
-                      {pt.isCustom && <button onClick={() => { if (confirm(`"${pt.label}" 삭제?`)) deleteMut.mutate({ id: r.id }); }} className="p-0.5 text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>}
-                    </div>
+                const isInactive = rows.every((r: any) => r.isActive === false);
+                return (
+                  <div key={pt.value} className={isInactive ? "opacity-40" : ""}>
+                    {rows.map((r: any) => (
+                      <div key={r.id} className="flex items-center justify-between text-xs py-0.5">
+                        <span className="text-muted-foreground flex items-center gap-1">
+                          {pt.isCustom && <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500" />}
+                          {r.label || pt.label} ({dayLabel(r.dayType)})
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`font-medium ${isInactive ? "line-through" : ""}`}>{r.startTime}~{r.endTime}{r.breakMinutes > 0 && <span className="text-muted-foreground ml-1">(휴게{r.breakMinutes}분)</span>}</span>
+                          <button
+                            onClick={() => toggleMut.mutate({ restaurantId, presetType: pt.value, isActive: isInactive })}
+                            className={`p-0.5 rounded ${isInactive ? "text-green-500 hover:text-green-700" : "text-yellow-500 hover:text-yellow-700"}`}
+                            title={isInactive ? "활성화" : "비활성화"}
+                          >
+                            {isInactive ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                          </button>
+                          {pt.isCustom && <button onClick={() => { if (confirm(`"${pt.label}" 삭제?`)) deleteMut.mutate({ id: r.id }); }} className="p-0.5 text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ));
+                );
               })}
             </div>
           )
         ) : (
           <div className="space-y-1.5">
-            <p className="text-[10px] text-muted-foreground">비워두면 영업시간 기반 자동 계산</p>
-            {forms.map((f, idx) => (
-              <div key={`${f.presetType}-${f.dayType}`} className="flex items-center gap-1 text-xs">
-                <span className="w-24 font-medium shrink-0 flex items-center gap-1">
-                  {f.isCustom && <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500 shrink-0" />}
-                  {presetLabel(f.presetType)} ({dayLabel(f.dayType)})
-                </span>
-                <input type="time" value={f.startTime} onChange={(e) => setForms((p) => p.map((x, i) => i === idx ? { ...x, startTime: e.target.value } : x))} className="w-[85px] rounded border border-input bg-background px-1 py-0.5 text-xs" />
-                <span className="text-muted-foreground">~</span>
-                <input type="time" value={f.endTime} onChange={(e) => setForms((p) => p.map((x, i) => i === idx ? { ...x, endTime: e.target.value } : x))} className="w-[85px] rounded border border-input bg-background px-1 py-0.5 text-xs" />
-                <span className="text-muted-foreground shrink-0">휴게</span>
-                <input type="number" value={f.breakMinutes} onChange={(e) => setForms((p) => p.map((x, i) => i === idx ? { ...x, breakMinutes: Number(e.target.value) || 0 } : x))} className="w-[45px] rounded border border-input bg-background px-1 py-0.5 text-xs text-center" min={0} max={180} />
-                <span className="text-muted-foreground">분</span>
-              </div>
-            ))}
+            <p className="text-[10px] text-muted-foreground">비워두면 영업시간 기반 자동 계산 · 라벨도 수정 가능</p>
+            {forms.map((f, idx) => {
+              // 같은 presetType의 첫 번째 row에서만 라벨 input 표시
+              const sameTypeFirst = forms.findIndex((x) => x.presetType === f.presetType) === idx;
+              return (
+                <div key={`${f.presetType}-${f.dayType}`} className="flex items-center gap-1 text-xs">
+                  {sameTypeFirst ? (
+                    <input
+                      value={f.label}
+                      onChange={(e) => {
+                        const newLabel = e.target.value;
+                        setForms((p) => p.map((x) => x.presetType === f.presetType ? { ...x, label: newLabel } : x));
+                      }}
+                      className="w-20 rounded border border-input bg-background px-1 py-0.5 text-xs font-medium shrink-0"
+                      placeholder="라벨"
+                    />
+                  ) : (
+                    <span className="w-20 shrink-0" />
+                  )}
+                  <span className="w-8 text-muted-foreground shrink-0 text-center">{dayLabel(f.dayType)}</span>
+                  <input type="time" value={f.startTime} onChange={(e) => setForms((p) => p.map((x, i) => i === idx ? { ...x, startTime: e.target.value } : x))} className="w-[85px] rounded border border-input bg-background px-1 py-0.5 text-xs" />
+                  <span className="text-muted-foreground">~</span>
+                  <input type="time" value={f.endTime} onChange={(e) => setForms((p) => p.map((x, i) => i === idx ? { ...x, endTime: e.target.value } : x))} className="w-[85px] rounded border border-input bg-background px-1 py-0.5 text-xs" />
+                  <span className="text-muted-foreground shrink-0">휴게</span>
+                  <input type="number" value={f.breakMinutes} onChange={(e) => setForms((p) => p.map((x, i) => i === idx ? { ...x, breakMinutes: Number(e.target.value) || 0 } : x))} className="w-[45px] rounded border border-input bg-background px-1 py-0.5 text-xs text-center" min={0} max={180} />
+                  <span className="text-muted-foreground">분</span>
+                </div>
+              );
+            })}
             <div className="flex gap-2 pt-1">
               <Button size="sm" onClick={handleSave} disabled={saveMut.isPending} className="h-7 px-3 text-xs">저장</Button>
               <button onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground">취소</button>
@@ -1070,14 +1105,18 @@ export default function SchedulePage() {
                     </div>
                   );
                 })()}
-                {/* 동적 프리셋 버튼: DB 기본3종 + 커스텀 */}
+                {/* 동적 프리셋 버튼: DB 기본3종 + 커스텀 (비활성 제외) */}
                 {(() => {
-                  // 기본 프리셋 (DB에 있든 없든 항상 표시)
-                  const defaultTypes = [
+                  const allDefaults = [
                     { key: "full", apiKey: "fullday", label: "풀타임", icon: Maximize2, fallbackDesc: "영업시간 전체 근무" },
                     { key: "open", apiKey: "open", label: "오픈", icon: Sun, fallbackDesc: "오픈 ~ 중간시간" },
                     { key: "close", apiKey: "close", label: "마감", icon: Moon, fallbackDesc: "중간시간 ~ 마감" },
                   ];
+                  // DB에 프리셋이 있으면 active 목록에 있는 것만 표시, 없으면 전부 표시
+                  const hasDbPresets = shiftPresets.length > 0;
+                  const defaultTypes = hasDbPresets
+                    ? allDefaults.filter(({ key }) => shiftPresets.some((p: any) => p.presetType === key))
+                    : allDefaults;
                   // DB 커스텀 프리셋 (isCustom=true, 중복 제거)
                   const customTypes = shiftPresets
                     .filter((p: any) => p.isCustom && !["open", "full", "close"].includes(p.presetType))
@@ -1370,11 +1409,15 @@ export default function SchedulePage() {
                 <label className="text-xs font-medium text-muted-foreground">근무유형</label>
                 <div className="flex flex-wrap gap-1.5 mt-1">
                   {(() => {
-                    const defaultItems = [
-                      { key: "full", label: "풀타임", icon: Maximize2 },
-                      { key: "open", label: "오픈", icon: Sun },
-                      { key: "close", label: "마감", icon: Moon },
+                    const allDefaultItems = [
+                      { key: "full", label: shiftPresets.find((p: any) => p.presetType === "full")?.label || "풀타임", icon: Maximize2 },
+                      { key: "open", label: shiftPresets.find((p: any) => p.presetType === "open")?.label || "오픈", icon: Sun },
+                      { key: "close", label: shiftPresets.find((p: any) => p.presetType === "close")?.label || "마감", icon: Moon },
                     ];
+                    const hasDbPresets = shiftPresets.length > 0;
+                    const defaultItems = hasDbPresets
+                      ? allDefaultItems.filter(({ key }) => shiftPresets.some((p: any) => p.presetType === key))
+                      : allDefaultItems;
                     const customItems = shiftPresets
                       .filter((p: any) => p.isCustom && !["open", "full", "close"].includes(p.presetType))
                       .reduce((acc: any[], p: any) => {
