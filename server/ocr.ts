@@ -6,8 +6,9 @@ import sharp from "sharp";
 import { execSync } from "child_process";
 import { UPLOAD_ROOT } from "./upload";
 import { db } from "./db";
-import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs, apiUsageLogs } from "../drizzle/schema";
+import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs, apiUsageLogs, purchaseOrdersV2, purchaseOrderItemsV2, items, restaurants } from "../drizzle/schema";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
+import { exportDatasetToGDrive, isGDriveConfigured } from "./gdrive";
 
 // OCR 에러를 error_logs 테이블에 저장
 async function logOcrError(message: string, metadata?: Record<string, any>, restaurantId?: number) {
@@ -1224,5 +1225,229 @@ ocrRouter.get("/tracking", async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error("[OCR] tracking error:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// 학습 데이터셋 내보내기 (master 전용)
+// ============================================================
+
+// 1) OCR 수정 데이터셋: 원본 OCR → 사람이 수정한 값 쌍
+ocrRouter.get("/export-dataset/corrections", async (req: Request, res: Response) => {
+  try {
+    const rows = await db
+      .select({
+        id: ocrCorrections.id,
+        restaurantId: ocrCorrections.restaurantId,
+        counterpartyId: ocrCorrections.counterpartyId,
+        counterpartyName: counterparties.name,
+        imageUrl: ocrCorrections.imageUrl,
+        originalItems: ocrCorrections.originalItems,
+        correctedItems: ocrCorrections.correctedItems,
+        createdAt: ocrCorrections.createdAt,
+      })
+      .from(ocrCorrections)
+      .leftJoin(counterparties, eq(ocrCorrections.counterpartyId, counterparties.id))
+      .orderBy(desc(ocrCorrections.createdAt));
+
+    const dataset = rows.map((r) => ({
+      id: r.id,
+      restaurantId: r.restaurantId,
+      counterparty: { id: r.counterpartyId, name: r.counterpartyName },
+      imageUrl: r.imageUrl,
+      original: r.originalItems,
+      corrected: r.correctedItems,
+      createdAt: r.createdAt,
+    }));
+
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="ocr-corrections-dataset-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json({
+      exportedAt: new Date().toISOString(),
+      type: "ocr_corrections",
+      description: "OCR 원본→사용자 수정 쌍. 요식업 전표 인식 학습용.",
+      totalRecords: dataset.length,
+      data: dataset,
+    });
+  } catch (err: any) {
+    console.error("[OCR] export corrections error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2) 확정 매입 데이터셋: 사람이 검증 완료한 매입 내역
+ocrRouter.get("/export-dataset/purchases", async (req: Request, res: Response) => {
+  try {
+    const orders = await db
+      .select({
+        orderId: purchaseOrdersV2.id,
+        restaurantId: purchaseOrdersV2.restaurantId,
+        restaurantName: restaurants.name,
+        counterpartyId: purchaseOrdersV2.counterpartyId,
+        counterpartyName: counterparties.name,
+        purchaseDate: purchaseOrdersV2.purchaseDate,
+        status: purchaseOrdersV2.status,
+        totalAmount: purchaseOrdersV2.totalAmount,
+        createdAt: purchaseOrdersV2.createdAt,
+      })
+      .from(purchaseOrdersV2)
+      .leftJoin(counterparties, eq(purchaseOrdersV2.counterpartyId, counterparties.id))
+      .leftJoin(restaurants, eq(purchaseOrdersV2.restaurantId, restaurants.id))
+      .orderBy(desc(purchaseOrdersV2.purchaseDate));
+
+    const orderIds = orders.map((o) => o.orderId);
+
+    let allItems: any[] = [];
+    if (orderIds.length > 0) {
+      // batch fetch items
+      allItems = await db
+        .select({
+          purchaseOrderId: purchaseOrderItemsV2.purchaseOrderId,
+          itemId: purchaseOrderItemsV2.itemId,
+          rawItemName: purchaseOrderItemsV2.rawItemName,
+          itemType: purchaseOrderItemsV2.itemType,
+          quantity: purchaseOrderItemsV2.quantity,
+          unitName: purchaseOrderItemsV2.unitName,
+          unitPrice: purchaseOrderItemsV2.unitPrice,
+          lineTotal: purchaseOrderItemsV2.lineTotal,
+          costingCategory: purchaseOrderItemsV2.costingCategory,
+          standardItemName: items.name,
+        })
+        .from(purchaseOrderItemsV2)
+        .leftJoin(items, eq(purchaseOrderItemsV2.itemId, items.id))
+        .orderBy(purchaseOrderItemsV2.purchaseOrderId);
+    }
+
+    // group items by orderId
+    const itemsByOrder = new Map<number, any[]>();
+    for (const it of allItems) {
+      const list = itemsByOrder.get(it.purchaseOrderId) || [];
+      list.push({
+        itemId: it.itemId,
+        rawName: it.rawItemName,
+        standardName: it.standardItemName,
+        type: it.itemType,
+        quantity: it.quantity ? Number(it.quantity) : null,
+        unit: it.unitName,
+        unitPrice: it.unitPrice ? Number(it.unitPrice) : null,
+        lineTotal: it.lineTotal ? Number(it.lineTotal) : null,
+        category: it.costingCategory,
+      });
+      itemsByOrder.set(it.purchaseOrderId, list);
+    }
+
+    const dataset = orders.map((o) => ({
+      orderId: o.orderId,
+      restaurant: { id: o.restaurantId, name: o.restaurantName },
+      counterparty: { id: o.counterpartyId, name: o.counterpartyName },
+      purchaseDate: o.purchaseDate,
+      status: o.status,
+      totalAmount: o.totalAmount ? Number(o.totalAmount) : null,
+      items: itemsByOrder.get(o.orderId) || [],
+      createdAt: o.createdAt,
+    }));
+
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="purchase-dataset-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json({
+      exportedAt: new Date().toISOString(),
+      type: "verified_purchases",
+      description: "사람이 검증한 요식업 식자재 매입 데이터. 품목명/단가/수량/거래처/날짜.",
+      totalOrders: dataset.length,
+      totalItems: allItems.length,
+      data: dataset,
+    });
+  } catch (err: any) {
+    console.error("[OCR] export purchases error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3) 거래처 OCR 프로파일 + 품목 마스터
+ocrRouter.get("/export-dataset/profiles", async (req: Request, res: Response) => {
+  try {
+    const profiles = await db
+      .select({
+        id: counterpartyOcrProfiles.id,
+        counterpartyId: counterpartyOcrProfiles.counterpartyId,
+        counterpartyName: counterparties.name,
+        documentType: counterpartyOcrProfiles.documentType,
+        columnOrder: counterpartyOcrProfiles.columnOrder,
+        frequentItems: counterpartyOcrProfiles.frequentItems,
+        sampleCount: counterpartyOcrProfiles.sampleCount,
+        lastUsedAt: counterpartyOcrProfiles.lastUsedAt,
+      })
+      .from(counterpartyOcrProfiles)
+      .leftJoin(counterparties, eq(counterpartyOcrProfiles.counterpartyId, counterparties.id))
+      .orderBy(desc(counterpartyOcrProfiles.sampleCount));
+
+    const itemMaster = await db
+      .select({
+        id: items.id,
+        restaurantId: items.restaurantId,
+        name: items.name,
+        itemType: items.itemType,
+        costingCategory: items.costingCategory,
+        baseUnit: items.baseUnit,
+        isActive: items.isActive,
+      })
+      .from(items)
+      .orderBy(items.restaurantId, items.name);
+
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="profiles-items-dataset-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json({
+      exportedAt: new Date().toISOString(),
+      type: "ocr_profiles_and_items",
+      description: "거래처별 OCR 프로파일(양식 패턴, 빈출 품목, 이동평균 단가) + 품목 마스터.",
+      profiles: {
+        total: profiles.length,
+        data: profiles.map((p) => ({
+          counterparty: { id: p.counterpartyId, name: p.counterpartyName },
+          documentType: p.documentType,
+          columnOrder: p.columnOrder,
+          frequentItems: p.frequentItems,
+          sampleCount: p.sampleCount,
+          lastUsedAt: p.lastUsedAt,
+        })),
+      },
+      itemMaster: {
+        total: itemMaster.length,
+        data: itemMaster,
+      },
+    });
+  } catch (err: any) {
+    console.error("[OCR] export profiles error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// Google Drive 데이터셋 업로드
+// ============================================================
+
+// 연동 상태 확인
+ocrRouter.get("/gdrive/status", async (_req: Request, res: Response) => {
+  res.json({
+    configured: isGDriveConfigured(),
+    folderId: process.env.GOOGLE_DRIVE_FOLDER_ID || null,
+  });
+});
+
+// Drive에 전체 데이터셋 업로드 실행
+ocrRouter.post("/gdrive/export", async (_req: Request, res: Response) => {
+  if (!isGDriveConfigured()) {
+    return res.status(400).json({
+      success: false,
+      error: "Google Drive 미설정. GOOGLE_SERVICE_ACCOUNT_KEY, GOOGLE_DRIVE_FOLDER_ID 환경변수 필요.",
+    });
+  }
+
+  try {
+    const result = await exportDatasetToGDrive();
+    res.json(result);
+  } catch (err: any) {
+    console.error("[OCR] gdrive export error:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });

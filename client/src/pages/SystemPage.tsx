@@ -795,7 +795,7 @@ function ErrorStatCard({ label, value, sub }: { label: string; value: number; su
 // 탭11: OCR 트래킹
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type OcrSubTab = "overview" | "errors" | "learning";
+type OcrSubTab = "overview" | "errors" | "learning" | "dataset";
 
 function OcrStatsTab() {
   const [data, setData] = useState<any>(null);
@@ -849,10 +849,10 @@ function OcrStatsTab() {
       {/* 기간 선택 + 서브탭 */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex gap-1">
-          {(["overview", "errors", "learning"] as OcrSubTab[]).map(st => (
+          {(["overview", "errors", "learning", "dataset"] as OcrSubTab[]).map(st => (
             <Button key={st} size="sm" variant={subTab === st ? "default" : "outline"} className="text-xs h-7 px-2.5"
               onClick={() => setSubTab(st)}>
-              {st === "overview" ? "호출/비용" : st === "errors" ? "에러" : "학습"}
+              {st === "overview" ? "호출/비용" : st === "errors" ? "에러" : st === "learning" ? "학습" : "데이터셋"}
             </Button>
           ))}
         </div>
@@ -1062,7 +1062,7 @@ function OcrStatsTab() {
             </Card>
           )}
 
-          {/* 수정 이력 */}
+          {/* 수정 이력 보기 */}
           <Button size="sm" variant="outline" className="text-xs" onClick={fetchCorrections}>
             최근 수정 이력 보기
           </Button>
@@ -1092,6 +1092,202 @@ function OcrStatsTab() {
           )}
         </div>
       )}
+
+      {/* ──── 서브탭: 데이터셋 ──── */}
+      {subTab === "dataset" && <DatasetExportSection />}
+    </div>
+  );
+}
+
+// ─── 데이터셋 내보내기 섹션 ───
+
+function DatasetExportSection() {
+  const [gdriveStatus, setGdriveStatus] = useState<{ configured: boolean; folderId?: string } | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<any>(null);
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  // Drive 연동 상태 확인
+  useState(() => {
+    fetch("/api/ocr/gdrive/status")
+      .then(r => r.json())
+      .then(setGdriveStatus)
+      .catch(() => setGdriveStatus({ configured: false }));
+  });
+
+  const handleGDriveExport = async () => {
+    setExporting(true);
+    setExportResult(null);
+    try {
+      const res = await fetch("/api/ocr/gdrive/export", { method: "POST" });
+      const data = await res.json();
+      setExportResult(data);
+      if (data.success) {
+        toast.success(`데이터셋 ${data.files?.length || 0}개 파일 Google Drive에 업로드 완료`);
+      } else {
+        toast.error(data.error || "업로드 실패");
+      }
+    } catch (err) {
+      toast.error("Google Drive 내보내기 실패");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleLocalDownload = async (type: string, label: string) => {
+    setDownloading(type);
+    try {
+      const res = await fetch(`/api/ocr/export-dataset/${type}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const cd = res.headers.get("content-disposition");
+      const match = cd?.match(/filename="(.+)"/);
+      a.download = match?.[1] || `${type}-dataset.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`${label} 다운로드 완료`);
+    } catch (err) {
+      toast.error(`${label} 다운로드 실패`);
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  const datasets = [
+    { type: "corrections", label: "OCR 수정 데이터", desc: "원본 OCR → 사용자 수정 쌍 (JSONL)", icon: "📝" },
+    { type: "purchases", label: "확정 매입 데이터", desc: "검증된 품목/단가/수량/거래처 (JSONL)", icon: "📦" },
+    { type: "profiles", label: "프로파일+품목", desc: "거래처 OCR 프로파일 + 품목 마스터 (JSON)", icon: "🏷️" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Google Drive 연동 상태 */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <HardDrive size={16} />
+            <span className="text-sm font-semibold">Google Drive 자동 업로드</span>
+          </div>
+          {gdriveStatus?.configured ? (
+            <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">연동됨</Badge>
+          ) : (
+            <Badge variant="outline" className="text-muted-foreground">미설정</Badge>
+          )}
+        </div>
+
+        {gdriveStatus?.configured ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              폴더 ID: <span className="font-mono text-[10px]">{gdriveStatus.folderId}</span>
+            </p>
+            <Button
+              size="sm"
+              onClick={handleGDriveExport}
+              disabled={exporting}
+              className="w-full"
+            >
+              {exporting ? (
+                <><RefreshCw size={14} className="animate-spin mr-2" />업로드 중...</>
+              ) : (
+                <><TrendingUp size={14} className="mr-2" />전체 데이터셋 Drive에 업로드</>
+              )}
+            </Button>
+
+            {exportResult?.success && (
+              <div className="space-y-1.5 mt-2">
+                {exportResult.files?.map((f: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between text-xs bg-muted/50 rounded px-3 py-2">
+                    <div>
+                      <span className="font-medium text-foreground">{f.name}</span>
+                      <span className="text-muted-foreground ml-2">({f.records}건)</span>
+                    </div>
+                    {f.link && (
+                      <a href={f.link} target="_blank" rel="noopener noreferrer"
+                        className="text-blue-600 dark:text-blue-400 hover:underline text-[11px]">
+                        열기 →
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {exportResult && !exportResult.success && (
+              <p className="text-xs text-red-500 mt-2">{exportResult.error}</p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Google Drive에 학습 데이터를 자동 업로드하려면 서비스 계정 설정이 필요합니다.
+            </p>
+            <details className="text-xs">
+              <summary className="cursor-pointer text-blue-600 dark:text-blue-400 hover:underline font-medium">설정 방법 보기</summary>
+              <ol className="mt-2 space-y-1.5 text-muted-foreground pl-4 list-decimal">
+                <li>Google Cloud Console → 서비스 계정 생성 → JSON 키 다운로드</li>
+                <li>Google Drive에 폴더 생성 → 서비스 계정 이메일에 편집자 권한 공유</li>
+                <li>Railway 환경변수 추가:
+                  <div className="font-mono text-[10px] bg-muted/50 rounded px-2 py-1 mt-1">
+                    GOOGLE_SERVICE_ACCOUNT_KEY = (JSON 키 전체)<br />
+                    GOOGLE_DRIVE_FOLDER_ID = (폴더 URL의 ID)
+                  </div>
+                </li>
+              </ol>
+            </details>
+          </div>
+        )}
+      </Card>
+
+      {/* 로컬 다운로드 (항상 사용 가능) */}
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Download size={16} />
+          <span className="text-sm font-semibold">로컬 다운로드</span>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          Drive 연동 없이 직접 JSON 파일로 다운로드합니다.
+        </p>
+        <div className="space-y-2">
+          {datasets.map((ds) => (
+            <button
+              key={ds.type}
+              onClick={() => handleLocalDownload(ds.type, ds.label)}
+              disabled={downloading === ds.type}
+              className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-lg border border-border hover:bg-muted/50 transition-colors disabled:opacity-50"
+            >
+              <span className="text-lg">{ds.icon}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">{ds.label}</p>
+                <p className="text-[11px] text-muted-foreground">{ds.desc}</p>
+              </div>
+              {downloading === ds.type ? (
+                <RefreshCw size={14} className="animate-spin text-muted-foreground shrink-0" />
+              ) : (
+                <Download size={14} className="text-muted-foreground shrink-0" />
+              )}
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      {/* 데이터 가치 설명 */}
+      <Card className="p-4 bg-muted/20">
+        <p className="text-xs font-semibold mb-2">데이터셋 구성</p>
+        <div className="space-y-2 text-[11px] text-muted-foreground">
+          <div>
+            <span className="font-medium text-foreground">OCR 수정 데이터 (JSONL)</span> — 이미지 OCR 원본 vs 사람이 확정한 값. 전표 인식 AI 학습의 핵심 라벨 데이터.
+          </div>
+          <div>
+            <span className="font-medium text-foreground">확정 매입 데이터 (JSONL)</span> — 품목명/단가/수량/거래처/날짜. 요식업 식자재 실거래 가격 DB. 시장에 공개된 곳 없음.
+          </div>
+          <div>
+            <span className="font-medium text-foreground">프로파일+품목 (JSON)</span> — 거래처별 양식 패턴, 빈출 품목, 이동평균 단가 + 품목 마스터.
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }
