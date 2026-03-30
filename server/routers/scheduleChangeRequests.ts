@@ -121,10 +121,23 @@ export const scheduleChangeRequestsRouter = router({
           .limit(1);
 
         if (req) {
+          // 해당 스케줄 현재 상태 조회 (정산 영향 판단)
+          const [currentSchedule] = await db
+            .select({ status: schedules.status })
+            .from(schedules)
+            .where(eq(schedules.id, req.scheduleId))
+            .limit(1);
+          const isCompleted = currentSchedule?.status === "completed";
+          const editReason = `변경요청 승인: ${req.reason ?? req.requestType}`;
+
           if (req.requestType === "off") {
             await db
               .update(schedules)
-              .set({ status: "canceled" })
+              .set({
+                status: "canceled",
+                editReason,
+                ...(isCompleted ? { payrollRecheckRequired: true } : {}),
+              } as any)
               .where(eq(schedules.id, req.scheduleId));
           } else if (req.requestType === "change" && req.requestedStartTime && req.requestedEndTime) {
             await db
@@ -132,7 +145,9 @@ export const scheduleChangeRequestsRouter = router({
               .set({
                 startTime: req.requestedStartTime,
                 endTime: req.requestedEndTime,
-              })
+                editReason,
+                ...(isCompleted ? { payrollRecheckRequired: true } : {}),
+              } as any)
               .where(eq(schedules.id, req.scheduleId));
           }
         }

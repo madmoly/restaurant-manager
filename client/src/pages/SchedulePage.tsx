@@ -690,7 +690,7 @@ export default function SchedulePage() {
     setAssignStep("preset");
   };
 
-  const handleQuickAssign = (preset: "open" | "fullday" | "close") => {
+  const handleQuickAssign = (preset: string) => {
     if (!assignDate || !assignUserId) return;
     quickAssign.mutate({
       restaurantId,
@@ -781,7 +781,7 @@ export default function SchedulePage() {
       workDate: dateStr,
       startTime: editForm.startTime,
       endTime: editForm.endTime,
-      shiftPreset: editForm.shiftPreset as "open" | "full" | "close" | "custom",
+      shiftPreset: editForm.shiftPreset,
       breakMinutes: editForm.breakMinutes,
       note: editForm.note || undefined,
       editReason: editForm.editReason || undefined,

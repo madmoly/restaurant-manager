@@ -78,11 +78,11 @@ export const leaveRequestsRouter = router({
       reason: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      // 5일 전 제한 검증
-      const target = new Date(input.leaveDate + "T00:00:00");
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const diffDays = Math.floor((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      // 5일 전 제한 검증 (KST 기준)
+      const target = new Date(input.leaveDate + "T00:00:00+09:00");
+      const nowKST = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
+      const todayKST = new Date(Date.UTC(nowKST.getUTCFullYear(), nowKST.getUTCMonth(), nowKST.getUTCDate()));
+      const diffDays = Math.floor((target.getTime() - todayKST.getTime()) / (1000 * 60 * 60 * 24));
       if (diffDays < 5) {
         throw new Error("휴무/반차 신청은 최소 5일 전에 해야 합니다");
       }

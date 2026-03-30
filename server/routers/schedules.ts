@@ -472,6 +472,11 @@ export const schedulesRouter = router({
           restaurantId: s.restaurantId,
           startTime: new Date(new Date(s.startTime).getTime() + diff),
           endTime: new Date(new Date(s.endTime).getTime() + diff),
+          shiftPreset: s.shiftPreset,
+          breakMinutes: s.breakMinutes ?? 0,
+          tempWorkerName: s.tempWorkerName,
+          tempWageType: s.tempWageType,
+          tempWageAmount: s.tempWageAmount,
           note: s.note,
           createdBy: ctx.user.userId,
           status: "draft" as const,
@@ -697,6 +702,7 @@ export const schedulesRouter = router({
           userName: users.name,
           startTime: schedules.startTime,
           endTime: schedules.endTime,
+          breakMinutes: schedules.breakMinutes,
           status: schedules.status,
           tempWorkerName: schedules.tempWorkerName,
           tempWageType: schedules.tempWageType,
@@ -761,7 +767,7 @@ export const schedulesRouter = router({
         }
 
         const grossHours = (new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 3600000;
-        const breakHours = ((r as any).breakMinutes ?? 0) / 60;
+        const breakHours = (r.breakMinutes ?? 0) / 60;
         const hours = Math.max(0, grossHours - breakHours);
         let wage = 0;
         if (r.tempWageType === "hourly" && r.tempWageAmount) {
