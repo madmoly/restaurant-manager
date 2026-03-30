@@ -1640,8 +1640,7 @@ function PurchaseTab({
                 </div>
               </div>
             );
-          })()
-          )}
+          })()}
 
           {/* 거래처 선택/입력 (검색 + 신규 생성) */}
           <div className="relative">
