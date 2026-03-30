@@ -46,7 +46,7 @@ export default function AdminDashboard() {
   const { data: allUsers, isLoading: loadingU } = trpc.users.list.useQuery();
   const { data: notifications } = trpc.notifications.listMine.useQuery({ limit: 10 });
 
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   const { data: todayStatuses } = trpc.admin.allStoresTodayStatus.useQuery({ date: todayStr });
 
   // ─── 사업그룹 필터 (master 전용) ──────────────────────────────────────

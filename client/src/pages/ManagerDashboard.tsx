@@ -15,9 +15,14 @@ export default function ManagerDashboard() {
   const [, setLocation] = useLocation();
 
   const today = new Date();
+  // KST 기준 날짜 문자열 (UTC+9)
+  const toKSTDateStr = (d: Date) => {
+    const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+    return kst.toISOString().slice(0, 10);
+  };
   const year = today.getFullYear();
   const month = today.getMonth() + 1;
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = toKSTDateStr(today);
 
   const restaurantId = current?.id ?? 0;
   const enabled = restaurantId > 0;
@@ -91,9 +96,9 @@ export default function ManagerDashboard() {
   // 일마감 상태
   const isClosed = !!dailyClosing;
 
-  // 오늘 출근자
+  // 오늘 출근자 (KST 기준)
   const todaySchedules = (upcoming ?? []).filter(s => {
-    const d = new Date(s.startTime).toISOString().slice(0, 10);
+    const d = toKSTDateStr(new Date(s.startTime));
     return d === todayStr;
   });
   const todayStaffCount = todaySchedules.length;
@@ -367,16 +372,22 @@ function buildFiveDaySchedule(
 ): DaySchedule[] {
   const days: DaySchedule[] = [];
   const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+  // KST 날짜 변환 헬퍼
+  const toKST = (d: Date) => {
+    const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+    return kst.toISOString().slice(0, 10);
+  };
 
   for (let i = 0; i < 5; i++) {
-    const d = new Date(todayStr);
+    // todayStr은 이미 KST 날짜 → KST 자정 기준으로 Date 생성
+    const d = new Date(todayStr + "T00:00:00+09:00");
     d.setDate(d.getDate() + i);
-    const dateStr = d.toISOString().slice(0, 10);
+    const dateStr = toKST(d);
     const dayOfWeek = dayNames[d.getDay()];
     const label = i === 0 ? `오늘 (${dayOfWeek})` : `${d.getMonth() + 1}/${d.getDate()} (${dayOfWeek})`;
 
     const daySchedules = upcoming.filter(s => {
-      const sd = new Date(s.startTime).toISOString().slice(0, 10);
+      const sd = toKST(new Date(s.startTime));
       return sd === dateStr;
     });
 

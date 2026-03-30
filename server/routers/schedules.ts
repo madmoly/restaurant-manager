@@ -98,6 +98,13 @@ export const schedulesRouter = router({
     .input(z.object({ restaurantId: z.number(), from: z.string(), to: z.string() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      // from/to는 KST 날짜 문자열 → KST 타임존으로 해석
+      const fromKST = input.from.includes("T")
+        ? new Date(input.from + (input.from.includes("+") ? "" : "+09:00"))
+        : new Date(input.from + "T00:00:00+09:00");
+      const toKST = input.to.includes("T")
+        ? new Date(input.to + (input.to.includes("+") ? "" : "+09:00"))
+        : new Date(input.to + "T23:59:59+09:00");
       const rows = await db
         .select({
           id: schedules.id,
@@ -119,8 +126,8 @@ export const schedulesRouter = router({
         .where(
           and(
             eq(schedules.restaurantId, input.restaurantId),
-            gte(schedules.startTime, new Date(input.from)),
-            sql`${schedules.startTime} <= ${new Date(input.to)}`
+            gte(schedules.startTime, fromKST),
+            sql`${schedules.startTime} <= ${toKST}`
           )
         )
         .orderBy(schedules.startTime);
@@ -131,6 +138,12 @@ export const schedulesRouter = router({
   listByUser: protectedProcedure
     .input(z.object({ userId: z.number(), from: z.string(), to: z.string() }))
     .query(async ({ input }) => {
+      const fromKST = input.from.includes("T")
+        ? new Date(input.from + (input.from.includes("+") ? "" : "+09:00"))
+        : new Date(input.from + "T00:00:00+09:00");
+      const toKST = input.to.includes("T")
+        ? new Date(input.to + (input.to.includes("+") ? "" : "+09:00"))
+        : new Date(input.to + "T23:59:59+09:00");
       const rows = await db
         .select({
           id: schedules.id,
@@ -145,8 +158,8 @@ export const schedulesRouter = router({
         .where(
           and(
             eq(schedules.userId, input.userId),
-            gte(schedules.startTime, new Date(input.from)),
-            sql`${schedules.startTime} <= ${new Date(input.to)}`
+            gte(schedules.startTime, fromKST),
+            sql`${schedules.startTime} <= ${toKST}`
           )
         )
         .orderBy(schedules.startTime);
@@ -647,11 +660,12 @@ export const schedulesRouter = router({
     .input(z.object({ restaurantId: z.number() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      // 오늘 00:00부터 (이미 시작된 오늘 근무도 포함)
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const end = new Date(todayStart);
-      end.setDate(end.getDate() + 7);
+      // KST 기준 오늘 00:00부터 (서버가 UTC이므로 +09:00 명시)
+      const now = new Date();
+      const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      const kstDateStr = kstNow.toISOString().slice(0, 10);
+      const todayStart = new Date(`${kstDateStr}T00:00:00+09:00`);
+      const end = new Date(todayStart.getTime() + 7 * 24 * 60 * 60 * 1000);
       return db
         .select({
           id: schedules.id,

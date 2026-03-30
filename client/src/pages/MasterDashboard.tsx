@@ -32,7 +32,7 @@ export default function MasterDashboard() {
   // 이번 달 사업 요약
   const { data: bizSummary, isLoading: loadingBiz } =    trpc.admin.multiStoreMonthlySummary.useQuery({ year, month });
 
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   const { data: todayStatuses } = trpc.admin.allStoresTodayStatus.useQuery({ date: todayStr });
 
   const { data: notifications } = trpc.notifications.listMine.useQuery({ limit: 5 });

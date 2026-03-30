@@ -76,7 +76,7 @@ export default function EmployeeDashboard() {
   }, [schedulesQuery.data, user]);
 
   const todaySchedules = mySchedules.filter((s: any) => {
-    const d = typeof s.startTime === "string" ? s.startTime.substring(0, 10) : fmtDate(new Date(s.startTime));
+    const d = fmtDate(new Date(s.startTime));
     return d === today;
   });
 
