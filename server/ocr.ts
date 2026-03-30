@@ -6,8 +6,22 @@ import sharp from "sharp";
 import { execSync } from "child_process";
 import { UPLOAD_ROOT } from "./upload";
 import { db } from "./db";
-import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections } from "../drizzle/schema";
+import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs } from "../drizzle/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
+
+// OCR 에러를 error_logs 테이블에 저장
+async function logOcrError(message: string, metadata?: Record<string, any>, restaurantId?: number) {
+  try {
+    await db.insert(errorLogs).values({
+      errorType: "ocr",
+      message,
+      metadata: metadata || null,
+      restaurantId: restaurantId || null,
+    });
+  } catch (e) {
+    console.error("[OCR] 에러 로그 저장 실패:", e);
+  }
+}
 
 export const ocrRouter = Router();
 
@@ -563,16 +577,16 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
    - "공급받는자"가 아닌 "공급자" 측입니다.
 
 2. **각 품목별 추출:**
-   - shortName: **품목명/규격** 형식으로 분리 표기. 품목명은 핵심 이름만, 규격은 용량·중량·사이즈·포장단위 등.
+   - shortName: **품목명만** (규격 제외, 핵심 이름만). 규격은 spec 필드에 별도 기록.
      예시:
-     · "핫철리소스/CHOLIMEX/250g(250g*24ea)/막소" → shortName: "핫철리소스/250g*24ea"
-     · "무항생제 계란(대란) 30구" → shortName: "무항생제 계란/대란 30구"
-     · "코카콜라 1.5L PET" → shortName: "코카콜라/1.5L"
-     · "양파(국내산) 10kg" → shortName: "양파/10kg"
-     · "일회용장갑(L)" → shortName: "일회용장갑/L"
-     · 규격 정보가 없으면 품목명만: "소금" → shortName: "소금"
-   - spec: 규격 부분만 별도 추출 (용량, 중량, 사이즈, 포장단위). 없으면 빈 문자열.
-     예시: "250g*24ea", "대란 30구", "1.5L", "10kg", "L", ""
+     · "핫철리소스/CHOLIMEX/250g(250g*24ea)/막소" → shortName: "핫철리소스"
+     · "무항생제 계란(대란) 30구" → shortName: "무항생제 계란"
+     · "코카콜라 1.5L PET" → shortName: "코카콜라"
+     · "양파(국내산) 10kg" → shortName: "양파"
+     · "일회용장갑(L)" → shortName: "일회용장갑"
+     · "소금" → shortName: "소금"
+   - spec: 규격 부분만 별도 추출 (용량, 중량, 사이즈, 포장단위, 원산지 등). 없으면 빈 문자열.
+     예시: "250g*24ea", "대란 30구", "1.5L", "10kg", "L", "국내산", ""
    - originalName: 이미지에 적힌 전체 품목/규격 텍스트 그대로
    - quantity: **수량 열의 숫자** (순수 숫자, 콤마 제거). 소수점 유지. 예: "6.000" → "6", "0.500" → "0.5"
    - unit: 단위. **규격에서 단위를 유추할 수 있으면 반영하세요.**
@@ -648,11 +662,14 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     try {
       parsed = parseAIJson(responseText);
     } catch {
-      // JSON 파싱 실패 시 원문 일부 반환
-      res.status(200).json({
-        counterpartyName: null,
-        items: [],
-        note: `구조화 실패. AI 응답: ${responseText.substring(0, 500)}`,
+      // JSON 파싱 실패 → 에러 로그 저장 + 재시도 가능 에러 응답
+      await logOcrError("OCR JSON 파싱 실패", {
+        responsePreview: responseText.substring(0, 1000),
+        imageUrl,
+      }, restaurantId ? Number(restaurantId) : undefined);
+      res.status(500).json({
+        error: "AI 응답을 처리하지 못했습니다. 다시 시도해주세요.",
+        retryable: true,
       });
       return;
     }
@@ -709,8 +726,12 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     res.json(result);
   } catch (err: any) {
     console.error("[OCR] extract-purchase error:", err);
+    await logOcrError(`OCR 처리 오류: ${err.message}`, {
+      stack: err.stack?.substring(0, 1000),
+      imageUrl: req.body?.imageUrl,
+    }, req.body?.restaurantId ? Number(req.body.restaurantId) : undefined);
     res.status(500).json({
-      error: `OCR 처리 중 오류: ${err.message}`,
+      error: `OCR 처리 중 오류가 발생했습니다.`,
       retryable: true,
     });
   }

@@ -793,6 +793,7 @@ function PurchaseTab({
   const [ocrRotation, setOcrRotation] = useState(0); // 사용자 수동 회전 (0/90/180/270)
   const [ocrStep, setOcrStep] = useState<'idle' | 'uploaded' | 'analyzed'>('idle'); // 업로드→확인→분석 단계
   const [ocrDateSuggestion, setOcrDateSuggestion] = useState<string | null>(null); // OCR 감지 날짜 (인라인 알림용)
+  const [ocrRetryCount, setOcrRetryCount] = useState(0); // OCR 재시도 횟수
   const [viewerImage, setViewerImage] = useState<string | null>(null); // 이미지 확대보기
 
   const utils = trpc.useUtils();
@@ -874,6 +875,7 @@ function PurchaseTab({
     setOcrRotation(0);
     setOcrStep('idle');
     setOcrDateSuggestion(null);
+    setOcrRetryCount(0);
     setReceivingOrderId(null);
   };
 
@@ -1087,8 +1089,22 @@ function PurchaseTab({
 
       if (ocrData.note) setNote(ocrData.note);
     } catch (error: any) {
-      setOcrError(error.message || 'OCR 처리 중 오류 발생');
-      toast.error(error.message || 'OCR 처리 실패');
+      const nextRetry = ocrRetryCount + 1;
+      setOcrRetryCount(nextRetry);
+
+      if (nextRetry < 2) {
+        // 자동 재시도 (최대 2회)
+        toast.info(`분석 실패, 자동 재시도 중... (${nextRetry}/2)`);
+        setOcrProcessing(false);
+        // 약간의 딜레이 후 재시도
+        setTimeout(() => handleOcrAnalyze(), 500);
+        return;
+      } else {
+        // 2회 재시도 후에도 실패
+        setOcrError('전표 분석에 실패했습니다. 이미지를 다시 올리거나 직접 입력해주세요.');
+        setOcrStep('uploaded'); // 다시 업로드 상태로 (재촬영 유도)
+        toast.error('분석 실패 — 이미지를 다시 올리거나 직접 입력해주세요');
+      }
     } finally {
       setOcrProcessing(false);
     }
@@ -1454,7 +1470,7 @@ function PurchaseTab({
                     글씨가 정방향으로 읽히는지 확인하세요. 돌아가 있으면 회전 버튼을 눌러주세요.
                   </p>
                   <button
-                    onClick={handleOcrAnalyze}
+                    onClick={() => { setOcrRetryCount(0); handleOcrAnalyze(); }}
                     className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
                   >
                     <Search className="w-4 h-4" />
