@@ -8,7 +8,7 @@ import { UPLOAD_ROOT } from "./upload";
 import { db } from "./db";
 import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs, apiUsageLogs, purchaseOrdersV2, purchaseOrderItemsV2, items, restaurants } from "../drizzle/schema";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
-import { exportDatasetToGDrive, isGDriveConfigured } from "./gdrive";
+import { exportDatasetToGDrive, isGDriveConfigured, getLastExportResult } from "./gdrive";
 
 // OCR 에러를 error_logs 테이블에 저장
 async function logOcrError(message: string, metadata?: Record<string, any>, restaurantId?: number) {
@@ -1426,11 +1426,14 @@ ocrRouter.get("/export-dataset/profiles", async (req: Request, res: Response) =>
 // Google Drive 데이터셋 업로드
 // ============================================================
 
-// 연동 상태 확인
+// 연동 상태 + 마지막 업로드 결과 확인
 ocrRouter.get("/gdrive/status", async (_req: Request, res: Response) => {
+  const { lastExport, inProgress } = getLastExportResult();
   res.json({
     configured: isGDriveConfigured(),
     folderId: process.env.GOOGLE_DRIVE_FOLDER_ID || null,
+    inProgress,
+    lastExport,
   });
 });
 
@@ -1444,7 +1447,7 @@ ocrRouter.post("/gdrive/export", async (_req: Request, res: Response) => {
   }
 
   try {
-    const result = await exportDatasetToGDrive();
+    const result = await exportDatasetToGDrive("manual");
     res.json(result);
   } catch (err: any) {
     console.error("[OCR] gdrive export error:", err);

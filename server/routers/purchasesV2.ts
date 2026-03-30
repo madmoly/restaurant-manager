@@ -10,6 +10,22 @@ import {
   items,
   users,
 } from "../../drizzle/schema";
+import { exportDatasetToGDrive, isGDriveConfigured } from "../gdrive";
+
+// 매입 확정 시 비동기로 Drive 업로드 (응답 지연 없음)
+function triggerDatasetExport() {
+  if (!isGDriveConfigured()) return;
+  setTimeout(async () => {
+    try {
+      const result = await exportDatasetToGDrive("purchase_confirmed");
+      if (result.success) {
+        console.log(`[GDrive] 매입 확정 트리거: ${result.files.length}개 파일 업로드`);
+      }
+    } catch (e: any) {
+      console.error("[GDrive] 매입 확정 트리거 실패:", e.message);
+    }
+  }, 5000);
+}
 
 export const purchasesV2Router = router({
   /** 월별 매입 전표 목록 */
@@ -209,6 +225,7 @@ export const purchasesV2Router = router({
                 .where(eq(counterpartyItems.id, item.counterpartyItemId));
             }
           }
+          triggerDatasetExport();
         }
       }
 
@@ -307,6 +324,7 @@ export const purchasesV2Router = router({
         })
         .where(eq(purchaseOrdersV2.id, input.id));
 
+      triggerDatasetExport();
       return { ok: true };
     }),
 
@@ -371,6 +389,7 @@ export const purchasesV2Router = router({
       // 발주→입고 전환 시 receivedAt 자동 설정
       if (rest.status === "received" && existing.status === "ordered") {
         updatePayload.receivedAt = new Date();
+        triggerDatasetExport();
       }
 
       if (rest.purchaseDate) {

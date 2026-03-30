@@ -7,6 +7,7 @@ import path from "path";
 import fs from "fs";
 import { uploadRouter, UPLOAD_ROOT, startCleanupScheduler } from "./upload";
 import { ocrRouter } from "./ocr";
+import { exportDatasetToGDrive, isGDriveConfigured } from "./gdrive";
 
 const app = express();
 app.use(express.json());
@@ -1103,6 +1104,29 @@ if (process.env.NODE_ENV === "production") {
   // 서버 시작 30초 후 1회 + 24시간마다 반복
   setTimeout(runAutoBackup, 30000);
   setInterval(runAutoBackup, 24 * 60 * 60 * 1000);
+})();
+
+// ─── Google Drive 학습 데이터셋 자동 업로드 (일 1회) ─────────────────────────
+(async () => {
+  const runAutoDatasetExport = async () => {
+    if (!isGDriveConfigured()) return;
+    try {
+      console.log("[GDrive] 자동 데이터셋 내보내기 시작...");
+      const result = await exportDatasetToGDrive("daily_auto");
+      if (result.success) {
+        const totalRecords = result.files.reduce((sum, f) => sum + f.records, 0);
+        console.log(`[GDrive] 자동 내보내기 완료: ${result.files.length}개 파일, ${totalRecords}건`);
+      } else {
+        console.error("[GDrive] 자동 내보내기 실패:", result.error);
+      }
+    } catch (e: any) {
+      console.error("[GDrive] 자동 내보내기 에러:", e.message);
+    }
+  };
+
+  // 서버 시작 60초 후 1회 + 24시간마다 반복
+  setTimeout(runAutoDatasetExport, 60000);
+  setInterval(runAutoDatasetExport, 24 * 60 * 60 * 1000);
 })();
 
 const port = parseInt(process.env.PORT || "3000");

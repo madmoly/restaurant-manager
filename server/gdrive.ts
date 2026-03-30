@@ -239,19 +239,32 @@ async function buildProfilesDataset() {
   return { profiles, itemMaster };
 }
 
-// ─── 메인 내보내기 함수 ───
+// ─── 마지막 업로드 상태 캐시 ───
 
 export interface ExportResult {
   success: boolean;
   files: Array<{ name: string; fileId?: string; link?: string; records: number }>;
   error?: string;
+  exportedAt?: string;
+  trigger?: string;
+}
+
+let lastExportResult: ExportResult | null = null;
+let exportInProgress = false;
+
+export function getLastExportResult() {
+  return { lastExport: lastExportResult, inProgress: exportInProgress };
 }
 
 /**
  * 전체 학습 데이터셋을 Google Drive에 업로드
  * SystemPage에서 호출하거나, 크론으로 자동 실행
  */
-export async function exportDatasetToGDrive(): Promise<ExportResult> {
+export async function exportDatasetToGDrive(trigger: string = "manual"): Promise<ExportResult> {
+  if (exportInProgress) {
+    return { success: false, files: [], error: "이미 내보내기 진행 중" };
+  }
+
   const drive = getDrive();
   const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
@@ -262,6 +275,8 @@ export async function exportDatasetToGDrive(): Promise<ExportResult> {
       error: "Google Drive 연동 미설정. GOOGLE_SERVICE_ACCOUNT_KEY와 GOOGLE_DRIVE_FOLDER_ID 환경변수를 확인하세요.",
     };
   }
+
+  exportInProgress = true;
 
   const results: ExportResult["files"] = [];
   const today = new Date().toISOString().slice(0, 10);
@@ -344,10 +359,16 @@ export async function exportDatasetToGDrive(): Promise<ExportResult> {
       records: 1,
     });
 
-    console.log(`[GDrive] 데이터셋 내보내기 완료: ${results.length}개 파일`);
-    return { success: true, files: results };
+    console.log(`[GDrive] 데이터셋 내보내기 완료: ${results.length}개 파일 (trigger: ${trigger})`);
+    const result: ExportResult = { success: true, files: results, exportedAt: new Date().toISOString(), trigger };
+    lastExportResult = result;
+    exportInProgress = false;
+    return result;
   } catch (err: any) {
     console.error("[GDrive] 데이터셋 내보내기 실패:", err);
-    return { success: false, files: results, error: err.message };
+    const result: ExportResult = { success: false, files: results, error: err.message, exportedAt: new Date().toISOString(), trigger };
+    lastExportResult = result;
+    exportInProgress = false;
+    return result;
   }
 }
