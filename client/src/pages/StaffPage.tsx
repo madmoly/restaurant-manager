@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { useRestaurant } from "@/contexts/RestaurantContext";
@@ -723,6 +723,16 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
   defaultEmployee?: { userId: number; name: string; affiliatedCompany?: string };
 }) {
   const utils = trpc.useUtils();
+
+  // ── 기존 회사 목록 + 최근 계약서 템플릿 조회 ──
+  const { data: companies } = trpc.electronicContracts.listCompanies.useQuery({ restaurantId });
+  const { data: latestTemplate } = trpc.electronicContracts.getLatestTemplate.useQuery(
+    { restaurantId },
+    { enabled: !defaultEmployee }, // 새 계약서일 때만 조회 (갱신/재계약 시 불필요)
+  );
+  const [templateApplied, setTemplateApplied] = useState(false);
+  const [showCompanyList, setShowCompanyList] = useState(false);
+
   const [form, setForm] = useState({
     employeeId: defaultEmployee?.userId ?? 0,
     employeeName: defaultEmployee?.name ?? "",
@@ -750,6 +760,37 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
     jobDescription: "",
     specialTerms: "",
   });
+
+  // ── 최근 계약서 템플릿 자동 적용 (새 계약서 + 첫 로드 시 1회) ──
+  useEffect(() => {
+    if (!defaultEmployee && latestTemplate && !templateApplied) {
+      setForm((prev) => ({
+        ...prev,
+        position: latestTemplate.position || prev.position,
+        contractType: (latestTemplate.contractType as any) || prev.contractType,
+        wageType: (latestTemplate.wageType as any) || prev.wageType,
+        wageAmount: latestTemplate.wageAmount || prev.wageAmount,
+        weeklyHours: latestTemplate.weeklyHours || prev.weeklyHours,
+        workStartTime: latestTemplate.workStartTime || prev.workStartTime,
+        workEndTime: latestTemplate.workEndTime || prev.workEndTime,
+        breakMinutes: latestTemplate.breakMinutes ?? prev.breakMinutes,
+        weeklyHoliday: latestTemplate.weeklyHoliday || prev.weeklyHoliday,
+        payDay: latestTemplate.payDay ?? prev.payDay,
+        payMethod: (latestTemplate.payMethod as any) || prev.payMethod,
+        over5Employees: latestTemplate.over5Employees ?? prev.over5Employees,
+        socialInsurance: latestTemplate.socialInsurance ?? prev.socialInsurance,
+        hasProbation: latestTemplate.hasProbation ?? prev.hasProbation,
+        probationMonths: latestTemplate.probationMonths ?? prev.probationMonths,
+        mealProvided: latestTemplate.mealProvided ?? prev.mealProvided,
+        mealAllowance: latestTemplate.mealAllowance || prev.mealAllowance,
+        workPlace: latestTemplate.workPlace || prev.workPlace,
+        jobDescription: latestTemplate.jobDescription || prev.jobDescription,
+        specialTerms: latestTemplate.specialTerms || prev.specialTerms,
+        affiliatedCompany: latestTemplate.affiliatedCompany || prev.affiliatedCompany,
+      }));
+      setTemplateApplied(true);
+    }
+  }, [latestTemplate, defaultEmployee, templateApplied]);
 
   const create = trpc.electronicContracts.createEmploymentContract.useMutation({
     onSuccess() { toast.success("계약서 초안 생성됨"); utils.electronicContracts.listEmploymentContracts.invalidate(); onClose(); },
@@ -781,13 +822,49 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
         </div>
 
         <div className="space-y-3">
+          {/* ═══ 기존 계약서 기반 자동 불러오기 안내 ═══ */}
+          {!defaultEmployee && templateApplied && (
+            <div className="rounded-lg bg-blue-500/10 border border-blue-200 dark:border-blue-800 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+              이전 계약서 내용이 자동으로 불러와졌습니다. 필요한 항목만 수정하세요.
+            </div>
+          )}
+
           {/* ═══ 소속회사 + 사업장 규모 ═══ */}
           <div className="rounded-lg border border-border p-3 space-y-2">
-            <div>
+            <div className="relative">
               <label className={labelCls}>소속회사</label>
-              <input className={inputCls} value={form.affiliatedCompany}
-                onChange={(e) => setForm({ ...form, affiliatedCompany: e.target.value })}
-                placeholder="인건비 정산 귀속 회사명" />
+              <div className="flex gap-2 mt-1">
+                <input className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={form.affiliatedCompany}
+                  onChange={(e) => { setForm({ ...form, affiliatedCompany: e.target.value }); setShowCompanyList(false); }}
+                  onFocus={() => { if (companies && companies.length > 0) setShowCompanyList(true); }}
+                  placeholder="인건비 정산 귀속 회사명" />
+                {companies && companies.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCompanyList(!showCompanyList)}
+                    className="shrink-0 px-2.5 py-2 rounded-md border border-input bg-background text-xs text-muted-foreground hover:bg-accent transition-colors"
+                    title="기존 회사 목록"
+                  >
+                    ▾
+                  </button>
+                )}
+              </div>
+              {/* 기존 회사 드롭다운 */}
+              {showCompanyList && companies && companies.length > 0 && (
+                <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-card border border-border rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                  {companies.map((c: string) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => { setForm({ ...form, affiliatedCompany: c }); setShowCompanyList(false); }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors ${form.affiliatedCompany === c ? "bg-primary/10 font-medium" : ""}`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              )}
               <p className={subLabelCls}>인건비 정산 시 소속회사별로 분류됩니다</p>
             </div>
             <div className="flex items-center justify-between pt-2">

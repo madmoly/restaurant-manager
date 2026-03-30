@@ -7,6 +7,7 @@ import {
   Trash2, Edit3, ChevronDown, ChevronUp, Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -58,7 +59,8 @@ export default function TaskManagementPage() {
     onSuccess: () => { utils.storeChecklists.listAllTemplates.invalidate(); resetForm(); },
   });
   const deleteMut = trpc.storeChecklists.deleteTemplate.useMutation({
-    onSuccess: () => utils.storeChecklists.listAllTemplates.invalidate(),
+    onSuccess: () => { toast.success("삭제되었습니다"); utils.storeChecklists.listAllTemplates.invalidate(); },
+    onError: (e: any) => { toast.error("삭제 실패: " + (e.message || "알 수 없는 오류")); },
   });
 
   const resetForm = () => {
@@ -188,8 +190,9 @@ export default function TaskManagementPage() {
                     <Edit3 className="w-3 h-3 mr-1" /> 수정
                   </Button>
                   <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive"
+                    disabled={deleteMut.isPending}
                     onClick={() => { if (confirm("이 업무를 삭제하시겠습니까?")) deleteMut.mutate({ id: t.id }); }}>
-                    <Trash2 className="w-3 h-3 mr-1" /> 삭제
+                    <Trash2 className="w-3 h-3 mr-1" /> {deleteMut.isPending ? "삭제 중..." : "삭제"}
                   </Button>
                 </div>
               )}

@@ -180,12 +180,24 @@ function RestaurantDetail({ restaurant: r, onNavigate }: {
     openTime: r.openTime ?? "09:00", closeTime: r.closeTime ?? "22:00",
   });
 
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   const updateMut = trpc.restaurants.update.useMutation({
     onSuccess() {
       toast.success("매장 정보 수정 완료");
       utils.restaurants.listWithSummary.invalidate();
       utils.restaurants.list.invalidate();
       setEditing(false);
+    },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const deleteMut = trpc.restaurants.softDelete.useMutation({
+    onSuccess() {
+      toast.success("매장이 삭제되었습니다 (복구 가능)");
+      utils.restaurants.listWithSummary.invalidate();
+      utils.restaurants.list.invalidate();
+      setConfirmDelete(false);
     },
     onError(err) { toast.error(err.message); },
   });
@@ -244,6 +256,21 @@ function RestaurantDetail({ restaurant: r, onNavigate }: {
             <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => { onNavigate(); window.location.href = "/"; }}>
               이 매장으로 이동
             </Button>
+            {!confirmDelete ? (
+              <Button size="sm" variant="ghost" className="text-xs h-7 text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}>
+                <Trash2 size={12} className="mr-1" /> 삭제
+              </Button>
+            ) : (
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-destructive">정말 삭제?</span>
+                <Button size="sm" variant="destructive" className="text-xs h-7" onClick={() => deleteMut.mutate({ id: r.id })} disabled={deleteMut.isPending}>
+                  확인
+                </Button>
+                <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => setConfirmDelete(false)}>
+                  취소
+                </Button>
+              </div>
+            )}
           </div>
         </>
       ) : (
@@ -423,8 +450,6 @@ const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
 function ClosedDaysManager({ restaurantId, canEdit }: { restaurantId: number; canEdit: boolean }) {
   const utils = trpc.useUtils();
-  const [viewYear, setViewYear] = useState(new Date().getFullYear());
-  const [viewMonth, setViewMonth] = useState(new Date().getMonth() + 1);
   const [addDate, setAddDate] = useState("");
   const [addReason, setAddReason] = useState("");
 
@@ -432,8 +457,27 @@ function ClosedDaysManager({ restaurantId, canEdit }: { restaurantId: number; ca
   const weeklyQ = trpc.storeClosures.getWeeklyClosures.useQuery({ restaurantId });
   const weeklyClosedSet = useMemo(() => new Set((weeklyQ.data || []).map((w: any) => w.weekday)), [weeklyQ.data]);
 
-  // 특정 휴무일 조회
-  const closedQ = trpc.storeClosures.listByMonth.useQuery({ restaurantId, year: viewYear, month: viewMonth });
+  // 특정 휴무일 조회 — 현재 월 + 미래 3개월
+  const now = new Date();
+  const closedQ = trpc.storeClosures.listByMonth.useQuery({ restaurantId, year: now.getFullYear(), month: now.getMonth() + 1 });
+  // 향후 전체 조회를 위해 다음 달도 가져옴
+  const nextMonth = now.getMonth() + 2 > 12 ? 1 : now.getMonth() + 2;
+  const nextYear = now.getMonth() + 2 > 12 ? now.getFullYear() + 1 : now.getFullYear();
+  const closedNextQ = trpc.storeClosures.listByMonth.useQuery({ restaurantId, year: nextYear, month: nextMonth });
+
+  // 전체 특정휴무일 통합 (이번달 + 다음달)
+  const allClosedDays = useMemo(() => {
+    const items = [...(closedQ.data || []), ...(closedNextQ.data || [])];
+    // 중복 제거 + 날짜순 정렬
+    const seen = new Set<number>();
+    return items
+      .filter((d: any) => { if (seen.has(d.id)) return false; seen.add(d.id); return true; })
+      .sort((a: any, b: any) => {
+        const da = typeof a.closedDate === "string" ? a.closedDate : new Date(a.closedDate).toISOString().split("T")[0];
+        const db = typeof b.closedDate === "string" ? b.closedDate : new Date(b.closedDate).toISOString().split("T")[0];
+        return da.localeCompare(db);
+      });
+  }, [closedQ.data, closedNextQ.data]);
 
   // Mutations
   const setWeekly = trpc.storeClosures.setWeeklyClosures.useMutation({
@@ -456,30 +500,12 @@ function ClosedDaysManager({ restaurantId, canEdit }: { restaurantId: number; ca
     setWeekly.mutate({ restaurantId, closedDays: Array.from(next) });
   };
 
-  const prevMonth = () => {
-    if (viewMonth === 1) { setViewYear(viewYear - 1); setViewMonth(12); }
-    else setViewMonth(viewMonth - 1);
+  const handleAdd = () => {
+    if (!addDate) { toast.error("날짜를 선택해주세요"); return; }
+    const dow = new Date(addDate + "T00:00:00").getDay();
+    if (weeklyClosedSet.has(dow)) { toast.error("해당 날짜는 정기 휴무일입니다"); return; }
+    addClosed.mutate({ restaurantId, closedDate: addDate, reason: addReason || undefined });
   };
-  const nextMonth = () => {
-    if (viewMonth === 12) { setViewYear(viewYear + 1); setViewMonth(1); }
-    else setViewMonth(viewMonth + 1);
-  };
-
-  // 달력 렌더링용 데이터
-  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
-  const firstDow = new Date(viewYear, viewMonth - 1, 1).getDay(); // 0=일
-  const closedDateSet = useMemo(
-    () => new Set((closedQ.data || []).map((d: any) => typeof d.closedDate === "string" ? d.closedDate : new Date(d.closedDate).toISOString().split("T")[0])),
-    [closedQ.data]
-  );
-  const closedDateMap = useMemo(() => {
-    const m: Record<string, { id: number; reason?: string | null }> = {};
-    for (const d of closedQ.data || []) {
-      const ds = typeof d.closedDate === "string" ? d.closedDate : new Date(d.closedDate).toISOString().split("T")[0];
-      m[ds] = { id: d.id, reason: d.reason };
-    }
-    return m;
-  }, [closedQ.data]);
 
   return (
     <div className="bg-card rounded-lg border border-border p-4 space-y-4">
@@ -513,79 +539,54 @@ function ClosedDaysManager({ restaurantId, canEdit }: { restaurantId: number; ca
         </div>
       </div>
 
-      {/* 특정 휴무일 캘린더 */}
+      {/* 특정 휴무일 — 날짜 선택 + 리스트 */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h4 className="text-xs font-medium text-muted-foreground">특정 휴무일</h4>
-          <div className="flex items-center gap-1">
-            <button onClick={prevMonth} className="p-1 rounded hover:bg-muted"><ChevronLeft size={14} /></button>
-            <span className="text-xs font-medium text-foreground min-w-[80px] text-center">{viewYear}년 {viewMonth}월</span>
-            <button onClick={nextMonth} className="p-1 rounded hover:bg-muted"><ChevronRight size={14} /></button>
+        <h4 className="text-xs font-medium text-muted-foreground">특정 휴무일</h4>
+
+        {/* 날짜 추가 입력 */}
+        {canEdit && (
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <input
+                type="date"
+                value={addDate}
+                onChange={(e) => setAddDate(e.target.value)}
+                min={new Date().toISOString().split("T")[0]}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              />
+            </div>
+            <input
+              value={addReason}
+              onChange={(e) => setAddReason(e.target.value)}
+              placeholder="사유 (선택)"
+              className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm"
+            />
+            <button
+              onClick={handleAdd}
+              disabled={!addDate || addClosed.isPending}
+              className="shrink-0 px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              추가
+            </button>
           </div>
-        </div>
+        )}
 
-        {/* 미니 캘린더 */}
-        <div className="grid grid-cols-7 gap-0.5 text-center">
-          {WEEKDAY_LABELS.map((l, i) => (
-            <div key={i} className={`text-[10px] font-medium py-1 ${i === 0 ? "text-red-400" : i === 6 ? "text-blue-400" : "text-muted-foreground"}`}>{l}</div>
-          ))}
-          {Array.from({ length: firstDow }).map((_, i) => <div key={`e-${i}`} />)}
-          {Array.from({ length: daysInMonth }).map((_, i) => {
-            const day = i + 1;
-            const ds = `${viewYear}-${String(viewMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-            const dow = new Date(viewYear, viewMonth - 1, day).getDay();
-            const isWeeklyClosed = weeklyClosedSet.has(dow);
-            const isSpecificClosed = closedDateSet.has(ds);
-            const isClosed = isWeeklyClosed || isSpecificClosed;
-            const closedInfo = closedDateMap[ds];
-
-            return (
-              <button
-                key={day}
-                disabled={!canEdit || isWeeklyClosed}
-                title={closedInfo?.reason || (isWeeklyClosed ? "정기 휴무" : undefined)}
-                onClick={() => {
-                  if (isSpecificClosed && closedInfo) {
-                    delClosed.mutate({ id: closedInfo.id });
-                  } else if (!isWeeklyClosed) {
-                    addClosed.mutate({ restaurantId, closedDate: ds });
-                  }
-                }}
-                className={`h-8 rounded text-xs transition-all ${
-                  isClosed
-                    ? isWeeklyClosed
-                      ? "bg-red-500/20 text-red-500 font-bold cursor-default"
-                      : "bg-red-500 text-white font-bold hover:bg-red-600"
-                    : "text-foreground hover:bg-primary/10"
-                } ${dow === 0 ? "text-red-400" : dow === 6 ? "text-blue-400" : ""} ${!canEdit ? "cursor-default" : ""}`}
-              >
-                {day}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* 범례 */}
-        <div className="flex gap-3 text-[10px] text-muted-foreground pt-1">
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500/20 inline-block" /> 정기 휴무</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block" /> 지정 휴무</span>
-          <span className="flex items-center gap-1">클릭으로 지정/해제</span>
-        </div>
-
-        {/* 이번 달 특정 휴무일 리스트 */}
-        {(closedQ.data || []).length > 0 && (
-          <div className="space-y-1 pt-1">
-            {(closedQ.data || []).map((d: any) => {
+        {/* 등록된 휴무일 리스트 */}
+        {allClosedDays.length > 0 ? (
+          <div className="space-y-1">
+            {allClosedDays.map((d: any) => {
               const ds = typeof d.closedDate === "string" ? d.closedDate : new Date(d.closedDate).toISOString().split("T")[0];
-              const dt = new Date(d.closedDate);
+              const dt = new Date(ds + "T00:00:00");
               const dow = dt.getDay();
+              const isPast = ds < new Date().toISOString().split("T")[0];
               return (
-                <div key={d.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-red-50 dark:bg-red-500/10 text-xs">
+                <div key={d.id} className={`flex items-center justify-between py-1.5 px-3 rounded-lg text-xs ${isPast ? "bg-muted/50 opacity-60" : "bg-red-50 dark:bg-red-500/10"}`}>
                   <span className="text-foreground">
-                    {ds.split("-")[1]}/{ds.split("-")[2]} ({WEEKDAY_LABELS[dow]})
-                    {d.reason && <span className="text-muted-foreground ml-1">— {d.reason}</span>}
+                    <span className="font-medium">{ds.slice(5).replace("-", "/")} ({WEEKDAY_LABELS[dow]})</span>
+                    {d.reason && <span className="text-muted-foreground ml-2">— {d.reason}</span>}
+                    {isPast && <span className="text-muted-foreground ml-1">(지남)</span>}
                   </span>
-                  {canEdit && (
+                  {canEdit && !isPast && (
                     <button onClick={() => delClosed.mutate({ id: d.id })} className="text-red-400 hover:text-red-600 p-1">
                       <Trash2 size={12} />
                     </button>
@@ -594,6 +595,8 @@ function ClosedDaysManager({ restaurantId, canEdit }: { restaurantId: number; ca
               );
             })}
           </div>
+        ) : (
+          <p className="text-xs text-muted-foreground py-2">등록된 특정 휴무일이 없습니다</p>
         )}
       </div>
     </div>

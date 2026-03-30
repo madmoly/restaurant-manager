@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql, isNotNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
@@ -132,6 +132,58 @@ export const electronicContractsRouter = router({
         .limit(1);
       if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "유효하지 않은 링크입니다" });
       return { ...rows[0].contract, restaurantName: rows[0].restaurantName };
+    }),
+
+  /** 매장 내 기존 계약서의 소속회사 목록 (중복 제거) */
+  listCompanies: managerProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const rows = await db
+        .selectDistinct({ affiliatedCompany: employmentElectronicContracts.affiliatedCompany })
+        .from(employmentElectronicContracts)
+        .where(and(
+          eq(employmentElectronicContracts.restaurantId, input.restaurantId),
+          isNotNull(employmentElectronicContracts.affiliatedCompany),
+          ne(employmentElectronicContracts.affiliatedCompany, ""),
+        ));
+      return rows.map((r) => r.affiliatedCompany!).filter(Boolean);
+    }),
+
+  /** 매장의 가장 최근 계약서 내용 반환 (새 계약서 작성 시 기본값으로 사용) */
+  getLatestTemplate: managerProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const [latest] = await db
+        .select({
+          position: employmentElectronicContracts.position,
+          contractType: employmentElectronicContracts.contractType,
+          wageType: employmentElectronicContracts.wageType,
+          wageAmount: employmentElectronicContracts.wageAmount,
+          weeklyHours: employmentElectronicContracts.weeklyHours,
+          workStartTime: employmentElectronicContracts.workStartTime,
+          workEndTime: employmentElectronicContracts.workEndTime,
+          breakMinutes: employmentElectronicContracts.breakMinutes,
+          weeklyHoliday: employmentElectronicContracts.weeklyHoliday,
+          payDay: employmentElectronicContracts.payDay,
+          payMethod: employmentElectronicContracts.payMethod,
+          socialInsurance: employmentElectronicContracts.socialInsurance,
+          over5Employees: employmentElectronicContracts.over5Employees,
+          hasProbation: employmentElectronicContracts.hasProbation,
+          probationMonths: employmentElectronicContracts.probationMonths,
+          mealProvided: employmentElectronicContracts.mealProvided,
+          mealAllowance: employmentElectronicContracts.mealAllowance,
+          workPlace: employmentElectronicContracts.workPlace,
+          jobDescription: employmentElectronicContracts.jobDescription,
+          specialTerms: employmentElectronicContracts.specialTerms,
+          affiliatedCompany: employmentElectronicContracts.affiliatedCompany,
+        })
+        .from(employmentElectronicContracts)
+        .where(eq(employmentElectronicContracts.restaurantId, input.restaurantId))
+        .orderBy(desc(employmentElectronicContracts.createdAt))
+        .limit(1);
+      return latest ?? null;
     }),
 
   /** 근로계약서 생성 (초안) */
