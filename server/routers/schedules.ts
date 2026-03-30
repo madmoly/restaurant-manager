@@ -796,4 +796,91 @@ export const schedulesRouter = router({
         employees: Object.values(c.employees),
       }));
     }),
+
+  /** 기존 스케줄을 프리셋 시간 기준으로 일괄 업데이트 */
+  applyPresetsToSchedules: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      weekStart: z.string().optional(), // 미지정 시 전체
+      weekEnd: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      // 1) 매장 프리셋 조회
+      const presetRows = await db.select().from(restaurantShiftPresets)
+        .where(and(
+          eq(restaurantShiftPresets.restaurantId, input.restaurantId),
+          eq(restaurantShiftPresets.isActive, true),
+        ));
+
+      if (presetRows.length === 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "저장된 근무유형 프리셋이 없습니다" });
+      }
+
+      // presetType+dayType → { startTime, endTime, breakMinutes }
+      const presetMap = new Map<string, { startTime: string; endTime: string; breakMinutes: number }>();
+      for (const p of presetRows) {
+        presetMap.set(`${p.presetType}_${p.dayType}`, {
+          startTime: p.startTime,
+          endTime: p.endTime,
+          breakMinutes: p.breakMinutes ?? 0,
+        });
+      }
+
+      // 2) 해당 매장의 스케줄 조회 (custom 제외, shiftPreset이 있는 것만)
+      const conditions: any[] = [
+        eq(schedules.restaurantId, input.restaurantId),
+        sql`${schedules.shiftPreset} IS NOT NULL`,
+        sql`${schedules.shiftPreset} != 'custom'`,
+      ];
+      if (input.weekStart) {
+        conditions.push(sql`${schedules.startTime} >= ${input.weekStart}`);
+      }
+      if (input.weekEnd) {
+        conditions.push(sql`${schedules.startTime} < ${input.weekEnd}`);
+      }
+
+      const rows = await db.select({
+        id: schedules.id,
+        startTime: schedules.startTime,
+        endTime: schedules.endTime,
+        shiftPreset: schedules.shiftPreset,
+        breakMinutes: schedules.breakMinutes,
+      }).from(schedules).where(and(...conditions));
+
+      let updated = 0;
+      for (const row of rows) {
+        if (!row.shiftPreset) continue;
+
+        // 날짜에서 평일/주말 판별 (KST 기준)
+        const kstDate = new Date(row.startTime.getTime() + 9 * 60 * 60 * 1000);
+        const dayOfWeek = kstDate.getUTCDay(); // 0=일, 6=토
+        const dayType = (dayOfWeek === 0 || dayOfWeek === 6) ? "weekend" : "weekday";
+
+        // 프리셋 찾기 (해당 dayType → fallback 반대 dayType)
+        let preset = presetMap.get(`${row.shiftPreset}_${dayType}`);
+        if (!preset) preset = presetMap.get(`${row.shiftPreset}_${dayType === "weekday" ? "weekend" : "weekday"}`);
+        if (!preset) continue; // 프리셋 없으면 스킵
+
+        // 기존 날짜 유지하면서 시간만 변경
+        const dateStr = toKSTDateString(row.startTime);
+        const [sh, sm] = preset.startTime.split(":").map(Number);
+        const [eh, em] = preset.endTime.split(":").map(Number);
+
+        const newStart = new Date(`${dateStr}T${preset.startTime}:00+09:00`);
+        let newEnd = new Date(`${dateStr}T${preset.endTime}:00+09:00`);
+        // 야간 근무: 종료시간이 시작시간보다 작으면 다음날
+        if (eh * 60 + em <= sh * 60 + sm) {
+          newEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
+        }
+
+        await db.update(schedules).set({
+          startTime: newStart,
+          endTime: newEnd,
+          breakMinutes: preset.breakMinutes,
+        }).where(eq(schedules.id, row.id));
+        updated++;
+      }
+
+      return { ok: true, updated, total: rows.length };
+    }),
 });
