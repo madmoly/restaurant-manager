@@ -1000,10 +1000,25 @@ function PurchaseTab({
 
       // 거래처 매칭 (사용자가 아직 선택 안 한 경우만)
       if (!counterpartyId && ocrData.counterpartyName) {
-        const matched = counterpartiesQuery.data?.find(
-          (cp: any) => cp.name.includes(ocrData.counterpartyName) || ocrData.counterpartyName.includes(cp.name)
-        );
-        if (matched) setCounterpartyId(matched.id);
+        const cpName = ocrData.counterpartyName.trim();
+        const cpList = counterpartiesQuery.data || [];
+        // 1) 정확 매칭
+        let matched = cpList.find((cp: any) => cp.name === cpName);
+        // 2) 부분 매칭 (포함 관계)
+        if (!matched) {
+          matched = cpList.find(
+            (cp: any) => cp.name.includes(cpName) || cpName.includes(cp.name)
+          );
+        }
+        if (matched) {
+          setCounterpartyId(matched.id);
+          toast.success(`거래처 자동선택: ${matched.name}`);
+        } else {
+          // 매칭 실패 → 검색란에 OCR 추출명 자동 입력 (사용자가 선택/신규등록)
+          setCpSearchText(cpName);
+          setShowCpDropdown(true);
+          toast.info(`거래처 "${cpName}" — 목록에서 선택하거나 새로 등록하세요`);
+        }
       }
 
       // 날짜 확인 → 인라인 알림 (toast 대신 — 모바일에서 버튼 가림 방지)
@@ -1053,7 +1068,7 @@ function PurchaseTab({
             rawItemName: item.shortName || item.name || '',
             spec: item.spec || '',
             originalName: item.originalName || item.name || '',
-            quantity: item.quantity || '',
+            quantity: item.quantity ? String(Math.round(parseFloat(item.quantity) * 100) / 100) : '',
             unitName: item.unit || '개',
             unitPrice: item.unitPrice || '',
             lineTotal: item.lineTotal || '',
@@ -1244,7 +1259,7 @@ function PurchaseTab({
                       <div key={item.id} className="flex justify-between text-xs">
                         <span className="text-foreground">{item.rawItemName || item.itemName || '품목'}</span>
                         <span className="text-muted-foreground tabular-nums">
-                          {item.quantity && `${item.quantity}${item.unitName ? item.unitName : ''} × `}
+                          {item.quantity && `${parseFloat(Number(item.quantity).toFixed(2))}${item.unitName ? item.unitName : ''} × `}
                           ₩{Number(item.lineTotal).toLocaleString()}
                         </span>
                       </div>
@@ -1432,15 +1447,20 @@ function PurchaseTab({
                 </button>
               </div>
 
-              {/* 분석 시작 버튼 (uploaded 단계에서만) */}
+              {/* 분석 시작 (uploaded 단계에서만) */}
               {ocrStep === 'uploaded' && (
-                <button
-                  onClick={handleOcrAnalyze}
-                  className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
-                >
-                  <Search className="w-4 h-4" />
-                  전표 분석 시작
-                </button>
+                <>
+                  <p className="text-[10px] text-muted-foreground text-center leading-relaxed">
+                    글씨가 정방향으로 읽히는지 확인하세요. 돌아가 있으면 회전 버튼을 눌러주세요.
+                  </p>
+                  <button
+                    onClick={handleOcrAnalyze}
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
+                  >
+                    <Search className="w-4 h-4" />
+                    전표 분석 시작
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -1643,7 +1663,7 @@ function PurchaseTab({
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <span className="text-[10px] text-muted-foreground mb-0.5 block">수량</span>
-                        <Input placeholder="0" type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', e.target.value)} className="text-sm h-9" />
+                        <Input placeholder="0" type="number" step="0.01" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', e.target.value)} className="text-sm h-9" />
                       </div>
                       <div>
                         <span className="text-[10px] text-muted-foreground mb-0.5 block">단위</span>
