@@ -170,6 +170,16 @@ export const schedulesRouter = router({
       if (await isClosedDay(input.restaurantId, input.workDate)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
       }
+      // 퇴사자 스케줄 배정 방지
+      const [ru] = await db.select({ resignedAt: restaurantUsers.resignedAt })
+        .from(restaurantUsers)
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId)
+        )).limit(1);
+      if (ru?.resignedAt) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "퇴사한 직원에게는 스케줄을 배정할 수 없습니다." });
+      }
       if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { userId: input.userId })) {
         throw new TRPCError({ code: "CONFLICT", message: "해당 직원은 이 날짜에 이미 스케줄이 등록되어 있습니다." });
       }
@@ -469,7 +479,21 @@ export const schedulesRouter = router({
         existingTargetWeek.map((e) => toKSTDateString(new Date(e.startTime)))
       );
 
+      // 퇴사자 userId 목록 조회 — 복사 대상에서 제외
+      const resignedRows = await db.select({ userId: restaurantUsers.userId })
+        .from(restaurantUsers)
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          sql`${restaurantUsers.resignedAt} IS NOT NULL`
+        ));
+      const resignedUserIds = new Set(resignedRows.map(r => r.userId));
+
       const inserts = prevSchedules
+        .filter((s) => {
+          // 퇴사자 스케줄 제외 (임시근로자는 userId가 null이므로 통과)
+          if (s.userId && resignedUserIds.has(s.userId)) return false;
+          return true;
+        })
         .map((s) => ({
           userId: s.userId,
           restaurantId: s.restaurantId,

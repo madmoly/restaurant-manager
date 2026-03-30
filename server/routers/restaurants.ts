@@ -189,10 +189,17 @@ export const restaurantsRouter = router({
       return { ok: true };
     }),
 
-  /** 매장 직원 목록 */
+  /** 매장 직원 목록 (includeResigned=true이면 퇴사자 포함) */
   getStaff: protectedProcedure
-    .input(z.object({ restaurantId: z.number() }))
+    .input(z.object({ restaurantId: z.number(), includeResigned: z.boolean().optional() }))
     .query(async ({ input }) => {
+      const conditions = [
+        eq(restaurantUsers.restaurantId, input.restaurantId),
+        eq(users.isActive, true),
+      ];
+      if (!input.includeResigned) {
+        conditions.push(sql`${restaurantUsers.resignedAt} IS NULL`);
+      }
       return db
         .select({
           id: restaurantUsers.id,
@@ -205,14 +212,13 @@ export const restaurantsRouter = router({
           healthCertExpiry: users.healthCertExpiry,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
+          resignedAt: restaurantUsers.resignedAt,
+          resignReason: restaurantUsers.resignReason,
           createdAt: restaurantUsers.createdAt,
         })
         .from(restaurantUsers)
         .innerJoin(users, eq(users.id, restaurantUsers.userId))
-        .where(and(
-          eq(restaurantUsers.restaurantId, input.restaurantId),
-          eq(users.isActive, true),
-        ));
+        .where(and(...conditions));
     }),
 
   /** 직원 매장 배정 */
@@ -274,6 +280,60 @@ export const restaurantsRouter = router({
       await db
         .update(restaurantUsers)
         .set({ hireDate: input.hireDate })
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId)
+        ));
+      return { ok: true };
+    }),
+
+  /** 직원 퇴사 처리 (소프트 삭제) */
+  resignStaff: ownerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      userId: z.number(),
+      resignedAt: z.string(), // YYYY-MM-DD
+      resignReason: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
+      await db
+        .update(restaurantUsers)
+        .set({
+          resignedAt: input.resignedAt,
+          resignReason: input.resignReason || null,
+        })
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId)
+        ));
+
+      // 퇴사일 이후 미확정(draft) 스케줄 자동 취소
+      await db.execute(sql`
+        UPDATE schedules
+        SET status = 'canceled'
+        WHERE restaurantId = ${input.restaurantId}
+          AND userId = ${input.userId}
+          AND status = 'draft'
+          AND DATE(startTime) > ${input.resignedAt}
+      `);
+
+      return { ok: true };
+    }),
+
+  /** 퇴사 취소 (복직) */
+  reinstateStaff: ownerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      userId: z.number(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
+      await db
+        .update(restaurantUsers)
+        .set({ resignedAt: null, resignReason: null })
         .where(and(
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, input.userId)

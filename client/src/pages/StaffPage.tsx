@@ -48,6 +48,10 @@ export default function StaffPage() {
   const [editingCredentials, setEditingCredentials] = useState<any>(null);
   const [editingCompany, setEditingCompany] = useState<{ userId: number; value: string } | null>(null);
   const [editingHireDate, setEditingHireDate] = useState<{ userId: number; value: string } | null>(null);
+  const [resignTarget, setResignTarget] = useState<{ userId: number; name: string } | null>(null);
+  const [resignDate, setResignDate] = useState(new Date().toISOString().slice(0, 10));
+  const [resignReason, setResignReason] = useState("");
+  const [showResigned, setShowResigned] = useState(false);
   const [renewTarget, setRenewTarget] = useState<{ userId: number; name: string; affiliatedCompany?: string } | null>(null);
 
   const utils = trpc.useUtils();
@@ -72,7 +76,7 @@ export default function StaffPage() {
   });
 
   const { data: staffList, isLoading } = trpc.restaurants.getStaff.useQuery(
-    { restaurantId },
+    { restaurantId, includeResigned: showResigned },
     { enabled: restaurantId > 0 },
   );
 
@@ -109,6 +113,16 @@ export default function StaffPage() {
 
   const updateHireDate = trpc.restaurants.updateStaffHireDate.useMutation({
     onSuccess() { toast.success("입사일 변경됨"); setEditingHireDate(null); utils.restaurants.getStaff.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const resignStaff = trpc.restaurants.resignStaff.useMutation({
+    onSuccess() { toast.success("퇴사 처리 완료"); setResignTarget(null); setResignReason(""); utils.restaurants.getStaff.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const reinstateStaff = trpc.restaurants.reinstateStaff.useMutation({
+    onSuccess() { toast.success("복직 처리 완료"); utils.restaurants.getStaff.invalidate(); },
     onError(err) { toast.error(err.message); },
   });
 
@@ -307,6 +321,14 @@ export default function StaffPage() {
         </div>
       )}
 
+      {/* 퇴사자 포함 토글 */}
+      <div className="flex items-center justify-end gap-2 mb-2">
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+          <input type="checkbox" checked={showResigned} onChange={(e) => setShowResigned(e.target.checked)} className="rounded" />
+          퇴사자 포함
+        </label>
+      </div>
+
       {/* 직원 목록 */}
       {isLoading ? (
         <div className="text-center py-8 text-muted-foreground">로딩 중...</div>
@@ -348,6 +370,12 @@ export default function StaffPage() {
                       {s.affiliatedCompany && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent text-muted-foreground">
                           {s.affiliatedCompany}
+                        </span>
+                      )}
+                      {/* 퇴사 배지 */}
+                      {s.resignedAt && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 font-medium">
+                          퇴사 {s.resignedAt}
                         </span>
                       )}
                       {/* 보건증 경고 */}
@@ -526,14 +554,32 @@ export default function StaffPage() {
                       </div>
                     </div>
 
-                    {/* 삭제 */}
-                    <div className="flex items-center gap-3 pt-2 border-t border-border">
+                    {/* 퇴사/복직 + 삭제 */}
+                    <div className="flex items-center gap-3 pt-2 border-t border-border flex-wrap">
                       <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
                         <Trash2 className="w-3 h-3" /> 관리
                       </label>
+                      {s.resignedAt ? (
+                        <button
+                          onClick={() => {
+                            if (confirm(`${s.name}을(를) 복직 처리하시겠습니까?`))
+                              reinstateStaff.mutate({ restaurantId, userId: s.userId });
+                          }}
+                          className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                        >
+                          <RefreshCw className="w-3 h-3" /> 복직 처리
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => { setResignTarget({ userId: s.userId, name: s.name }); setResignDate(new Date().toISOString().slice(0, 10)); setResignReason(""); }}
+                          className="text-xs text-orange-600 hover:underline flex items-center gap-1"
+                        >
+                          <X className="w-3 h-3" /> 퇴사 처리
+                        </button>
+                      )}
                       <button
                         onClick={() => {
-                          if (confirm(`${s.name}을(를) 매장에서 제거하시겠습니까?`))
+                          if (confirm(`${s.name}을(를) 매장에서 제거하시겠습니까? (이력 포함 완전 삭제)`))
                             removeStaff.mutate({ restaurantId, userId: s.userId });
                         }}
                         className="text-xs text-destructive hover:underline flex items-center gap-1"
@@ -686,6 +732,36 @@ export default function StaffPage() {
           defaultEmployee={renewTarget}
           onClose={() => setRenewTarget(null)}
         />
+      )}
+
+      {/* 퇴사 처리 다이얼로그 */}
+      {resignTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setResignTarget(null)}>
+          <div className="bg-card border border-border rounded-xl p-6 w-[90vw] max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-bold mb-4">퇴사 처리 — {resignTarget.name}</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">퇴사일</label>
+                <input type="date" value={resignDate} onChange={e => setResignDate(e.target.value)}
+                  className="w-full text-sm px-3 py-2 rounded-md border border-input bg-background" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">사유 (선택)</label>
+                <input value={resignReason} onChange={e => setResignReason(e.target.value)}
+                  placeholder="자발적 퇴사, 계약 만료 등"
+                  className="w-full text-sm px-3 py-2 rounded-md border border-input bg-background" />
+              </div>
+              <p className="text-xs text-muted-foreground">퇴사일 이후 미확정 스케줄은 자동 취소됩니다.</p>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <Button size="sm" variant="outline" onClick={() => setResignTarget(null)}>취소</Button>
+              <Button size="sm" variant="destructive" disabled={!resignDate || resignStaff.isPending}
+                onClick={() => resignStaff.mutate({ restaurantId, userId: resignTarget.userId, resignedAt: resignDate, resignReason: resignReason || undefined })}>
+                {resignStaff.isPending ? "처리 중..." : "퇴사 처리"}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

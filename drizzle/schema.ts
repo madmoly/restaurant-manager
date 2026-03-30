@@ -97,6 +97,8 @@ export const restaurantUsers = mysqlTable(
   role: mysqlEnum("role", ["owner", "supervisor", "staff", "store_manager", "manager", "employee"]).notNull().default("staff"),
     affiliatedCompany: varchar("affiliatedCompany", { length: 100 }),
     hireDate: date("hireDate"),
+    resignedAt: date("resignedAt"),
+    resignReason: varchar("resignReason", { length: 200 }),
     roleChangedAt: timestamp("roleChangedAt"),
     roleChangedBy: int("roleChangedBy"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
