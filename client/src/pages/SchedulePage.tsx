@@ -24,11 +24,10 @@ import {
   Check,
   Settings,
   Plus,
-  Eye,
-  EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { getHolidayName } from "@shared/holidays";
 
 // ─── 헬퍼 ────────────────────────────────────────────────────────────────────
@@ -333,21 +332,23 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
     { restaurantId, includeInactive: true },
     { enabled: restaurantId > 0 },
   );
-  const [editing, setEditing] = useState(false);
-  const [forms, setForms] = useState<{ presetType: string; dayType: string; label: string; startTime: string; endTime: string; breakMinutes: number; isCustom: boolean }[]>([]);
+
+  // ── 편집 상태: 어떤 presetType을 열고 있는지 ──
+  const [expandedType, setExpandedType] = useState<string | null>(null);
+  const [editForms, setEditForms] = useState<Record<string, { label: string; weekdayStart: string; weekdayEnd: string; weekdayBreak: number; weekendStart: string; weekendEnd: string; weekendBreak: number }>>({});
   const [showAddCustom, setShowAddCustom] = useState(false);
-  const [newType, setNewType] = useState({ key: "", label: "", weekdayStart: "", weekdayEnd: "", weekdayBreak: 0, weekendStart: "", weekendEnd: "", weekendBreak: 0 });
+  const [newType, setNewType] = useState({ label: "", weekdayStart: "", weekdayEnd: "", weekdayBreak: 0, weekendStart: "", weekendEnd: "", weekendBreak: 0 });
 
   const saveMut = trpc.restaurants.saveShiftPresets.useMutation({
-    onSuccess() { toast.success("프리셋 저장됨"); utils.restaurants.getShiftPresets.invalidate({ restaurantId }); setEditing(false); },
+    onSuccess() { toast.success("저장됨"); utils.restaurants.getShiftPresets.invalidate({ restaurantId }); setExpandedType(null); },
     onError(e: any) { toast.error(e.message); },
   });
   const createMut = trpc.restaurants.createShiftPresetType.useMutation({
-    onSuccess() { toast.success("커스텀 근무유형 추가됨"); utils.restaurants.getShiftPresets.invalidate({ restaurantId }); setShowAddCustom(false); setNewType({ key: "", label: "", weekdayStart: "", weekdayEnd: "", weekdayBreak: 0, weekendStart: "", weekendEnd: "", weekendBreak: 0 }); },
+    onSuccess() { toast.success("근무유형 추가됨"); utils.restaurants.getShiftPresets.invalidate({ restaurantId }); setShowAddCustom(false); setNewType({ label: "", weekdayStart: "", weekdayEnd: "", weekdayBreak: 0, weekendStart: "", weekendEnd: "", weekendBreak: 0 }); },
     onError(e: any) { toast.error(e.message); },
   });
   const deleteMut = trpc.restaurants.deleteShiftPreset.useMutation({
-    onSuccess() { toast.success("삭제됨"); utils.restaurants.getShiftPresets.invalidate({ restaurantId }); },
+    onSuccess() { toast.success("삭제됨"); utils.restaurants.getShiftPresets.invalidate({ restaurantId }); setExpandedType(null); },
     onError(e: any) { toast.error(e.message); },
   });
   const toggleMut = trpc.restaurants.toggleShiftPreset.useMutation({
@@ -355,39 +356,7 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
     onError(e: any) { toast.error(e.message); },
   });
 
-  const startEdit = () => {
-    const initial: typeof forms = [];
-    for (const pt of SHIFT_PRESET_DEFAULTS) {
-      for (const dt of SHIFT_DAY_TYPES) {
-        const existing = presets?.find((p: any) => p.presetType === pt.value && p.dayType === dt.value);
-        initial.push({ presetType: pt.value, dayType: dt.value, label: existing?.label ?? pt.label, startTime: existing?.startTime ?? "", endTime: existing?.endTime ?? "", breakMinutes: existing?.breakMinutes ?? (pt.value === "full" ? 60 : 0), isCustom: false });
-      }
-    }
-    const customTypes = (presets ?? []).filter((p: any) => p.isCustom).reduce((acc: string[], p: any) => { if (!acc.includes(p.presetType)) acc.push(p.presetType); return acc; }, []);
-    for (const ct of customTypes) {
-      for (const dt of SHIFT_DAY_TYPES) {
-        const existing = presets?.find((p: any) => p.presetType === ct && p.dayType === dt.value);
-        initial.push({ presetType: ct, dayType: dt.value, label: existing?.label ?? ct, startTime: existing?.startTime ?? "", endTime: existing?.endTime ?? "", breakMinutes: existing?.breakMinutes ?? 0, isCustom: true });
-      }
-    }
-    setForms(initial);
-    setEditing(true);
-  };
-
-  const handleSave = () => {
-    const valid = forms.filter((f) => f.startTime && f.endTime);
-    if (valid.length === 0) { toast.error("최소 1개 프리셋 시간을 입력해주세요"); return; }
-    saveMut.mutate({ restaurantId, presets: valid.map((f) => ({ presetType: f.presetType, dayType: f.dayType as "weekday" | "weekend", label: f.label, startTime: f.startTime, endTime: f.endTime, breakMinutes: f.breakMinutes, isCustom: f.isCustom })) });
-  };
-
-  const handleAddCustom = () => {
-    if (!newType.key || !newType.label || !newType.weekdayStart || !newType.weekdayEnd) { toast.error("유형 코드, 라벨, 평일 시간을 입력해주세요"); return; }
-    createMut.mutate({ restaurantId, presetType: newType.key, label: newType.label, weekday: { startTime: newType.weekdayStart, endTime: newType.weekdayEnd, breakMinutes: newType.weekdayBreak }, weekend: newType.weekendStart && newType.weekendEnd ? { startTime: newType.weekendStart, endTime: newType.weekendEnd, breakMinutes: newType.weekendBreak } : undefined });
-  };
-
-  const dayLabel = (v: string) => SHIFT_DAY_TYPES.find((d) => d.value === v)?.label ?? v;
-  const presetLabel = (v: string) => { const dbRow = presets?.find((p: any) => p.presetType === v); if (dbRow?.label) return dbRow.label; const d = SHIFT_PRESET_DEFAULTS.find((p) => p.value === v); return d?.label ?? v; };
-
+  // ── 프리셋을 presetType별로 그룹화 ──
   const allTypes = useMemo(() => {
     const base = SHIFT_PRESET_DEFAULTS.map((p) => {
       const dbRow = (presets ?? []).find((r: any) => r.presetType === p.value);
@@ -397,6 +366,76 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
     return [...base, ...custom];
   }, [presets]);
 
+  const presetLabel = (v: string) => { const dbRow = presets?.find((p: any) => p.presetType === v); if (dbRow?.label) return dbRow.label; const d = SHIFT_PRESET_DEFAULTS.find((p) => p.value === v); return d?.label ?? v; };
+
+  // ── 카드 확장 시 폼 초기화 ──
+  const openEdit = (presetType: string) => {
+    if (expandedType === presetType) { setExpandedType(null); return; }
+    const wd = (presets ?? []).find((p: any) => p.presetType === presetType && p.dayType === "weekday");
+    const we = (presets ?? []).find((p: any) => p.presetType === presetType && p.dayType === "weekend");
+    const label = wd?.label || we?.label || presetLabel(presetType);
+    setEditForms((prev) => ({
+      ...prev,
+      [presetType]: {
+        label,
+        weekdayStart: wd?.startTime ?? "", weekdayEnd: wd?.endTime ?? "",
+        weekdayBreak: wd?.breakMinutes ?? (presetType === "full" ? 60 : 0),
+        weekendStart: we?.startTime ?? "", weekendEnd: we?.endTime ?? "",
+        weekendBreak: we?.breakMinutes ?? (presetType === "full" ? 60 : 0),
+      },
+    }));
+    setExpandedType(presetType);
+  };
+
+  const handleSaveType = (presetType: string) => {
+    const f = editForms[presetType];
+    if (!f) return;
+    const items: any[] = [];
+    const isCustom = !SHIFT_PRESET_DEFAULTS.some((d) => d.value === presetType);
+    if (f.weekdayStart && f.weekdayEnd) {
+      items.push({ presetType, dayType: "weekday" as const, label: f.label, startTime: f.weekdayStart, endTime: f.weekdayEnd, breakMinutes: f.weekdayBreak, isCustom });
+    }
+    // 주말: 비어있으면 평일과 동일
+    const weStart = f.weekendStart || f.weekdayStart;
+    const weEnd = f.weekendEnd || f.weekdayEnd;
+    const weBreak = f.weekendStart ? f.weekendBreak : f.weekdayBreak;
+    if (weStart && weEnd) {
+      items.push({ presetType, dayType: "weekend" as const, label: f.label, startTime: weStart, endTime: weEnd, breakMinutes: weBreak, isCustom });
+    }
+    if (items.length === 0) { toast.error("평일 시간을 입력해주세요"); return; }
+    saveMut.mutate({ restaurantId, presets: items });
+  };
+
+  // ── 커스텀 추가: 영문코드 자동 생성 ──
+  const handleAddCustom = () => {
+    if (!newType.label || !newType.weekdayStart || !newType.weekdayEnd) { toast.error("이름과 평일 시간을 입력해주세요"); return; }
+    // 라벨로부터 영문 키 자동 생성 (한글→로마자 변환 대신 타임스탬프 기반)
+    const key = `custom_${Date.now().toString(36)}`;
+    createMut.mutate({
+      restaurantId, presetType: key, label: newType.label,
+      weekday: { startTime: newType.weekdayStart, endTime: newType.weekdayEnd, breakMinutes: newType.weekdayBreak },
+      weekend: newType.weekendStart && newType.weekendEnd
+        ? { startTime: newType.weekendStart, endTime: newType.weekendEnd, breakMinutes: newType.weekendBreak }
+        : undefined,
+    });
+  };
+
+  // ── 시간 행 컴포넌트 ──
+  const TimeRow = ({ label, startTime, endTime, breakMin, onStartChange, onEndChange, onBreakChange }: {
+    label: string; startTime: string; endTime: string; breakMin: number;
+    onStartChange: (v: string) => void; onEndChange: (v: string) => void; onBreakChange: (v: number) => void;
+  }) => (
+    <div className="flex items-center gap-1.5 text-xs">
+      <span className="w-8 text-muted-foreground shrink-0">{label}</span>
+      <input type="time" value={startTime} onChange={(e) => onStartChange(e.target.value)} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
+      <span className="text-muted-foreground">~</span>
+      <input type="time" value={endTime} onChange={(e) => onEndChange(e.target.value)} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
+      <span className="text-muted-foreground shrink-0 ml-1">휴게</span>
+      <input type="number" value={breakMin} onChange={(e) => onBreakChange(Number(e.target.value) || 0)} className="w-[48px] rounded border border-input bg-background px-1 py-1 text-xs text-center" min={0} max={180} />
+      <span className="text-muted-foreground">분</span>
+    </div>
+  );
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -404,126 +443,178 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
           <CardTitle className="text-sm flex items-center gap-2">
             <Settings className="h-4 w-4 text-primary" /> 근무유형 프리셋
           </CardTitle>
-          <div className="flex gap-1">
-            {!editing && (
-              <>
-                <button onClick={() => setShowAddCustom(!showAddCustom)} className="text-xs text-primary hover:underline">+ 커스텀</button>
-                <button onClick={startEdit} className="p-1 rounded hover:bg-accent text-muted-foreground"><Edit3 className="w-3.5 h-3.5" /></button>
-              </>
-            )}
-          </div>
+          <button
+            onClick={() => { setShowAddCustom(!showAddCustom); setExpandedType(null); }}
+            className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" /> 유형 추가
+          </button>
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
-        {/* 커스텀 추가 폼 */}
-        {showAddCustom && (
-          <div className="p-3 rounded-lg bg-violet-50/50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800 space-y-2">
-            <p className="text-xs font-semibold text-violet-700 dark:text-violet-400">커스텀 근무유형 추가</p>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[10px] text-muted-foreground">유형코드 (영문)</label>
-                <input value={newType.key} onChange={(e) => setNewType({ ...newType, key: e.target.value.replace(/[^a-z0-9_]/gi, "").toLowerCase() })} placeholder="mid" className="w-full rounded border border-input bg-background px-2 py-1 text-xs" />
-              </div>
-              <div>
-                <label className="text-[10px] text-muted-foreground">표시명</label>
-                <input value={newType.label} onChange={(e) => setNewType({ ...newType, label: e.target.value })} placeholder="미들" className="w-full rounded border border-input bg-background px-2 py-1 text-xs" />
-              </div>
-            </div>
-            <p className="text-[10px] text-muted-foreground">평일</p>
-            <div className="flex items-center gap-1.5 text-xs">
-              <input type="time" value={newType.weekdayStart} onChange={(e) => setNewType({ ...newType, weekdayStart: e.target.value })} className="w-[85px] rounded border border-input bg-background px-1.5 py-0.5 text-xs" />
-              <span>~</span>
-              <input type="time" value={newType.weekdayEnd} onChange={(e) => setNewType({ ...newType, weekdayEnd: e.target.value })} className="w-[85px] rounded border border-input bg-background px-1.5 py-0.5 text-xs" />
-              <span className="text-muted-foreground">휴게</span>
-              <input type="number" value={newType.weekdayBreak} onChange={(e) => setNewType({ ...newType, weekdayBreak: Number(e.target.value) || 0 })} className="w-[45px] rounded border border-input bg-background px-1 py-0.5 text-xs text-center" min={0} />
-              <span className="text-muted-foreground">분</span>
-            </div>
-            <p className="text-[10px] text-muted-foreground">주말 (비우면 평일과 동일)</p>
-            <div className="flex items-center gap-1.5 text-xs">
-              <input type="time" value={newType.weekendStart} onChange={(e) => setNewType({ ...newType, weekendStart: e.target.value })} className="w-[85px] rounded border border-input bg-background px-1.5 py-0.5 text-xs" />
-              <span>~</span>
-              <input type="time" value={newType.weekendEnd} onChange={(e) => setNewType({ ...newType, weekendEnd: e.target.value })} className="w-[85px] rounded border border-input bg-background px-1.5 py-0.5 text-xs" />
-              <span className="text-muted-foreground">휴게</span>
-              <input type="number" value={newType.weekendBreak} onChange={(e) => setNewType({ ...newType, weekendBreak: Number(e.target.value) || 0 })} className="w-[45px] rounded border border-input bg-background px-1 py-0.5 text-xs text-center" min={0} />
-              <span className="text-muted-foreground">분</span>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={handleAddCustom} disabled={createMut.isPending} className="h-7 px-3 text-xs">추가</Button>
-              <button onClick={() => setShowAddCustom(false)} className="text-xs text-muted-foreground hover:text-foreground">취소</button>
-            </div>
-          </div>
-        )}
-
-        {!editing ? (
-          isLoading ? <p className="text-xs text-muted-foreground">불러오는 중...</p> :
-          !presets || presets.length === 0 ? <p className="text-xs text-muted-foreground">미설정 — 매장 영업시간 기반 자동 계산</p> : (
-            <div className="space-y-0.5">
-              {allTypes.map((pt) => {
-                const rows = (presets ?? []).filter((p: any) => p.presetType === pt.value);
-                if (rows.length === 0) return null;
-                const isInactive = rows.every((r: any) => r.isActive === false);
-                return (
-                  <div key={pt.value} className={isInactive ? "opacity-40" : ""}>
-                    {rows.map((r: any) => (
-                      <div key={r.id} className="flex items-center justify-between text-xs py-0.5">
-                        <span className="text-muted-foreground flex items-center gap-1">
-                          {pt.isCustom && <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500" />}
-                          {r.label || pt.label} ({dayLabel(r.dayType)})
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className={`font-medium ${isInactive ? "line-through" : ""}`}>{r.startTime}~{r.endTime}{r.breakMinutes > 0 && <span className="text-muted-foreground ml-1">(휴게{r.breakMinutes}분)</span>}</span>
-                          <button
-                            onClick={() => toggleMut.mutate({ restaurantId, presetType: pt.value, isActive: isInactive })}
-                            className={`p-0.5 rounded ${isInactive ? "text-green-500 hover:text-green-700" : "text-yellow-500 hover:text-yellow-700"}`}
-                            title={isInactive ? "활성화" : "비활성화"}
-                          >
-                            {isInactive ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                          </button>
-                          {pt.isCustom && <button onClick={() => { if (confirm(`"${pt.label}" 삭제?`)) deleteMut.mutate({ id: r.id }); }} className="p-0.5 text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          )
-        ) : (
-          <div className="space-y-1.5">
-            <p className="text-[10px] text-muted-foreground">비워두면 영업시간 기반 자동 계산 · 라벨도 수정 가능</p>
-            {forms.map((f, idx) => {
-              // 같은 presetType의 첫 번째 row에서만 라벨 input 표시
-              const sameTypeFirst = forms.findIndex((x) => x.presetType === f.presetType) === idx;
-              return (
-                <div key={`${f.presetType}-${f.dayType}`} className="flex items-center gap-1 text-xs">
-                  {sameTypeFirst ? (
-                    <input
-                      value={f.label}
-                      onChange={(e) => {
-                        const newLabel = e.target.value;
-                        setForms((p) => p.map((x) => x.presetType === f.presetType ? { ...x, label: newLabel } : x));
-                      }}
-                      className="w-20 rounded border border-input bg-background px-1 py-0.5 text-xs font-medium shrink-0"
-                      placeholder="라벨"
-                    />
-                  ) : (
-                    <span className="w-20 shrink-0" />
-                  )}
-                  <span className="w-8 text-muted-foreground shrink-0 text-center">{dayLabel(f.dayType)}</span>
-                  <input type="time" value={f.startTime} onChange={(e) => setForms((p) => p.map((x, i) => i === idx ? { ...x, startTime: e.target.value } : x))} className="w-[85px] rounded border border-input bg-background px-1 py-0.5 text-xs" />
-                  <span className="text-muted-foreground">~</span>
-                  <input type="time" value={f.endTime} onChange={(e) => setForms((p) => p.map((x, i) => i === idx ? { ...x, endTime: e.target.value } : x))} className="w-[85px] rounded border border-input bg-background px-1 py-0.5 text-xs" />
-                  <span className="text-muted-foreground shrink-0">휴게</span>
-                  <input type="number" value={f.breakMinutes} onChange={(e) => setForms((p) => p.map((x, i) => i === idx ? { ...x, breakMinutes: Number(e.target.value) || 0 } : x))} className="w-[45px] rounded border border-input bg-background px-1 py-0.5 text-xs text-center" min={0} max={180} />
-                  <span className="text-muted-foreground">분</span>
+        {isLoading ? <p className="text-xs text-muted-foreground">불러오는 중...</p> : (
+          <>
+            {/* ── 커스텀 추가 폼 ── */}
+            {showAddCustom && (
+              <div className="p-3 rounded-lg bg-violet-50/50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800 space-y-2.5">
+                <p className="text-xs font-semibold text-violet-700 dark:text-violet-400">새 근무유형</p>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">이름</label>
+                  <input
+                    value={newType.label} onChange={(e) => setNewType({ ...newType, label: e.target.value })}
+                    placeholder="예: 미들, 라운지, 주방오픈"
+                    className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs"
+                  />
                 </div>
-              );
-            })}
-            <div className="flex gap-2 pt-1">
-              <Button size="sm" onClick={handleSave} disabled={saveMut.isPending} className="h-7 px-3 text-xs">저장</Button>
-              <button onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground">취소</button>
-            </div>
-          </div>
+                <TimeRow label="평일"
+                  startTime={newType.weekdayStart} endTime={newType.weekdayEnd} breakMin={newType.weekdayBreak}
+                  onStartChange={(v) => setNewType({ ...newType, weekdayStart: v })}
+                  onEndChange={(v) => setNewType({ ...newType, weekdayEnd: v })}
+                  onBreakChange={(v) => setNewType({ ...newType, weekdayBreak: v })}
+                />
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1">주말 <span className="text-muted-foreground/60">(비우면 평일과 동일)</span></p>
+                  <TimeRow label="주말"
+                    startTime={newType.weekendStart} endTime={newType.weekendEnd} breakMin={newType.weekendBreak}
+                    onStartChange={(v) => setNewType({ ...newType, weekendStart: v })}
+                    onEndChange={(v) => setNewType({ ...newType, weekendEnd: v })}
+                    onBreakChange={(v) => setNewType({ ...newType, weekendBreak: v })}
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" onClick={handleAddCustom} disabled={createMut.isPending} className="h-7 px-3 text-xs">추가</Button>
+                  <button onClick={() => setShowAddCustom(false)} className="text-xs text-muted-foreground hover:text-foreground">취소</button>
+                </div>
+              </div>
+            )}
+
+            {/* ── 프리셋 목록 (카드형) ── */}
+            {(!presets || presets.length === 0) && !showAddCustom ? (
+              <p className="text-xs text-muted-foreground py-2">미설정 — 매장 영업시간 기반으로 자동 계산됩니다</p>
+            ) : (
+              <div className="space-y-1.5">
+                {allTypes.map((pt) => {
+                  const rows = (presets ?? []).filter((p: any) => p.presetType === pt.value);
+                  if (rows.length === 0) return null;
+                  const isActive = rows.some((r: any) => r.isActive !== false);
+                  const wd = rows.find((r: any) => r.dayType === "weekday");
+                  const we = rows.find((r: any) => r.dayType === "weekend");
+                  const isExpanded = expandedType === pt.value;
+
+                  // 평일/주말 시간이 동일한지 체크
+                  const sameTime = wd && we && wd.startTime === we.startTime && wd.endTime === we.endTime && wd.breakMinutes === we.breakMinutes;
+
+                  return (
+                    <div
+                      key={pt.value}
+                      className={`rounded-lg border transition-all ${isExpanded ? "border-primary/40 bg-accent/30" : "border-border/60 hover:border-border"} ${!isActive ? "opacity-50" : ""}`}
+                    >
+                      {/* ── 요약 행 ── */}
+                      <div
+                        className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none"
+                        onClick={() => openEdit(pt.value)}
+                      >
+                        {/* 라벨 */}
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          {pt.isCustom && <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500 shrink-0" />}
+                          <span className={`text-xs font-medium truncate ${!isActive ? "line-through" : ""}`}>
+                            {pt.label}
+                          </span>
+                        </div>
+
+                        {/* 시간 요약 */}
+                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+                          {wd && (
+                            <span>
+                              {sameTime ? "" : "평 "}{wd.startTime}~{wd.endTime}
+                              {wd.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">(휴{wd.breakMinutes})</span>}
+                            </span>
+                          )}
+                          {we && !sameTime && (
+                            <span className="ml-1">
+                              주 {we.startTime}~{we.endTime}
+                              {we.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">(휴{we.breakMinutes})</span>}
+                            </span>
+                          )}
+                          {!wd && !we && <span className="italic">미설정</span>}
+                        </div>
+
+                        {/* 활성/비활성 스위치 */}
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <Switch
+                            checked={isActive}
+                            onCheckedChange={(checked: boolean) => toggleMut.mutate({ restaurantId, presetType: pt.value, isActive: checked })}
+                            className="scale-90"
+                          />
+                        </div>
+
+                        {/* 확장 표시 */}
+                        <ChevronRight className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                      </div>
+
+                      {/* ── 편집 패널 (확장 시) ── */}
+                      {isExpanded && editForms[pt.value] && (
+                        <div className="px-3 pb-3 space-y-2.5 border-t border-border/40 pt-2.5">
+                          {/* 라벨 편집 */}
+                          <div>
+                            <label className="text-[10px] text-muted-foreground block mb-0.5">표시 이름</label>
+                            <input
+                              value={editForms[pt.value].label}
+                              onChange={(e) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], label: e.target.value } }))}
+                              className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs font-medium"
+                              placeholder="표시 이름"
+                            />
+                          </div>
+
+                          {/* 평일 시간 */}
+                          <TimeRow label="평일"
+                            startTime={editForms[pt.value].weekdayStart}
+                            endTime={editForms[pt.value].weekdayEnd}
+                            breakMin={editForms[pt.value].weekdayBreak}
+                            onStartChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekdayStart: v } }))}
+                            onEndChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekdayEnd: v } }))}
+                            onBreakChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekdayBreak: v } }))}
+                          />
+
+                          {/* 주말 시간 */}
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">주말 <span className="text-muted-foreground/60">(비우면 평일과 동일)</span></p>
+                            <TimeRow label="주말"
+                              startTime={editForms[pt.value].weekendStart}
+                              endTime={editForms[pt.value].weekendEnd}
+                              breakMin={editForms[pt.value].weekendBreak}
+                              onStartChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekendStart: v } }))}
+                              onEndChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekendEnd: v } }))}
+                              onBreakChange={(v) => setEditForms((prev) => ({ ...prev, [pt.value]: { ...prev[pt.value], weekendBreak: v } }))}
+                            />
+                          </div>
+
+                          {/* 저장/삭제 버튼 */}
+                          <div className="flex items-center gap-2 pt-1">
+                            <Button size="sm" onClick={() => handleSaveType(pt.value)} disabled={saveMut.isPending} className="h-7 px-4 text-xs">저장</Button>
+                            <button onClick={() => setExpandedType(null)} className="text-xs text-muted-foreground hover:text-foreground">취소</button>
+                            {pt.isCustom && (
+                              <button
+                                onClick={() => { if (confirm(`"${pt.label}" 유형을 삭제하시겠습니까?`)) deleteMut.mutate({ id: rows[0]?.id }); }}
+                                className="ml-auto text-xs text-red-400 hover:text-red-600 flex items-center gap-0.5"
+                              >
+                                <Trash2 className="w-3 h-3" /> 삭제
+                              </button>
+                            )}
+                          </div>
+
+                          {/* 비우면 자동계산 안내 (기본 프리셋만) */}
+                          {!pt.isCustom && (
+                            <p className="text-[10px] text-muted-foreground/60">시간을 비우면 매장 영업시간 기반으로 자동 계산됩니다</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
