@@ -489,14 +489,11 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
             )}
 
             {/* ── 프리셋 목록 (카드형) ── */}
-            {(!presets || presets.length === 0) && !showAddCustom ? (
-              <p className="text-xs text-muted-foreground py-2">미설정 — 매장 영업시간 기반으로 자동 계산됩니다</p>
-            ) : (
               <div className="space-y-1.5">
                 {allTypes.map((pt) => {
                   const rows = (presets ?? []).filter((p: any) => p.presetType === pt.value);
-                  if (rows.length === 0) return null;
-                  const isActive = rows.some((r: any) => r.isActive !== false);
+                  const hasData = rows.length > 0;
+                  const isActive = hasData ? rows.some((r: any) => r.isActive !== false) : true;
                   const wd = rows.find((r: any) => r.dayType === "weekday");
                   const we = rows.find((r: any) => r.dayType === "weekend");
                   const isExpanded = expandedType === pt.value;
@@ -536,20 +533,22 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
                               {we.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">(휴{we.breakMinutes})</span>}
                             </span>
                           )}
-                          {!wd && !we && <span className="italic">미설정</span>}
+                          {!wd && !we && <span className="italic text-muted-foreground/60">미설정</span>}
                         </div>
 
-                        {/* 활성/비활성 스위치 */}
-                        <div onClick={(e) => e.stopPropagation()}>
-                          <Switch
-                            checked={isActive}
-                            onCheckedChange={(checked: boolean) => toggleMut.mutate({ restaurantId, presetType: pt.value, isActive: checked })}
-                            className="scale-90"
-                          />
-                        </div>
+                        {/* 수정 버튼 */}
+                        <Pencil className={`w-3 h-3 shrink-0 transition-colors ${isExpanded ? "text-primary" : "text-muted-foreground/40 hover:text-muted-foreground"}`} />
 
-                        {/* 확장 표시 */}
-                        <ChevronRight className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                        {/* 활성/비활성 스위치 (데이터 있을 때만) */}
+                        {hasData && (
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <Switch
+                              checked={isActive}
+                              onCheckedChange={(checked: boolean) => toggleMut.mutate({ restaurantId, presetType: pt.value, isActive: checked })}
+                              className="scale-90"
+                            />
+                          </div>
+                        )}
                       </div>
 
                       {/* ── 편집 패널 (확장 시) ── */}
@@ -613,7 +612,6 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
                   );
                 })}
               </div>
-            )}
           </>
         )}
       </CardContent>
