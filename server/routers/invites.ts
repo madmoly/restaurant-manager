@@ -6,6 +6,7 @@ import { ROLE_LEVEL } from "@shared/permissions";
 import { db } from "../db";
 import { restaurantInvites, users, restaurantUsers, restaurants } from "../../drizzle/schema";
 import { hashPassword, createToken } from "../auth";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 import crypto from "crypto";
 
 /** 6자리 영숫자 초대코드 생성 */
@@ -32,6 +33,9 @@ export const invitesRouter = router({
       expiresInHours: z.number().min(1).max(168).default(48), // 최대 7일
     }))
     .mutation(async ({ input, ctx }) => {
+      // 매장 접근권 검증 (자기 매장만 초대 가능)
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
       // owner 초대는 admin 이상만
       if (input.role === "owner") {
         const level = ROLE_LEVEL[ctx.user.role] ?? 0;
@@ -164,7 +168,10 @@ export const invitesRouter = router({
   /** 매장의 초대코드 목록 조회 (점장/매니져 이상) */
   list: managerProcedure
     .input(z.object({ restaurantId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // 매장 접근권 검증
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+
       const invites = await db.select({
         id: restaurantInvites.id,
         code: restaurantInvites.code,

@@ -5,6 +5,7 @@ import { db } from "../db";
 import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { activeRealStoreCondition, getOwnedRestaurants } from "../helpers/restaurantScope";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 
 /** 주소 → 좌표 자동 변환 (Nominatim / OpenStreetMap) + API 사용량 로깅 */
 async function geocodeAddress(address: string, userId?: number, restaurantId?: number): Promise<{ latitude: string; longitude: string } | null> {
@@ -115,7 +116,7 @@ export const restaurantsRouter = router({
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
-      const [r] = await db.select().from(restaurants).where(eq(restaurants.id, input.id)).limit(1);
+      const [r] = await db.select().from(restaurants).where(and(eq(restaurants.id, input.id), sql`${restaurants.deletedAt} IS NULL`)).limit(1);
       if (!r) throw new TRPCError({ code: "NOT_FOUND", message: "매장을 찾을 수 없습니다" });
       return r;
     }),
@@ -207,7 +208,10 @@ export const restaurantsRouter = router({
         })
         .from(restaurantUsers)
         .innerJoin(users, eq(users.id, restaurantUsers.userId))
-        .where(eq(restaurantUsers.restaurantId, input.restaurantId));
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(users.isActive, true),
+        ));
     }),
 
   /** 직원 매장 배정 */
@@ -231,7 +235,10 @@ export const restaurantsRouter = router({
       userId: z.number(),
       affiliatedCompany: z.string().nullable(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // 매장 접근권 검증
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
       await db
         .update(restaurantUsers)
         .set({ affiliatedCompany: input.affiliatedCompany })

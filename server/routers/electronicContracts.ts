@@ -169,6 +169,9 @@ export const electronicContractsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // 매장 접근권 검증
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
       const token = randomBytes(32).toString("hex");
       const [result] = await db
         .insert(employmentElectronicContracts)
@@ -212,13 +215,15 @@ export const electronicContractsRouter = router({
   /** 계약서 발송 (상태 → sent) */
   sendContract: ownerProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const [contract] = await db
-        .select({ token: employmentElectronicContracts.token })
+        .select({ token: employmentElectronicContracts.token, restaurantId: employmentElectronicContracts.restaurantId })
         .from(employmentElectronicContracts)
         .where(eq(employmentElectronicContracts.id, input.id))
         .limit(1);
       if (!contract) throw new TRPCError({ code: "NOT_FOUND" });
+      // 매장 접근권 검증
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, contract.restaurantId, true);
       await db
         .update(employmentElectronicContracts)
         .set({ status: "sent", sentAt: new Date() })

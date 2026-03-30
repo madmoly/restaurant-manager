@@ -17,6 +17,9 @@ export const authRouter = router({
       const ok = await comparePassword(input.password, user.passwordHash);
       if (!ok) throw new Error("아이디 또는 비밀번호가 올바르지 않습니다");
 
+      // 비활성 사용자 차단
+      if (user.isActive === false) throw new Error("비활성화된 계정입니다. 관리자에게 문의하세요.");
+
       await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
 
       const token = await createToken({ userId: user.id, username: user.username, role: user.role, parentId: user.parentId });

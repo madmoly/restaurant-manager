@@ -690,7 +690,10 @@ export const schedulesRouter = router({
   /** 소속회사별 인건비 정산 조회 (점장 이상만) */
   laborCostByCompany: ownerProcedure
     .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // 매장 접근권 검증
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+
       const monthStr = String(input.month).padStart(2, "0");
       const from = new Date(`${input.year}-${monthStr}-01T00:00:00`);
       const toDate = new Date(input.year, input.month, 1);
