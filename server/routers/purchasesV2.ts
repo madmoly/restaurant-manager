@@ -137,7 +137,7 @@ export const purchasesV2Router = router({
     .input(
       z.object({
         restaurantId: z.number(),
-        counterpartyId: z.number().optional(),
+        counterpartyId: z.number(),
         purchaseDate: z.string(),
         status: z.enum(["received", "ordered"]).default("received"),
         note: z.string().optional(),

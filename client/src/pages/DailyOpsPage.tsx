@@ -1059,6 +1059,12 @@ function PurchaseTab({
     const isOrderMode = inputMode === 'order';
     const isReceiveFromOrder = inputMode === 'receive' && receivingOrderId;
 
+    // 거래처 필수 (입고전환 제외 — 이미 거래처가 지정된 발주를 전환하는 경우)
+    if (!isReceiveFromOrder && !counterpartyId) {
+      toast.error('거래처를 선택하세요.');
+      return;
+    }
+
     if (simpleMode) {
       const total = parseFloat(simpleTotalAmount || '0');
       if (!isOrderMode && total <= 0) {
@@ -1096,10 +1102,10 @@ function PurchaseTab({
       ? itemsWithName  // 발주: 품명만 있으면 OK (금액 0 허용)
       : itemsWithName.filter(i => parseFloat(i.lineTotal || '0') > 0);  // 입고: 금액 필수
 
-    // 발주: 거래처 또는 품목 또는 사진 중 하나만 있으면 OK
+    // 발주: 품목 또는 사진 중 하나는 필요
     if (isOrderMode) {
-      if (!counterpartyId && validItems.length === 0 && !attachmentUrl) {
-        toast.error('거래처, 품목, 또는 발주서 사진 중 하나는 입력하세요.');
+      if (validItems.length === 0 && !attachmentUrl) {
+        toast.error('품목 또는 발주서 사진을 입력하세요.');
         return;
       }
     } else if (validItems.length === 0) {
