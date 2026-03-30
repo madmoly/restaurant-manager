@@ -2622,7 +2622,7 @@ const SHIFT_LABELS: Record<string, string> = { open: '오픈', close: '마감', 
 
 
 function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; date: string }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
 
