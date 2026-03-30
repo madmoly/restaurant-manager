@@ -230,7 +230,7 @@ export default function LaborCostPage() {
                   <Building2 className="w-4 h-4 text-muted-foreground shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold text-foreground">{company.company}</div>
-                    <div className="text-xs text-muted-foreground">{company.employees.length}명</div>
+                    <div className="text-xs text-muted-foreground">{company.employees.length}명 · 영업 {company.operatingDays ?? '-'}일</div>
                   </div>
                   <div className="text-right shrink-0">
                     <div className="text-sm font-bold text-foreground">₩{fmtWon(company.totalWage)}</div>
@@ -247,6 +247,8 @@ export default function LaborCostPage() {
                           <th className="text-left px-4 py-2 font-medium text-muted-foreground">이름</th>
                           <th className="text-left px-4 py-2 font-medium text-muted-foreground">급여</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">출근</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">휴무</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">신청휴무</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">시간</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">인건비</th>
                         </tr>
@@ -269,7 +271,9 @@ export default function LaborCostPage() {
                                 </div>
                               )}
                             </td>
-                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.shifts}회</td>
+                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.shifts}일</td>
+                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.daysOff ?? 0}일</td>
+                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.approvedLeaves ?? 0}{typeof emp.approvedLeaves === 'number' && emp.approvedLeaves % 1 !== 0 ? '' : '일'}</td>
                             <td className="px-4 py-2 text-right text-muted-foreground">{emp.totalHours.toFixed(1)}h</td>
                             <td className="px-4 py-2 text-right font-medium text-foreground">₩{fmtWon(emp.totalWage)}</td>
                           </tr>

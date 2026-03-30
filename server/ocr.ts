@@ -5,8 +5,8 @@ import path from "path";
 import sharp from "sharp";
 import { UPLOAD_ROOT } from "./upload";
 import { db } from "./db";
-import { counterpartyItems, counterparties, counterpartyOcrProfiles } from "../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections } from "../drizzle/schema";
+import { eq, and, desc, sql } from "drizzle-orm";
 
 export const ocrRouter = Router();
 
@@ -53,52 +53,59 @@ function loadImageBase64Raw(filePath: string): { base64: string; mediaType: stri
 
 // ─── AI 방향 감지: Claude Vision으로 이미지 회전 각도 판별 ──────────────────
 // haiku 모델로 빠르고 저렴하게 방향만 판별 → 0/90/180/270 반환
+// 실패해도 OCR 자체는 계속 진행 (try-catch 전체 래핑)
 async function detectAndFixOrientation(filePath: string, anthropic: Anthropic): Promise<void> {
+  // 1. EXIF 자동 회전 (upload 엔드포인트에서 이미 처리했지만, 직접 OCR 호출 시 대비)
   try {
-    // 1. EXIF 자동 회전 먼저 시도 (EXIF 태그가 있으면 이것만으로 해결)
-    const exifRotated = await sharp(filePath).rotate().toBuffer();
-    fs.writeFileSync(filePath, exifRotated);
-    console.log(`[OCR] EXIF 자동회전 적용: ${path.basename(filePath)} (${(exifRotated.length / 1024).toFixed(0)}KB)`);
-  } catch {
-    console.warn(`[OCR] EXIF 회전 실패 (무시): ${path.basename(filePath)}`);
+    const meta = await sharp(filePath).metadata();
+    if (meta.orientation && meta.orientation > 1) {
+      const exifRotated = await sharp(filePath).rotate().toBuffer();
+      fs.writeFileSync(filePath, exifRotated);
+      console.log(`[OCR] EXIF 자동회전 적용 (orientation=${meta.orientation}): ${path.basename(filePath)}`);
+    }
+  } catch (exifErr: any) {
+    console.warn(`[OCR] EXIF 회전 실패 (무시): ${path.basename(filePath)} — ${exifErr.message}`);
   }
 
-  // 2. AI 방향 감지: EXIF 회전 후에도 여전히 옆으로 되어 있을 수 있음
-  //    (브라우저가 Canvas로 EXIF 스트립한 경우, EXIF 없는 이미지 등)
-  const { base64, mediaType } = loadImageBase64Raw(filePath);
+  // 2. AI 방향 감지: EXIF 없거나 이미 스트립된 경우 AI로 판별
+  try {
+    const { base64, mediaType } = loadImageBase64Raw(filePath);
 
-  const orientationRes = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 64,
-    messages: [{
-      role: "user",
-      content: [
-        {
-          type: "image",
-          source: { type: "base64", media_type: mediaType as any, data: base64 },
-        },
-        {
-          type: "text",
-          text: `이 이미지의 텍스트/문서가 정방향인지 확인하세요.
+    const orientationRes = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 64,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: { type: "base64", media_type: mediaType as any, data: base64 },
+          },
+          {
+            type: "text",
+            text: `이 이미지는 한국 식당 매입 전표(거래명세서/영수증)입니다.
+문서의 텍스트가 정방향(위→아래로 읽을 수 있는 상태)인지 확인하세요.
 정방향으로 읽으려면 시계방향으로 몇 도 회전해야 하나요?
-숫자 하나만 답하세요: 0, 90, 180, 270`,
-        },
-      ],
-    }],
-  });
+반드시 숫자 하나만 답하세요: 0, 90, 180, 270`,
+          },
+        ],
+      }],
+    });
 
-  const orientText = extractText(orientationRes)?.trim() || "0";
-  // 응답에서 숫자만 추출
-  const angleMatch = orientText.match(/\b(0|90|180|270)\b/);
-  const angle = angleMatch ? parseInt(angleMatch[1], 10) : 0;
+    const orientText = extractText(orientationRes)?.trim() || "0";
+    const angleMatch = orientText.match(/\b(0|90|180|270)\b/);
+    const angle = angleMatch ? parseInt(angleMatch[1], 10) : 0;
 
-  console.log(`[OCR] AI 방향 감지: ${path.basename(filePath)} → ${angle}° (원문: "${orientText}")`);
+    console.log(`[OCR] AI 방향 감지: ${path.basename(filePath)} → ${angle}° (원문: "${orientText}")`);
 
-  if (angle > 0) {
-    // 회전 필요 → sharp로 회전 후 파일 덮어쓰기
-    const rotated = await sharp(filePath).rotate(angle).toBuffer();
-    fs.writeFileSync(filePath, rotated);
-    console.log(`[OCR] AI 기반 ${angle}° 회전 완료: ${path.basename(filePath)} (${(rotated.length / 1024).toFixed(0)}KB)`);
+    if (angle > 0) {
+      const rotated = await sharp(filePath).rotate(angle).toBuffer();
+      fs.writeFileSync(filePath, rotated);
+      console.log(`[OCR] AI 기반 ${angle}° 회전 완료: ${path.basename(filePath)} (${(rotated.length / 1024).toFixed(0)}KB)`);
+    }
+  } catch (aiErr: any) {
+    // AI 방향 감지 실패해도 OCR 계속 진행 (원본 그대로 분석)
+    console.error(`[OCR] AI 방향 감지 실패 (OCR 계속 진행): ${path.basename(filePath)} — ${aiErr.message}`);
   }
 }
 
@@ -860,5 +867,90 @@ ocrRouter.post("/submit-correction", async (req: Request, res: Response) => {
     console.error("[OCR] submit-correction error:", err);
     // 비치명적 — 수정 데이터 저장 실패해도 정상 동작
     res.json({ ok: false, error: err.message });
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// GET /api/ocr/corrections — OCR 수정 이력 조회 (master/admin용)
+// ═════════════════════════════════════════════════════════════════════════════
+ocrRouter.get("/corrections", async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const offset = Number(req.query.offset) || 0;
+    const restaurantId = req.query.restaurantId ? Number(req.query.restaurantId) : undefined;
+
+    const conditions = restaurantId
+      ? eq(ocrCorrections.restaurantId, restaurantId)
+      : undefined;
+
+    const rows = await db.select().from(ocrCorrections)
+      .where(conditions)
+      .orderBy(desc(ocrCorrections.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    res.json({ corrections: rows, count: rows.length });
+  } catch (err: any) {
+    console.error("[OCR] corrections list error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// GET /api/ocr/corrections/stats — OCR 수정 통계 (거래처별 수정 빈도)
+// ═════════════════════════════════════════════════════════════════════════════
+ocrRouter.get("/corrections/stats", async (req: Request, res: Response) => {
+  try {
+    const restaurantId = req.query.restaurantId ? Number(req.query.restaurantId) : undefined;
+
+    // 거래처별 수정 건수
+    const conditions = restaurantId
+      ? eq(ocrCorrections.restaurantId, restaurantId)
+      : undefined;
+
+    const stats = await db.select({
+      counterpartyId: ocrCorrections.counterpartyId,
+      correctionCount: sql<number>`COUNT(*)`,
+      lastCorrectedAt: sql<string>`MAX(${ocrCorrections.createdAt})`,
+    }).from(ocrCorrections)
+      .where(conditions)
+      .groupBy(ocrCorrections.counterpartyId)
+      .orderBy(sql`COUNT(*) DESC`);
+
+    // 거래처명 매핑
+    const counterpartyIds = stats.map(s => s.counterpartyId).filter(Boolean) as number[];
+    let counterpartyMap: Record<number, string> = {};
+    if (counterpartyIds.length > 0) {
+      const cps = await db.select({ id: counterparties.id, name: counterparties.name })
+        .from(counterparties)
+        .where(sql`${counterparties.id} IN (${sql.join(counterpartyIds.map(id => sql`${id}`), sql`, `)})`);
+      counterpartyMap = Object.fromEntries(cps.map(c => [c.id, c.name]));
+    }
+
+    // OCR 프로파일 정보
+    const profiles = await db.select().from(counterpartyOcrProfiles);
+
+    const total = stats.reduce((sum, s) => sum + Number(s.correctionCount), 0);
+
+    res.json({
+      totalCorrections: total,
+      byCounterparty: stats.map(s => ({
+        counterpartyId: s.counterpartyId,
+        counterpartyName: s.counterpartyId ? counterpartyMap[s.counterpartyId] ?? "알 수 없음" : "미지정",
+        correctionCount: Number(s.correctionCount),
+        lastCorrectedAt: s.lastCorrectedAt,
+      })),
+      profileCount: profiles.length,
+      profiles: profiles.map(p => ({
+        counterpartyId: p.counterpartyId,
+        documentType: p.documentType,
+        sampleCount: p.sampleCount,
+        frequentItemCount: Array.isArray(p.frequentItems) ? (p.frequentItems as any[]).length : 0,
+        lastUsedAt: p.lastUsedAt,
+      })),
+    });
+  } catch (err: any) {
+    console.error("[OCR] corrections stats error:", err);
+    res.status(500).json({ error: err.message });
   }
 });

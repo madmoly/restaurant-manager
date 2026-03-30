@@ -12,6 +12,7 @@ import {
   restaurantUsers,
   employeeContracts,
   restaurantShiftPresets,
+  leaveRequests,
 } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -654,10 +655,13 @@ export const schedulesRouter = router({
     .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
     .query(async ({ input }) => {
       const monthStr = String(input.month).padStart(2, "0");
-      const from = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
+      const kstFrom = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
       const nm = input.month === 12 ? 1 : input.month + 1;
       const ny = input.month === 12 ? input.year + 1 : input.year;
-      const toDate = new Date(`${ny}-${String(nm).padStart(2, "0")}-01T00:00:00+09:00`);
+      const kstTo = new Date(`${ny}-${String(nm).padStart(2, "0")}-01T00:00:00+09:00`);
+      const fromStr = kstFrom.toISOString().slice(0, 19).replace("T", " ");
+      const toStr = kstTo.toISOString().slice(0, 19).replace("T", " ");
+
       const rows = await db
         .select({
           id: schedules.id,
@@ -680,8 +684,8 @@ export const schedulesRouter = router({
         .where(
           and(
             eq(schedules.restaurantId, input.restaurantId),
-            gte(schedules.startTime, from),
-            sql`${schedules.startTime} < ${toDate}`,
+            sql`${schedules.startTime} >= ${fromStr}`,
+            sql`${schedules.startTime} < ${toStr}`,
             sql`${schedules.status} IN ('draft','confirmed','completed')`
           )
         )
@@ -697,11 +701,18 @@ export const schedulesRouter = router({
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
 
       const monthStr = String(input.month).padStart(2, "0");
-      // KST 기준 월 범위
-      const from = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
+      // KST 기준 월 범위를 UTC 문자열로 변환
+      // KST 00:00 = UTC 전날 15:00 (9시간 차이)
+      // JS Date → toISOString()으로 UTC 문자열 생성 후 MySQL 포맷으로 변환
+      const kstFrom = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
       const nm = input.month === 12 ? 1 : input.month + 1;
       const ny = input.month === 12 ? input.year + 1 : input.year;
-      const toDate = new Date(`${ny}-${String(nm).padStart(2, "0")}-01T00:00:00+09:00`);
+      const kstTo = new Date(`${ny}-${String(nm).padStart(2, "0")}-01T00:00:00+09:00`);
+      // MySQL DATETIME 형식 UTC 문자열
+      const fromStr = kstFrom.toISOString().slice(0, 19).replace("T", " ");
+      const toStr = kstTo.toISOString().slice(0, 19).replace("T", " ");
+
+      console.log(`[laborCost] restaurantId=${input.restaurantId} year=${input.year} month=${input.month} fromUTC="${fromStr}" toUTC="${toStr}"`);
 
       // 전체 스케줄 (draft 포함) + 직원 정보 + 소속회사 + 시급 조인
       const rows = await db
@@ -736,20 +747,76 @@ export const schedulesRouter = router({
         .where(
           and(
             eq(schedules.restaurantId, input.restaurantId),
-            gte(schedules.startTime, from),
-            sql`${schedules.startTime} < ${toDate}`,
+            sql`${schedules.startTime} >= ${fromStr}`,
+            sql`${schedules.startTime} < ${toStr}`,
             sql`${schedules.status} IN ('draft','confirmed','completed')`
           )
         )
         .orderBy(schedules.startTime);
 
+      console.log(`[laborCost] rows found: ${rows.length}`);
+
+      // ── 영업일수 계산 ──
+      // 1) 정기 휴무 요일 조회
+      const weeklyClosureRows = await db.select()
+        .from(storeWeeklyClosures)
+        .where(and(
+          eq(storeWeeklyClosures.restaurantId, input.restaurantId),
+          eq(storeWeeklyClosures.isClosed, true),
+        ));
+      const closedWeekdays = new Set(weeklyClosureRows.map(r => r.weekday)); // 0=일,1=월,...6=토
+
+      // 2) 특정 휴무일 조회
+      const closedDayRows = await db.select()
+        .from(storeClosedDays)
+        .where(and(
+          eq(storeClosedDays.restaurantId, input.restaurantId),
+          sql`${storeClosedDays.closedDate} >= ${`${input.year}-${monthStr}-01`}`,
+          sql`${storeClosedDays.closedDate} < ${`${ny}-${String(nm).padStart(2, "0")}-01`}`,
+        ));
+      const closedDateSet = new Set(closedDayRows.map(r => String(r.closedDate)));
+
+      // 3) 월 내 영업일수 계산
+      const daysInMonth = new Date(input.year, input.month, 0).getDate();
+      let operatingDays = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dt = new Date(input.year, input.month - 1, d);
+        const jsDay = dt.getDay(); // 0=일,...6=토
+        const dateStr = `${input.year}-${monthStr}-${String(d).padStart(2, "0")}`;
+        if (closedWeekdays.has(jsDay) || closedDateSet.has(dateStr)) continue;
+        operatingDays++;
+      }
+
+      // ── 승인된 휴무신청 조회 (계약휴무일수) ──
+      const leaveRows = await db.select({
+        userId: leaveRequests.userId,
+        leaveType: leaveRequests.leaveType,
+      })
+        .from(leaveRequests)
+        .where(and(
+          eq(leaveRequests.restaurantId, input.restaurantId),
+          eq(leaveRequests.status, "approved"),
+          sql`${leaveRequests.leaveDate} >= ${`${input.year}-${monthStr}-01`}`,
+          sql`${leaveRequests.leaveDate} < ${`${ny}-${String(nm).padStart(2, "0")}-01`}`,
+        ));
+      // 유저별 승인 휴무 수 (반차=0.5일로 계산)
+      const approvedLeavesMap: Record<number, number> = {};
+      for (const lr of leaveRows) {
+        if (!lr.userId) continue;
+        const val = lr.leaveType === "dayoff" ? 1 : 0.5;
+        approvedLeavesMap[lr.userId] = (approvedLeavesMap[lr.userId] || 0) + val;
+      }
+
       // 소속회사별 그룹핑
       const companyMap: Record<string, {
         company: string;
+        operatingDays: number;
         employees: Record<string, {
           name: string; totalHours: number; totalWage: number; shifts: number;
           wageType: string | null; wageAmount: string | null;
           position: string | null; contractStart: string | null; contractEnd: string | null;
+          daysOff: number; approvedLeaves: number;
+          userId: number | null;
         }>;
         totalHours: number;
         totalWage: number;
@@ -761,9 +828,10 @@ export const schedulesRouter = router({
         const empKey = r.userId ? String(r.userId) : `temp_${name}`;
 
         if (!companyMap[company]) {
-          companyMap[company] = { company, employees: {}, totalHours: 0, totalWage: 0 };
+          companyMap[company] = { company, operatingDays, employees: {}, totalHours: 0, totalWage: 0 };
         }
         if (!companyMap[company].employees[empKey]) {
+          const uid = r.userId ? Number(r.userId) : null;
           companyMap[company].employees[empKey] = {
             name, totalHours: 0, totalWage: 0, shifts: 0,
             wageType: r.wageType ?? (r.tempWageType ?? null),
@@ -771,6 +839,9 @@ export const schedulesRouter = router({
             position: r.position ?? null,
             contractStart: r.contractStart ? String(r.contractStart) : null,
             contractEnd: r.contractEnd ? String(r.contractEnd) : null,
+            daysOff: 0, // 아래에서 최종 계산
+            approvedLeaves: uid ? (approvedLeavesMap[uid] || 0) : 0,
+            userId: uid,
           };
         }
 
@@ -799,7 +870,11 @@ export const schedulesRouter = router({
 
       return Object.values(companyMap).map(c => ({
         ...c,
-        employees: Object.values(c.employees),
+        employees: Object.values(c.employees).map(emp => ({
+          ...emp,
+          daysOff: Math.max(0, operatingDays - emp.shifts),
+          userId: undefined, // 클라이언트에 노출하지 않음
+        })),
       }));
     }),
 
