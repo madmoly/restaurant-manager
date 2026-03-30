@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
+import { execSync } from "child_process";
 import { UPLOAD_ROOT } from "./upload";
 import { db } from "./db";
 import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections } from "../drizzle/schema";
@@ -22,10 +23,19 @@ ocrRouter.get("/debug", async (_req: Request, res: Response) => {
   } catch (err: any) {
     sharpStatus = `fail: ${err.message}`;
   }
+  let tessStatus = "unknown";
+  try {
+    const tessVer = execSync("tesseract --version 2>&1", { encoding: "utf-8", timeout: 5000 });
+    tessStatus = `ok (${tessVer.split("\n")[0]})`;
+  } catch (err: any) {
+    tessStatus = `fail: ${err.message}`;
+  }
+
   res.json({
-    version: "v4-ai-orientation",  // AI 방향 감지 + 자동 회전 후 OCR
+    version: "v5-tesseract-osd",  // Tesseract OSD 방향 감지 + 자동 회전 후 OCR
     timestamp: new Date().toISOString(),
     sharp: sharpStatus,
+    tesseract: tessStatus,
     node: process.version,
   });
 });
@@ -51,11 +61,12 @@ function loadImageBase64Raw(filePath: string): { base64: string; mediaType: stri
   };
 }
 
-// ─── AI 방향 감지: Claude Vision으로 이미지 회전 각도 판별 ──────────────────
-// haiku 모델로 빠르고 저렴하게 방향만 판별 → 0/90/180/270 반환
-// 실패해도 OCR 자체는 계속 진행 (try-catch 전체 래핑)
-async function detectAndFixOrientation(filePath: string, anthropic: Anthropic): Promise<void> {
-  // 1. EXIF 자동 회전 (upload 엔드포인트에서 이미 처리했지만, 직접 OCR 호출 시 대비)
+// ─── Tesseract OSD 기반 방향 감지 + 자동 회전 ───────────────────────────────
+// AI 비전 모델은 회전 각도 판별이 구조적으로 부정확 (Anthropic 공식 한계)
+// Tesseract OSD(Orientation & Script Detection)로 0/90/180/270 판별 → sharp 회전
+// 비용 0, 속도 빠름, 한글 스크립트 감지 지원
+async function detectAndFixOrientation(filePath: string, _anthropic: Anthropic): Promise<void> {
+  // 1. EXIF 자동 회전
   try {
     const meta = await sharp(filePath).metadata();
     if (meta.orientation && meta.orientation > 1) {
@@ -67,66 +78,47 @@ async function detectAndFixOrientation(filePath: string, anthropic: Anthropic): 
     console.warn(`[OCR] EXIF 회전 실패 (무시): ${path.basename(filePath)} — ${exifErr.message}`);
   }
 
-  // 2. AI 방향 감지: 4방향 이미지 비교 방식
-  //    0°/90°/180°/270° 모두 생성 → AI에게 "어느 게 정방향이냐" 선택시킴
-  //    판별용 이미지는 800px로 축소하여 비용/속도 최적화
+  // 2. Tesseract OSD로 텍스트 방향 감지
   try {
-    const ext = path.extname(filePath).toLowerCase();
-    const mimeMap: Record<string, string> = {
-      ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-      ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
-    };
-    const mt = mimeMap[ext] || "image/jpeg";
+    // OSD용 임시 PNG 생성 (tesseract는 PNG/TIFF 선호)
+    const tmpPng = filePath + ".osd.png";
+    await sharp(filePath)
+      .resize(1200, 1200, { fit: "inside" })  // OSD에 적절한 크기
+      .grayscale()  // 흑백 변환으로 정확도 향상
+      .sharpen()    // 텍스트 선명화
+      .png()
+      .toFile(tmpPng);
 
-    // 판별용 축소 이미지 생성 (800px max, JPEG 품질 70)
-    const makeThumb = async (angle: number): Promise<string> => {
-      const buf = await sharp(filePath)
-        .rotate(angle)
-        .resize(800, 800, { fit: "inside" })
-        .jpeg({ quality: 70 })
-        .toBuffer();
-      return buf.toString("base64");
-    };
+    // tesseract --psm 0: OSD 전용 모드 (텍스트 인식 없이 방향만 감지)
+    const osdOutput = execSync(
+      `tesseract "${tmpPng}" stdout --psm 0 -l kor+eng 2>/dev/null || tesseract "${tmpPng}" stdout --psm 0 2>/dev/null`,
+      { encoding: "utf-8", timeout: 10000 }
+    ).trim();
 
-    const [img0, img90, img180, img270] = await Promise.all([
-      makeThumb(0), makeThumb(90), makeThumb(180), makeThumb(270),
-    ]);
+    // 임시 파일 정리
+    try { fs.unlinkSync(tmpPng); } catch {}
 
-    const orientationRes = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 100,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "text", text: "한국 식당 매입 전표 이미지입니다. 아래 A/B/C/D 4개 중 한글 텍스트가 정방향(왼→오른쪽, 위→아래)으로 읽히는 이미지를 고르세요.\n\n이미지 A:" },
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: img0 } },
-          { type: "text", text: "이미지 B:" },
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: img90 } },
-          { type: "text", text: "이미지 C:" },
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: img180 } },
-          { type: "text", text: "이미지 D:" },
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: img270 } },
-          { type: "text", text: "정방향으로 읽히는 이미지의 알파벳만 답하세요: A, B, C, D" },
-        ],
-      }],
-    });
+    // "Rotate: 270" 형태에서 각도 추출
+    const rotateMatch = osdOutput.match(/Rotate:\s*(\d+)/);
+    const angle = rotateMatch ? parseInt(rotateMatch[1], 10) : 0;
 
-    const orientText = extractText(orientationRes)?.trim() || "A";
-    const choiceMatch = orientText.match(/\b([A-D])\b/);
-    const choice = choiceMatch ? choiceMatch[1] : "A";
-    const angleMap: Record<string, number> = { A: 0, B: 90, C: 180, D: 270 };
-    const angle = angleMap[choice] ?? 0;
+    // Orientation confidence 추출
+    const confMatch = osdOutput.match(/Orientation confidence:\s*([\d.]+)/);
+    const confidence = confMatch ? parseFloat(confMatch[1]) : 0;
 
-    console.log(`[OCR] AI 방향 감지 (4방향 비교): ${path.basename(filePath)} → ${choice}=${angle}° (원문: "${orientText}")`);
+    console.log(`[OCR] Tesseract OSD: ${path.basename(filePath)} → rotate=${angle}° (confidence=${confidence.toFixed(2)}, raw: "${osdOutput.replace(/\n/g, " | ")}")`);
 
-    if (angle > 0) {
+    // confidence가 너무 낮으면 회전하지 않음 (잘못된 회전 방지)
+    if (angle > 0 && confidence >= 1.0) {
       const rotated = await sharp(filePath).rotate(angle).toBuffer();
       fs.writeFileSync(filePath, rotated);
-      console.log(`[OCR] AI 기반 ${angle}° 회전 완료: ${path.basename(filePath)} (${(rotated.length / 1024).toFixed(0)}KB)`);
+      console.log(`[OCR] Tesseract 기반 ${angle}° 회전 완료: ${path.basename(filePath)} (${(rotated.length / 1024).toFixed(0)}KB)`);
+    } else if (angle > 0) {
+      console.log(`[OCR] Tesseract 회전 감지 ${angle}°이지만 confidence ${confidence.toFixed(2)} 낮아 회전 안함: ${path.basename(filePath)}`);
     }
-  } catch (aiErr: any) {
-    // AI 방향 감지 실패해도 OCR 계속 진행 (원본 그대로 분석)
-    console.error(`[OCR] AI 방향 감지 실패 (OCR 계속 진행): ${path.basename(filePath)} — ${aiErr.message}`);
+  } catch (tessErr: any) {
+    // Tesseract 실패 시 (미설치 등) OCR 계속 진행
+    console.warn(`[OCR] Tesseract OSD 실패 (OCR 계속 진행): ${path.basename(filePath)} — ${tessErr.message}`);
   }
 }
 
@@ -532,17 +524,8 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       return;
     }
 
-    // ── EXIF 회전만 적용 (AI 방향 감지는 비활성화 — 본 OCR 소넷이 회전 이미지를 직접 처리) ──
-    try {
-      const meta = await sharp(filePath).metadata();
-      if (meta.orientation && meta.orientation > 1) {
-        const exifRotated = await sharp(filePath).rotate().toBuffer();
-        fs.writeFileSync(filePath, exifRotated);
-        console.log(`[OCR] EXIF 자동회전 적용 (orientation=${meta.orientation}): ${path.basename(filePath)}`);
-      }
-    } catch (exifErr: any) {
-      console.warn(`[OCR] EXIF 처리 실패 (무시): ${exifErr.message}`);
-    }
+    // ── Tesseract OSD 기반 방향 감지 + EXIF 회전 + 자동 보정 ──
+    await detectAndFixOrientation(filePath, anthropic);
 
     // ── 거래처 프로파일 조회 (동적 프롬프트 힌트용) ──────────────────────
     const ocrProfile = await getOcrProfile(clientCpId ? Number(clientCpId) : null);

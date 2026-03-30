@@ -14,6 +14,10 @@ RUN pnpm run build
 
 FROM node:20-slim AS runner
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-kor \
+  && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@10.4.1 --activate
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
