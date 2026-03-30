@@ -60,11 +60,16 @@ export const usersRouter = router({
       username: z.string().min(2),
       password: z.string().min(4),
       name: z.string().min(1),
-      role: z.enum(["master", "admin", "manager", "employee"]).default("employee"),
+      role: z.enum(["master", "admin", "manager", "user", "employee"]).default("employee"),
       email: z.string().email().optional(),
       phone: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // 권한 상승 방지: master/admin 역할은 master만 생성 가능
+      if ((input.role === "master" || input.role === "admin") && ctx.user.role !== "master") {
+        throw new Error("master/admin 역할 사용자는 개발자만 생성할 수 있습니다");
+      }
+
       const existing = await db.select().from(users).where(eq(users.username, input.username)).limit(1);
       if (existing.length > 0) throw new Error("이미 존재하는 아이디입니다");
 
@@ -90,7 +95,19 @@ export const usersRouter = router({
       isActive: z.boolean().optional(),
       password: z.string().min(4).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // 권한 상승 방지: admin 역할 부여는 master만 가능
+      if (input.role === "admin" && ctx.user.role !== "master") {
+        throw new Error("admin 역할 변경은 개발자만 가능합니다");
+      }
+      // master 계정은 수정 불가 (자기 자신 제외)
+      if (input.id !== ctx.user.userId) {
+        const [target] = await db.select({ role: users.role }).from(users).where(eq(users.id, input.id)).limit(1);
+        if (target?.role === "master" && ctx.user.role !== "master") {
+          throw new Error("개발자 계정은 수정할 수 없습니다");
+        }
+      }
+
       const { id, password, ...data } = input;
       const update: Record<string, unknown> = { ...data };
       if (password) update.passwordHash = await hashPassword(password);
