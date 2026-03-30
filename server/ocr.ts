@@ -46,7 +46,7 @@ ocrRouter.get("/debug", async (_req: Request, res: Response) => {
   }
 
   res.json({
-    version: "v7-tesseract-confidence",  // Tesseract 4방향 confidence 가중 비교
+    version: "v8-enhance-korean",  // 이미지 전처리 + 한글 프롬프트 강화
     timestamp: new Date().toISOString(),
     sharp: sharpStatus,
     tesseract: tessStatus,
@@ -557,6 +557,35 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       fs.writeFileSync(filePath, rotatedBuf);
     }
 
+    // ── 이미지 전처리: 대비 강화 + 샤프닝 (한글 인식 퀄리티 향상) ──
+    try {
+      const meta = await sharp(filePath).metadata();
+      const maxDim = Math.max(meta.width || 0, meta.height || 0);
+      let pipeline = sharp(filePath);
+
+      // 해상도 제한 (너무 크면 API 비용 + 처리 시간 증가, 3000px이면 충분)
+      if (maxDim > 3000) {
+        pipeline = pipeline.resize(3000, 3000, { fit: "inside", withoutEnlargement: true });
+      }
+
+      // 대비 강화 + 샤프닝 (전표 특성: 흰 배경 + 검은 글씨/숫자)
+      const enhancedBuf = await pipeline
+        .normalize()          // 히스토그램 평활화 (대비 자동 보정)
+        .sharpen({            // 언샤프 마스크 (텍스트 가장자리 강화)
+          sigma: 1.5,
+          m1: 1.5,            // flat area sharpening
+          m2: 0.7,            // jagged area sharpening
+        })
+        .gamma(1.1)           // 밝은 영역 살짝 밝게 (배경 화이트닝)
+        .jpeg({ quality: 95 })
+        .toBuffer();
+
+      fs.writeFileSync(filePath, enhancedBuf);
+      console.log(`[OCR] 이미지 전처리 완료: ${path.basename(filePath)} (${(enhancedBuf.length / 1024).toFixed(0)}KB, 원본 ${maxDim}px)`);
+    } catch (enhErr: any) {
+      console.warn(`[OCR] 이미지 전처리 실패 (원본 사용): ${enhErr.message}`);
+    }
+
     // ── 거래처 프로파일 조회 (동적 프롬프트 힌트용) ──────────────────────
     const ocrProfile = await getOcrProfile(clientCpId ? Number(clientCpId) : null);
     const profileHint = buildProfileHint(ocrProfile);
@@ -585,14 +614,37 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
 당신의 임무: 이미지에서 **거래처명**과 **품목별 숫자 데이터**를 정확하게 추출하여 JSON으로 출력하세요.
 
-## ⚠ 이미지 방향 (최우선 — 반드시 먼저 수행)
+## ⚠ 한글 인식 핵심 규칙
 
-이 이미지는 90°, 180°, 270° 회전되어 있을 수 있습니다. 촬영자가 휴대폰을 옆으로 들고 찍는 경우가 매우 흔합니다.
-**데이터를 추출하기 전에 반드시 아래 순서를 따르세요:**
-1. 이미지에서 한글 텍스트가 보이는 방향을 확인 — 텍스트가 옆으로 누워있거나 거꾸로일 수 있음
-2. 한글이 왼→오른쪽, 위→아래로 자연스럽게 읽히는 방향을 기준으로 문서를 해석
-3. 문서 제목("거래명세표", "거래명세서" 등), 표의 열 헤더(품목, 수량, 단가, 공급가액)를 확인하여 열 순서 파악
-4. **텍스트가 세로로 읽히면 90° 또는 270° 회전된 것** — 머릿속으로 회전하여 정방향 기준으로 읽으세요
+**한글 품목명은 정확히 읽는 것이 매우 중요합니다.** 아래 규칙을 반드시 적용하세요:
+
+1. **글자 단위로 천천히 읽으세요.** 비슷한 한글 글자를 혼동하지 마세요:
+   - 받침 구별: "달" ≠ "닭", "곤" ≠ "콩", "갈" ≠ "감", "봉" ≠ "볶"
+   - 모음 구별: "대" ≠ "데", "래" ≠ "레", "파" ≠ "피", "무" ≠ "두"
+   - 초성 구별: "깨" ≠ "째", "감" ≠ "강", "돈" ≠ "론"
+   - 한자어/약어: "소(小)" ≠ "소(牛)", "특" ≠ "톡"
+
+2. **식자재 품목명에서 자주 나오는 한글 단어** (참고용):
+   양파, 감자, 대파, 당근, 양배추, 깻잎, 마늘, 생강, 고추, 오이, 배추, 시금치, 무,
+   삼겹살, 목살, 안심, 등심, 닭가슴살, 닭다리, 오리, 소고기, 돼지고기,
+   새우, 오징어, 고등어, 연어, 참치, 조개, 굴, 문어,
+   두부, 우유, 계란, 치즈, 버터, 참기름, 들기름, 식용유, 올리브유,
+   소금, 설탕, 간장, 된장, 고추장, 식초, 후추, 물엿, 맛술,
+   밀가루, 쌀, 면, 국수, 라면, 떡, 만두,
+   콜라, 사이다, 맥주, 소주, 생수, 주스,
+   일회용, 랩, 호일, 봉투, 장갑, 행주, 세제, 소독
+
+3. **숫자와 한글이 붙어있는 경우** 정확히 분리하세요:
+   - "양파10kg" → 품목: "양파", 규격: "10kg"
+   - "대파1단" → 품목: "대파", 수량: "1", 단위: "단"
+
+4. **흐릿하거나 잘려서 확실하지 않은 글자**는 가장 가능성 높은 식자재명으로 추정하되 uncertain: true
+
+## ⚠ 이미지 방향
+
+이 이미지는 사용자가 방향을 확인하고 보정한 상태입니다. 대부분 정방향이지만, 만약 텍스트가 옆으로 누워있다면:
+1. 한글이 왼→오른쪽, 위→아래로 읽히는 방향을 기준으로 해석
+2. 표의 열 헤더(품목, 수량, 단가, 공급가액)를 확인하여 열 순서 파악
 
 ## 문서 양식별 구조
 
