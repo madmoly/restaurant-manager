@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { useRestaurant } from "@/contexts/RestaurantContext";
+import { getEffectiveRole, isManagerLevel } from "@shared/permissions";
 import { toast } from "sonner";
 import {
   ChevronLeft,
@@ -500,7 +501,8 @@ export default function SchedulePage() {
   const { user } = useAuth();
   const { selectedRestaurant: current } = useRestaurant();
   const restaurantId = current?.id ?? 0;
-  const isManager = user?.role === "master" || user?.role === "admin" || user?.role === "manager";
+  const effectiveRole = getEffectiveRole(user?.role ?? "user", current?.storeRole ?? null);
+  const isManager = isManagerLevel(effectiveRole);
 
   const [baseDate, setBaseDate] = useState(new Date());
   const weekDates = useMemo(() => getWeekDates(baseDate), [baseDate]);
