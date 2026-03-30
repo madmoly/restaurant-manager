@@ -21,8 +21,8 @@ const DEFAULT_OPTIONS: Required<ResizeOptions> = {
 };
 
 export const OCR_HIGH: ResizeOptions = {
-  maxSize: 2560,
-  quality: 0.92,
+  maxSize: 3200,
+  quality: 0.95,
   mimeType: "image/jpeg",
 };
 
