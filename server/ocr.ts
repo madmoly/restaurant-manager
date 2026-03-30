@@ -73,8 +73,8 @@ async function detectAndFixOrientation(filePath: string, anthropic: Anthropic): 
     const { base64, mediaType } = loadImageBase64Raw(filePath);
 
     const orientationRes = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 256,
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 200,
       messages: [{
         role: "user",
         content: [
@@ -87,20 +87,12 @@ async function detectAndFixOrientation(filePath: string, anthropic: Anthropic): 
             text: `이 이미지는 한국 식당의 매입 전표(거래명세서/영수증/수기전표)입니다.
 이미지가 회전되어 있을 수 있습니다. 정방향으로 만들기 위해 시계방향으로 몇 도 회전이 필요한지 판별하세요.
 
-단계별로 분석하세요:
+판별 기준:
+1. 한글 텍스트가 왼→오른쪽, 위→아래로 자연스럽게 읽히는 방향이 정방향
+2. 문서 상단에 거래처명/날짜, 하단에 합계금액이 위치
+3. 숫자 6과 9, 한글 받침 위치로 상하 구분
 
-STEP1 - 텍스트 방향 확인:
-- 이미지에서 한글 또는 숫자 텍스트가 보이는 방향을 확인하세요
-- 텍스트가 왼→오른쪽으로 읽히면: 0° 또는 180° (위아래 확인 필요)
-- 텍스트가 위→아래로 세로 배열이면: 90° 또는 270°
-
-STEP2 - 세부 방향 확인:
-- 한글 글자 모양: ㅎ ㅋ ㄱ 등의 획 방향, 받침 위치가 아래에 있는가
-- 숫자 모양: 6과 9가 올바른가, 합계 숫자가 자연스러운가
-- 문서 레이아웃: 거래처명/날짜가 상단, 품목 리스트가 중간, 합계가 하단에 있는가
-
-STEP3 - 결론:
-반드시 아래 형식으로 결론을 작성하세요.
+반드시 아래 형식으로만 답하세요:
 ANGLE: (0 또는 90 또는 180 또는 270)`,
           },
         ],
