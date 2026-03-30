@@ -403,6 +403,6 @@ git add -A && git commit --file=.commitmsg && git push origin main
 - [x] Phase 2 (프로파일): 거래처별 OCR 프로파일 자동 생성/업데이트 + 이동평균 단가 학습
 - [x] Phase 2 (수정 축적): 사용자 OCR 수정 데이터 INSERT + corrections 조회/통계 API (GET /api/ocr/corrections, /corrections/stats)
 - [x] Phase 2 (모니터링): SystemPage > OCR학습 탭에서 수정 빈도/프로파일 현황 조회 가능
-- [ ] Phase 2: 클라이언트 이미지 회전 UI (촬영 후 방향 보정)
-- [ ] Phase 3: 동적 프롬프트 주입 (거래처 품목/단가 힌트)
-- [ ] Phase 3: 사용자 수정 데이터 기반 학습 파이프라인
+- [x] Phase 3: 동적 프롬프트 주입 (거래처 프로파일 기반 품목/단가 힌트 — ocr.ts buildProfileHint)
+- ~~Phase 2: 클라이언트 수동 이미지 회전 UI~~ → 서버 AI 자동 회전(detectAndFixOrientation)으로 대체, 불필요
+- ~~Phase 3: 사용자 수정 데이터 기반 학습 파이프라인~~ → 오인식 수정값의 프로파일 오염 리스크. OCR 결과 기반 자동 학습으로 충분
