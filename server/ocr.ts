@@ -32,7 +32,7 @@ ocrRouter.get("/debug", async (_req: Request, res: Response) => {
   }
 
   res.json({
-    version: "v6-tesseract-4way",  // Tesseract 4방향 OCR 비교 + 자동 회전 후 OCR
+    version: "v7-tesseract-confidence",  // Tesseract 4방향 confidence 가중 비교
     timestamp: new Date().toISOString(),
     sharp: sharpStatus,
     tesseract: tessStatus,
@@ -62,9 +62,8 @@ function loadImageBase64Raw(filePath: string): { base64: string; mediaType: stri
 }
 
 // ─── Tesseract 4방향 OCR 비교 기반 방향 감지 ─────────────────────────────────
-// OSD(--psm 0)는 폰 촬영 영수증에서 부정확. AI 비전도 구조적 한계.
-// 대신: 0°/90°/180°/270° 4방향 모두 Tesseract OCR → 한글 문자 수 최다 방향 선택
-// 비용 0, 정확도 높음 (실제 텍스트 인식 결과 기반)
+// 4방향 Tesseract TSV 출력 → 단어별 confidence 합산 → 최고 점수 방향 선택
+// 한글 문자 수만 세면 90°/270°에서 오탐 발생 → confidence 가중치가 핵심
 async function detectAndFixOrientation(filePath: string, _anthropic: Anthropic): Promise<void> {
   // 1. EXIF 자동 회전
   try {
@@ -78,15 +77,14 @@ async function detectAndFixOrientation(filePath: string, _anthropic: Anthropic):
     console.warn(`[OCR] EXIF 회전 실패 (무시): ${path.basename(filePath)} — ${exifErr.message}`);
   }
 
-  // 2. 4방향 Tesseract OCR 비교: 한글 문자 수 최다 = 정방향
+  // 2. 4방향 Tesseract OCR 비교: confidence 가중 한글+숫자 점수 최대 = 정방향
   try {
     const angles = [0, 90, 180, 270];
-    const results: { angle: number; korCount: number; totalChars: number; sample: string }[] = [];
+    const results: { angle: number; score: number; korCount: number; confAvg: number; sample: string }[] = [];
 
     for (const angle of angles) {
       const tmpPng = filePath + `.rot${angle}.png`;
       try {
-        // 회전 + 축소 + 흑백 + 선명화 (OCR 최적화)
         await sharp(filePath)
           .rotate(angle)
           .resize(1000, 1000, { fit: "inside" })
@@ -95,41 +93,77 @@ async function detectAndFixOrientation(filePath: string, _anthropic: Anthropic):
           .png()
           .toFile(tmpPng);
 
-        // Tesseract OCR 실행 (--psm 6: 단일 텍스트 블록 가정)
-        let ocrText = "";
+        // TSV 출력으로 단어별 confidence 획득
+        let tsvOutput = "";
         try {
-          ocrText = execSync(
-            `tesseract "${tmpPng}" stdout --psm 6 -l kor+eng 2>/dev/null`,
-            { encoding: "utf-8", timeout: 8000 }
+          tsvOutput = execSync(
+            `tesseract "${tmpPng}" stdout --psm 3 -l kor+eng tsv 2>/dev/null`,
+            { encoding: "utf-8", timeout: 10000 }
           ).trim();
         } catch {
-          // kor 실패 시 eng만으로 재시도
           try {
-            ocrText = execSync(
-              `tesseract "${tmpPng}" stdout --psm 6 2>/dev/null`,
-              { encoding: "utf-8", timeout: 8000 }
+            tsvOutput = execSync(
+              `tesseract "${tmpPng}" stdout --psm 3 tsv 2>/dev/null`,
+              { encoding: "utf-8", timeout: 10000 }
             ).trim();
           } catch {}
         }
 
-        // 한글 문자 수 카운트 (가-힣 범위)
-        const korChars = (ocrText.match(/[\uAC00-\uD7AF]/g) || []).length;
-        const totalChars = ocrText.replace(/\s/g, "").length;
-        const sample = ocrText.substring(0, 60).replace(/\n/g, " ");
-        results.push({ angle, korCount: korChars, totalChars, sample });
+        // TSV 파싱: 각 단어의 text와 confidence 추출
+        const lines = tsvOutput.split("\n").slice(1); // 헤더 제거
+        let totalScore = 0;
+        let korCount = 0;
+        let confSum = 0;
+        let wordCount = 0;
+        let sampleWords: string[] = [];
+
+        for (const line of lines) {
+          const cols = line.split("\t");
+          if (cols.length < 12) continue;
+          const conf = parseInt(cols[10], 10); // confidence (0-100)
+          const text = (cols[11] || "").trim();
+          if (!text || conf < 0) continue;
+
+          wordCount++;
+          confSum += conf;
+
+          // 한글 포함 단어: confidence 가중 점수
+          const korChars = (text.match(/[\uAC00-\uD7AF]/g) || []).length;
+          if (korChars > 0) {
+            korCount += korChars;
+            totalScore += korChars * (conf / 100); // confidence 가중
+          }
+
+          // 숫자 포함 단어 (영수증 특성): confidence 가중
+          const digitChars = (text.match(/\d/g) || []).length;
+          if (digitChars > 0) {
+            totalScore += digitChars * (conf / 100) * 0.3; // 숫자는 한글 대비 30% 가중
+          }
+
+          if (sampleWords.length < 5 && korChars > 0) sampleWords.push(text);
+        }
+
+        const confAvg = wordCount > 0 ? confSum / wordCount : 0;
+        results.push({
+          angle,
+          score: Math.round(totalScore * 100) / 100,
+          korCount,
+          confAvg: Math.round(confAvg * 10) / 10,
+          sample: sampleWords.join(" ") || "(no Korean)",
+        });
       } finally {
         try { fs.unlinkSync(tmpPng); } catch {}
       }
     }
 
-    // 한글 문자 수가 가장 많은 방향 선택
-    const best = results.reduce((a, b) => b.korCount > a.korCount ? b : a, results[0]);
+    // confidence 가중 점수가 가장 높은 방향 선택
+    const best = results.reduce((a, b) => b.score > a.score ? b : a, results[0]);
 
-    const summary = results.map(r => `${r.angle}°:kor=${r.korCount}/total=${r.totalChars}`).join(", ");
+    const summary = results.map(r => `${r.angle}°:score=${r.score}/kor=${r.korCount}/conf=${r.confAvg}`).join(", ");
     console.log(`[OCR] 4방향 Tesseract: ${path.basename(filePath)} → best=${best.angle}° (${summary})`);
     console.log(`[OCR] best sample(${best.angle}°): "${best.sample}"`);
 
-    if (best.angle > 0 && best.korCount > 0) {
+    if (best.angle > 0 && best.score > 0) {
       const rotated = await sharp(filePath).rotate(best.angle).toBuffer();
       fs.writeFileSync(filePath, rotated);
       console.log(`[OCR] Tesseract 기반 ${best.angle}° 회전 완료: ${path.basename(filePath)} (${(rotated.length / 1024).toFixed(0)}KB)`);
