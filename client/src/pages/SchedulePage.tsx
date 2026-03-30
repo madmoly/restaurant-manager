@@ -847,26 +847,28 @@ export default function SchedulePage() {
       {/* ─── 헤더 ──────────────────────────────── */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold text-foreground">스케줄 관리</h1>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => copyWeek.mutate({ restaurantId, targetWeekStart: weekStart })}
-            disabled={copyWeek.isPending}
-            className="text-xs gap-1.5"
-          >
-            <Copy className="w-3.5 h-3.5" /> 지난주 복사
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => confirmRange.mutate({ restaurantId, from: weekStart, to: weekEnd })}
-            disabled={confirmRange.isPending}
-            className="text-xs gap-1.5"
-          >
-            <Send className="w-3.5 h-3.5" /> 스케줄 확정
-          </Button>
-        </div>
+        {isManager && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => copyWeek.mutate({ restaurantId, targetWeekStart: weekStart })}
+              disabled={copyWeek.isPending}
+              className="text-xs gap-1.5"
+            >
+              <Copy className="w-3.5 h-3.5" /> 지난주 복사
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => confirmRange.mutate({ restaurantId, from: weekStart, to: weekEnd })}
+              disabled={confirmRange.isPending}
+              className="text-xs gap-1.5"
+            >
+              <Send className="w-3.5 h-3.5" /> 스케줄 확정
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* ─── 주 네비게이션 ─────────────────────── */}
@@ -978,12 +980,14 @@ export default function SchedulePage() {
                 })}
               </div>
 
-              <button
-                onClick={() => openAssignModal(dateStr)}
-                className="w-full mt-1 py-2 rounded border border-dashed border-border/60 text-[11px] md:text-xs text-muted-foreground hover:bg-accent/30 active:bg-accent/50 transition-colors"
-              >
-                + 직원 배정
-              </button>
+              {isManager && (
+                <button
+                  onClick={() => openAssignModal(dateStr)}
+                  className="w-full mt-1 py-2 rounded border border-dashed border-border/60 text-[11px] md:text-xs text-muted-foreground hover:bg-accent/30 active:bg-accent/50 transition-colors"
+                >
+                  + 직원 배정
+                </button>
+              )}
             </div>
           );
         })}
@@ -1540,26 +1544,28 @@ export default function SchedulePage() {
                 </div>
               )}
 
-              <div className="flex gap-2 pt-2">
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="flex-1"
-                  onClick={handleDelete}
-                  disabled={deleteSchedule.isPending}
-                >
-                  <Trash2 className="w-4 h-4 mr-1" />
-                  {deleteConfirm ? "삭제 확인" : editSchedule.status === "draft" ? "삭제" : "취소 처리"}
-                </Button>
-                <Button
-                  size="sm"
-                  className="flex-1"
-                  onClick={handleUpdate}
-                  disabled={updateSchedule.isPending}
-                >
-                  저장
-                </Button>
-              </div>
+              {isManager && (
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="flex-1"
+                    onClick={handleDelete}
+                    disabled={deleteSchedule.isPending}
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    {deleteConfirm ? "삭제 확인" : editSchedule.status === "draft" ? "삭제" : "취소 처리"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    onClick={handleUpdate}
+                    disabled={updateSchedule.isPending}
+                  >
+                    저장
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>
