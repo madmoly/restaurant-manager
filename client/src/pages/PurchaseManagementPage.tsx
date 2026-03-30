@@ -37,7 +37,7 @@ export default function PurchaseManagementPage() {
     <div className="max-w-3xl mx-auto">
       {/* 탭 네비게이션 */}
       <div className="sticky top-0 z-10 bg-background border-b border-border">
-        <div className="flex">
+        <div className="flex overflow-x-auto scrollbar-hide">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -45,7 +45,7 @@ export default function PurchaseManagementPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 flex flex-col items-center gap-0.5 py-3 text-xs font-medium border-b-2 transition-colors ${
+                className={`shrink-0 flex-1 min-w-[64px] flex flex-col items-center gap-0.5 py-3 text-xs font-medium border-b-2 transition-colors ${
                   active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
