@@ -67,43 +67,57 @@ async function detectAndFixOrientation(filePath: string, anthropic: Anthropic): 
     console.warn(`[OCR] EXIF 회전 실패 (무시): ${path.basename(filePath)} — ${exifErr.message}`);
   }
 
-  // 2. AI 방향 감지: EXIF 없거나 이미 스트립된 경우 AI로 판별
-  //    단일 이미지 + CoT 프롬프트로 0/90/180/270 모두 정확히 감지
+  // 2. AI 방향 감지: 4방향 이미지 비교 방식
+  //    0°/90°/180°/270° 모두 생성 → AI에게 "어느 게 정방향이냐" 선택시킴
+  //    판별용 이미지는 800px로 축소하여 비용/속도 최적화
   try {
-    const { base64, mediaType } = loadImageBase64Raw(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+      ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+    };
+    const mt = mimeMap[ext] || "image/jpeg";
+
+    // 판별용 축소 이미지 생성 (800px max, JPEG 품질 70)
+    const makeThumb = async (angle: number): Promise<string> => {
+      const buf = await sharp(filePath)
+        .rotate(angle)
+        .resize(800, 800, { fit: "inside" })
+        .jpeg({ quality: 70 })
+        .toBuffer();
+      return buf.toString("base64");
+    };
+
+    const [img0, img90, img180, img270] = await Promise.all([
+      makeThumb(0), makeThumb(90), makeThumb(180), makeThumb(270),
+    ]);
 
     const orientationRes = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 200,
+      max_tokens: 100,
       messages: [{
         role: "user",
         content: [
-          {
-            type: "image",
-            source: { type: "base64", media_type: mediaType as any, data: base64 },
-          },
-          {
-            type: "text",
-            text: `이 이미지는 한국 식당의 매입 전표(거래명세서/영수증/수기전표)입니다.
-이미지가 회전되어 있을 수 있습니다. 정방향으로 만들기 위해 시계방향으로 몇 도 회전이 필요한지 판별하세요.
-
-판별 기준:
-1. 한글 텍스트가 왼→오른쪽, 위→아래로 자연스럽게 읽히는 방향이 정방향
-2. 문서 상단에 거래처명/날짜, 하단에 합계금액이 위치
-3. 숫자 6과 9, 한글 받침 위치로 상하 구분
-
-반드시 아래 형식으로만 답하세요:
-ANGLE: (0 또는 90 또는 180 또는 270)`,
-          },
+          { type: "text", text: "한국 식당 매입 전표 이미지입니다. 아래 A/B/C/D 4개 중 한글 텍스트가 정방향(왼→오른쪽, 위→아래)으로 읽히는 이미지를 고르세요.\n\n이미지 A:" },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: img0 } },
+          { type: "text", text: "이미지 B:" },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: img90 } },
+          { type: "text", text: "이미지 C:" },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: img180 } },
+          { type: "text", text: "이미지 D:" },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: img270 } },
+          { type: "text", text: "정방향으로 읽히는 이미지의 알파벳만 답하세요: A, B, C, D" },
         ],
       }],
     });
 
-    const orientText = extractText(orientationRes)?.trim() || "0";
-    const angleMatch = orientText.match(/ANGLE:\s*(0|90|180|270)/);
-    const angle = angleMatch ? parseInt(angleMatch[1], 10) : 0;
+    const orientText = extractText(orientationRes)?.trim() || "A";
+    const choiceMatch = orientText.match(/\b([A-D])\b/);
+    const choice = choiceMatch ? choiceMatch[1] : "A";
+    const angleMap: Record<string, number> = { A: 0, B: 90, C: 180, D: 270 };
+    const angle = angleMap[choice] ?? 0;
 
-    console.log(`[OCR] AI 방향 감지 (CoT): ${path.basename(filePath)} → ${angle}° (원문: "${orientText}")`);
+    console.log(`[OCR] AI 방향 감지 (4방향 비교): ${path.basename(filePath)} → ${choice}=${angle}° (원문: "${orientText}")`);
 
     if (angle > 0) {
       const rotated = await sharp(filePath).rotate(angle).toBuffer();
