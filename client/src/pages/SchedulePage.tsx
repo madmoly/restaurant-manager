@@ -536,19 +536,25 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
                         </div>
 
                         {/* 시간 요약 */}
-                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
-                          {wd && (
+                        <div className="flex flex-col items-end text-[11px] text-muted-foreground shrink-0 leading-tight">
+                          {wd && sameTime && (
                             <span>
-                              {sameTime ? "" : "평 "}{wd.startTime}~{wd.endTime}
-                              {wd.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">(휴{wd.breakMinutes})</span>}
-                              {sameTime && wdHours !== null && <span className="text-primary font-medium ml-1">{fmtHours(wdHours)}</span>}
-                              {!sameTime && wdHours !== null && <span className="text-primary/70 ml-0.5">{fmtHours(wdHours)}</span>}
+                              {wd.startTime}~{wd.endTime}
+                              {wd.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">휴{wd.breakMinutes}</span>}
+                              {wdHours !== null && <span className="text-primary font-medium ml-1">{fmtHours(wdHours)}</span>}
+                            </span>
+                          )}
+                          {wd && !sameTime && (
+                            <span>
+                              평 {wd.startTime}~{wd.endTime}
+                              {wd.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">휴{wd.breakMinutes}</span>}
+                              {wdHours !== null && <span className="text-primary/70 ml-0.5">{fmtHours(wdHours)}</span>}
                             </span>
                           )}
                           {we && !sameTime && (
-                            <span className="ml-1">
+                            <span>
                               주 {we.startTime}~{we.endTime}
-                              {we.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">(휴{we.breakMinutes})</span>}
+                              {we.breakMinutes > 0 && <span className="text-orange-500 ml-0.5">휴{we.breakMinutes}</span>}
                               {weHours !== null && <span className="text-primary/70 ml-0.5">{fmtHours(weHours)}</span>}
                             </span>
                           )}
