@@ -248,7 +248,7 @@ export default function LaborCostPage() {
                           <th className="text-left px-4 py-2 font-medium text-muted-foreground">급여</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">출근</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">휴무</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">신청휴무</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">계약휴무</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">시간</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">대체</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">연차</th>
@@ -278,7 +278,7 @@ export default function LaborCostPage() {
                             </td>
                             <td className="px-4 py-2 text-right text-muted-foreground">{emp.shifts}일</td>
                             <td className="px-4 py-2 text-right text-muted-foreground">{emp.daysOff ?? 0}일</td>
-                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.approvedLeaves ?? 0}{typeof emp.approvedLeaves === 'number' && emp.approvedLeaves % 1 !== 0 ? '' : '일'}</td>
+                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.contractDaysOff ?? 0}일</td>
                             <td className="px-4 py-2 text-right text-muted-foreground">{emp.totalHours.toFixed(1)}h</td>
                             <td className="px-4 py-2 text-right text-muted-foreground">
                               {emp.substituteLeave ? (

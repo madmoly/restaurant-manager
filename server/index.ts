@@ -84,6 +84,7 @@ app.use(express.json());
     await addColumnIfNotExists("restaurant_users", "hireDate", "DATE DEFAULT NULL");
     await addColumnIfNotExists("restaurant_users", "resignedAt", "DATE DEFAULT NULL");
     await addColumnIfNotExists("restaurant_users", "resignReason", "VARCHAR(200) DEFAULT NULL");
+    await addColumnIfNotExists("employee_contracts", "weeklyOffDays", "INT DEFAULT 1");
 
     // employment_electronic_contracts 소속회사
     await addColumnIfNotExists("employment_electronic_contracts", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");

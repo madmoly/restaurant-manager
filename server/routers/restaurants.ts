@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, sql, count } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
-import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets, auditLogs } from "../../drizzle/schema";
+import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets, auditLogs, employeeContracts } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { activeRealStoreCondition, getOwnedRestaurants } from "../helpers/restaurantScope";
 import { verifyStoreAccess } from "../middleware/storeAuth";
@@ -215,9 +215,15 @@ export const restaurantsRouter = router({
           resignedAt: restaurantUsers.resignedAt,
           resignReason: restaurantUsers.resignReason,
           createdAt: restaurantUsers.createdAt,
+          weeklyOffDays: employeeContracts.weeklyOffDays,
         })
         .from(restaurantUsers)
         .innerJoin(users, eq(users.id, restaurantUsers.userId))
+        .leftJoin(employeeContracts, and(
+          eq(employeeContracts.userId, restaurantUsers.userId),
+          eq(employeeContracts.restaurantId, restaurantUsers.restaurantId),
+          eq(employeeContracts.isActive, true)
+        ))
         .where(and(...conditions));
     }),
 
@@ -284,6 +290,37 @@ export const restaurantsRouter = router({
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, input.userId)
         ));
+      return { ok: true };
+    }),
+
+  /** 주당 휴무일수 수정 (employee_contracts.weeklyOffDays) */
+  updateWeeklyOffDays: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      userId: z.number(),
+      weeklyOffDays: z.number().min(0).max(7),
+    }))
+    .mutation(async ({ input }) => {
+      // 활성 계약이 있으면 업데이트, 없으면 새로 생성
+      const [existing] = await db.select({ id: employeeContracts.id })
+        .from(employeeContracts)
+        .where(and(
+          eq(employeeContracts.userId, input.userId),
+          eq(employeeContracts.restaurantId, input.restaurantId),
+          eq(employeeContracts.isActive, true)
+        ))
+        .limit(1);
+      if (existing) {
+        await db.update(employeeContracts)
+          .set({ weeklyOffDays: input.weeklyOffDays })
+          .where(eq(employeeContracts.id, existing.id));
+      } else {
+        await db.insert(employeeContracts).values({
+          userId: input.userId,
+          restaurantId: input.restaurantId,
+          weeklyOffDays: input.weeklyOffDays,
+        });
+      }
       return { ok: true };
     }),
 

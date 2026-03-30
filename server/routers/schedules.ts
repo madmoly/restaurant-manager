@@ -12,7 +12,6 @@ import {
   restaurantUsers,
   employeeContracts,
   restaurantShiftPresets,
-  leaveRequests,
   leaveTransactions,
   employmentElectronicContracts,
 } from "../../drizzle/schema";
@@ -759,6 +758,7 @@ export const schedulesRouter = router({
           position: employeeContracts.position,
           contractStart: employeeContracts.contractStart,
           contractEnd: employeeContracts.contractEnd,
+          weeklyOffDays: employeeContracts.weeklyOffDays,
         })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
@@ -814,25 +814,9 @@ export const schedulesRouter = router({
         operatingDays++;
       }
 
-      // ── 승인된 휴무신청 조회 (계약휴무일수) ──
-      const leaveRows = await db.select({
-        userId: leaveRequests.userId,
-        leaveType: leaveRequests.leaveType,
-      })
-        .from(leaveRequests)
-        .where(and(
-          eq(leaveRequests.restaurantId, input.restaurantId),
-          eq(leaveRequests.status, "approved"),
-          sql`${leaveRequests.leaveDate} >= ${`${input.year}-${monthStr}-01`}`,
-          sql`${leaveRequests.leaveDate} < ${`${ny}-${String(nm).padStart(2, "0")}-01`}`,
-        ));
-      // 유저별 승인 휴무 수 (반차=0.5일로 계산)
-      const approvedLeavesMap: Record<number, number> = {};
-      for (const lr of leaveRows) {
-        if (!lr.userId) continue;
-        const val = lr.leaveType === "dayoff" ? 1 : 0.5;
-        approvedLeavesMap[lr.userId] = (approvedLeavesMap[lr.userId] || 0) + val;
-      }
+      // ── 계약휴무 계산: weeklyOffDays × 해당 월 주 수 ──
+      // 주 수 = 해당 월 일수 / 7 (소수점 포함, 최종 반올림)
+      const weeksInMonth = daysInMonth / 7;
 
       // 소속회사별 그룹핑
       const companyMap: Record<string, {
@@ -842,7 +826,7 @@ export const schedulesRouter = router({
           name: string; totalHours: number; totalWage: number; shifts: number;
           wageType: string | null; wageAmount: string | null;
           position: string | null; contractStart: string | null; contractEnd: string | null;
-          daysOff: number; approvedLeaves: number;
+          daysOff: number; contractDaysOff: number;
           hireDate: string | null;
           userId: number | null;
         }>;
@@ -868,7 +852,7 @@ export const schedulesRouter = router({
             contractStart: r.contractStart ? String(r.contractStart) : null,
             contractEnd: r.contractEnd ? String(r.contractEnd) : null,
             daysOff: 0, // 아래에서 최종 계산
-            approvedLeaves: uid ? (approvedLeavesMap[uid] || 0) : 0,
+            contractDaysOff: Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
           };

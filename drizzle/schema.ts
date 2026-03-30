@@ -245,6 +245,7 @@ export const employeeContracts = mysqlTable("employee_contracts", {
   contractEnd: date("contractEnd"),
   contractNote: text("contractNote"),
   weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }),
+  weeklyOffDays: int("weeklyOffDays").default(1),
   isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

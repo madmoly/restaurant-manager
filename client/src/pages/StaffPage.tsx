@@ -48,6 +48,7 @@ export default function StaffPage() {
   const [editingCredentials, setEditingCredentials] = useState<any>(null);
   const [editingCompany, setEditingCompany] = useState<{ userId: number; value: string } | null>(null);
   const [editingHireDate, setEditingHireDate] = useState<{ userId: number; value: string } | null>(null);
+  const [editingOffDays, setEditingOffDays] = useState<{ userId: number; value: number } | null>(null);
   const [resignTarget, setResignTarget] = useState<{ userId: number; name: string } | null>(null);
   const [resignDate, setResignDate] = useState(new Date().toISOString().slice(0, 10));
   const [resignReason, setResignReason] = useState("");
@@ -113,6 +114,11 @@ export default function StaffPage() {
 
   const updateHireDate = trpc.restaurants.updateStaffHireDate.useMutation({
     onSuccess() { toast.success("입사일 변경됨"); setEditingHireDate(null); utils.restaurants.getStaff.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const updateWeeklyOffDays = trpc.restaurants.updateWeeklyOffDays.useMutation({
+    onSuccess() { toast.success("주당 휴무일수 변경됨"); setEditingOffDays(null); utils.restaurants.getStaff.invalidate(); },
     onError(err) { toast.error(err.message); },
   });
 
@@ -486,6 +492,42 @@ export default function StaffPage() {
                           <span className="text-xs text-foreground">{s.hireDate || "(미설정)"}</span>
                           <button
                             onClick={() => setEditingHireDate({ userId: s.userId, value: s.hireDate || "" })}
+                            className="p-1 rounded hover:bg-accent text-muted-foreground"
+                          ><Edit3 className="w-3 h-3" /></button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 주당 계약휴무 */}
+                    <div className="flex items-center gap-3">
+                      <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
+                        <CalendarDays className="w-3 h-3" /> 계약휴무
+                      </label>
+                      {editingOffDays?.userId === s.userId ? (
+                        <div className="flex items-center gap-2 flex-1">
+                          <select
+                            className="text-xs px-2 py-1 rounded border border-input bg-background"
+                            value={editingOffDays!.value}
+                            onChange={(e) => setEditingOffDays({ userId: s.userId, value: Number(e.target.value) })}
+                            autoFocus
+                          >
+                            {[0,1,2,3,4,5,6,7].map(v => (
+                              <option key={v} value={v}>주 {v}일</option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() => updateWeeklyOffDays.mutate({ restaurantId, userId: s.userId, weeklyOffDays: editingOffDays!.value })}
+                            className="p-1 rounded hover:bg-accent text-green-600"
+                          ><Check className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => setEditingOffDays(null)} className="p-1 rounded hover:bg-accent text-muted-foreground">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-foreground">주 {s.weeklyOffDays ?? 1}일</span>
+                          <button
+                            onClick={() => setEditingOffDays({ userId: s.userId, value: s.weeklyOffDays ?? 1 })}
                             className="p-1 rounded hover:bg-accent text-muted-foreground"
                           ><Edit3 className="w-3 h-3" /></button>
                         </div>
