@@ -1793,18 +1793,21 @@ function PurchaseTab({
             </span>
           </div>
 
-          <Button
+          <button
             onClick={handleCreate}
             disabled={createOrder.isPending || receiveOrderMutation.isPending}
-            className="w-full"
-            variant={inputMode === 'order' ? 'secondary' : 'default'}
+            className={`w-full py-3 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 ${
+              inputMode === 'order'
+                ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
           >
             {createOrder.isPending || receiveOrderMutation.isPending
               ? '등록 중...'
-              : receivingOrderId ? '입고 확인'
-              : inputMode === 'order' ? '발주 등록'
-              : '입고 등록'}
-          </Button>
+              : receivingOrderId ? '✓ 입고 확인'
+              : inputMode === 'order' ? '📋 발주 등록'
+              : '✓ 입고 등록'}
+          </button>
         </Card>
       )}
 
