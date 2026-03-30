@@ -431,9 +431,9 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
   }) => (
     <div className="flex items-center gap-1.5 text-xs">
       <span className="w-8 text-muted-foreground shrink-0">{label}</span>
-      <input type="time" value={startTime} onChange={(e) => onStartChange(e.target.value)} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
+      <input type="time" step="600" value={startTime} onChange={(e) => onStartChange(e.target.value)} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
       <span className="text-muted-foreground">~</span>
-      <input type="time" value={endTime} onChange={(e) => onEndChange(e.target.value)} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
+      <input type="time" step="600" value={endTime} onChange={(e) => onEndChange(e.target.value)} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
       <span className="text-muted-foreground shrink-0 ml-1">휴게</span>
       <input type="number" value={breakMin} onChange={(e) => onBreakChange(Number(e.target.value) || 0)} className="w-[48px] rounded border border-input bg-background px-1 py-1 text-xs text-center" min={0} max={180} />
       <span className="text-muted-foreground">분</span>
@@ -513,7 +513,9 @@ function ShiftPresetPanel({ restaurantId }: { restaurantId: number }) {
                     let totalMin = (eh * 60 + em) - (sh * 60 + sm);
                     if (totalMin <= 0) totalMin += 24 * 60; // 야간 근무
                     totalMin -= (breakMin || 0);
-                    return totalMin > 0 ? totalMin / 60 : 0;
+                    // 10분 단위 내림
+                    const rounded = Math.floor(Math.max(0, totalMin) / 10) * 10;
+                    return rounded / 60;
                   };
                   const wdHours = wd ? calcHours(wd.startTime, wd.endTime, wd.breakMinutes) : null;
                   const weHours = we ? calcHours(we.startTime, we.endTime, we.breakMinutes) : null;
@@ -1062,9 +1064,9 @@ export default function SchedulePage() {
                     const totalHours = daySchedules.reduce((sum, s) => {
                       const st = new Date(s.startTime).getTime();
                       const et = new Date(s.endTime).getTime();
-                      const gross = (et - st) / 3600000;
-                      const brk = (s.breakMinutes ?? 0) / 60;
-                      return sum + Math.max(0, gross - brk);
+                      const grossMin = (et - st) / 60000;
+                      const netMin = Math.max(0, grossMin - (s.breakMinutes ?? 0));
+                      return sum + Math.floor(netMin / 10) * 10 / 60;
                     }, 0);
                     const hDisp = totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1);
                     return <span className="ml-1 text-[10px] md:text-xs font-normal">({headcount % 1 === 0 ? headcount : headcount.toFixed(1)}명 {hDisp}h)</span>;
@@ -1348,7 +1350,7 @@ export default function SchedulePage() {
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">시작</label>
                     <input
-                      type="time"
+                      type="time" step="600"
                       className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={customTime.startTime}
                       onChange={(e) => setCustomTime({ ...customTime, startTime: e.target.value })}
@@ -1357,7 +1359,7 @@ export default function SchedulePage() {
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">종료</label>
                     <input
-                      type="time"
+                      type="time" step="600"
                       className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={customTime.endTime}
                       onChange={(e) => setCustomTime({ ...customTime, endTime: e.target.value })}
@@ -1454,7 +1456,7 @@ export default function SchedulePage() {
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">시작</label>
                     <input
-                      type="time"
+                      type="time" step="600"
                       className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={tempForm.startTime}
                       onChange={(e) => setTempForm({ ...tempForm, startTime: e.target.value })}
@@ -1463,7 +1465,7 @@ export default function SchedulePage() {
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">종료</label>
                     <input
-                      type="time"
+                      type="time" step="600"
                       className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={tempForm.endTime}
                       onChange={(e) => setTempForm({ ...tempForm, endTime: e.target.value })}
@@ -1597,7 +1599,7 @@ export default function SchedulePage() {
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">시작</label>
                   <input
-                    type="time"
+                    type="time" step="600"
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={editForm.startTime}
                     onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value, shiftPreset: "custom" })}
@@ -1606,7 +1608,7 @@ export default function SchedulePage() {
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">종료</label>
                   <input
-                    type="time"
+                    type="time" step="600"
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={editForm.endTime}
                     onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value, shiftPreset: "custom" })}

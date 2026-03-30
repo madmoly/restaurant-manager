@@ -769,9 +769,10 @@ export const schedulesRouter = router({
           };
         }
 
-        const grossHours = (new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 3600000;
-        const breakHours = (r.breakMinutes ?? 0) / 60;
-        const hours = Math.max(0, grossHours - breakHours);
+        const grossMin = (new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 60000;
+        const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
+        // 10분 단위 내림
+        const hours = Math.floor(netMin / 10) * 10 / 60;
         let wage = 0;
         if (r.tempWageType === "hourly" && r.tempWageAmount) {
           wage = hours * Number(r.tempWageAmount);

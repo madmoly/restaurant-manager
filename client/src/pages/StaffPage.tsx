@@ -992,11 +992,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className={labelCls}>출근</label>
-              <input type="time" className={inputCls} value={form.workStartTime} onChange={(e) => setForm({ ...form, workStartTime: e.target.value })} />
+              <input type="time" step="600" className={inputCls} value={form.workStartTime} onChange={(e) => setForm({ ...form, workStartTime: e.target.value })} />
             </div>
             <div>
               <label className={labelCls}>퇴근</label>
-              <input type="time" className={inputCls} value={form.workEndTime} onChange={(e) => setForm({ ...form, workEndTime: e.target.value })} />
+              <input type="time" step="600" className={inputCls} value={form.workEndTime} onChange={(e) => setForm({ ...form, workEndTime: e.target.value })} />
             </div>
             <div>
               <label className={labelCls}>휴게(분)</label>

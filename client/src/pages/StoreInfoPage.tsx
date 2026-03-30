@@ -79,9 +79,9 @@ function SalesTimeSettings({ restaurantId, isManager }: { restaurantId: number; 
             </div>
           ) : (
             <div className="flex items-center gap-1.5">
-              <input type="time" value={salesStartTime} onChange={(e) => setSalesStartTime(e.target.value)} className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm" />
+              <input type="time" step="600" value={salesStartTime} onChange={(e) => setSalesStartTime(e.target.value)} className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm" />
               <span className="text-muted-foreground text-xs">~</span>
-              <input type="time" value={salesEndTime} onChange={(e) => setSalesEndTime(e.target.value)} className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm" />
+              <input type="time" step="600" value={salesEndTime} onChange={(e) => setSalesEndTime(e.target.value)} className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm" />
               <Button size="sm" variant="default" onClick={handleSave} disabled={updateMut.isPending} className="h-7 px-2 text-xs">저장</Button>
               <button onClick={() => { setSalesStartTime(""); setSalesEndTime(""); handleSave(); }} className="p-1 rounded hover:bg-accent text-muted-foreground text-xs" title="제한 해제">해제</button>
               <button onClick={() => setEditing(false)} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
