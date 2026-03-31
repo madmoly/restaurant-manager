@@ -423,6 +423,149 @@ async function findCounterpartyId(name: string, restaurantId?: number): Promise<
   }
 }
 
+// ─── 거래처 후보 매칭 (퍼지) ────────────────────────────────────────────────
+async function findCounterpartyCandidates(
+  ocrName: string,
+  restaurantId?: number
+): Promise<{ id: number; name: string; score: number }[]> {
+  if (!ocrName || !restaurantId) return [];
+  try {
+    const rows = await db
+      .select({ id: counterparties.id, name: counterparties.name })
+      .from(counterparties)
+      .where(and(
+        eq(counterparties.restaurantId, restaurantId),
+        eq(counterparties.isActive, true)
+      ));
+    if (rows.length === 0) return [];
+
+    const ocrNorm = normalizeKorean(ocrName);
+    return rows
+      .map((r) => {
+        const dbNorm = normalizeKorean(r.name);
+        const score = fuzzyScore(ocrNorm, dbNorm);
+        return { id: r.id, name: r.name, score };
+      })
+      .filter((r) => r.score >= 0.3) // 30% 이상 유사도만
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+  } catch {
+    return [];
+  }
+}
+
+// ─── 품목 후보 매칭 (거래처 확정 후) ──────────────────────────────────────────
+async function findItemCandidates(
+  restaurantId: number,
+  counterpartyId: number | null,
+  ocrItems: OcrItem[]
+): Promise<OcrItem[]> {
+  try {
+    // 거래처 품목 + 전체 품목 마스터 조회
+    let cpItems: { id: number; name: string; price: string | null }[] = [];
+    if (counterpartyId) {
+      cpItems = await db
+        .select({ id: counterpartyItems.id, name: counterpartyItems.name, price: counterpartyItems.price })
+        .from(counterpartyItems)
+        .where(and(
+          eq(counterpartyItems.counterpartyId, counterpartyId),
+          eq(counterpartyItems.isActive, true)
+        ));
+    }
+
+    // 전체 품목 마스터 (거래처 품목에 없는 경우 폴백)
+    const allItems = await db
+      .select({ id: items.id, name: items.name })
+      .from(items)
+      .where(eq(items.restaurantId, restaurantId));
+
+    return ocrItems.map((item) => {
+      const ocrNorm = normalizeKorean(item.shortName);
+      if (!ocrNorm) return item;
+
+      // 1) 거래처 품목에서 매칭
+      let bestMatch: { itemId: number; itemName: string; score: number; source: "counterparty" | "master" } | null = null;
+      let candidates: { itemId: number; itemName: string; score: number; source: "counterparty" | "master" }[] = [];
+
+      for (const ci of cpItems) {
+        const score = fuzzyScore(ocrNorm, normalizeKorean(ci.name));
+        if (score >= 0.3) {
+          candidates.push({ itemId: ci.id, itemName: ci.name, score, source: "counterparty" });
+        }
+      }
+
+      // 2) 거래처 품목에서 좋은 매칭 없으면 전체 마스터에서 검색
+      if (candidates.length === 0 || (candidates[0] && candidates[0].score < 0.7)) {
+        for (const mi of allItems) {
+          const score = fuzzyScore(ocrNorm, normalizeKorean(mi.name));
+          if (score >= 0.3) {
+            candidates.push({ itemId: mi.id, itemName: mi.name, score, source: "master" });
+          }
+        }
+      }
+
+      candidates.sort((a, b) => b.score - a.score);
+      bestMatch = candidates[0] || null;
+
+      return {
+        ...item,
+        matchedItemId: bestMatch?.score && bestMatch.score >= 0.7 ? bestMatch.itemId : undefined,
+        matchedItemName: bestMatch?.score && bestMatch.score >= 0.7 ? bestMatch.itemName : undefined,
+        itemCandidates: candidates.slice(0, 3).map((c) => ({
+          itemId: c.itemId,
+          itemName: c.itemName,
+          score: Math.round(c.score * 100),
+          source: c.source,
+        })),
+      };
+    });
+  } catch {
+    return ocrItems;
+  }
+}
+
+// ─── 한글 정규화 (공백, 괄호 정리) ──────────────────────────────────────────
+function normalizeKorean(s: string): string {
+  return s
+    .replace(/\s+/g, '')        // 공백 제거
+    .replace(/[()（）\[\]]/g, '') // 괄호 제거
+    .toLowerCase();
+}
+
+// ─── 퍼지 유사도 점수 (0~1) ────────────────────────────────────────────────
+function fuzzyScore(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+
+  // 포함 관계 체크
+  if (a.includes(b) || b.includes(a)) {
+    const shorter = Math.min(a.length, b.length);
+    const longer = Math.max(a.length, b.length);
+    return shorter / longer; // 길이 비율로 점수화 (짧은쪽/긴쪽)
+  }
+
+  // Levenshtein distance 기반 유사도
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  const dist = levenshtein(a, b);
+  return 1 - dist / maxLen;
+}
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
 // ─── 거래처 정보 변경 감지 → DB 자동 반영 ─────────────────────────────────
 async function updateCounterpartyInfo(
   counterpartyId: number,
@@ -846,6 +989,18 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       : await findCounterpartyId(counterpartyName, restaurantId ? Number(restaurantId) : undefined);
     items = await matchCounterpartyItems(cpId, items);
 
+    // ── 거래처 후보 매칭 (사용자가 미선택 + 자동매칭 실패 시) ──────────
+    let counterpartyCandidates: { id: number; name: string; score: number }[] = [];
+    if (!clientCpId && !cpId && counterpartyName && restaurantId) {
+      counterpartyCandidates = await findCounterpartyCandidates(counterpartyName, Number(restaurantId));
+    }
+
+    // ── 품목 후보 매칭 (기존 품목 DB와 유사도 비교) ──────────────────
+    const rId = restaurantId ? Number(restaurantId) : 0;
+    if (rId > 0) {
+      items = await findItemCandidates(rId, cpId || (counterpartyCandidates[0]?.id ?? null), items);
+    }
+
     // ── 거래처 OCR 프로파일 자동 업데이트 (학습) ───────────────────────
     updateOcrProfile(cpId, parsed.documentType || null, items).catch(() => {});
 
@@ -855,6 +1010,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     const result = {
       counterpartyName,
       counterpartyId: cpId,
+      counterpartyCandidates: counterpartyCandidates.length > 0 ? counterpartyCandidates : undefined,
       transactionDate: parsed.transactionDate || null,
       counterpartyInfo: cpInfo.contactName || cpInfo.contactPhone ? cpInfo : null,
       items,

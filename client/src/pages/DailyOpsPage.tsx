@@ -796,6 +796,10 @@ interface PurchaseItemRow {
   unitPrice: string;
   lineTotal: string;
   counterpartyItemId?: number;
+  confidence?: string;
+  matchedItemId?: number;
+  matchedItemName?: string;
+  itemCandidates?: { itemId: number; itemName: string; score: number; source: string }[];
 }
 
 function emptyPurchaseItem(): PurchaseItemRow {
@@ -859,6 +863,7 @@ function PurchaseTab({
   const [counterpartyId, setCounterpartyId] = useState<number | undefined>(undefined);
   const [cpSearchText, setCpSearchText] = useState('');
   const [showCpDropdown, setShowCpDropdown] = useState(false);
+  const [cpCandidates, setCpCandidates] = useState<{ id: number; name: string; score: number }[]>([]);
   const [note, setNote] = useState('');
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemRow[]>([emptyPurchaseItem()]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -1069,7 +1074,7 @@ function PurchaseTab({
       setOcrProcessing(true);
       setOcrError(null);
 
-      toast.info('AI가 전표를 분석 중입니다...');
+      toast.info('전표 분석중...');
 
       const ocrRes = await fetch('/api/ocr/extract-purchase', {
         method: 'POST',
@@ -1101,24 +1106,22 @@ function PurchaseTab({
 
       // 거래처 매칭 (사용자가 아직 선택 안 한 경우만)
       if (!counterpartyId && ocrData.counterpartyName) {
-        const cpName = ocrData.counterpartyName.trim();
-        const cpList = counterpartiesQuery.data || [];
-        // 1) 정확 매칭
-        let matched = cpList.find((cp: any) => cp.name === cpName);
-        // 2) 부분 매칭 (포함 관계)
-        if (!matched) {
-          matched = cpList.find(
-            (cp: any) => cp.name.includes(cpName) || cpName.includes(cp.name)
-          );
-        }
-        if (matched) {
-          setCounterpartyId(matched.id);
-          toast.success(`거래처 자동선택: ${matched.name}`);
+        if (ocrData.counterpartyId) {
+          // 서버에서 정확 매칭됨
+          const cpList = counterpartiesQuery.data || [];
+          const matchedCp = cpList.find((cp: any) => cp.id === ocrData.counterpartyId);
+          setCounterpartyId(ocrData.counterpartyId);
+          toast.success(`거래처 자동선택: ${matchedCp?.name || ocrData.counterpartyName}`);
+        } else if (ocrData.counterpartyCandidates && ocrData.counterpartyCandidates.length > 0) {
+          // 유사 거래처 후보 있음 → 후보 배너 표시
+          setCpCandidates(ocrData.counterpartyCandidates);
+          setCpSearchText(ocrData.counterpartyName.trim());
+          toast.info(`"${ocrData.counterpartyName}" — 비슷한 거래처가 있습니다. 확인해주세요`);
         } else {
-          // 매칭 실패 → 검색란에 OCR 추출명 자동 입력 (사용자가 선택/신규등록)
-          setCpSearchText(cpName);
+          // 매칭 실패 → 검색란에 OCR 추출명 자동 입력
+          setCpSearchText(ocrData.counterpartyName.trim());
           setShowCpDropdown(true);
-          toast.info(`거래처 "${cpName}" — 목록에서 선택하거나 새로 등록하세요`);
+          toast.info(`거래처 "${ocrData.counterpartyName}" — 목록에서 선택하거나 새로 등록하세요`);
         }
       }
 
@@ -1166,7 +1169,7 @@ function PurchaseTab({
       if (ocrData.items && ocrData.items.length > 0) {
         setPurchaseItems(
           ocrData.items.map((item: any) => ({
-            rawItemName: item.shortName || item.name || '',
+            rawItemName: item.matchedItemName || item.shortName || item.name || '',
             spec: item.spec || '',
             originalName: item.originalName || item.name || '',
             quantity: item.quantity ? String(Math.round(parseFloat(item.quantity) * 100) / 100) : '',
@@ -1174,13 +1177,22 @@ function PurchaseTab({
             unitPrice: item.unitPrice || '',
             lineTotal: item.lineTotal || '',
             confidence: item.confidence || 'high',
+            matchedItemId: item.matchedItemId,
+            matchedItemName: item.matchedItemName,
+            itemCandidates: item.itemCandidates,
           }))
         );
+        // 매칭 통계
+        const matchedCount = ocrData.items.filter((i: any) => i.matchedItemId).length;
+        const candidateCount = ocrData.items.filter((i: any) => !i.matchedItemId && i.itemCandidates?.length > 0).length;
         const lowConfCount = ocrData.items.filter((i: any) => i.confidence === 'low').length;
-        if (lowConfCount > 0) {
-          toast.success(`${ocrData.items.length}개 항목 추출 (${lowConfCount}개 확인 필요)`);
+        if (candidateCount > 0 || lowConfCount > 0) {
+          const parts: string[] = [];
+          if (candidateCount > 0) parts.push(`${candidateCount}개 품목 확인 필요`);
+          if (lowConfCount > 0) parts.push(`${lowConfCount}개 수량/단가 확인`);
+          toast.success(`${ocrData.items.length}개 항목 추출 (${parts.join(', ')})`);
         } else {
-          toast.success(`${ocrData.items.length}개 항목이 추출되었습니다.`);
+          toast.success(`${ocrData.items.length}개 항목 추출${matchedCount > 0 ? ` (${matchedCount}개 자동매칭)` : ''}`);
         }
       } else {
         toast.info('항목을 추출하지 못했습니다. 직접 입력해주세요.');
@@ -1497,7 +1509,7 @@ function PurchaseTab({
           {ocrProcessing && (
             <div className="flex flex-col items-center py-6 space-y-2">
               <div className="w-7 h-7 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm text-foreground">AI가 전표를 분석 중...</p>
+              <p className="text-sm text-foreground">전표 분석중...</p>
               <p className="text-[10px] text-muted-foreground">품목, 수량, 단가를 자동 추출합니다</p>
             </div>
           )}
@@ -1652,7 +1664,7 @@ function PurchaseTab({
                 </span>
                 <button
                   type="button"
-                  onClick={() => { setCounterpartyId(undefined); setCpSearchText(''); }}
+                  onClick={() => { setCounterpartyId(undefined); setCpSearchText(''); setCpCandidates([]); }}
                   className="text-muted-foreground hover:text-foreground"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -1712,6 +1724,42 @@ function PurchaseTab({
               </>
             )}
           </div>
+
+          {/* 거래처 후보 매칭 배너 */}
+          {cpCandidates.length > 0 && !counterpartyId && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-md p-2.5 space-y-1.5">
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                비슷한 거래처가 있습니다. 맞는 것을 선택하세요:
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {cpCandidates.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setCounterpartyId(c.id);
+                      setCpSearchText('');
+                      setCpCandidates([]);
+                      toast.success(`거래처 선택: ${c.name}`);
+                    }}
+                    className="px-2.5 py-1.5 text-xs bg-amber-500/20 hover:bg-amber-500/40 text-amber-800 dark:text-amber-200 rounded-md transition-colors font-medium"
+                  >
+                    {c.name} ({c.score}%)
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCpCandidates([]);
+                    setShowCpDropdown(true);
+                  }}
+                  className="px-2.5 py-1.5 text-xs bg-muted/50 hover:bg-muted text-muted-foreground rounded-md transition-colors"
+                >
+                  해당없음
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 합계 표시 (거래처 아래) */}
           {!simpleMode && purchaseItems.some(i => parseFloat(i.lineTotal || '0') > 0) && (
@@ -1803,8 +1851,40 @@ function PurchaseTab({
                           </div>
                         )}
                       </div>
-                      {item.originalName && item.originalName !== item.rawItemName && (
+                      {item.originalName && item.originalName !== item.rawItemName && !item.matchedItemName && (
                         <p className="text-[10px] text-muted-foreground mt-0.5 px-1 truncate">원본: {item.originalName}</p>
+                      )}
+                      {/* 자동매칭된 경우 원본명 표시 */}
+                      {item.matchedItemName && item.originalName && (
+                        <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 px-1 truncate">
+                          ✓ 자동매칭 (전표: {item.originalName || item.matchedItemName})
+                        </p>
+                      )}
+                      {/* 후보가 있지만 자동매칭은 안 된 경우 → 선택 칩 */}
+                      {!item.matchedItemId && item.itemCandidates && item.itemCandidates.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          <span className="text-[10px] text-amber-600 dark:text-amber-400">혹시:</span>
+                          {item.itemCandidates.map((c: any) => (
+                            <button
+                              key={c.itemId}
+                              type="button"
+                              onClick={() => {
+                                const updated = [...purchaseItems];
+                                updated[idx] = {
+                                  ...updated[idx],
+                                  rawItemName: c.itemName,
+                                  matchedItemId: c.itemId,
+                                  matchedItemName: c.itemName,
+                                  itemCandidates: undefined,
+                                };
+                                setPurchaseItems(updated);
+                              }}
+                              className="px-1.5 py-0.5 text-[10px] bg-amber-500/15 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 rounded transition-colors"
+                            >
+                              {c.itemName}
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
                     {/* 수량 + 단위 */}
