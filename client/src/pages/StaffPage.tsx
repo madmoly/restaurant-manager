@@ -153,7 +153,6 @@ export default function StaffPage() {
   });
 
   // 보건증 업로드 핸들러
-  const healthCertInputRef = useRef<HTMLInputElement>(null);
   const [uploadingHealthCert, setUploadingHealthCert] = useState<number | null>(null);
 
   const handleHealthCertUpload = async (userId: number, file: File) => {
@@ -202,7 +201,6 @@ export default function StaffPage() {
   };
 
   // 통장사본 업로드 핸들러
-  const bankBookInputRef = useRef<HTMLInputElement>(null);
   const [uploadingBankBook, setUploadingBankBook] = useState<number | null>(null);
 
   const handleBankBookUpload = async (userId: number, file: File) => {
@@ -583,7 +581,7 @@ export default function StaffPage() {
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <input
-                            ref={healthCertInputRef}
+                            id={`health-cert-${s.userId}`}
                             type="file"
                             accept="image/*"
                             className="hidden"
@@ -596,7 +594,7 @@ export default function StaffPage() {
                           <Button
                             size="sm" variant="outline"
                             className="h-7 text-xs"
-                            onClick={() => healthCertInputRef.current?.click()}
+                            onClick={() => document.getElementById(`health-cert-${s.userId}`)?.click()}
                             disabled={uploadingHealthCert === s.userId}
                           >
                             {uploadingHealthCert === s.userId ? (
@@ -630,7 +628,7 @@ export default function StaffPage() {
                       </label>
                       <div className="flex items-center gap-2 flex-wrap">
                         <input
-                          ref={bankBookInputRef}
+                          id={`bank-book-${s.userId}`}
                           type="file"
                           accept="image/*"
                           className="hidden"
@@ -643,7 +641,7 @@ export default function StaffPage() {
                         <Button
                           size="sm" variant="outline"
                           className="h-7 text-xs"
-                          onClick={() => bankBookInputRef.current?.click()}
+                          onClick={() => document.getElementById(`bank-book-${s.userId}`)?.click()}
                           disabled={uploadingBankBook === s.userId}
                         >
                           {uploadingBankBook === s.userId ? (
@@ -1026,6 +1024,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     specialTerms: ec?.specialTerms ?? "",
     employerBusinessNumber: ec?.employerBusinessNumber ?? "",
     weeklyHoliday: ec?.weeklyHoliday ?? "일요일",
+    weeklyOffDays: ec?.weeklyOffDays ?? 1,
     includeNda: ec?.includeNda ?? true,
     includePrivacyConsent: ec?.includePrivacyConsent ?? true,
   });
@@ -1044,6 +1043,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         workEndTime: latestTemplate.workEndTime || prev.workEndTime,
         breakMinutes: latestTemplate.breakMinutes ?? prev.breakMinutes,
         weeklyHoliday: latestTemplate.weeklyHoliday || prev.weeklyHoliday,
+        weeklyOffDays: (latestTemplate as any).weeklyOffDays ?? prev.weeklyOffDays,
         payDay: latestTemplate.payDay ?? prev.payDay,
         payMethod: (latestTemplate.payMethod as any) || prev.payMethod,
         over5Employees: latestTemplate.over5Employees ?? prev.over5Employees,
@@ -1350,6 +1350,14 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               <input type="number" className={inputCls} value={form.weeklyHours} onChange={(e) => setForm({ ...form, weeklyHours: e.target.value })} />
               {isUnder15Hours && <p className="text-[10px] text-amber-500 mt-0.5">주 15시간 미만: 주휴수당·4대보험 미적용</p>}
             </div>
+            <div>
+              <label className={labelCls}>주당 휴무일수</label>
+              <select className={inputCls} value={form.weeklyOffDays} onChange={(e) => setForm({ ...form, weeklyOffDays: Number(e.target.value) })}>
+                <option value={1}>1일</option>
+                <option value={2}>2일</option>
+                <option value={0}>없음</option>
+              </select>
+            </div>
           </div>
 
           {/* ═══ 포괄임금 구성항목 (월급제 전용) ═══ */}
@@ -1535,6 +1543,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 workEndTime: form.workEndTime,
                 breakMinutes: form.breakMinutes,
                 weeklyHoliday: form.weeklyHoliday || "일요일",
+                weeklyOffDays: form.weeklyOffDays,
                 payDay: form.payDay,
                 payMethod: form.payMethod,
                 over5Employees: form.over5Employees,

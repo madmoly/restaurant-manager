@@ -20,8 +20,8 @@ export const users = mysqlTable("users", {
   name: varchar("name", { length: 100 }).notNull(),
   email: varchar("email", { length: 320 }),
   phone: varchar("phone", { length: 30 }),
-  // 시스템 역할: master > admin > manager > employee
-  role: mysqlEnum("role", ["master", "admin", "manager", "employee"]).default("employee").notNull(),
+  // 시스템 역할: master > admin > user (레거시: manager, employee)
+  role: mysqlEnum("role", ["master", "admin", "user", "manager", "employee"]).default("user").notNull(),
   authProvider: varchar("authProvider", { length: 20 }).default("local"),
   authProviderId: varchar("authProviderId", { length: 255 }),
   isActive: boolean("isActive").default(true).notNull(),
@@ -656,6 +656,7 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   workEndTime: varchar("workEndTime", { length: 5 }).default("18:00"),
   breakMinutes: int("breakMinutes").default(60),
   weeklyHoliday: varchar("weeklyHoliday", { length: 20 }).default("일요일"),
+  weeklyOffDays: int("weeklyOffDays").default(1), // 주당 휴무일수
   payDay: int("payDay").default(25),
   payMethod: mysqlEnum("payMethod", ["bank_transfer", "cash"]).default("bank_transfer"),
   mealProvided: boolean("mealProvided").default(false).notNull(),

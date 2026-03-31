@@ -70,7 +70,7 @@ app.use(express.json());
 
     // users.role ENUM 확장: 'user' → 'master','admin','manager','employee' 모두 포함
     try {
-      await conn.query(`ALTER TABLE users MODIFY COLUMN role ENUM('master','admin','manager','employee','user') NOT NULL DEFAULT 'employee'`);
+      await conn.query(`ALTER TABLE users MODIFY COLUMN role ENUM('master','admin','user','manager','employee') NOT NULL DEFAULT 'user'`);
       console.log("[migrate] users.role ENUM updated");
     } catch (e: any) {
       if (!e.message.includes("Duplicate")) console.log("[migrate] role ENUM:", e.message);
@@ -627,6 +627,9 @@ app.use(express.json());
 
     // users에 bankBookUrl 추가
     await addColumnIfNotExists("users", "bankBookUrl", "VARCHAR(500) DEFAULT NULL");
+
+    // employment_electronic_contracts에 weeklyOffDays 추가
+    await addColumnIfNotExists("employment_electronic_contracts", "weeklyOffDays", "INT DEFAULT 1");
 
     await conn.end();
     console.log("[migrate] all migrations complete");

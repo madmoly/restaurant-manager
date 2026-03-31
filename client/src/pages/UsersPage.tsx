@@ -255,7 +255,7 @@ function CreateUserForm({ onDone }: { onDone: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<"master" | "admin" | "manager" | "employee">("employee");
+  const [role, setRole] = useState<"master" | "admin" | "user">("user");
   const [phone, setPhone] = useState("");
 
   const create = trpc.users.create.useMutation({
@@ -277,7 +277,7 @@ function CreateUserForm({ onDone }: { onDone: () => void }) {
       <div>
         <label className="text-xs text-muted-foreground">시스템 역할</label>
         <select value={role} onChange={(e) => setRole(e.target.value as any)} className={`mt-1 w-full ${inputCls}`}>
-          <option value="employee">일반 (직원)</option>
+          <option value="user">일반 사용자</option>
           <option value="admin">대표</option>
           <option value="master">개발자</option>
         </select>

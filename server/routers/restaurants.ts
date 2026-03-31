@@ -217,7 +217,16 @@ export const restaurantsRouter = router({
           resignedAt: restaurantUsers.resignedAt,
           resignReason: restaurantUsers.resignReason,
           createdAt: restaurantUsers.createdAt,
+          // employeeContracts (현재 활성 계약)
+          wageType: employeeContracts.wageType,
+          wageAmount: employeeContracts.wageAmount,
+          position: employeeContracts.position,
+          contractStart: employeeContracts.contractStart,
+          contractEnd: employeeContracts.contractEnd,
           weeklyOffDays: employeeContracts.weeklyOffDays,
+          socialInsurance: employeeContracts.socialInsurance,
+          bankAccount: employeeContracts.bankAccount,
+          residentNumber: employeeContracts.residentNumber,
         })
         .from(restaurantUsers)
         .innerJoin(users, eq(users.id, restaurantUsers.userId))
