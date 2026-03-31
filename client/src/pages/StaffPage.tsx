@@ -988,10 +988,10 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     }
   }, [latestTemplate, defaultEmployee, templateApplied]);
 
-  // ── 스케줄 풀타임 프리셋 → 출퇴근/주근로시간 자동 반영 (템플릿 미적용 시) ──
+  // ── 스케줄 풀타임 프리셋 → 출퇴근/휴게/주근로시간 자동 반영 (항상 적용) ──
   const [presetApplied, setPresetApplied] = useState(false);
   useEffect(() => {
-    if (presetApplied || templateApplied) return;
+    if (presetApplied) return;
     const fullPreset = shiftPresets.find((p: any) => p.presetType === "full" || p.presetType === "fullday");
     if (!fullPreset) return;
     const wd = shiftPresets.find((p: any) => (p.presetType === "full" || p.presetType === "fullday") && p.dayType === "weekday") || fullPreset;
@@ -999,16 +999,17 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
       const start = (wd as any).startTime || prev.workStartTime;
       const end = (wd as any).endTime || prev.workEndTime;
       const brk = (wd as any).breakMinutes ?? prev.breakMinutes;
-      // 주근로시간 계산: (출~퇴 - 휴게) × 5일
+      // 1일 소정근로시간(분) = 출~퇴 - 휴게
       const [sh, sm] = start.split(":").map(Number);
       const [eh, em] = end.split(":").map(Number);
       let dailyMin = (eh * 60 + em) - (sh * 60 + sm) - brk;
       if (dailyMin <= 0) dailyMin += 24 * 60;
+      // 주 5일 기준 주근로시간
       const weeklyH = Math.round(dailyMin * 5 / 60);
       return { ...prev, workStartTime: start, workEndTime: end, breakMinutes: brk, weeklyHours: String(weeklyH) };
     });
     setPresetApplied(true);
-  }, [shiftPresets, presetApplied, templateApplied]);
+  }, [shiftPresets, presetApplied]);
 
   const create = trpc.electronicContracts.createEmploymentContract.useMutation({
     onSuccess() { toast.success("계약서 초안 생성됨"); utils.electronicContracts.listEmploymentContracts.invalidate(); onClose(); },

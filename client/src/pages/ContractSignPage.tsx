@@ -258,15 +258,26 @@ export default function ContractSignPage({ token }: { token: string }) {
               <div>
                 <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>근로시간 및 휴게시간</h3>
                 <div className="space-y-1" style={{ paddingLeft: "8px" }}>
-                  <p>① 1일 소정근로시간은 {(() => {
+                  {(() => {
                     const [sh, sm] = (contract.workStartTime || "09:00").split(":").map(Number);
                     const [eh, em] = (contract.workEndTime || "18:00").split(":").map(Number);
-                    let mins = (eh * 60 + em) - (sh * 60 + sm) - (contract.breakMinutes ?? 60);
-                    if (mins < 0) mins += 24 * 60;
-                    return `${Math.floor(mins / 60)}시간 ${mins % 60 > 0 ? `${mins % 60}분` : ""}`.trim();
-                  })()}이며, 1주 소정근로시간은 {Number(contract.weeklyHours)}시간으로 한다.</p>
-                  <p>② 휴게시간은 {contract.breakMinutes ?? 60}분으로 하며, 근로자는 자유롭게 이용할 수 있다.</p>
-                  <p>③ 실제 근무 스케줄은 사업주가 작성한 스케줄표에 따르되, 근로자에게 사전에 고지한다.</p>
+                    let dailyMins = (eh * 60 + em) - (sh * 60 + sm) - (contract.breakMinutes ?? 60);
+                    if (dailyMins <= 0) dailyMins += 24 * 60;
+                    const dailyH = Math.floor(dailyMins / 60);
+                    const dailyM = dailyMins % 60;
+                    const dailyStr = `${dailyH}시간${dailyM > 0 ? ` ${dailyM}분` : ""}`;
+                    const weeklyH = Number(contract.weeklyHours) || 40;
+                    // 주 근무일수 = 주근로시간 / 1일 근로시간 (반올림)
+                    const workDays = dailyMins > 0 ? Math.round(weeklyH * 60 / dailyMins) : 5;
+                    return (
+                      <>
+                        <p>① 근무시간: {contract.workStartTime} ~ {contract.workEndTime} (휴게시간 {contract.breakMinutes ?? 60}분 제외)</p>
+                        <p>② 1일 소정근로시간은 {dailyStr}이며, 주 {workDays}일 근무를 기준으로 1주 소정근로시간은 {weeklyH}시간으로 한다.</p>
+                      </>
+                    );
+                  })()}
+                  <p>③ 휴게시간은 근로자가 자유롭게 이용할 수 있다.</p>
+                  <p>④ 실제 근무 스케줄은 사업주가 작성한 스케줄표에 따르되, 근로자에게 사전에 고지한다.</p>
                 </div>
               </div>
 
