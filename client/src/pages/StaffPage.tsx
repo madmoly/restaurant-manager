@@ -92,10 +92,7 @@ export default function StaffPage() {
     onError(err) { toast.error(err.message); },
   });
 
-  const removeStaff = trpc.restaurants.removeStaff.useMutation({
-    onSuccess() { toast.success("제거됨"); utils.restaurants.getStaff.invalidate(); },
-    onError(err) { toast.error(err.message); },
-  });
+  // removeStaff 기능 제거됨 (퇴사처리만 사용)
 
   const updateCredentials = trpc.users.updateStaffCredentials.useMutation({
     onSuccess() { toast.success("정보 수정됨"); setEditingCredentials(null); utils.restaurants.getStaff.invalidate(); },
@@ -601,11 +598,8 @@ export default function StaffPage() {
                       </div>
                     </div>
 
-                    {/* 퇴사/복직 + 삭제 */}
+                    {/* 퇴사/복직 */}
                     <div className="flex items-center gap-3 pt-2 border-t border-border flex-wrap">
-                      <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
-                        <Trash2 className="w-3 h-3" /> 관리
-                      </label>
                       {s.resignedAt ? (
                         <button
                           onClick={() => {
@@ -624,15 +618,6 @@ export default function StaffPage() {
                           <X className="w-3 h-3" /> 퇴사 처리
                         </button>
                       )}
-                      <button
-                        onClick={() => {
-                          if (confirm(`${s.name}을(를) 매장에서 제거하시겠습니까? (이력 포함 완전 삭제)`))
-                            removeStaff.mutate({ restaurantId, userId: s.userId });
-                        }}
-                        className="text-xs text-destructive hover:underline flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3 h-3" /> 매장에서 제거
-                      </button>
                     </div>
                   </div>
                 )}
