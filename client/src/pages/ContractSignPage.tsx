@@ -162,6 +162,73 @@ export default function ContractSignPage({ token }: { token: string }) {
                   label="6. 임금"
                   value={`${contract.wageType === "hourly" ? "시급" : "월급"} ${Number(contract.wageAmount).toLocaleString()}원`}
                 />
+                {/* 포괄임금 구성항목 (월급제 + basePay 존재 시) */}
+                {contract.wageType === "monthly" && contract.basePay && (
+                  <tr>
+                    <td colSpan={2} style={{ padding: "0 0 0 0" }}>
+                      <div style={{ margin: "0 16px 12px 16px", border: "1px solid #d1d5db", borderRadius: "6px", overflow: "hidden" }}>
+                        <div style={{ background: "#f3f4f6", padding: "6px 12px", borderBottom: "1px solid #d1d5db" }}>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#374151" }}>임금 구성항목 (근기법 제17조)</span>
+                          {contract.monthlyContractHours && (
+                            <span style={{ fontSize: "10px", color: "#6b7280", marginLeft: "8px" }}>월소정근로 {Number(contract.monthlyContractHours)}h</span>
+                          )}
+                        </div>
+                        <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
+                          <tbody>
+                            {contract.hourlyWage && (
+                              <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                                <td style={{ padding: "5px 12px", color: "#6b7280" }}>통상시급</td>
+                                <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
+                                  {Number(contract.hourlyWage).toLocaleString()}원
+                                </td>
+                              </tr>
+                            )}
+                            <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                              <td style={{ padding: "5px 12px", color: "#6b7280" }}>기본급{contract.monthlyContractHours ? ` (${Number(contract.monthlyContractHours)}h)` : ""}</td>
+                              <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
+                                {Number(contract.basePay).toLocaleString()}원
+                              </td>
+                            </tr>
+                            {contract.fixedOvertimePay && Number(contract.fixedOvertimePay) > 0 && (
+                              <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                                <td style={{ padding: "5px 12px", color: "#6b7280" }}>
+                                  고정연장수당{contract.fixedOvertimeHours ? ` (${Number(contract.fixedOvertimeHours)}h × 1.5배)` : ""}
+                                </td>
+                                <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
+                                  {Number(contract.fixedOvertimePay).toLocaleString()}원
+                                </td>
+                              </tr>
+                            )}
+                            {contract.fixedHolidayPay && Number(contract.fixedHolidayPay) > 0 && (
+                              <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                                <td style={{ padding: "5px 12px", color: "#6b7280" }}>
+                                  고정휴일수당{contract.fixedHolidayHours ? ` (${Number(contract.fixedHolidayHours)}h × 1.5배)` : ""}
+                                </td>
+                                <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
+                                  {Number(contract.fixedHolidayPay).toLocaleString()}원
+                                </td>
+                              </tr>
+                            )}
+                            {contract.annualLeavePay && (
+                              <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                                <td style={{ padding: "5px 12px", color: "#6b7280" }}>포괄연차수당 (8h)</td>
+                                <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
+                                  {Number(contract.annualLeavePay).toLocaleString()}원
+                                </td>
+                              </tr>
+                            )}
+                            <tr style={{ background: "#f9fafb" }}>
+                              <td style={{ padding: "6px 12px", fontWeight: 600 }}>합계 (월급)</td>
+                              <td style={{ padding: "6px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>
+                                {Number(contract.wageAmount).toLocaleString()}원
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </td>
+                  </tr>
+                )}
                 <ContractRow label="7. 급여일" value={`매월 ${contract.payDay ?? 25}일`} />
                 <ContractRow
                   label="8. 지급방법"

@@ -91,6 +91,16 @@ app.use(express.json());
     await addColumnIfNotExists("employment_electronic_contracts", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");
     await addColumnIfNotExists("employment_electronic_contracts", "employerBusinessNumber", "VARCHAR(20) DEFAULT NULL");
     await addColumnIfNotExists("employment_electronic_contracts", "workPlaceAddress", "VARCHAR(300) DEFAULT NULL");
+    // 포괄임금 구성항목
+    await addColumnIfNotExists("employment_electronic_contracts", "annualSalary", "DECIMAL(14,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "basePay", "DECIMAL(12,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "fixedOvertimeHours", "DECIMAL(6,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "fixedOvertimePay", "DECIMAL(12,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "fixedHolidayHours", "DECIMAL(6,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "fixedHolidayPay", "DECIMAL(12,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "annualLeavePay", "DECIMAL(12,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "hourlyWage", "DECIMAL(10,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "monthlyContractHours", "DECIMAL(6,2) DEFAULT NULL");
 
     // 계좌이체 입금자명
     await addColumnIfNotExists("daily_sales_detail", "transferDepositor", "VARCHAR(100) DEFAULT NULL");

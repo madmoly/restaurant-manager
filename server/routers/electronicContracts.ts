@@ -180,6 +180,15 @@ export const electronicContractsRouter = router({
           affiliatedCompany: employmentElectronicContracts.affiliatedCompany,
           employerBusinessNumber: employmentElectronicContracts.employerBusinessNumber,
           workPlaceAddress: employmentElectronicContracts.workPlaceAddress,
+          annualSalary: employmentElectronicContracts.annualSalary,
+          basePay: employmentElectronicContracts.basePay,
+          fixedOvertimeHours: employmentElectronicContracts.fixedOvertimeHours,
+          fixedOvertimePay: employmentElectronicContracts.fixedOvertimePay,
+          fixedHolidayHours: employmentElectronicContracts.fixedHolidayHours,
+          fixedHolidayPay: employmentElectronicContracts.fixedHolidayPay,
+          annualLeavePay: employmentElectronicContracts.annualLeavePay,
+          hourlyWage: employmentElectronicContracts.hourlyWage,
+          monthlyContractHours: employmentElectronicContracts.monthlyContractHours,
         })
         .from(employmentElectronicContracts)
         .where(eq(employmentElectronicContracts.restaurantId, input.restaurantId))
@@ -222,6 +231,16 @@ export const electronicContractsRouter = router({
         affiliatedCompany: z.string().optional(),
         employerBusinessNumber: z.string().optional(),
         workPlaceAddress: z.string().optional(),
+        // 포괄임금 구성항목
+        annualSalary: z.string().optional(),
+        basePay: z.string().optional(),
+        fixedOvertimeHours: z.string().optional(),
+        fixedOvertimePay: z.string().optional(),
+        fixedHolidayHours: z.string().optional(),
+        fixedHolidayPay: z.string().optional(),
+        annualLeavePay: z.string().optional(),
+        hourlyWage: z.string().optional(),
+        monthlyContractHours: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -263,6 +282,15 @@ export const electronicContractsRouter = router({
           affiliatedCompany: input.affiliatedCompany,
           employerBusinessNumber: input.employerBusinessNumber,
           workPlaceAddress: input.workPlaceAddress,
+          annualSalary: input.annualSalary,
+          basePay: input.basePay,
+          fixedOvertimeHours: input.fixedOvertimeHours,
+          fixedOvertimePay: input.fixedOvertimePay,
+          fixedHolidayHours: input.fixedHolidayHours,
+          fixedHolidayPay: input.fixedHolidayPay,
+          annualLeavePay: input.annualLeavePay,
+          hourlyWage: input.hourlyWage,
+          monthlyContractHours: input.monthlyContractHours,
           status: "draft",
           createdBy: ctx.user.userId,
         })

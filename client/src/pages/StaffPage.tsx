@@ -959,6 +959,9 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         employerBusinessNumber: (latestTemplate as any).employerBusinessNumber || prev.employerBusinessNumber,
         workPlaceAddress: (latestTemplate as any).workPlaceAddress || prev.workPlaceAddress,
       }));
+      // 포괄임금 시간 값도 템플릿에서 복원
+      if ((latestTemplate as any).fixedOvertimeHours) setFixedOvertimeHoursInput((latestTemplate as any).fixedOvertimeHours);
+      if ((latestTemplate as any).fixedHolidayHours) setFixedHolidayHoursInput((latestTemplate as any).fixedHolidayHours);
       setTemplateApplied(true);
     }
   }, [latestTemplate, defaultEmployee, templateApplied]);
@@ -1000,6 +1003,29 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
   const weeklyHoursNum = Number(form.weeklyHours) || 0;
   const isUnder15Hours = weeklyHoursNum < 15;
   const wageNum = Number(form.wageAmount) || 0;
+
+  // ── 포괄임금 역산 (월급제 전용) ──
+  const [fixedOvertimeHoursInput, setFixedOvertimeHoursInput] = useState("0");
+  const [fixedHolidayHoursInput, setFixedHolidayHoursInput] = useState("0");
+
+  // 월소정근로시간 계산: (주소정+주휴) × 365/12/7
+  const weeklyPaidHours = weeklyHoursNum >= 15 ? Math.min(weeklyHoursNum / 5, 8) * (weeklyHoursNum / (weeklyHoursNum / 5)) / weeklyHoursNum * 8 : 0;
+  // 간단 계산: 주휴시간 = min(8, 주소정/5 * 8) — 40시간 기준 8시간
+  const weeklyRestHours = weeklyHoursNum >= 15 ? Math.min(8, (weeklyHoursNum / 5) * 8 / 5) : 0;
+  // 표준: 40h → 주휴 8h → 월소정 209h
+  const monthlyContractHours = Math.round((weeklyHoursNum + (weeklyHoursNum >= 15 ? 8 : 0)) * (365 / 12 / 7));
+
+  const fixedOTHours = Number(fixedOvertimeHoursInput) || 0;
+  const fixedHolHours = Number(fixedHolidayHoursInput) || 0;
+
+  // 통상시급 = 계약급여 / (월소정 + 연장×1.5 + 휴일×1.5 + 연차8)
+  const divisor = monthlyContractHours + fixedOTHours * 1.5 + fixedHolHours * 1.5 + 8;
+  const hourlyWageCalc = divisor > 0 ? wageNum / divisor : 0;
+  const basePayCalc = Math.round(hourlyWageCalc * monthlyContractHours);
+  const fixedOvertimePayCalc = Math.round(hourlyWageCalc * 1.5 * fixedOTHours);
+  const fixedHolidayPayCalc = Math.round(hourlyWageCalc * 1.5 * fixedHolHours);
+  const annualLeavePayCalc = Math.round(hourlyWageCalc * 8);
+  const annualSalaryCalc = wageNum * 12;
   // probation removed from UI
 
   const inputCls = "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
@@ -1178,6 +1204,70 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             </div>
           </div>
 
+          {/* ═══ 포괄임금 구성항목 (월급제 전용) ═══ */}
+          {form.wageType === "monthly" && wageNum > 0 && (
+            <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-500/5 p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">임금 구성항목 (근기법 제17조)</p>
+                <p className="text-[10px] text-blue-500">월소정근로 {monthlyContractHours}h</p>
+              </div>
+
+              {/* 고정연장/휴일 시간 입력 */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] text-muted-foreground">고정연장근무(시간/월)</label>
+                  <input type="number" className="mt-0.5 w-full rounded border border-input bg-background px-2 py-1.5 text-sm"
+                    value={fixedOvertimeHoursInput}
+                    onChange={(e) => setFixedOvertimeHoursInput(e.target.value)} min={0} step={1} />
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted-foreground">고정휴일근무(시간/월)</label>
+                  <input type="number" className="mt-0.5 w-full rounded border border-input bg-background px-2 py-1.5 text-sm"
+                    value={fixedHolidayHoursInput}
+                    onChange={(e) => setFixedHolidayHoursInput(e.target.value)} min={0} step={1} />
+                </div>
+              </div>
+
+              {/* 자동 역산 결과 */}
+              <div className="text-xs space-y-1.5 pt-1">
+                <div className="flex justify-between items-center">
+                  <span style={{ color: "#6b7280" }}>통상시급</span>
+                  <span className="font-mono font-medium">{Math.round(hourlyWageCalc).toLocaleString()}원</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span style={{ color: "#6b7280" }}>기본급 ({monthlyContractHours}h × 통상시급)</span>
+                  <span className="font-mono font-medium">{basePayCalc.toLocaleString()}원</span>
+                </div>
+                {fixedOTHours > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span style={{ color: "#6b7280" }}>고정연장수당 ({fixedOTHours}h × 1.5배)</span>
+                    <span className="font-mono font-medium">{fixedOvertimePayCalc.toLocaleString()}원</span>
+                  </div>
+                )}
+                {fixedHolHours > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span style={{ color: "#6b7280" }}>고정휴일수당 ({fixedHolHours}h × 1.5배)</span>
+                    <span className="font-mono font-medium">{fixedHolidayPayCalc.toLocaleString()}원</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center">
+                  <span style={{ color: "#6b7280" }}>포괄연차수당 (8h × 통상시급)</span>
+                  <span className="font-mono font-medium">{annualLeavePayCalc.toLocaleString()}원</span>
+                </div>
+                <div className="flex justify-between items-center pt-1.5" style={{ borderTop: "1px solid #e5e7eb" }}>
+                  <span className="font-semibold">합계</span>
+                  <span className="font-mono font-semibold">{(basePayCalc + fixedOvertimePayCalc + fixedHolidayPayCalc + annualLeavePayCalc).toLocaleString()}원</span>
+                </div>
+                {Math.abs((basePayCalc + fixedOvertimePayCalc + fixedHolidayPayCalc + annualLeavePayCalc) - wageNum) > 10 && (
+                  <p className="text-[10px] text-amber-600">※ 단수 차이 {((basePayCalc + fixedOvertimePayCalc + fixedHolidayPayCalc + annualLeavePayCalc) - wageNum).toLocaleString()}원 — 반올림에 의한 차이입니다</p>
+                )}
+                {hourlyWageCalc > 0 && hourlyWageCalc < 10320 && (
+                  <p className="text-[10px] text-red-600 font-semibold">⚠ 통상시급이 2026년 최저시급(10,320원) 미만입니다</p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ═══ 근무시간 ═══ */}
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -1279,6 +1369,18 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               affiliatedCompany: form.affiliatedCompany || undefined,
               employerBusinessNumber: form.employerBusinessNumber || undefined,
               workPlaceAddress: form.workPlaceAddress || undefined,
+              // 포괄임금 구성항목 (월급제 전용)
+              ...(form.wageType === "monthly" && wageNum > 0 ? {
+                annualSalary: String(annualSalaryCalc),
+                basePay: String(basePayCalc),
+                fixedOvertimeHours: fixedOTHours > 0 ? fixedOvertimeHoursInput : undefined,
+                fixedOvertimePay: fixedOTHours > 0 ? String(fixedOvertimePayCalc) : undefined,
+                fixedHolidayHours: fixedHolHours > 0 ? fixedHolidayHoursInput : undefined,
+                fixedHolidayPay: fixedHolHours > 0 ? String(fixedHolidayPayCalc) : undefined,
+                annualLeavePay: String(annualLeavePayCalc),
+                hourlyWage: String(Math.round(hourlyWageCalc)),
+                monthlyContractHours: String(monthlyContractHours),
+              } : {}),
             })}
             disabled={!form.employeeName || create.isPending}
           >

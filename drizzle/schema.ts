@@ -661,6 +661,16 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   affiliatedCompany: varchar("affiliatedCompany", { length: 100 }),
   employerBusinessNumber: varchar("employerBusinessNumber", { length: 20 }),
   workPlaceAddress: varchar("workPlaceAddress", { length: 300 }),
+  // ── 포괄임금 구성항목 (월급제) ──
+  annualSalary: decimal("annualSalary", { precision: 14, scale: 2 }),           // 연봉
+  basePay: decimal("basePay", { precision: 12, scale: 2 }),                     // 기본급
+  fixedOvertimeHours: decimal("fixedOvertimeHours", { precision: 6, scale: 2 }),// 고정연장시간
+  fixedOvertimePay: decimal("fixedOvertimePay", { precision: 12, scale: 2 }),   // 고정연장수당
+  fixedHolidayHours: decimal("fixedHolidayHours", { precision: 6, scale: 2 }), // 고정휴일시간
+  fixedHolidayPay: decimal("fixedHolidayPay", { precision: 12, scale: 2 }),     // 고정휴일수당
+  annualLeavePay: decimal("annualLeavePay", { precision: 12, scale: 2 }),       // 포괄연차수당
+  hourlyWage: decimal("hourlyWage", { precision: 10, scale: 2 }),               // 통상시급
+  monthlyContractHours: decimal("monthlyContractHours", { precision: 6, scale: 2 }), // 월소정+주휴시간
   nightShiftConsent: boolean("nightShiftConsent").default(false).notNull(),
   specialTerms: text("specialTerms"),
   status: mysqlEnum("status", ["draft", "sent", "signed", "expired", "cancelled"]).notNull().default("draft"),
