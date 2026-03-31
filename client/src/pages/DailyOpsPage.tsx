@@ -2136,7 +2136,7 @@ function MiddayTab({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => deleteMidSalesMutation.mutate({ id: sale.id })}
+                    onClick={() => deleteMidSalesMutation.mutate({ id: sale.id, restaurantId })}
                     disabled={deleteMidSalesMutation.isPending}
                   >
                     <Trash2 className="w-4 h-4 text-red-500" />

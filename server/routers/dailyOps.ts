@@ -299,9 +299,12 @@ export const dailyOpsRouter = router({
     }),
 
   deleteMidSales: managerProcedure
-    .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
-      await db.delete(intermediateSales).where(eq(intermediateSales.id, input.id));
+    .input(z.object({ id: z.number(), restaurantId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      await db.delete(intermediateSales).where(
+        and(eq(intermediateSales.id, input.id), eq(intermediateSales.restaurantId, input.restaurantId))
+      );
       return { ok: true };
     }),
 
@@ -341,9 +344,12 @@ export const dailyOpsRouter = router({
     }),
 
   deleteOrderImage: managerProcedure
-    .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
-      await db.delete(dailyOrderImages).where(eq(dailyOrderImages.id, input.id));
+    .input(z.object({ id: z.number(), restaurantId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      await db.delete(dailyOrderImages).where(
+        and(eq(dailyOrderImages.id, input.id), eq(dailyOrderImages.restaurantId, input.restaurantId))
+      );
       return { ok: true };
     }),
 

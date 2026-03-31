@@ -91,7 +91,7 @@ export const storeChecklistsRouter = router({
       return templates;
     }),
 
-  /** 모든 템플릿 조회 (비활성 포함 — 업무관리 페이지용) */
+  /** 모든 활성 템플릿 조회 (업무관리 페이지용) */
   listAllTemplates: managerProcedure
     .input(
       z.object({
@@ -99,12 +99,14 @@ export const storeChecklistsRouter = router({
         targetTab: targetTabEnum.optional(),
       })
     )
-    .query(async ({ input }) => {
-      const conditions = [
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const conditions: any[] = [
         eq(storeChecklistTemplates.restaurantId, input.restaurantId),
+        eq(storeChecklistTemplates.isActive, true),
       ];
       if (input.targetTab) {
-        conditions.push(eq(storeChecklistTemplates.targetTab, input.targetTab) as any);
+        conditions.push(eq(storeChecklistTemplates.targetTab, input.targetTab));
       }
       return db
         .select()
@@ -157,6 +159,7 @@ export const storeChecklistsRouter = router({
     .input(
       z.object({
         id: z.number(),
+        restaurantId: z.number(),
         targetTab: targetTabEnum.optional(),
         itemText: z.string().optional(),
         requirementType: z.enum(["none", "text_input", "camera_photo"]).optional(),
@@ -167,23 +170,34 @@ export const storeChecklistsRouter = router({
         isHighlight: z.boolean().optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      const { id, ...data } = input;
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const { id, restaurantId, ...data } = input;
       await db
         .update(storeChecklistTemplates)
         .set(data as any)
-        .where(eq(storeChecklistTemplates.id, id));
+        .where(
+          and(
+            eq(storeChecklistTemplates.id, id),
+            eq(storeChecklistTemplates.restaurantId, restaurantId),
+          )
+        );
       return { success: true };
     }),
 
-  /** 템플릿 항목 삭제 (soft) */
+  /** 템플릿 항목 삭제 (물리삭제) */
   deleteTemplate: managerProcedure
-    .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .input(z.object({ id: z.number(), restaurantId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       await db
-        .update(storeChecklistTemplates)
-        .set({ isActive: false })
-        .where(eq(storeChecklistTemplates.id, input.id));
+        .delete(storeChecklistTemplates)
+        .where(
+          and(
+            eq(storeChecklistTemplates.id, input.id),
+            eq(storeChecklistTemplates.restaurantId, input.restaurantId),
+          )
+        );
       return { success: true };
     }),
 

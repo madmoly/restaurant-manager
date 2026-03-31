@@ -91,7 +91,7 @@ export default function TaskManagementPage() {
       requirementType: formReqType as any,
     };
     if (editId) {
-      updateMut.mutate({ id: editId, ...payload });
+      updateMut.mutate({ id: editId, restaurantId, ...payload });
     } else {
       createMut.mutate({ restaurantId, ...payload });
     }
@@ -99,7 +99,7 @@ export default function TaskManagementPage() {
 
   // 필터링
   const filtered = useMemo(() => {
-    return (templates as Template[]).filter(t => t.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+    return (templates as Template[]).sort((a, b) => a.sortOrder - b.sortOrder);
   }, [templates]);
 
   const tabLabel = (tab: string | null) =>
@@ -191,7 +191,7 @@ export default function TaskManagementPage() {
                   </Button>
                   <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive"
                     disabled={deleteMut.isPending}
-                    onClick={() => { if (confirm("이 업무를 삭제하시겠습니까?")) deleteMut.mutate({ id: t.id }); }}>
+                    onClick={() => { if (confirm("이 업무를 삭제하시겠습니까?")) deleteMut.mutate({ id: t.id, restaurantId }); }}>
                     <Trash2 className="w-3 h-3 mr-1" /> {deleteMut.isPending ? "삭제 중..." : "삭제"}
                   </Button>
                 </div>

@@ -1,4 +1,7 @@
-만료된 계약서 삭제 기능 추가
+업무관리 삭제 버그 수정 + 보안 강화
 
-- deleteContract 서버 로직: draft + expired 상태 모두 삭제 허용
-- 클라이언트: expired 계약서 카드에 삭제 버튼 표시
+1. deleteTemplate: 소프트삭제 → 물리삭제(DELETE)로 변경, restaurantId 검증 추가
+2. listAllTemplates: isActive=true 필터 추가 (삭제 후 목록에 남는 버그 수정)
+3. updateTemplate: restaurantId 검증 추가
+4. deleteMidSales, deleteOrderImage: restaurantId 필터 + verifyStoreAccess 추가
+5. 모든 delete/update mutation에 매장 접근권한 검증 적용
