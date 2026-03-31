@@ -36,3 +36,9 @@
 - ~~월마감 인건비 자동 계산 (스케줄×시급)~~ : 일마감에서 수동 입력된 laborCost를 admin 대시보드가 이미 참조. 자동 계산 추가 시 이중 집계 위험
 - ~~OCR 클라이언트 수동 이미지 회전 UI~~ : 서버 detectAndFixOrientation()이 AI 기반 자동 회전 처리. 수동 UI는 과잉
 - ~~OCR 사용자 수정 → 프로파일 피드백 루프~~ : 오인식 수정값이 프로파일 오염 가능. 현행 OCR 결과 기반 자동 학습이 더 안전
+
+---
+
+## 예정 작업 (보류)
+
+- [ ] OCR corrections → 품목 alias 매핑 자동화: 사용자가 퍼지매칭 후보를 선택/무시한 이력(ocr_corrections)을 counterparty_ocr_profiles.frequentItems에 alias로 반영 → 동일 거래처 다음 OCR 시 자동매칭 정확도 향상. 오인식 수정값 프로파일 오염 리스크 있으므로, 일정 횟수(3회+) 동일 수정 패턴이 반복될 때만 반영하는 필터 필요
