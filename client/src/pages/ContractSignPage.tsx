@@ -525,9 +525,15 @@ export default function ContractSignPage({ token }: { token: string }) {
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ token, email: emailInput }),
                         });
-                        const data = await res.json();
-                        if (data.ok) { setEmailSent(true); } else { setEmailError(data.message || "발송 실패"); }
-                      } catch { setEmailError("네트워크 오류"); }
+                        if (!res.ok) {
+                          let errMsg = `HTTP ${res.status}`;
+                          try { const d = await res.json(); errMsg = d.message || errMsg; } catch {}
+                          setEmailError(errMsg);
+                        } else {
+                          const data = await res.json();
+                          if (data.ok) { setEmailSent(true); } else { setEmailError(data.message || "발송 실패"); }
+                        }
+                      } catch (err: any) { setEmailError("네트워크 오류: " + (err?.message || "")); }
                       setEmailSending(false);
                     }}
                     disabled={emailSending}
