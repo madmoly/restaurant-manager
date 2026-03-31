@@ -287,7 +287,7 @@ export default function LaborCostPage() {
                                 <div className="text-[10px] text-muted-foreground">{emp.position}</div>
                               )}
                               {emp.hireDate && (
-                                <div className="text-[10px] text-muted-foreground">입사 {emp.hireDate}</div>
+                                <div className="text-[10px] text-muted-foreground">입사 {fmtDate(emp.hireDate)}</div>
                               )}
                             </td>
                             <td className="px-4 py-2">
