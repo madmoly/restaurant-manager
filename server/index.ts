@@ -128,6 +128,10 @@ app.use(express.json());
     await addColumnIfNotExists("store_checklist_templates", "repeatDays", "JSON DEFAULT NULL");
     await addColumnIfNotExists("store_checklist_templates", "specificDate", "DATE DEFAULT NULL");
     await addColumnIfNotExists("store_checklist_templates", "isHighlight", "BOOLEAN DEFAULT FALSE");
+    // 적용 기간: 생성일 이후만 일일운영에 표시, 삭제(비활성) 시 해당일부터 미적용
+    await addColumnIfNotExists("store_checklist_templates", "effectiveFrom", "DATE DEFAULT NULL");
+    await addColumnIfNotExists("store_checklist_templates", "effectiveTo", "DATE DEFAULT NULL");
+    await addColumnIfNotExists("store_checklist_templates", "deactivatedBy", "INT DEFAULT NULL");
 
     // repeatType enum 확장: monthly 추가 + none→daily 변환 + specificDate→monthly 변환
     try {

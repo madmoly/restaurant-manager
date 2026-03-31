@@ -467,6 +467,10 @@ export const storeChecklistTemplates = mysqlTable("store_checklist_templates", {
   repeatDays: json("repeatDays").$type<number[]>().default([]),  // weekly: 0=일~6=토, monthly: 1~31일
   specificDate: date("specificDate"),  // 레거시 (monthly 전환 후 미사용)
   isHighlight: boolean("isHighlight").default(false),
+  // 적용 기간: 생성일 이후만 일일운영에 표시, 삭제(비활성) 시 해당일부터 미적용
+  effectiveFrom: date("effectiveFrom"),   // NULL = 제한없음(기존 데이터 호환)
+  effectiveTo: date("effectiveTo"),       // NULL = 무기한 활성
+  deactivatedBy: int("deactivatedBy"),    // 비활성 처리한 사용자
   createdBy: int("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

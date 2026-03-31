@@ -25,9 +25,23 @@ function shouldShowOnDate(
     repeatType: string | null;
     repeatDays: number[] | null;
     specificDate?: string | Date | null; // 레거시 호환
+    effectiveFrom?: string | Date | null;
+    effectiveTo?: string | Date | null;
   },
   dateStr: string,
 ): boolean {
+  // 적용 기간 필터: effectiveFrom 이전 / effectiveTo 이후면 미표시
+  if (template.effectiveFrom) {
+    const from = typeof template.effectiveFrom === "string"
+      ? template.effectiveFrom : template.effectiveFrom.toISOString().slice(0, 10);
+    if (dateStr < from) return false;
+  }
+  if (template.effectiveTo) {
+    const to = typeof template.effectiveTo === "string"
+      ? template.effectiveTo : template.effectiveTo.toISOString().slice(0, 10);
+    if (dateStr > to) return false;
+  }
+
   const d = new Date(dateStr);
   const repeatType = template.repeatType ?? "daily";
 
@@ -139,6 +153,11 @@ export const storeChecklistsRouter = router({
       };
       const checkType = checkTypeMap[input.targetTab] ?? "other";
 
+      // effectiveFrom: 오늘 날짜 (KST) — 생성일 이후의 일일운영에만 표시
+      const now = new Date();
+      const kstDate = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      const todayStr = kstDate.toISOString().slice(0, 10);
+
       const [result] = await db.insert(storeChecklistTemplates).values({
         restaurantId: input.restaurantId,
         checkType: checkType as any,
@@ -149,6 +168,7 @@ export const storeChecklistsRouter = router({
         repeatType: (input.repeatType ?? "daily") as any,
         repeatDays: input.repeatDays ?? [],
         isHighlight: input.isHighlight ?? false,
+        effectiveFrom: todayStr,
         createdBy: ctx.user.userId,
       });
       return { id: (result as any).insertId };
@@ -185,13 +205,22 @@ export const storeChecklistsRouter = router({
       return { success: true };
     }),
 
-  /** 템플릿 항목 삭제 (물리삭제) */
+  /** 템플릿 항목 비활성화 (소프트 삭제 — effectiveTo 설정 + isActive=false) */
   deleteTemplate: managerProcedure
     .input(z.object({ id: z.number(), restaurantId: z.number() }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const now = new Date();
+      const kstDate = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      const todayStr = kstDate.toISOString().slice(0, 10);
+
       await db
-        .delete(storeChecklistTemplates)
+        .update(storeChecklistTemplates)
+        .set({
+          isActive: false,
+          effectiveTo: todayStr,
+          deactivatedBy: ctx.user.userId,
+        })
         .where(
           and(
             eq(storeChecklistTemplates.id, input.id),

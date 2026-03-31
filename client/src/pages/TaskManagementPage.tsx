@@ -27,6 +27,8 @@ type Template = {
   repeatType: string | null;
   repeatDays: number[] | null; specificDate?: string | null;
   isHighlight: boolean | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
 };
 
 export default function TaskManagementPage() {
@@ -59,8 +61,8 @@ export default function TaskManagementPage() {
     onSuccess: () => { utils.storeChecklists.listAllTemplates.invalidate(); resetForm(); },
   });
   const deleteMut = trpc.storeChecklists.deleteTemplate.useMutation({
-    onSuccess: () => { toast.success("삭제되었습니다"); utils.storeChecklists.listAllTemplates.invalidate(); },
-    onError: (e: any) => { toast.error("삭제 실패: " + (e.message || "알 수 없는 오류")); },
+    onSuccess: () => { toast.success("비활성화되었습니다. 오늘부터 일일운영에서 제외됩니다."); utils.storeChecklists.listAllTemplates.invalidate(); },
+    onError: (e: any) => { toast.error("비활성화 실패: " + (e.message || "알 수 없는 오류")); },
   });
 
   const resetForm = () => {
@@ -175,6 +177,11 @@ export default function TaskManagementPage() {
                         <Calendar className="w-2.5 h-2.5" /> 매월 {(t.repeatDays ?? []).join("·")}일
                       </span>
                     )}
+                    {t.effectiveFrom && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                        {t.effectiveFrom.slice(5).replace("-", "/")}~
+                      </span>
+                    )}
                   </div>
                 </div>
                 {expandedId === t.id ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
@@ -191,8 +198,8 @@ export default function TaskManagementPage() {
                   </Button>
                   <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive"
                     disabled={deleteMut.isPending}
-                    onClick={() => { if (confirm("이 업무를 삭제하시겠습니까?")) deleteMut.mutate({ id: t.id, restaurantId }); }}>
-                    <Trash2 className="w-3 h-3 mr-1" /> {deleteMut.isPending ? "삭제 중..." : "삭제"}
+                    onClick={() => { if (confirm("이 업무를 비활성화하시겠습니까?\n오늘부터 일일운영에서 제외됩니다.")) deleteMut.mutate({ id: t.id, restaurantId }); }}>
+                    <Trash2 className="w-3 h-3 mr-1" /> {deleteMut.isPending ? "처리 중..." : "비활성화"}
                   </Button>
                 </div>
               )}
