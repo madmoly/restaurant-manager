@@ -365,8 +365,8 @@ export const electronicContractsRouter = router({
         .limit(1);
       if (!contract) throw new TRPCError({ code: "NOT_FOUND" });
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, contract.restaurantId, true);
-      if (contract.status !== "draft") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "초안 상태의 계약서만 삭제할 수 있습니다" });
+      if (contract.status !== "draft" && contract.status !== "expired") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "초안 또는 만료된 계약서만 삭제할 수 있습니다" });
       }
       await db
         .delete(employmentElectronicContracts)

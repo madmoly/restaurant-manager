@@ -728,6 +728,19 @@ export default function StaffPage() {
                         <Link className="w-3.5 h-3.5" /> 서명 링크 복사
                       </button>
                     )}
+                    {c.status === "expired" && (
+                      <button
+                        onClick={() => {
+                          if (confirm("만료된 계약서를 삭제하시겠습니까?")) {
+                            deleteContract.mutate({ id: c.id });
+                          }
+                        }}
+                        disabled={deleteContract.isPending}
+                        className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors ml-auto"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> 삭제
+                      </button>
+                    )}
                     {c.status === "draft" && (
                       <div className="flex items-center gap-1.5 ml-auto">
                         <button
