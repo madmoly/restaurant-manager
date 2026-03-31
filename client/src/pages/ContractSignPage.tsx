@@ -197,26 +197,7 @@ export default function ContractSignPage({ token }: { token: string }) {
                                 {Number(contract.basePay).toLocaleString()}원
                               </td>
                             </tr>
-                            {contract.fixedOvertimePay && Number(contract.fixedOvertimePay) > 0 && (
-                              <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                                <td style={{ padding: "5px 12px", color: "#6b7280" }}>
-                                  고정연장수당{contract.fixedOvertimeHours ? ` (${Number(contract.fixedOvertimeHours)}h × 1.5배)` : ""}
-                                </td>
-                                <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
-                                  {Number(contract.fixedOvertimePay).toLocaleString()}원
-                                </td>
-                              </tr>
-                            )}
-                            {contract.fixedHolidayPay && Number(contract.fixedHolidayPay) > 0 && (
-                              <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                                <td style={{ padding: "5px 12px", color: "#6b7280" }}>
-                                  고정휴일수당{contract.fixedHolidayHours ? ` (${Number(contract.fixedHolidayHours)}h × 1.5배)` : ""}
-                                </td>
-                                <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
-                                  {Number(contract.fixedHolidayPay).toLocaleString()}원
-                                </td>
-                              </tr>
-                            )}
+                            {/* 고정연장/휴일수당 필드 제거됨 */}
                             {contract.annualLeavePay && (
                               <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
                                 <td style={{ padding: "5px 12px", color: "#6b7280" }}>포괄연차수당 (8h)</td>
@@ -289,18 +270,7 @@ export default function ContractSignPage({ token }: { token: string }) {
                 </div>
               </div>
 
-              {/* 연장·야간·휴일근로 */}
-              <div>
-                <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>연장·야간·휴일근로</h3>
-                <div className="space-y-1" style={{ paddingLeft: "8px" }}>
-                  <p>① 사업주는 근로자의 동의를 얻어 1주 12시간 한도 내에서 연장근로를 실시할 수 있다.</p>
-                  {contract.wageType === "monthly" && contract.basePay ? (
-                    <p>② 본 계약의 임금에는 상기 임금 구성항목에 명시된 고정연장근로수당이 포함되어 있으며, 해당 시간 범위 내의 연장근로에 대해서는 별도의 수당을 지급하지 아니한다.</p>
-                  ) : (
-                    <p>② 연장·야간(22:00~06:00)·휴일근로 시 관련 법령에 따라 가산수당을 지급한다.</p>
-                  )}
-                </div>
-              </div>
+              {/* 연장·야간·휴일근로 조항 제거됨 */}
 
               {/* 휴일·휴가 */}
               <div>
