@@ -2802,11 +2802,15 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
     if (existing) {
       setLaborCost(existing.laborCost ?? '0');
       setClosingNote(existing.note ?? '');
+    } else if (calculated?.laborCost) {
+      // 신규 마감: 스케줄 기반 자동 계산된 인건비 반영
+      setLaborCost(calculated.laborCost);
+      setClosingNote('');
     } else {
       setLaborCost('0');
       setClosingNote('');
     }
-  }, [existing]);
+  }, [existing, calculated]);
 
   const save = trpc.dailyClosings.save.useMutation({
     onSuccess(data: any) {
@@ -2881,7 +2885,12 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
 
       {/* 인건비 */}
       <div>
-        <Label className="text-xs">인건비 (원)</Label>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs">인건비 (원)</Label>
+          {!existing && calculated?.laborCost && Number(calculated.laborCost) > 0 && (
+            <span className="text-[10px] text-blue-600 dark:text-blue-400">스케줄 자동계산</span>
+          )}
+        </div>
         <Input
           type="number"
           value={laborCost}

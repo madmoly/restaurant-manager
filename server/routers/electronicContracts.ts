@@ -3,7 +3,7 @@ import { eq, and, desc, sql, isNotNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { employmentElectronicContracts, restaurantContracts, restaurants } from "../../drizzle/schema";
+import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -415,6 +415,38 @@ export const electronicContractsRouter = router({
           employeeSignature: input.signature,
         })
         .where(eq(employmentElectronicContracts.id, contract.id));
+
+      // ── 서명 완료 시 employeeContracts 자동 동기화 (upsert) ──
+      if (contract.employeeId && contract.restaurantId) {
+        try {
+          // 기존 활성 계약 비활성화
+          await db.update(employeeContracts)
+            .set({ isActive: false })
+            .where(and(
+              eq(employeeContracts.userId, contract.employeeId),
+              eq(employeeContracts.restaurantId, contract.restaurantId),
+              eq(employeeContracts.isActive, true),
+            ));
+          // 새 계약 정보 삽입
+          await db.insert(employeeContracts).values({
+            userId: contract.employeeId,
+            restaurantId: contract.restaurantId,
+            wageType: (contract.wageType as "hourly" | "monthly") ?? "hourly",
+            wageAmount: contract.wageAmount ?? "0",
+            position: contract.position ?? null,
+            contractStart: contract.contractStart ? new Date(contract.contractStart) : null,
+            contractEnd: contract.contractEnd ? new Date(contract.contractEnd) : null,
+            weeklyHours: contract.weeklyHours ?? null,
+            weeklyOffDays: 1,
+            isActive: true,
+          } as any);
+          console.log(`[signContract] synced employeeContracts for userId=${contract.employeeId} restaurantId=${contract.restaurantId}`);
+        } catch (e: any) {
+          console.error(`[signContract] employeeContracts sync error:`, e.message);
+          // 동기화 실패해도 서명 자체는 성공으로 처리
+        }
+      }
+
       return { ok: true };
     }),
 });

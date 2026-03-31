@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, between, sql, desc, inArray } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
-import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures } from "../../drizzle/schema";
+import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures, schedules, employeeContracts } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 
 export const dailyClosingsRouter = router({
@@ -93,9 +93,69 @@ export const dailyClosingsRouter = router({
         if (Number(purchaseRow?.total ?? 0) > 0) purchasesTotalStr = purchaseRow!.total;
       }
 
+      // 당일 인건비: 스케줄 × 계약 시급/월급 자동 계산
+      const kstDate = new Date(`${input.date}T00:00:00+09:00`);
+      const kstNext = new Date(kstDate.getTime() + 86400000);
+      const fromUtc = kstDate.toISOString().slice(0, 19).replace("T", " ");
+      const toUtc = kstNext.toISOString().slice(0, 19).replace("T", " ");
+
+      const schedRows = await db
+        .select({
+          startTime: schedules.startTime,
+          endTime: schedules.endTime,
+          breakMinutes: schedules.breakMinutes,
+          tempWageType: schedules.tempWageType,
+          tempWageAmount: schedules.tempWageAmount,
+          wageType: employeeContracts.wageType,
+          wageAmount: employeeContracts.wageAmount,
+        })
+        .from(schedules)
+        .leftJoin(employeeContracts, and(
+          eq(employeeContracts.userId, schedules.userId),
+          eq(employeeContracts.restaurantId, input.restaurantId),
+          eq(employeeContracts.isActive, true),
+        ))
+        .where(and(
+          eq(schedules.restaurantId, input.restaurantId),
+          sql`${schedules.startTime} >= ${fromUtc}`,
+          sql`${schedules.startTime} < ${toUtc}`,
+          sql`${schedules.status} IN ('confirmed','completed')`,
+        ));
+
+      let laborCostCalc = 0;
+      for (const r of schedRows) {
+        const sDt = new Date(r.startTime);
+        const eDt = new Date(r.endTime);
+        const gMin = (eDt.getTime() - sDt.getTime()) / 60000;
+        const nMin = Math.max(0, gMin - (r.breakMinutes ?? 0));
+        const hrs = nMin / 60;
+        let rate = 0;
+        if (r.tempWageType === "daily" && r.tempWageAmount) {
+          laborCostCalc += Number(r.tempWageAmount); continue;
+        } else if (r.tempWageType === "hourly" && r.tempWageAmount) {
+          rate = Number(r.tempWageAmount);
+        } else if (r.wageType === "hourly" && r.wageAmount) {
+          rate = Number(r.wageAmount);
+        } else if (r.wageType === "monthly" && r.wageAmount) {
+          rate = Number(r.wageAmount) / 209;
+        }
+        if (rate > 0) {
+          laborCostCalc += hrs * rate;
+          // 야간 할증
+          const sM = sDt.getHours() * 60 + sDt.getMinutes();
+          let nM = 0;
+          for (let m = Math.floor(sM); m < Math.floor(sM + gMin); m++) {
+            const mod = ((m % 1440) + 1440) % 1440;
+            if (mod >= 1320 || mod < 360) nM++;
+          }
+          if (nM > 0) laborCostCalc += (nM / 60) * rate * 0.5;
+        }
+      }
+
       return {
         salesTotal: salesTotalStr,
         purchasesTotal: purchasesTotalStr,
+        laborCost: String(Math.round(laborCostCalc)),
       };
     }),
 

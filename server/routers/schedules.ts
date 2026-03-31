@@ -775,6 +775,7 @@ export const schedulesRouter = router({
           contractStart: employeeContracts.contractStart,
           contractEnd: employeeContracts.contractEnd,
           weeklyOffDays: employeeContracts.weeklyOffDays,
+          payrollRecheckRequired: schedules.payrollRecheckRequired,
         })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
@@ -845,6 +846,7 @@ export const schedulesRouter = router({
           daysOff: number; contractDaysOff: number;
           hireDate: string | null;
           userId: number | null;
+          recheckRequired: boolean;
         }>;
         totalHours: number;
         totalWage: number;
@@ -871,28 +873,61 @@ export const schedulesRouter = router({
             contractDaysOff: Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
+            recheckRequired: false,
           };
         }
 
-        const grossMin = (new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 60000;
+        const startDt = new Date(r.startTime);
+        const endDt = new Date(r.endTime);
+        const grossMin = (endDt.getTime() - startDt.getTime()) / 60000;
         const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
-        // 10분 단위 내림
-        const hours = Math.floor(netMin / 10) * 10 / 60;
-        let wage = 0;
-        if (r.tempWageType === "hourly" && r.tempWageAmount) {
-          wage = hours * Number(r.tempWageAmount);
-        } else if (r.tempWageType === "daily" && r.tempWageAmount) {
-          wage = Number(r.tempWageAmount);
+        const hours = netMin / 60; // 분 단위 정밀 계산
+
+        // ── 시급 결정 ──
+        let baseHourlyRate = 0;
+        let isDailyTemp = false;
+        if (r.tempWageType === "daily" && r.tempWageAmount) {
+          isDailyTemp = true;
+        } else if (r.tempWageType === "hourly" && r.tempWageAmount) {
+          baseHourlyRate = Number(r.tempWageAmount);
         } else if (r.wageType === "hourly" && r.wageAmount) {
-          wage = hours * Number(r.wageAmount);
+          baseHourlyRate = Number(r.wageAmount);
         } else if (r.wageType === "monthly" && r.wageAmount) {
-          // 월급제: 근무일수 비례 (간이 계산)
-          wage = 0; // 월급은 별도 처리
+          // 월급제: 월급 ÷ 209 (월소정근로시간, 주40h 기준)
+          const monthlyContractH = r.weeklyOffDays != null
+            ? Math.round((40 + 8) * (365 / 12 / 7)) // 표준 209h
+            : 209;
+          baseHourlyRate = Number(r.wageAmount) / monthlyContractH;
+        }
+
+        // ── 할증 계산 (5인 이상 사업장 기준) ──
+        // 야간(22:00~06:00): +50%, 연장(일 8h 초과): +50%
+        let wage = 0;
+        if (isDailyTemp) {
+          wage = Number(r.tempWageAmount);
+        } else if (baseHourlyRate > 0) {
+          // 기본 근무 임금
+          wage = hours * baseHourlyRate;
+
+          // 야간 할증: 22:00~06:00 구간의 근무시간에 50% 가산
+          const nightStart = 22 * 60; // 22:00 in minutes
+          const nightEnd = 6 * 60;    // 06:00 in minutes
+          const startMin = startDt.getHours() * 60 + startDt.getMinutes();
+          const endMin = startMin + grossMin;
+          let nightMinutes = 0;
+          for (let m = Math.floor(startMin); m < Math.floor(endMin); m++) {
+            const mod = ((m % 1440) + 1440) % 1440; // 0~1439
+            if (mod >= nightStart || mod < nightEnd) nightMinutes++;
+          }
+          if (nightMinutes > 0) {
+            wage += (nightMinutes / 60) * baseHourlyRate * 0.5;
+          }
         }
 
         companyMap[company].employees[empKey].totalHours += hours;
         companyMap[company].employees[empKey].totalWage += wage;
         companyMap[company].employees[empKey].shifts++;
+        if (r.payrollRecheckRequired) companyMap[company].employees[empKey].recheckRequired = true;
         companyMap[company].totalHours += hours;
         companyMap[company].totalWage += wage;
       }

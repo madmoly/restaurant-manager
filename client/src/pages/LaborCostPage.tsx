@@ -191,6 +191,14 @@ export default function LaborCostPage() {
         <Button variant="ghost" size="sm" onClick={nextMonth}><ChevronRight className="w-4 h-4" /></Button>
       </div>
 
+      {/* 정산 재확인 배너 */}
+      {data && data.some(c => c.employees.some((e: any) => e.recheckRequired)) && (
+        <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>완료된 스케줄이 수정된 직원이 있습니다. 인건비 정산을 재확인해주세요.</span>
+        </div>
+      )}
+
       {/* 총계 */}
       <div className="grid grid-cols-2 gap-2">
         <div className="bg-card border border-border rounded-lg p-3 text-center">
@@ -221,6 +229,7 @@ export default function LaborCostPage() {
         <div className="space-y-3">
           {data.map((company) => {
             const isExpanded = expandedCompany === company.company;
+            const recheckCount = company.employees.filter((e: any) => e.recheckRequired).length;
             return (
               <div key={company.company} className="bg-card border border-border rounded-lg overflow-hidden">
                 <div
@@ -229,7 +238,14 @@ export default function LaborCostPage() {
                 >
                   <Building2 className="w-4 h-4 text-muted-foreground shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-foreground">{company.company}</div>
+                    <div className="text-sm font-semibold text-foreground flex items-center gap-1">
+                      {company.company}
+                      {recheckCount > 0 && (
+                        <span className="text-[10px] text-amber-600 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-full font-medium">
+                          재확인 {recheckCount}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs text-muted-foreground">{company.employees.length}명 · 영업 {company.operatingDays ?? '-'}일</div>
                   </div>
                   <div className="text-right shrink-0">
@@ -257,9 +273,16 @@ export default function LaborCostPage() {
                       </thead>
                       <tbody>
                         {company.employees.map((emp, i) => (
-                          <tr key={i} className="border-t border-border/50 group">
+                          <tr key={i} className={`border-t border-border/50 group ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
                             <td className="px-4 py-2">
-                              <div className="font-medium text-foreground">{emp.name}</div>
+                              <div className="font-medium text-foreground flex items-center gap-1">
+                                {emp.name}
+                                {emp.recheckRequired && (
+                                  <span title="완료된 스케줄이 수정됨 — 정산 재확인 필요">
+                                    <AlertTriangle className="w-3 h-3 text-amber-500" />
+                                  </span>
+                                )}
+                              </div>
                               {emp.position && (
                                 <div className="text-[10px] text-muted-foreground">{emp.position}</div>
                               )}

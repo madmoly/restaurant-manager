@@ -10,6 +10,9 @@ import {
   schedules,
   fixedCosts,
   restaurants,
+  users,
+  restaurantUsers,
+  employeeContracts,
 } from "../../drizzle/schema";
 
 export const monthlyClosingsRouter = router({
@@ -104,10 +107,71 @@ export const monthlyClosingsRouter = router({
         );
       const fixedCostsTotal = Number(fixedRow?.total ?? 0);
 
-      // 4. 인건비: confirmed 스케줄 기반 간이 계산
-      // (실제 운영시 employeeContracts의 시급 × 근무시간으로 계산)
-      // 여기서는 placeholder로 0 — 추후 employeeContracts 연동 시 구현
-      const laborCost = 0;
+      // 4. 인건비: 확정/완료 스케줄 × 계약 시급/월급 기반 자동 계산
+      const monthStr2 = String(input.month).padStart(2, "0");
+      const kstFrom = new Date(`${input.year}-${monthStr2}-01T00:00:00+09:00`);
+      const nm2 = input.month === 12 ? 1 : input.month + 1;
+      const ny2 = input.month === 12 ? input.year + 1 : input.year;
+      const kstTo = new Date(`${ny2}-${String(nm2).padStart(2, "0")}-01T00:00:00+09:00`);
+      const fromUtc = kstFrom.toISOString().slice(0, 19).replace("T", " ");
+      const toUtc = kstTo.toISOString().slice(0, 19).replace("T", " ");
+
+      const schedRows = await db
+        .select({
+          startTime: schedules.startTime,
+          endTime: schedules.endTime,
+          breakMinutes: schedules.breakMinutes,
+          tempWageType: schedules.tempWageType,
+          tempWageAmount: schedules.tempWageAmount,
+          wageType: employeeContracts.wageType,
+          wageAmount: employeeContracts.wageAmount,
+          weeklyOffDays: employeeContracts.weeklyOffDays,
+        })
+        .from(schedules)
+        .leftJoin(employeeContracts, and(
+          eq(employeeContracts.userId, schedules.userId),
+          eq(employeeContracts.restaurantId, input.restaurantId),
+          eq(employeeContracts.isActive, true),
+        ))
+        .where(and(
+          eq(schedules.restaurantId, input.restaurantId),
+          sql`${schedules.startTime} >= ${fromUtc}`,
+          sql`${schedules.startTime} < ${toUtc}`,
+          sql`${schedules.status} IN ('confirmed','completed')`,
+        ));
+
+      let laborCost = 0;
+      for (const r of schedRows) {
+        const startDt = new Date(r.startTime);
+        const endDt = new Date(r.endTime);
+        const grossMin = (endDt.getTime() - startDt.getTime()) / 60000;
+        const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
+        const hours = netMin / 60;
+
+        let baseRate = 0;
+        if (r.tempWageType === "daily" && r.tempWageAmount) {
+          laborCost += Number(r.tempWageAmount);
+          continue;
+        } else if (r.tempWageType === "hourly" && r.tempWageAmount) {
+          baseRate = Number(r.tempWageAmount);
+        } else if (r.wageType === "hourly" && r.wageAmount) {
+          baseRate = Number(r.wageAmount);
+        } else if (r.wageType === "monthly" && r.wageAmount) {
+          baseRate = Number(r.wageAmount) / 209;
+        }
+        if (baseRate > 0) {
+          laborCost += hours * baseRate;
+          // 야간 할증 (22:00~06:00 구간 +50%)
+          const startMin = startDt.getHours() * 60 + startDt.getMinutes();
+          let nightMin = 0;
+          for (let m = Math.floor(startMin); m < Math.floor(startMin + grossMin); m++) {
+            const mod = ((m % 1440) + 1440) % 1440;
+            if (mod >= 1320 || mod < 360) nightMin++;
+          }
+          if (nightMin > 0) laborCost += (nightMin / 60) * baseRate * 0.5;
+        }
+      }
+      laborCost = Math.round(laborCost);
 
       const profit = salesTotal - purchasesTotal - laborCost - fixedCostsTotal;
 
