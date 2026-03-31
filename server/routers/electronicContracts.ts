@@ -178,6 +178,8 @@ export const electronicContractsRouter = router({
           jobDescription: employmentElectronicContracts.jobDescription,
           specialTerms: employmentElectronicContracts.specialTerms,
           affiliatedCompany: employmentElectronicContracts.affiliatedCompany,
+          employerBusinessNumber: employmentElectronicContracts.employerBusinessNumber,
+          workPlaceAddress: employmentElectronicContracts.workPlaceAddress,
         })
         .from(employmentElectronicContracts)
         .where(eq(employmentElectronicContracts.restaurantId, input.restaurantId))
@@ -218,6 +220,8 @@ export const electronicContractsRouter = router({
         jobDescription: z.string().optional(),
         specialTerms: z.string().optional(),
         affiliatedCompany: z.string().optional(),
+        employerBusinessNumber: z.string().optional(),
+        workPlaceAddress: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -257,6 +261,8 @@ export const electronicContractsRouter = router({
           jobDescription: input.jobDescription,
           specialTerms: input.specialTerms,
           affiliatedCompany: input.affiliatedCompany,
+          employerBusinessNumber: input.employerBusinessNumber,
+          workPlaceAddress: input.workPlaceAddress,
           status: "draft",
           createdBy: ctx.user.userId,
         })

@@ -74,7 +74,7 @@ export default function ContractSignPage({ token }: { token: string }) {
 
   const typeLabels: Record<string, string> = {
     permanent: "정규직",
-    fixed_term: "기간제",
+    fixed_term: "계약직",
     part_time: "단시간(파트타임)",
     daily: "일용직",
   };
@@ -124,7 +124,10 @@ export default function ContractSignPage({ token }: { token: string }) {
           <div className="p-6 md:p-8 space-y-6 text-sm leading-relaxed" style={{ color: "#1f2937" }}>
             {/* 당사자 */}
             <p>
-              <strong>{contract.restaurantName ?? `매장 #${contract.restaurantId}`}</strong>
+              <strong>{contract.affiliatedCompany || contract.restaurantName || `매장 #${contract.restaurantId}`}</strong>
+              {contract.employerBusinessNumber && (
+                <span className="text-xs" style={{ color: "#6b7280" }}> (사업자등록번호: {contract.employerBusinessNumber})</span>
+              )}
               (이하 "사업주"라 한다)과(와){" "}
               <strong>{contract.employeeName}</strong>
               (이하 "근로자"라 한다)은(는) 다음과 같이 근로계약을 체결한다.
@@ -142,32 +145,35 @@ export default function ContractSignPage({ token }: { token: string }) {
                       : `${fmt(contract.contractStart)} ~ (기간의 정함 없음)`
                   }
                 />
-                {contract.hasProbation && (
-                  <ContractRow label="   수습기간" value={`${contract.probationMonths ?? 3}개월`} />
-                )}
-                <ContractRow label="3. 근무장소" value={contract.workPlace || "(매장 내)"} />
+                <ContractRow
+                  label="3. 근무장소"
+                  value={
+                    contract.workPlaceAddress
+                      ? `${contract.workPlace || "(매장 내)"} (${contract.workPlaceAddress})`
+                      : contract.workPlace || "(매장 내)"
+                  }
+                />
                 <ContractRow label="4. 업무내용" value={contract.jobDescription || "(사업주 지시에 따름)"} />
                 <ContractRow
                   label="5. 근무시간"
                   value={`${contract.workStartTime} ~ ${contract.workEndTime} (주 ${Number(contract.weeklyHours)}시간, 휴게 ${contract.breakMinutes ?? 60}분)`}
                 />
-                <ContractRow label="6. 주휴일" value={contract.weeklyHoliday ?? "일요일"} />
                 <ContractRow
-                  label="7. 임금"
+                  label="6. 임금"
                   value={`${contract.wageType === "hourly" ? "시급" : "월급"} ${Number(contract.wageAmount).toLocaleString()}원`}
                 />
-                <ContractRow label="8. 급여일" value={`매월 ${contract.payDay ?? 25}일`} />
+                <ContractRow label="7. 급여일" value={`매월 ${contract.payDay ?? 25}일`} />
                 <ContractRow
-                  label="9. 지급방법"
+                  label="8. 지급방법"
                   value={contract.payMethod === "bank_transfer" ? "계좌이체" : "현금"}
                 />
                 <ContractRow
-                  label="10. 4대보험"
+                  label="9. 4대보험"
                   value={contract.socialInsurance ? "가입" : "미가입"}
                 />
                 {contract.mealProvided && (
                   <ContractRow
-                    label="11. 식사제공"
+                    label="10. 식사제공"
                     value={
                       Number(contract.mealAllowance) > 0
                         ? `제공 (식대 월 ${Number(contract.mealAllowance).toLocaleString()}원)`
@@ -210,9 +216,12 @@ export default function ContractSignPage({ token }: { token: string }) {
                 <div className="rounded-lg p-4 text-center" style={{ border: "1px solid #e5e7eb" }}>
                   <p className="text-xs mb-1" style={{ color: "#6b7280" }}>사업주</p>
                   <p className="font-semibold" style={{ color: "#111827" }}>
-                    {contract.restaurantName ?? `매장 #${contract.restaurantId}`}
+                    {contract.affiliatedCompany || contract.restaurantName || `매장 #${contract.restaurantId}`}
                   </p>
-                  <p className="text-xs mt-2" style={{ color: "#9ca3af" }}>(전자계약 생성으로 갈음)</p>
+                  {contract.employerBusinessNumber && (
+                    <p className="text-xs" style={{ color: "#6b7280" }}>{contract.employerBusinessNumber}</p>
+                  )}
+                  <p className="text-xs mt-1" style={{ color: "#9ca3af" }}>(전자계약 생성으로 갈음)</p>
                 </div>
                 {/* 근로자 */}
                 <div className="rounded-lg p-4 text-center" style={{ border: "1px solid #e5e7eb" }}>

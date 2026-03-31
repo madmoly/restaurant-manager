@@ -87,8 +87,10 @@ app.use(express.json());
     await addColumnIfNotExists("restaurant_users", "resignReason", "VARCHAR(200) DEFAULT NULL");
     await addColumnIfNotExists("employee_contracts", "weeklyOffDays", "INT DEFAULT 1");
 
-    // employment_electronic_contracts 소속회사
+    // employment_electronic_contracts 소속회사 + 사업자등록번호 + 근무장소 주소
     await addColumnIfNotExists("employment_electronic_contracts", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "employerBusinessNumber", "VARCHAR(20) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "workPlaceAddress", "VARCHAR(300) DEFAULT NULL");
 
     // 계좌이체 입금자명
     await addColumnIfNotExists("daily_sales_detail", "transferDepositor", "VARCHAR(100) DEFAULT NULL");

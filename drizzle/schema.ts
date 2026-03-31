@@ -659,6 +659,8 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   socialInsurance: boolean("socialInsurance").default(true).notNull(),
   over5Employees: boolean("over5Employees").default(false).notNull(),
   affiliatedCompany: varchar("affiliatedCompany", { length: 100 }),
+  employerBusinessNumber: varchar("employerBusinessNumber", { length: 20 }),
+  workPlaceAddress: varchar("workPlaceAddress", { length: 300 }),
   nightShiftConsent: boolean("nightShiftConsent").default(false).notNull(),
   specialTerms: text("specialTerms"),
   status: mysqlEnum("status", ["draft", "sent", "signed", "expired", "cancelled"]).notNull().default("draft"),

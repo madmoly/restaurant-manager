@@ -762,6 +762,7 @@ export default function StaffPage() {
         <ContractFormModal
           restaurantId={restaurantId}
           staffList={staffList ?? []}
+          restaurantInfo={{ name: current?.name ?? "", address: current?.address ?? "" }}
           onClose={() => setShowContractForm(false)}
         />
       )}
@@ -771,6 +772,7 @@ export default function StaffPage() {
         <ContractFormModal
           restaurantId={restaurantId}
           staffList={staffList ?? []}
+          restaurantInfo={{ name: current?.name ?? "", address: current?.address ?? "" }}
           defaultEmployee={renewTarget}
           onClose={() => setRenewTarget(null)}
         />
@@ -875,9 +877,10 @@ function CredentialEditModal({ data, restaurantId, onSave, onClose, isPending }:
 
 // ─── 계약서 작성 모달 ─────────────────────────────────────────────────────────
 
-function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }: {
+function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, restaurantInfo }: {
   restaurantId: number; staffList: any[]; onClose: () => void;
   defaultEmployee?: { userId: number; name: string; affiliatedCompany?: string };
+  restaurantInfo?: { name: string; address: string };
 }) {
   const utils = trpc.useUtils();
 
@@ -919,9 +922,12 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
     probationMonths: 0,
     mealProvided: false,
     mealAllowance: "",
-    workPlace: "",
+    workPlace: restaurantInfo?.name ?? "",
+    workPlaceAddress: restaurantInfo?.address ?? "",
     jobDescription: "",
     specialTerms: "",
+    employerBusinessNumber: "",
+    weeklyHoliday: "일요일",
   });
 
   // ── 최근 계약서 템플릿 자동 적용 (새 계약서 + 첫 로드 시 1회) ──
@@ -950,6 +956,8 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
         jobDescription: latestTemplate.jobDescription || prev.jobDescription,
         specialTerms: latestTemplate.specialTerms || prev.specialTerms,
         affiliatedCompany: latestTemplate.affiliatedCompany || prev.affiliatedCompany,
+        employerBusinessNumber: (latestTemplate as any).employerBusinessNumber || prev.employerBusinessNumber,
+        workPlaceAddress: (latestTemplate as any).workPlaceAddress || prev.workPlaceAddress,
       }));
       setTemplateApplied(true);
     }
@@ -1014,16 +1022,16 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
             </div>
           )}
 
-          {/* ═══ 소속회사 + 사업장 규모 ═══ */}
+          {/* ═══ 사업주 정보 + 사업장 규모 ═══ */}
           <div className="rounded-lg border border-border p-3 space-y-2">
             <div className="relative">
-              <label className={labelCls}>소속회사</label>
+              <label className={labelCls}>사업주 (소속회사)</label>
               <div className="flex gap-2 mt-1">
                 <input className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={form.affiliatedCompany}
                   onChange={(e) => { setForm({ ...form, affiliatedCompany: e.target.value }); setShowCompanyList(false); }}
                   onFocus={() => { if (companies && companies.length > 0) setShowCompanyList(true); }}
-                  placeholder="인건비 정산 귀속 회사명" />
+                  placeholder="계약서 사업주명" />
                 {companies && companies.length > 0 && (
                   <button
                     type="button"
@@ -1035,7 +1043,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
                   </button>
                 )}
               </div>
-              {/* 기존 회사 드롭다운 */}
               {showCompanyList && companies && companies.length > 0 && (
                 <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-card border border-border rounded-lg shadow-lg max-h-40 overflow-y-auto">
                   {companies.map((c: string) => (
@@ -1050,7 +1057,13 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
                   ))}
                 </div>
               )}
-              <p className={subLabelCls}>인건비 정산 시 소속회사별로 분류됩니다</p>
+              <p className={subLabelCls}>계약서에 사업주로 표기됩니다</p>
+            </div>
+            <div>
+              <label className={labelCls}>사업자등록번호</label>
+              <input className={inputCls} value={form.employerBusinessNumber}
+                onChange={(e) => setForm({ ...form, employerBusinessNumber: e.target.value })}
+                placeholder="000-00-00000" />
             </div>
             <div className="flex items-center justify-between pt-2">
               <label className={labelCls}>사업장 규모</label>
@@ -1104,14 +1117,20 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
           </div>
 
           {/* ═══ 근무장소 / 업무내용 ═══ */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>근무장소</label>
-              <input className={inputCls} value={form.workPlace} onChange={(e) => setForm({ ...form, workPlace: e.target.value })} placeholder="예: 청계산뚝배기 천호점" />
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>근무장소 (매장명)</label>
+                <input className={inputCls} value={form.workPlace} onChange={(e) => setForm({ ...form, workPlace: e.target.value })} placeholder="매장명" />
+              </div>
+              <div>
+                <label className={labelCls}>업무내용</label>
+                <input className={inputCls} value={form.jobDescription} onChange={(e) => setForm({ ...form, jobDescription: e.target.value })} placeholder="홀 및 주방 그외 제반 업무" />
+              </div>
             </div>
             <div>
-              <label className={labelCls}>업무내용</label>
-              <input className={inputCls} value={form.jobDescription} onChange={(e) => setForm({ ...form, jobDescription: e.target.value })} placeholder="홀 및 주방 그외 제반 업무" />
+              <label className={labelCls}>근무장소 주소</label>
+              <input className={inputCls} value={form.workPlaceAddress} onChange={(e) => setForm({ ...form, workPlaceAddress: e.target.value })} placeholder="매장 주소" />
             </div>
           </div>
 
@@ -1258,6 +1277,8 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
               jobDescription: form.jobDescription || undefined,
               specialTerms: form.specialTerms || undefined,
               affiliatedCompany: form.affiliatedCompany || undefined,
+              employerBusinessNumber: form.employerBusinessNumber || undefined,
+              workPlaceAddress: form.workPlaceAddress || undefined,
             })}
             disabled={!form.employeeName || create.isPending}
           >
