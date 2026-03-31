@@ -926,8 +926,8 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
       const d = new Date(); d.setMonth(d.getMonth() + 1); d.setDate(d.getDate() - 1);
       return d.toISOString().slice(0, 10);
     })(),
-    wageType: "hourly" as "hourly" | "monthly",
-    wageAmount: "9860",
+    wageType: "monthly" as "hourly" | "monthly",
+    wageAmount: "",
     weeklyHours: "40",
     workStartTime: "09:00",
     workEndTime: "18:00",
@@ -1016,6 +1016,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     onError(err) { toast.error(err.message); },
   });
 
+  const removeCompany = trpc.electronicContracts.removeCompany.useMutation({
+    onSuccess() { toast.success("사업주 삭제됨"); utils.electronicContracts.listCompanies.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+
   const selectStaff = (userId: number) => {
     const staff = staffList.find((s: any) => s.userId === userId);
     if (staff) {
@@ -1095,20 +1100,34 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               {showCompanyList && companies && companies.length > 0 && (
                 <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-card border border-border rounded-lg shadow-lg max-h-40 overflow-y-auto">
                   {companies.map((c: any) => (
-                    <button
-                      key={c.name || c}
-                      type="button"
-                      onClick={() => {
-                        const name = c.name || c;
-                        const biz = c.businessNumber || "";
-                        setForm({ ...form, affiliatedCompany: name, ...(biz ? { employerBusinessNumber: biz } : {}) });
-                        setShowCompanyList(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors ${form.affiliatedCompany === (c.name || c) ? "bg-primary/10 font-medium" : ""}`}
-                    >
-                      <span>{c.name || c}</span>
-                      {c.businessNumber && <span className="ml-2 text-xs text-muted-foreground">{c.businessNumber}</span>}
-                    </button>
+                    <div key={c.name || c} className={`flex items-center hover:bg-accent transition-colors ${form.affiliatedCompany === (c.name || c) ? "bg-primary/10 font-medium" : ""}`}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const name = c.name || c;
+                          const biz = c.businessNumber || "";
+                          setForm({ ...form, affiliatedCompany: name, ...(biz ? { employerBusinessNumber: biz } : {}) });
+                          setShowCompanyList(false);
+                        }}
+                        className="flex-1 text-left px-3 py-2 text-sm"
+                      >
+                        <span>{c.name || c}</span>
+                        {c.businessNumber && <span className="ml-2 text-xs text-muted-foreground">{c.businessNumber}</span>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`"${c.name || c}" 사업주를 목록에서 삭제하시겠습니까?`)) {
+                            removeCompany.mutate({ restaurantId, companyName: c.name || c });
+                          }
+                        }}
+                        className="shrink-0 px-2 py-1 mr-1 text-muted-foreground hover:text-red-500 transition-colors"
+                        title="삭제"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -1190,26 +1209,48 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           </div>
 
           {/* ═══ 계약기간 ═══ */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>계약 시작</label>
-              <input type="date" className={inputCls} value={form.contractStart} onChange={(e) => {
-                const start = e.target.value;
-                // 초임(신규 계약서)일 경우 1달 계약 자동 적용
-                if (!defaultEmployee && start) {
-                  const d = new Date(start);
-                  d.setMonth(d.getMonth() + 1);
-                  d.setDate(d.getDate() - 1);
-                  setForm({ ...form, contractStart: start, contractEnd: d.toISOString().slice(0, 10) });
-                } else {
-                  setForm({ ...form, contractStart: start });
-                }
-              }} />
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>계약 시작</label>
+                <input type="date" className={inputCls} value={form.contractStart} onChange={(e) => {
+                  setForm({ ...form, contractStart: e.target.value });
+                }} />
+              </div>
+              <div>
+                <label className={labelCls}>계약 종료</label>
+                <input type="date" className={inputCls} value={form.contractEnd} onChange={(e) => setForm({ ...form, contractEnd: e.target.value })} />
+              </div>
             </div>
-            <div>
-              <label className={labelCls}>계약 종료</label>
-              <input type="date" className={inputCls} value={form.contractEnd} onChange={(e) => setForm({ ...form, contractEnd: e.target.value })} />
-              {!defaultEmployee && <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">초임: 1달 계약 자동 적용</p>}
+            <div className="flex gap-1.5 flex-wrap">
+              {[
+                { label: "1개월", months: 1 },
+                { label: "3개월", months: 3 },
+                { label: "6개월", months: 6 },
+                { label: "1년", months: 12 },
+              ].map((preset) => {
+                const calcEnd = () => {
+                  const d = new Date(form.contractStart || new Date());
+                  d.setMonth(d.getMonth() + preset.months);
+                  d.setDate(d.getDate() - 1);
+                  return d.toISOString().slice(0, 10);
+                };
+                const isActive = form.contractEnd === calcEnd();
+                return (
+                  <button key={preset.label} type="button"
+                    onClick={() => setForm({ ...form, contractEnd: calcEnd() })}
+                    className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${isActive ? "border-primary bg-primary/10 text-primary font-medium" : "border-input text-muted-foreground hover:bg-accent"}`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+              <button type="button"
+                onClick={() => setForm({ ...form, contractEnd: "" })}
+                className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${!form.contractEnd ? "border-primary bg-primary/10 text-primary font-medium" : "border-input text-muted-foreground hover:bg-accent"}`}
+              >
+                무기한
+              </button>
             </div>
           </div>
 
@@ -1217,14 +1258,21 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className={labelCls}>임금 유형</label>
-              <select className={inputCls} value={form.wageType} onChange={(e) => setForm({ ...form, wageType: e.target.value as any })}>
-                <option value="hourly">시급</option>
+              <select className={inputCls} value={form.wageType} onChange={(e) => {
+                const newType = e.target.value as "hourly" | "monthly";
+                setForm({ ...form, wageType: newType, wageAmount: newType === "hourly" ? "10320" : "" });
+              }}>
                 <option value="monthly">월급</option>
+                <option value="hourly">시급</option>
               </select>
             </div>
             <div>
-              <label className={labelCls}>금액</label>
-              <input type="number" className={inputCls} value={form.wageAmount} onChange={(e) => setForm({ ...form, wageAmount: e.target.value })} />
+              <label className={labelCls}>{form.wageType === "hourly" ? "시급(원)" : "월급(원)"}</label>
+              <input type="number" className={inputCls} value={form.wageAmount} onChange={(e) => setForm({ ...form, wageAmount: e.target.value })}
+                placeholder={form.wageType === "hourly" ? "10320" : "계약급여 입력"} />
+              {form.wageType === "hourly" && wageNum > 0 && wageNum < 10320 && (
+                <p className="text-[10px] text-red-600 font-semibold mt-0.5">⚠ 2026년 최저시급(10,320원) 미만</p>
+              )}
             </div>
             <div>
               <label className={labelCls}>주 근무시간</label>
@@ -1298,18 +1346,67 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           )}
 
           {/* ═══ 근무시간 ═══ */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className={labelCls}>출근</label>
-              <input type="time" step="600" className={inputCls} value={form.workStartTime} onChange={(e) => setForm({ ...form, workStartTime: e.target.value })} />
-            </div>
-            <div>
-              <label className={labelCls}>퇴근</label>
-              <input type="time" step="600" className={inputCls} value={form.workEndTime} onChange={(e) => setForm({ ...form, workEndTime: e.target.value })} />
-            </div>
-            <div>
-              <label className={labelCls}>휴게(분)</label>
-              <input type="number" className={inputCls} value={form.breakMinutes} onChange={(e) => setForm({ ...form, breakMinutes: Number(e.target.value) })} min={0} />
+          <div className="space-y-2">
+            {shiftPresets.length > 0 ? (
+              <div>
+                <label className={labelCls}>근무유형 (프리셋)</label>
+                <div className="flex gap-1.5 mt-1">
+                  {(() => {
+                    const types = [...new Set(shiftPresets.map((p: any) => p.presetType))];
+                    const typeLabels: Record<string, string> = { open: "오픈", full: "풀타임", fullday: "풀타임", close: "마감" };
+                    return types.map((t: string) => {
+                      const wd = shiftPresets.find((p: any) => p.presetType === t && p.dayType === "weekday")
+                        || shiftPresets.find((p: any) => p.presetType === t);
+                      if (!wd) return null;
+                      const isActive = form.workStartTime === (wd as any).startTime && form.workEndTime === (wd as any).endTime;
+                      return (
+                        <button key={t} type="button"
+                          onClick={() => {
+                            const start = (wd as any).startTime || form.workStartTime;
+                            const end = (wd as any).endTime || form.workEndTime;
+                            const brk = (wd as any).breakMinutes ?? form.breakMinutes;
+                            const [sh, sm] = start.split(":").map(Number);
+                            const [eh, em] = end.split(":").map(Number);
+                            let dailyMin = (eh * 60 + em) - (sh * 60 + sm) - brk;
+                            if (dailyMin <= 0) dailyMin += 24 * 60;
+                            const weeklyH = Math.round(dailyMin * 5 / 60);
+                            setForm({ ...form, workStartTime: start, workEndTime: end, breakMinutes: brk, weeklyHours: String(weeklyH) });
+                          }}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${isActive ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground hover:bg-accent"}`}
+                        >
+                          {typeLabels[t] || t}
+                          <span className="ml-1 text-[10px] opacity-70">{(wd as any).startTime}~{(wd as any).endTime}</span>
+                        </button>
+                      );
+                    });
+                  })()}
+                  <button type="button"
+                    onClick={() => {}}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md border border-input text-muted-foreground opacity-50"
+                    style={{ cursor: "default" }}
+                  >
+                    직접입력 ↓
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg bg-amber-500/10 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                근무 프리셋이 설정되지 않았습니다. <strong>업무정보 &gt; 매장 기본정보</strong>에서 프리셋을 먼저 등록하면 자동 반영됩니다.
+              </div>
+            )}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className={labelCls}>출근</label>
+                <input type="time" step="600" className={inputCls} value={form.workStartTime} onChange={(e) => setForm({ ...form, workStartTime: e.target.value })} />
+              </div>
+              <div>
+                <label className={labelCls}>퇴근</label>
+                <input type="time" step="600" className={inputCls} value={form.workEndTime} onChange={(e) => setForm({ ...form, workEndTime: e.target.value })} />
+              </div>
+              <div>
+                <label className={labelCls}>휴게(분)</label>
+                <input type="number" className={inputCls} value={form.breakMinutes} onChange={(e) => setForm({ ...form, breakMinutes: Number(e.target.value) })} min={0} />
+              </div>
             </div>
           </div>
 

@@ -678,6 +678,78 @@ app.use("/api/upload", uploadRouter);
 app.use("/api/ocr", ocrRouter);
 app.use("/uploads", express.static(UPLOAD_ROOT));
 
+// ─── 계약서 이메일 발송 ─────────────────────────────────────────────────────
+app.post("/api/contract/send-email", async (req, res) => {
+  try {
+    const { token, email } = req.body;
+    if (!token || !email) return res.status(400).json({ ok: false, message: "token과 email이 필요합니다" });
+
+    // 계약서 조회
+    const mysql2 = await import("mysql2/promise");
+    const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
+    const [rows] = await conn.query(
+      "SELECT id, employeeName, affiliatedCompany, status FROM employment_electronic_contracts WHERE token = ? LIMIT 1",
+      [token]
+    ) as any[];
+    await conn.end();
+
+    if (!rows.length) return res.status(404).json({ ok: false, message: "계약서를 찾을 수 없습니다" });
+    const contract = rows[0];
+
+    // 계약서 URL 생성
+    const baseUrl = process.env.BASE_URL || `https://${req.get("host")}`;
+    const contractUrl = `${baseUrl}/sign/${token}`;
+
+    // nodemailer로 발송
+    const nodemailer = await import("nodemailer");
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    if (!smtpUser || !smtpPass) {
+      return res.status(500).json({ ok: false, message: "이메일 설정(SMTP)이 되어있지 않습니다. 관리자에게 문의하세요." });
+    }
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: smtpUser, pass: smtpPass },
+    });
+
+    const statusText = contract.status === "signed" ? "서명 완료된" : "";
+    const subject = `[근로계약서] ${contract.employeeName || "직원"}님의 ${statusText}근로계약서`;
+    const html = `
+      <div style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #111827; font-size: 18px;">근로계약서</h2>
+        <p style="color: #4b5563; font-size: 14px; line-height: 1.6;">
+          ${contract.affiliatedCompany ? `<strong>${contract.affiliatedCompany}</strong>의 ` : ""}
+          <strong>${contract.employeeName || "직원"}</strong>님의 근로계약서입니다.
+        </p>
+        <p style="color: #4b5563; font-size: 14px; line-height: 1.6;">
+          아래 버튼을 클릭하여 계약서를 확인하실 수 있습니다.
+        </p>
+        <div style="margin: 24px 0;">
+          <a href="${contractUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px;">
+            계약서 확인하기
+          </a>
+        </div>
+        <p style="color: #9ca3af; font-size: 12px;">
+          이 이메일은 331매장관리 시스템에서 자동 발송되었습니다.
+        </p>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `331매장관리 <${smtpUser}>`,
+      to: email,
+      subject,
+      html,
+    });
+
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error("[contract-email]", e.message);
+    res.status(500).json({ ok: false, message: "이메일 발송에 실패했습니다: " + e.message });
+  }
+});
+
 // ─── 체크리스트 사진 2주 자동삭제 스케줄러 ───────────────────────────────────
 startCleanupScheduler();
 

@@ -21,6 +21,10 @@ export default function ContractSignPage({ token }: { token: string }) {
   const [agreed, setAgreed] = useState(false);
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [showSignPad, setShowSignPad] = useState(false);
+  const [emailInput, setEmailInput] = useState("");
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState("");
 
   // ─── 모든 Hooks는 조건부 return 앞에 위치해야 함 ──────────────────────────
 
@@ -159,7 +163,11 @@ export default function ContractSignPage({ token }: { token: string }) {
                   value={`${contract.workStartTime} ~ ${contract.workEndTime} (주 ${Number(contract.weeklyHours)}시간, 휴게 ${contract.breakMinutes ?? 60}분)`}
                 />
                 <ContractRow
-                  label="6. 임금"
+                  label="6. 주휴일"
+                  value="스케줄상 지정일 또는 당사자 간 협의에 따름"
+                />
+                <ContractRow
+                  label="7. 임금"
                   value={`${contract.wageType === "hourly" ? "시급" : "월급"} ${Number(contract.wageAmount).toLocaleString()}원`}
                 />
                 {/* 포괄임금 구성항목 (월급제 + basePay 존재 시) */}
@@ -229,18 +237,18 @@ export default function ContractSignPage({ token }: { token: string }) {
                     </td>
                   </tr>
                 )}
-                <ContractRow label="7. 급여일" value={`매월 ${contract.payDay ?? 25}일`} />
+                <ContractRow label="8. 급여일" value={`매월 ${contract.payDay ?? 25}일`} />
                 <ContractRow
-                  label="8. 지급방법"
+                  label="9. 지급방법"
                   value={contract.payMethod === "bank_transfer" ? "계좌이체" : "현금"}
                 />
                 <ContractRow
-                  label="9. 4대보험"
+                  label="10. 4대보험"
                   value={contract.socialInsurance ? "가입" : "미가입"}
                 />
                 {contract.mealProvided && (
                   <ContractRow
-                    label="10. 식사제공"
+                    label="11. 식사제공"
                     value={
                       Number(contract.mealAllowance) > 0
                         ? `제공 (식대 월 ${Number(contract.mealAllowance).toLocaleString()}원)`
@@ -290,6 +298,22 @@ export default function ContractSignPage({ token }: { token: string }) {
                     <p>② 본 계약의 임금에는 상기 임금 구성항목에 명시된 고정연장근로수당이 포함되어 있으며, 해당 시간 범위 내의 연장근로에 대해서는 별도의 수당을 지급하지 아니한다.</p>
                   ) : (
                     <p>② 연장·야간(22:00~06:00)·휴일근로 시 관련 법령에 따라 가산수당을 지급한다.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* 휴일·휴가 */}
+              <div>
+                <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>휴일 및 연차유급휴가</h3>
+                <div className="space-y-1" style={{ paddingLeft: "8px" }}>
+                  <p>① 주휴일은 스케줄상 지정일 또는 당사자 간 협의에 따르며, 1주 소정근로일을 개근한 경우 유급으로 부여한다.</p>
+                  {contract.wageType === "monthly" && contract.annualLeavePay ? (
+                    <>
+                      <p>② 연차유급휴가는 근로기준법 제60조에 따라 부여한다. 본 계약의 임금에는 상기 임금 구성항목에 명시된 포괄연차수당이 포함되어 있으며, 해당 일수 범위 내의 연차사용에 대해서는 별도 수당을 지급하지 아니한다.</p>
+                      <p>③ 포괄연차수당에 해당하는 일수를 초과하여 연차를 사용하는 경우 관련 법령에 따라 처리한다.</p>
+                    </>
+                  ) : (
+                    <p>② 연차유급휴가는 근로기준법 제60조에 따라 부여하며, 미사용 연차에 대해서는 관련 법령에 따라 수당으로 정산한다.</p>
                   )}
                 </div>
               </div>
@@ -494,19 +518,69 @@ export default function ContractSignPage({ token }: { token: string }) {
 
         {/* 서명 완료 후 안내 */}
         {isSigned && (
-          <div className="mt-6 rounded-lg shadow-sm p-6 text-center no-print" style={cardStyle}>
-            <CheckCircle className="w-10 h-10 mx-auto mb-3" style={{ color: "#22c55e" }} />
-            <p className="font-semibold" style={{ color: "#111827" }}>계약이 완료되었습니다</p>
-            <p className="text-sm mt-1" style={{ color: "#6b7280" }}>
-              사업주에게도 서명 완료가 통보되었습니다. 이 페이지를 스크린샷하거나 인쇄하여 보관하세요.
-            </p>
-            <button
-              className="mt-4 py-2 px-4 rounded-lg font-medium flex items-center gap-2 mx-auto"
-              style={{ border: "1px solid #d1d5db", color: "#374151" }}
-              onClick={() => window.print()}
-            >
-              <Download className="w-4 h-4" /> 인쇄 / 저장
-            </button>
+          <div className="mt-6 rounded-lg shadow-sm p-6 no-print" style={cardStyle}>
+            <div className="text-center">
+              <CheckCircle className="w-10 h-10 mx-auto mb-3" style={{ color: "#22c55e" }} />
+              <p className="font-semibold" style={{ color: "#111827" }}>계약이 완료되었습니다</p>
+              <p className="text-sm mt-1" style={{ color: "#6b7280" }}>
+                사업주에게도 서명 완료가 통보되었습니다.
+              </p>
+            </div>
+
+            {/* 이메일 발송 */}
+            <div className="mt-5 pt-4" style={{ borderTop: "1px solid #e5e7eb" }}>
+              <p className="text-sm font-medium mb-2" style={{ color: "#374151" }}>계약서 사본 이메일 발송</p>
+              {emailSent ? (
+                <div className="rounded-lg p-3 flex items-center gap-2" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                  <CheckCircle className="w-4 h-4 shrink-0" style={{ color: "#16a34a" }} />
+                  <p className="text-sm" style={{ color: "#166534" }}>이메일이 발송되었습니다</p>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={emailInput}
+                    onChange={(e) => { setEmailInput(e.target.value); setEmailError(""); }}
+                    placeholder="이메일 주소 입력"
+                    className="flex-1 rounded-lg px-3 py-2 text-sm"
+                    style={{ border: "1px solid #d1d5db", background: "#ffffff", color: "#111827" }}
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!emailInput || !emailInput.includes("@")) { setEmailError("올바른 이메일을 입력하세요"); return; }
+                      setEmailSending(true); setEmailError("");
+                      try {
+                        const res = await fetch("/api/contract/send-email", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ token, email: emailInput }),
+                        });
+                        const data = await res.json();
+                        if (data.ok) { setEmailSent(true); } else { setEmailError(data.message || "발송 실패"); }
+                      } catch { setEmailError("네트워크 오류"); }
+                      setEmailSending(false);
+                    }}
+                    disabled={emailSending}
+                    className="shrink-0 py-2 px-4 rounded-lg text-sm font-medium text-white"
+                    style={{ background: "#2563eb" }}
+                  >
+                    {emailSending ? "발송 중..." : "발송"}
+                  </button>
+                </div>
+              )}
+              {emailError && <p className="text-xs mt-1" style={{ color: "#dc2626" }}>{emailError}</p>}
+            </div>
+
+            {/* 인쇄 버튼 */}
+            <div className="text-center mt-4">
+              <button
+                className="py-2 px-4 rounded-lg font-medium flex items-center gap-2 mx-auto"
+                style={{ border: "1px solid #d1d5db", color: "#374151" }}
+                onClick={() => window.print()}
+              >
+                <Download className="w-4 h-4" /> 인쇄 / 저장
+              </button>
+            </div>
           </div>
         )}
       </div>

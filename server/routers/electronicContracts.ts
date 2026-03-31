@@ -374,6 +374,20 @@ export const electronicContractsRouter = router({
       return { ok: true };
     }),
 
+  /** 사업주(소속회사) 목록에서 제거 — 해당 회사의 모든 계약서 affiliatedCompany를 비움 */
+  removeCompany: ownerProcedure
+    .input(z.object({ restaurantId: z.number(), companyName: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      await db.update(employmentElectronicContracts)
+        .set({ affiliatedCompany: "" })
+        .where(and(
+          eq(employmentElectronicContracts.restaurantId, input.restaurantId),
+          eq(employmentElectronicContracts.affiliatedCompany, input.companyName),
+        ));
+      return { ok: true };
+    }),
+
   /** 계약서 서명 (상태 → signed, 비로그인 접근 가능) */
   signContract: publicProcedure
     .input(
