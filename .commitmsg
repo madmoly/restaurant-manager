@@ -1,7 +1,9 @@
-업무관리 삭제 버그 수정 + 보안 강화
+초안 계약서 수정 기능 + 전화번호 표시 + 인건비 정산 보험구분/공제 표시
 
-1. deleteTemplate: 소프트삭제 → 물리삭제(DELETE)로 변경, restaurantId 검증 추가
-2. listAllTemplates: isActive=true 필터 추가 (삭제 후 목록에 남는 버그 수정)
-3. updateTemplate: restaurantId 검증 추가
-4. deleteMidSales, deleteOrderImage: restaurantId 필터 + verifyStoreAccess 추가
-5. 모든 delete/update mutation에 매장 접근권한 검증 적용
+- 초안(draft) 상태 계약서 수정 기능 (서버 updateEmploymentContract + 클라이언트 모달)
+- 계약서에 직원 전화번호 표시 (ContractSignPage 헤더 + 서명란)
+- 계약서 작성 폼에 연락처 입력 필드 추가
+- 인건비 정산 테이블에 4대보험/3.3%공제 구분 컬럼 추가
+- 미가입시 3.3% 공제액 자동 계산 표시
+- Excel/PDF 내보내기에 보험구분/공제 컬럼 포함
+- employee_contracts에 socialInsurance 컬럼 추가 (서명 시 자동 동기화)

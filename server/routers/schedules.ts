@@ -775,6 +775,7 @@ export const schedulesRouter = router({
           contractStart: employeeContracts.contractStart,
           contractEnd: employeeContracts.contractEnd,
           weeklyOffDays: employeeContracts.weeklyOffDays,
+          socialInsurance: employeeContracts.socialInsurance,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
         })
         .from(schedules)
@@ -847,6 +848,7 @@ export const schedulesRouter = router({
           hireDate: string | null;
           userId: number | null;
           recheckRequired: boolean;
+          socialInsurance: boolean;
         }>;
         totalHours: number;
         totalWage: number;
@@ -874,6 +876,7 @@ export const schedulesRouter = router({
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
             recheckRequired: false,
+            socialInsurance: r.socialInsurance ?? true,
           };
         }
 

@@ -43,6 +43,7 @@ export default function StaffPage() {
   const canChangeRole = user?.role === "master" || current?.storeRole === "owner";
 
   const [showContractForm, setShowContractForm] = useState(false);
+  const [editingDraftContract, setEditingDraftContract] = useState<any>(null);
   const [showInviteSection, setShowInviteSection] = useState(false);
   const [expandedStaff, setExpandedStaff] = useState<number | null>(null);
   const [editingCredentials, setEditingCredentials] = useState<any>(null);
@@ -729,6 +730,12 @@ export default function StaffPage() {
                     {c.status === "draft" && (
                       <div className="flex items-center gap-1.5 ml-auto">
                         <button
+                          onClick={() => setEditingDraftContract(c)}
+                          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-2 py-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" /> 수정
+                        </button>
+                        <button
                           onClick={() => {
                             if (confirm("이 초안을 삭제하시겠습니까?")) {
                               deleteContract.mutate({ id: c.id });
@@ -780,6 +787,17 @@ export default function StaffPage() {
           staffList={staffList ?? []}
           restaurantInfo={{ name: current?.name ?? "", address: current?.address ?? "" }}
           onClose={() => setShowContractForm(false)}
+        />
+      )}
+
+      {/* 초안 수정 모달 */}
+      {editingDraftContract && (
+        <ContractFormModal
+          restaurantId={restaurantId}
+          staffList={staffList ?? []}
+          restaurantInfo={{ name: current?.name ?? "", address: current?.address ?? "" }}
+          editingContract={editingDraftContract}
+          onClose={() => setEditingDraftContract(null)}
         />
       )}
 
@@ -893,10 +911,11 @@ function CredentialEditModal({ data, restaurantId, onSave, onClose, isPending }:
 
 // ─── 계약서 작성 모달 ─────────────────────────────────────────────────────────
 
-function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, restaurantInfo }: {
+function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, restaurantInfo, editingContract }: {
   restaurantId: number; staffList: any[]; onClose: () => void;
   defaultEmployee?: { userId: number; name: string; affiliatedCompany?: string };
   restaurantInfo?: { name: string; address: string };
+  editingContract?: any; // draft 상태 계약서 수정 시 전달
 }) {
   const utils = trpc.useUtils();
 
@@ -912,45 +931,47 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
   const [templateApplied, setTemplateApplied] = useState(false);
   const [showCompanyList, setShowCompanyList] = useState(false);
 
+  const ec = editingContract; // 수정 모드 시 기존 데이터
   const [form, setForm] = useState({
-    employeeId: defaultEmployee?.userId ?? 0,
-    employeeName: defaultEmployee?.name ?? "",
-    position: "직원",
-    affiliatedCompany: defaultEmployee?.affiliatedCompany ?? "",
-    contractType: "fixed_term" as "permanent" | "fixed_term" | "part_time" | "daily",
-    contractStart: new Date().toISOString().slice(0, 10),
-    contractEnd: (() => {
-      if (defaultEmployee) return ""; // 재계약은 빈칸
+    employeeId: ec?.employeeId ?? defaultEmployee?.userId ?? 0,
+    employeeName: ec?.employeeName ?? defaultEmployee?.name ?? "",
+    employeePhone: ec?.employeePhone ?? "",
+    position: ec?.position ?? "직원",
+    affiliatedCompany: ec?.affiliatedCompany ?? defaultEmployee?.affiliatedCompany ?? "",
+    contractType: (ec?.contractType ?? "fixed_term") as "permanent" | "fixed_term" | "part_time" | "daily",
+    contractStart: ec?.contractStart ? String(ec.contractStart).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    contractEnd: ec?.contractEnd ? String(ec.contractEnd).slice(0, 10) : (() => {
+      if (defaultEmployee) return "";
       const d = new Date(); d.setMonth(d.getMonth() + 1); d.setDate(d.getDate() - 1);
       return d.toISOString().slice(0, 10);
     })(),
-    wageType: "monthly" as "hourly" | "monthly",
-    wageAmount: "",
-    weeklyHours: "40",
-    workStartTime: "09:00",
-    workEndTime: "18:00",
-    breakMinutes: 60,
-    payDay: 25,
-    payMethod: "bank_transfer" as "bank_transfer" | "cash",
-    over5Employees: false,
-    socialInsurance: true,
+    wageType: (ec?.wageType ?? "monthly") as "hourly" | "monthly",
+    wageAmount: ec?.wageAmount ?? "",
+    weeklyHours: ec?.weeklyHours ?? "40",
+    workStartTime: ec?.workStartTime ?? "09:00",
+    workEndTime: ec?.workEndTime ?? "18:00",
+    breakMinutes: ec?.breakMinutes ?? 60,
+    payDay: ec?.payDay ?? 25,
+    payMethod: (ec?.payMethod ?? "bank_transfer") as "bank_transfer" | "cash",
+    over5Employees: ec?.over5Employees ?? false,
+    socialInsurance: ec?.socialInsurance ?? true,
     hasProbation: false,
     probationMonths: 0,
-    mealProvided: false,
+    mealProvided: ec?.mealProvided ?? false,
     mealAllowance: "",
-    workPlace: restaurantInfo?.name ?? "",
-    workPlaceAddress: restaurantInfo?.address ?? "",
-    jobDescription: "",
-    specialTerms: "",
-    employerBusinessNumber: "",
-    weeklyHoliday: "일요일",
-    includeNda: true,
-    includePrivacyConsent: true,
+    workPlace: ec?.workPlace ?? restaurantInfo?.name ?? "",
+    workPlaceAddress: ec?.workPlaceAddress ?? restaurantInfo?.address ?? "",
+    jobDescription: ec?.jobDescription ?? "",
+    specialTerms: ec?.specialTerms ?? "",
+    employerBusinessNumber: ec?.employerBusinessNumber ?? "",
+    weeklyHoliday: ec?.weeklyHoliday ?? "일요일",
+    includeNda: ec?.includeNda ?? true,
+    includePrivacyConsent: ec?.includePrivacyConsent ?? true,
   });
 
   // ── 최근 계약서 템플릿 자동 적용 (새 계약서 + 첫 로드 시 1회) ──
   useEffect(() => {
-    if (!defaultEmployee && latestTemplate && !templateApplied) {
+    if (!defaultEmployee && !editingContract && latestTemplate && !templateApplied) {
       setForm((prev) => ({
         ...prev,
         position: latestTemplate.position || prev.position,
@@ -983,7 +1004,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
       // 고정연장/휴일 시간 필드 제거됨
       setTemplateApplied(true);
     }
-  }, [latestTemplate, defaultEmployee, templateApplied]);
+  }, [latestTemplate, defaultEmployee, editingContract, templateApplied]);
 
   // ── 스케줄 풀타임 프리셋 → 출퇴근/휴게/주근로시간 자동 반영 (항상 적용) ──
   const [presetApplied, setPresetApplied] = useState(false);
@@ -1012,6 +1033,10 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     onSuccess() { toast.success("계약서 초안 생성됨"); utils.electronicContracts.listEmploymentContracts.invalidate(); onClose(); },
     onError(err) { toast.error(err.message); },
   });
+  const updateContract = trpc.electronicContracts.updateEmploymentContract.useMutation({
+    onSuccess() { toast.success("계약서 수정됨"); utils.electronicContracts.listEmploymentContracts.invalidate(); onClose(); },
+    onError(err) { toast.error(err.message); },
+  });
 
   const removeCompany = trpc.electronicContracts.removeCompany.useMutation({
     onSuccess() { toast.success("사업주 삭제됨"); utils.electronicContracts.listCompanies.invalidate(); },
@@ -1021,7 +1046,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
   const selectStaff = (userId: number) => {
     const staff = staffList.find((s: any) => s.userId === userId);
     if (staff) {
-      setForm({ ...form, employeeId: userId, employeeName: staff.name, affiliatedCompany: staff.affiliatedCompany || "" });
+      setForm({ ...form, employeeId: userId, employeeName: staff.name, employeePhone: staff.phone || "", affiliatedCompany: staff.affiliatedCompany || "" });
     }
   };
 
@@ -1156,6 +1181,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             {form.employeeId === 0 && (
               <input className={inputCls + " mt-1"} value={form.employeeName} onChange={(e) => setForm({ ...form, employeeName: e.target.value })} placeholder="미등록 직원 이름 직접입력" />
             )}
+            <input className={inputCls + " mt-1"} value={form.employeePhone} onChange={(e) => setForm({ ...form, employeePhone: e.target.value })} placeholder="연락처 (예: 010-1234-5678)" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1433,48 +1459,51 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         <div className="flex gap-2 pt-4 justify-end">
           <Button variant="outline" onClick={onClose}>취소</Button>
           <Button
-            onClick={() => create.mutate({
-              restaurantId,
-              employeeId: form.employeeId || undefined,
-              employeeName: form.employeeName,
-              position: form.position,
-              contractType: form.contractType,
-              contractStart: form.contractStart,
-              contractEnd: form.contractEnd || undefined,
-              wageType: form.wageType,
-              wageAmount: form.wageAmount,
-              weeklyHours: form.weeklyHours,
-              workStartTime: form.workStartTime,
-              workEndTime: form.workEndTime,
-              breakMinutes: form.breakMinutes,
-              weeklyHoliday: form.weeklyHoliday || "일요일",
-              payDay: form.payDay,
-              payMethod: form.payMethod,
-              over5Employees: form.over5Employees,
-              socialInsurance: form.socialInsurance,
-              hasProbation: false,
-              probationMonths: 0,
-              mealProvided: form.mealProvided,
-              workPlace: form.workPlace || undefined,
-              jobDescription: form.jobDescription || undefined,
-              specialTerms: form.specialTerms || undefined,
-              affiliatedCompany: form.affiliatedCompany || undefined,
-              employerBusinessNumber: form.employerBusinessNumber || undefined,
-              workPlaceAddress: form.workPlaceAddress || undefined,
-              includeNda: form.includeNda,
-              includePrivacyConsent: form.includePrivacyConsent,
-              // 포괄임금 구성항목 (월급제 전용)
-              ...(form.wageType === "monthly" && wageNum > 0 ? {
-                annualSalary: String(annualSalaryCalc),
-                basePay: String(basePayCalc),
-                annualLeavePay: String(annualLeavePayCalc),
-                hourlyWage: String(Math.round(hourlyWageCalc)),
-                monthlyContractHours: String(monthlyContractHours),
-              } : {}),
-            })}
-            disabled={!form.employeeName || create.isPending}
+            onClick={() => {
+              const payload = {
+                employeeName: form.employeeName,
+                employeePhone: form.employeePhone || undefined,
+                position: form.position,
+                contractType: form.contractType,
+                contractStart: form.contractStart,
+                contractEnd: form.contractEnd || undefined,
+                wageType: form.wageType,
+                wageAmount: form.wageAmount,
+                weeklyHours: form.weeklyHours,
+                workStartTime: form.workStartTime,
+                workEndTime: form.workEndTime,
+                breakMinutes: form.breakMinutes,
+                weeklyHoliday: form.weeklyHoliday || "일요일",
+                payDay: form.payDay,
+                payMethod: form.payMethod,
+                over5Employees: form.over5Employees,
+                socialInsurance: form.socialInsurance,
+                mealProvided: form.mealProvided,
+                workPlace: form.workPlace || undefined,
+                jobDescription: form.jobDescription || undefined,
+                specialTerms: form.specialTerms || undefined,
+                affiliatedCompany: form.affiliatedCompany || undefined,
+                employerBusinessNumber: form.employerBusinessNumber || undefined,
+                workPlaceAddress: form.workPlaceAddress || undefined,
+                includeNda: form.includeNda,
+                includePrivacyConsent: form.includePrivacyConsent,
+                ...(form.wageType === "monthly" && wageNum > 0 ? {
+                  annualSalary: String(annualSalaryCalc),
+                  basePay: String(basePayCalc),
+                  annualLeavePay: String(annualLeavePayCalc),
+                  hourlyWage: String(Math.round(hourlyWageCalc)),
+                  monthlyContractHours: String(monthlyContractHours),
+                } : {}),
+              };
+              if (editingContract) {
+                updateContract.mutate({ id: editingContract.id, ...payload });
+              } else {
+                create.mutate({ restaurantId, employeeId: form.employeeId || undefined, hasProbation: false, probationMonths: 0, ...payload });
+              }
+            }}
+            disabled={!form.employeeName || create.isPending || updateContract.isPending}
           >
-            {create.isPending ? "생성 중..." : "초안 생성"}
+            {(create.isPending || updateContract.isPending) ? "처리 중..." : editingContract ? "수정 저장" : "초안 생성"}
           </Button>
         </div>
       </div>

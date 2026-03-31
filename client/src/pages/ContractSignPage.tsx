@@ -134,6 +134,9 @@ export default function ContractSignPage({ token }: { token: string }) {
               )}
               (이하 "사업주"라 한다)과(와){" "}
               <strong>{contract.employeeName}</strong>
+              {contract.employeePhone && (
+                <span className="text-xs" style={{ color: "#6b7280" }}> (연락처: {contract.employeePhone})</span>
+              )}
               (이하 "근로자"라 한다)은(는) 다음과 같이 근로계약을 체결한다.
             </p>
 
@@ -415,6 +418,9 @@ export default function ContractSignPage({ token }: { token: string }) {
                 <div className="rounded-lg p-4 text-center" style={{ border: "1px solid #e5e7eb" }}>
                   <p className="text-xs mb-1" style={{ color: "#6b7280" }}>근로자</p>
                   <p className="font-semibold" style={{ color: "#111827" }}>{contract.employeeName}</p>
+                  {contract.employeePhone && (
+                    <p className="text-xs" style={{ color: "#6b7280" }}>{contract.employeePhone}</p>
+                  )}
                   {isSigned && contract.employeeSignature ? (
                     <img
                       src={contract.employeeSignature}

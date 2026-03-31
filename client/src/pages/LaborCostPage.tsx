@@ -70,6 +70,8 @@ export default function LaborCostPage() {
     const rows: (string | number)[][] = [];
     for (const company of data) {
       for (const emp of company.employees) {
+        const wage = Math.round(emp.totalWage);
+        const deduction = !emp.socialInsurance && wage > 0 ? Math.round(wage * 0.033) : 0;
         rows.push([
           company.company,
           emp.name,
@@ -78,7 +80,9 @@ export default function LaborCostPage() {
           emp.wageAmount ? Number(emp.wageAmount) : 0,
           emp.shifts,
           Number(emp.totalHours.toFixed(1)),
-          Math.round(emp.totalWage),
+          emp.socialInsurance ? "4대보험" : "3.3%공제",
+          wage,
+          deduction,
           emp.contractStart ? new Date(emp.contractStart).toLocaleDateString("ko-KR") : "-",
           emp.contractEnd ? new Date(emp.contractEnd).toLocaleDateString("ko-KR") : "-",
         ]);
@@ -87,7 +91,7 @@ export default function LaborCostPage() {
     return rows;
   };
 
-  const headers = ["소속회사", "이름", "직위", "급여유형", "급여액", "출근횟수", "총근무시간", "인건비(원)", "계약시작", "계약종료"];
+  const headers = ["소속회사", "이름", "직위", "급여유형", "급여액", "출근횟수", "총근무시간", "보험구분", "인건비(원)", "3.3%공제", "계약시작", "계약종료"];
   const fileName = `인건비정산_${year}년${month}월_${current?.name ?? ""}`;
 
   const handleExportExcel = async () => {
@@ -96,7 +100,7 @@ export default function LaborCostPage() {
     if (!rows.length) return;
     const XLSX = await import("xlsx");
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    ws["!cols"] = headers.map((_h: string, i: number) => ({ wch: i === 0 ? 14 : i === 7 ? 14 : 10 }));
+    ws["!cols"] = headers.map((_h: string, i: number) => ({ wch: i === 0 ? 14 : i === 8 ? 14 : i === 9 ? 12 : 10 }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "인건비정산");
     const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
@@ -136,7 +140,8 @@ export default function LaborCostPage() {
           4: { halign: "right" },
           5: { halign: "right" },
           6: { halign: "right" },
-          7: { halign: "right" },
+          8: { halign: "right" },
+          9: { halign: "right" },
         },
       });
 
@@ -268,6 +273,7 @@ export default function LaborCostPage() {
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">시간</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">대체</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">연차</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">보험</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">인건비</th>
                         </tr>
                       </thead>
@@ -317,7 +323,21 @@ export default function LaborCostPage() {
                                 </span>
                               ) : <span className="text-muted-foreground/50">-</span>}
                             </td>
-                            <td className="px-4 py-2 text-right font-medium text-foreground">₩{fmtWon(emp.totalWage)}</td>
+                            <td className="px-4 py-2 text-right">
+                              {emp.socialInsurance ? (
+                                <span className="text-xs text-green-600 dark:text-green-400">4대보험</span>
+                              ) : (
+                                <span className="text-xs text-orange-600 dark:text-orange-400">3.3%</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2 text-right font-medium text-foreground">
+                              <div>₩{fmtWon(emp.totalWage)}</div>
+                              {!emp.socialInsurance && emp.totalWage > 0 && (
+                                <div className="text-[10px] text-orange-600 dark:text-orange-400">
+                                  공제 ₩{fmtWon(Math.round(emp.totalWage * 0.033))}
+                                </div>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

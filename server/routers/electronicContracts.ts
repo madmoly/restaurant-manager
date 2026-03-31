@@ -332,6 +332,69 @@ export const electronicContractsRouter = router({
       return { id: result.id, token };
     }),
 
+  /** 초안 계약서 수정 (draft 상태만) */
+  updateEmploymentContract: ownerProcedure
+    .input(
+      z.object({
+        id: z.number(),
+        employeeName: z.string().min(1).optional(),
+        employeePhone: z.string().optional(),
+        position: z.string().optional(),
+        contractType: z.enum(["permanent", "fixed_term", "part_time", "daily"]).optional(),
+        contractStart: z.string().optional(),
+        contractEnd: z.string().nullable().optional(),
+        wageType: z.enum(["hourly", "monthly"]).optional(),
+        wageAmount: z.string().optional(),
+        weeklyHours: z.string().optional(),
+        workStartTime: z.string().optional(),
+        workEndTime: z.string().optional(),
+        breakMinutes: z.number().optional(),
+        weeklyHoliday: z.string().optional(),
+        payDay: z.number().optional(),
+        socialInsurance: z.boolean().optional(),
+        over5Employees: z.boolean().optional(),
+        mealProvided: z.boolean().optional(),
+        payMethod: z.enum(["bank_transfer", "cash"]).optional(),
+        workPlace: z.string().optional(),
+        jobDescription: z.string().optional(),
+        specialTerms: z.string().optional(),
+        affiliatedCompany: z.string().optional(),
+        employerBusinessNumber: z.string().optional(),
+        workPlaceAddress: z.string().optional(),
+        annualSalary: z.string().optional(),
+        basePay: z.string().optional(),
+        annualLeavePay: z.string().optional(),
+        hourlyWage: z.string().optional(),
+        monthlyContractHours: z.string().optional(),
+        includeNda: z.boolean().optional(),
+        includePrivacyConsent: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...updates } = input;
+      const [contract] = await db
+        .select({ status: employmentElectronicContracts.status, restaurantId: employmentElectronicContracts.restaurantId })
+        .from(employmentElectronicContracts)
+        .where(eq(employmentElectronicContracts.id, id))
+        .limit(1);
+      if (!contract) throw new TRPCError({ code: "NOT_FOUND", message: "계약서를 찾을 수 없습니다" });
+      if (contract.status !== "draft") throw new TRPCError({ code: "BAD_REQUEST", message: "초안 상태에서만 수정할 수 있습니다" });
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, contract.restaurantId, true);
+
+      // 날짜 필드 변환
+      const setData: any = {};
+      for (const [k, v] of Object.entries(updates)) {
+        if (v === undefined) continue;
+        if (k === "contractStart" && v) setData[k] = new Date(v as string);
+        else if (k === "contractEnd") setData[k] = v ? new Date(v as string) : null;
+        else setData[k] = v;
+      }
+      if (Object.keys(setData).length > 0) {
+        await db.update(employmentElectronicContracts).set(setData).where(eq(employmentElectronicContracts.id, id));
+      }
+      return { ok: true };
+    }),
+
   /** 계약서 발송 (상태 → sent) */
   sendContract: ownerProcedure
     .input(z.object({ id: z.number() }))
@@ -438,6 +501,7 @@ export const electronicContractsRouter = router({
             contractEnd: contract.contractEnd ? new Date(contract.contractEnd) : null,
             weeklyHours: contract.weeklyHours ?? null,
             weeklyOffDays: 1,
+            socialInsurance: contract.socialInsurance ?? true,
             isActive: true,
           } as any);
           console.log(`[signContract] synced employeeContracts for userId=${contract.employeeId} restaurantId=${contract.restaurantId}`);

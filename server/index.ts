@@ -615,6 +615,12 @@ app.use(express.json());
     await addColumnIfNotExists("counterparties", "phone", "VARCHAR(30) DEFAULT NULL");
     await addColumnIfNotExists("counterparties", "address", "VARCHAR(200) DEFAULT NULL");
 
+    // employee_contracts에 socialInsurance 추가
+    await addColumnIfNotExists("employee_contracts", "socialInsurance", "BOOLEAN DEFAULT TRUE");
+
+    // employment_electronic_contracts에 employeePhone 추가
+    await addColumnIfNotExists("employment_electronic_contracts", "employeePhone", "VARCHAR(30) DEFAULT NULL");
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {
