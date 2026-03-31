@@ -701,14 +701,21 @@ app.post("/api/contract/send-email", async (req, res) => {
     const contractUrl = `${baseUrl}/sign/${token}`;
 
     // nodemailer로 발송
-    const nodemailer = await import("nodemailer");
+    let nodemailer: any;
+    try {
+      nodemailer = await import("nodemailer");
+    } catch (importErr: any) {
+      console.error("[contract-email] nodemailer import failed:", importErr.message);
+      return res.status(500).json({ ok: false, message: "이메일 모듈 로드 실패. 서버 로그를 확인하세요." });
+    }
     const smtpUser = process.env.SMTP_USER;
     const smtpPass = process.env.SMTP_PASS;
     if (!smtpUser || !smtpPass) {
       return res.status(500).json({ ok: false, message: "이메일 설정(SMTP)이 되어있지 않습니다. 관리자에게 문의하세요." });
     }
 
-    const transporter = nodemailer.createTransport({
+    const nm = nodemailer.default || nodemailer;
+    const transporter = nm.createTransport({
       service: "gmail",
       auth: { user: smtpUser, pass: smtpPass },
     });
@@ -745,7 +752,8 @@ app.post("/api/contract/send-email", async (req, res) => {
 
     res.json({ ok: true });
   } catch (e: any) {
-    console.error("[contract-email]", e.message);
+    console.error("[contract-email] error:", e.message, e.stack);
+    console.error("[contract-email] SMTP_USER set:", !!process.env.SMTP_USER, "SMTP_PASS set:", !!process.env.SMTP_PASS);
     res.status(500).json({ ok: false, message: "이메일 발송에 실패했습니다: " + e.message });
   }
 });
