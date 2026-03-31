@@ -1085,24 +1085,27 @@ export default function SchedulePage() {
                       onClick={() => openEditModal(s)}
                       className={`w-full text-left p-1 md:p-1.5 rounded bg-background border-l-2 ${st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors`}
                     >
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="font-medium text-foreground truncate text-[11px] md:text-xs">
+                      <div className="flex items-center gap-1">
+                        <span className={`font-medium truncate text-[11px] md:text-xs ${s.tempWorkerName ? "text-orange-600 dark:text-orange-400" : "text-foreground"}`}>
                           {(() => {
                             const rawName = s.userName ?? s.tempWorkerName ?? "미배정";
-                            const displayName = rawName.length >= 2 ? rawName.slice(1) : rawName;
-                            return displayName;
+                            return rawName.length >= 2 ? rawName.slice(1) : rawName;
                           })()}
-                          {s.tempWorkerName && <span className="text-orange-500 ml-0.5">임</span>}
                         </span>
-                        <span className="text-muted-foreground text-[10px] md:text-[11px] shrink-0">
+                        {(s.status === "draft" || s.status === "canceled") && (
+                          <span className={`shrink-0 px-1 py-0 rounded text-[9px] md:text-[10px] font-medium leading-tight ${st.color}`}>
+                            {st.label.charAt(0)}
+                          </span>
+                        )}
+                        {s.tempWorkerName && (
+                          <span className="shrink-0 px-1 py-0 rounded text-[9px] md:text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400">
+                            임시
+                          </span>
+                        )}
+                        <span className="text-muted-foreground text-[10px] md:text-[11px] shrink-0 ml-auto">
                           {presetInfo ? presetInfo.label.charAt(0) : `${fmtTime(s.startTime)}~${fmtTime(s.endTime)}`}
                         </span>
                       </div>
-                      {(s.status === "draft" || s.status === "canceled") && (
-                        <span className={`inline-block px-1 py-0.5 rounded text-[9px] md:text-[10px] font-medium mt-0.5 ${st.color}`}>
-                          {st.label.charAt(0)}
-                        </span>
-                      )}
                     </button>
                   );
                 })}
