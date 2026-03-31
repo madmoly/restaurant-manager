@@ -1049,15 +1049,7 @@ export default function SchedulePage() {
                   {daySchedules.length > 0 && (() => {
                     const headcount = daySchedules.reduce((sum, s) =>
                       sum + (s.shiftPreset === "open" || s.shiftPreset === "close" ? 0.5 : 1), 0);
-                    const totalHours = daySchedules.reduce((sum, s) => {
-                      const st = new Date(s.startTime).getTime();
-                      const et = new Date(s.endTime).getTime();
-                      const grossMin = (et - st) / 60000;
-                      const netMin = Math.max(0, grossMin - (s.breakMinutes ?? 0));
-                      return sum + Math.floor(netMin / 10) * 10 / 60;
-                    }, 0);
-                    const hDisp = totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1);
-                    return <span className="ml-1 text-[10px] md:text-xs font-normal">({headcount % 1 === 0 ? headcount : headcount.toFixed(1)}명 {hDisp}h)</span>;
+                    return <span className="ml-1 text-[10px] md:text-xs font-normal">({headcount % 1 === 0 ? headcount : headcount.toFixed(1)}명)</span>;
                   })()}
                 </span>
                 {daySchedules.some((s) => s.status === "draft") && (
