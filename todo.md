@@ -1,6 +1,6 @@
 # Restaurant Manager — 작업 로드맵
 
-> 마지막 갱신: 2026-03-30
+> 마지막 갱신: 2026-04-01
 
 ## 완료된 작업 (아카이브)
 
@@ -26,6 +26,9 @@
 - [x] 근무유형 프리셋 설정 UI 개선 (카드형 인라인 편집, Switch, 영문코드 자동생성)
 - [x] 특정휴무일 캘린더 → 날짜입력+리스트 약소형 변경
 - [x] 근로계약서 회사명 드롭다운 + 최근 계약서 내용 자동 불러오기
+- [x] 수익분석 → 월정산 페이지 전면 개편 (settlementData API + 5섹션 MonthlySettlementPage)
+- [x] 운영캘린더 상세뷰 → 일일운영 바로가기 (DailyOpsPage ?date= 파라미터)
+- [x] 체크리스트 적용 기간 관리 (effectiveFrom/effectiveTo, 소프트 삭제)
 
 ---
 
@@ -42,3 +45,6 @@
 ## 예정 작업 (보류)
 
 - [ ] OCR corrections → 품목 alias 매핑 자동화: 사용자가 퍼지매칭 후보를 선택/무시한 이력(ocr_corrections)을 counterparty_ocr_profiles.frequentItems에 alias로 반영 → 동일 거래처 다음 OCR 시 자동매칭 정확도 향상. 오인식 수정값 프로파일 오염 리스크 있으므로, 일정 횟수(3회+) 동일 수정 패턴이 반복될 때만 반영하는 필터 필요
+- [ ] ProfitPage.tsx 삭제 (dead code, MonthlySettlementPage로 대체됨)
+- [ ] 체크리스트 적용기간 중간안: 시즌한정 설정 UI, 예약등록(미래 effectiveFrom), 비활성 항목 목록/복원 기능
+- [ ] dailySalesDetail 데이터 없는 매장의 월정산 매출표시: sales 테이블 fallback 검토 필요
