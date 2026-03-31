@@ -881,11 +881,14 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
 }) {
   const utils = trpc.useUtils();
 
-  // ── 기존 회사 목록 + 최근 계약서 템플릿 조회 ──
+  // ── 기존 회사 목록 + 최근 계약서 템플릿 + 스케줄 프리셋 조회 ──
   const { data: companies } = trpc.electronicContracts.listCompanies.useQuery({ restaurantId });
   const { data: latestTemplate } = trpc.electronicContracts.getLatestTemplate.useQuery(
     { restaurantId },
     { enabled: !defaultEmployee }, // 새 계약서일 때만 조회 (갱신/재계약 시 불필요)
+  );
+  const { data: shiftPresets = [] } = trpc.restaurants.getShiftPresets.useQuery(
+    { restaurantId },
   );
   const [templateApplied, setTemplateApplied] = useState(false);
   const [showCompanyList, setShowCompanyList] = useState(false);
@@ -895,16 +898,19 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
     employeeName: defaultEmployee?.name ?? "",
     position: "직원",
     affiliatedCompany: defaultEmployee?.affiliatedCompany ?? "",
-    contractType: "part_time" as "permanent" | "fixed_term" | "part_time" | "daily",
+    contractType: "fixed_term" as "permanent" | "fixed_term" | "part_time" | "daily",
     contractStart: new Date().toISOString().slice(0, 10),
-    contractEnd: "",
+    contractEnd: (() => {
+      if (defaultEmployee) return ""; // 재계약은 빈칸
+      const d = new Date(); d.setMonth(d.getMonth() + 1); d.setDate(d.getDate() - 1);
+      return d.toISOString().slice(0, 10);
+    })(),
     wageType: "hourly" as "hourly" | "monthly",
     wageAmount: "9860",
     weeklyHours: "40",
     workStartTime: "09:00",
     workEndTime: "18:00",
     breakMinutes: 60,
-    weeklyHoliday: "일요일",
     payDay: 25,
     payMethod: "bank_transfer" as "bank_transfer" | "cash",
     over5Employees: false,
@@ -949,6 +955,28 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
     }
   }, [latestTemplate, defaultEmployee, templateApplied]);
 
+  // ── 스케줄 풀타임 프리셋 → 출퇴근/주근로시간 자동 반영 (템플릿 미적용 시) ──
+  const [presetApplied, setPresetApplied] = useState(false);
+  useEffect(() => {
+    if (presetApplied || templateApplied) return;
+    const fullPreset = shiftPresets.find((p: any) => p.presetType === "full" || p.presetType === "fullday");
+    if (!fullPreset) return;
+    const wd = shiftPresets.find((p: any) => (p.presetType === "full" || p.presetType === "fullday") && p.dayType === "weekday") || fullPreset;
+    setForm((prev) => {
+      const start = (wd as any).startTime || prev.workStartTime;
+      const end = (wd as any).endTime || prev.workEndTime;
+      const brk = (wd as any).breakMinutes ?? prev.breakMinutes;
+      // 주근로시간 계산: (출~퇴 - 휴게) × 5일
+      const [sh, sm] = start.split(":").map(Number);
+      const [eh, em] = end.split(":").map(Number);
+      let dailyMin = (eh * 60 + em) - (sh * 60 + sm) - brk;
+      if (dailyMin <= 0) dailyMin += 24 * 60;
+      const weeklyH = Math.round(dailyMin * 5 / 60);
+      return { ...prev, workStartTime: start, workEndTime: end, breakMinutes: brk, weeklyHours: String(weeklyH) };
+    });
+    setPresetApplied(true);
+  }, [shiftPresets, presetApplied, templateApplied]);
+
   const create = trpc.electronicContracts.createEmploymentContract.useMutation({
     onSuccess() { toast.success("계약서 초안 생성됨"); utils.electronicContracts.listEmploymentContracts.invalidate(); onClose(); },
     onError(err) { toast.error(err.message); },
@@ -964,7 +992,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
   const weeklyHoursNum = Number(form.weeklyHours) || 0;
   const isUnder15Hours = weeklyHoursNum < 15;
   const wageNum = Number(form.wageAmount) || 0;
-  const probationWage = Math.round(wageNum * 0.9);
+  // probation removed from UI
 
   const inputCls = "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
   const labelCls = "text-sm font-medium text-foreground";
@@ -1048,18 +1076,15 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
           </div>
 
           {/* ═══ 직원 정보 ═══ */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>직원</label>
-              <select className={inputCls} value={form.employeeId} onChange={(e) => selectStaff(Number(e.target.value))}>
-                <option value={0}>선택 또는 직접입력</option>
-                {staffList.map((s: any) => <option key={s.userId} value={s.userId}>{s.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>이름</label>
-              <input className={inputCls} value={form.employeeName} onChange={(e) => setForm({ ...form, employeeName: e.target.value })} />
-            </div>
+          <div>
+            <label className={labelCls}>직원</label>
+            <select className={inputCls} value={form.employeeId} onChange={(e) => selectStaff(Number(e.target.value))}>
+              <option value={0}>선택</option>
+              {staffList.map((s: any) => <option key={s.userId} value={s.userId}>{s.name}</option>)}
+            </select>
+            {form.employeeId === 0 && (
+              <input className={inputCls + " mt-1"} value={form.employeeName} onChange={(e) => setForm({ ...form, employeeName: e.target.value })} placeholder="미등록 직원 이름 직접입력" />
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1070,9 +1095,9 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
             <div>
               <label className={labelCls}>계약유형</label>
               <select className={inputCls} value={form.contractType} onChange={(e) => setForm({ ...form, contractType: e.target.value as any })}>
+                <option value="fixed_term">계약직</option>
                 <option value="part_time">파트타임</option>
                 <option value="permanent">정규직</option>
-                <option value="fixed_term">기간제</option>
                 <option value="daily">일용직</option>
               </select>
             </div>
@@ -1086,7 +1111,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
             </div>
             <div>
               <label className={labelCls}>업무내용</label>
-              <input className={inputCls} value={form.jobDescription} onChange={(e) => setForm({ ...form, jobDescription: e.target.value })} placeholder="예: 홀서빙, 주방보조" />
+              <input className={inputCls} value={form.jobDescription} onChange={(e) => setForm({ ...form, jobDescription: e.target.value })} placeholder="홀 및 주방 그외 제반 업무" />
             </div>
           </div>
 
@@ -1094,36 +1119,25 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>계약 시작</label>
-              <input type="date" className={inputCls} value={form.contractStart} onChange={(e) => setForm({ ...form, contractStart: e.target.value })} />
+              <input type="date" className={inputCls} value={form.contractStart} onChange={(e) => {
+                const start = e.target.value;
+                // 초임(신규 계약서)일 경우 1달 계약 자동 적용
+                if (!defaultEmployee && start) {
+                  const d = new Date(start);
+                  d.setMonth(d.getMonth() + 1);
+                  d.setDate(d.getDate() - 1);
+                  setForm({ ...form, contractStart: start, contractEnd: d.toISOString().slice(0, 10) });
+                } else {
+                  setForm({ ...form, contractStart: start });
+                }
+              }} />
             </div>
             <div>
               <label className={labelCls}>계약 종료</label>
               <input type="date" className={inputCls} value={form.contractEnd} onChange={(e) => setForm({ ...form, contractEnd: e.target.value })} />
-              <p className={subLabelCls}>미입력 시 기간정함 없음</p>
+              {!defaultEmployee && <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">초임: 1달 계약 자동 적용</p>}
             </div>
           </div>
-
-          {/* ═══ 수습기간 ═══ */}
-          <div className="flex items-center gap-3 py-1">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form.hasProbation}
-                onChange={(e) => setForm({ ...form, hasProbation: e.target.checked, probationMonths: e.target.checked ? 3 : 0 })}
-                className="rounded border-input" />
-              <span className="text-sm text-foreground">수습기간 적용</span>
-            </label>
-            {form.hasProbation && (
-              <div className="flex items-center gap-1.5">
-                <input type="number" className="w-16 rounded-md border border-input bg-background px-2 py-1 text-sm text-center"
-                  value={form.probationMonths} onChange={(e) => setForm({ ...form, probationMonths: Number(e.target.value) })} min={1} max={6} />
-                <span className="text-xs text-muted-foreground">개월</span>
-              </div>
-            )}
-          </div>
-          {form.hasProbation && form.wageType === "hourly" && (
-            <p className="text-[11px] text-muted-foreground px-1">
-              수습 중 최저임금의 90% 적용 가능 (1년 이상 계약 시) → 시급 {probationWage.toLocaleString()}원
-            </p>
-          )}
 
           {/* ═══ 임금 ═══ */}
           <div className="grid grid-cols-3 gap-3">
@@ -1162,7 +1176,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
           </div>
 
           {/* ═══ 급여 / 복리 ═══ */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>급여일</label>
               <input type="number" className={inputCls} value={form.payDay} onChange={(e) => setForm({ ...form, payDay: Number(e.target.value) })} min={1} max={31} />
@@ -1173,10 +1187,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
                 <option value="bank_transfer">계좌이체</option>
                 <option value="cash">현금</option>
               </select>
-            </div>
-            <div>
-              <label className={labelCls}>주휴일</label>
-              <input className={inputCls} value={form.weeklyHoliday} onChange={(e) => setForm({ ...form, weeklyHoliday: e.target.value })} />
             </div>
           </div>
 
@@ -1235,13 +1245,13 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee }
               workStartTime: form.workStartTime,
               workEndTime: form.workEndTime,
               breakMinutes: form.breakMinutes,
-              weeklyHoliday: form.weeklyHoliday,
+              weeklyHoliday: form.weeklyHoliday || "일요일",
               payDay: form.payDay,
               payMethod: form.payMethod,
               over5Employees: form.over5Employees,
               socialInsurance: form.socialInsurance,
-              hasProbation: form.hasProbation,
-              probationMonths: form.hasProbation ? form.probationMonths : 0,
+              hasProbation: false,
+              probationMonths: 0,
               mealProvided: form.mealProvided,
               mealAllowance: form.mealProvided ? form.mealAllowance || undefined : undefined,
               workPlace: form.workPlace || undefined,
