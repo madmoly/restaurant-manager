@@ -36,6 +36,11 @@ export async function verifyStoreAccess(
     throw new TRPCError({ code: "FORBIDDEN", message: "이 매장에 접근 권한이 없습니다" });
   }
 
+  // 퇴사자는 해당 매장 접근 차단
+  if (ru?.resignedAt) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "퇴사 처리된 매장에는 접근할 수 없습니다" });
+  }
+
   return { storeRole };
 }
 

@@ -109,6 +109,7 @@ export const restaurantsRouter = router({
       .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
       .where(and(
         eq(restaurantUsers.userId, ctx.user.userId),
+        sql`${restaurantUsers.resignedAt} IS NULL`,
         activeRealStoreCondition(me?.isTutorial ?? false),
       ));
   }),
