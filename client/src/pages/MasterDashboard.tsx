@@ -279,7 +279,7 @@ export default function MasterDashboard() {
             <div className="space-y-1.5">
               {[
                 { label: "사용자 관리", href: "/users", icon: <Users size={14} /> },
-                { label: "매장 관리", href: "/restaurants", icon: <Store size={14} /> },                { label: "수익 분석", href: "/profitability", icon: <TrendingUp size={14} /> },
+                { label: "매장 관리", href: "/restaurants", icon: <Store size={14} /> },                { label: "월정산", href: "/monthly-settlement", icon: <TrendingUp size={14} /> },
                 { label: "스케줄", href: "/schedule", icon: <Clock size={14} /> },
               ].map((item) => (
                 <button

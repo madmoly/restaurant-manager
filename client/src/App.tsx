@@ -17,7 +17,7 @@ import UsersPage from "./pages/UsersPage";
 import CounterpartiesPage from "./pages/CounterpartiesPage";
 import PurchaseManagementPage from "./pages/PurchaseManagementPage";
 import FixedCostsPage from "./pages/FixedCostsPage";
-import ProfitPage from "./pages/ProfitPage";
+import MonthlySettlementPage from "./pages/MonthlySettlementPage";
 import SchedulePage from "./pages/SchedulePage";
 import DailyOpsPage from "./pages/DailyOpsPage";
 import StaffPage from "./pages/StaffPage";
@@ -74,7 +74,8 @@ function RoleRouter() {
             <Route path="/groups" component={MasterDashboard} />
             <Route path="/users" component={UsersPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
-            <Route path="/profitability" component={ProfitPage} />
+            <Route path="/monthly-settlement" component={MonthlySettlementPage} />
+            <Route path="/profitability">{() => <Redirect to="/monthly-settlement" />}</Route>
             <Route path="/sales" component={SalesPage} />
 
             <Route path="/counterparties" component={CounterpartiesPage} />
@@ -97,7 +98,8 @@ function RoleRouter() {
             <Route path="/business" component={AdminDashboard} />
             <Route path="/users" component={UsersPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
-            <Route path="/profitability" component={ProfitPage} />
+            <Route path="/monthly-settlement" component={MonthlySettlementPage} />
+            <Route path="/profitability">{() => <Redirect to="/monthly-settlement" />}</Route>
             <Route path="/sales" component={SalesPage} />
             <Route path="/daily-closing" component={SalesPage} />
 
@@ -124,7 +126,8 @@ function RoleRouter() {
             <Route path="/counterparties" component={CounterpartiesPage} />
             <Route path="/purchase-management" component={PurchaseManagementPage} />
             <Route path="/fixed-costs" component={FixedCostsPage} />
-            <Route path="/profitability" component={ProfitPage} />
+            <Route path="/monthly-settlement" component={MonthlySettlementPage} />
+            <Route path="/profitability">{() => <Redirect to="/monthly-settlement" />}</Route>
             <Route path="/restaurants" component={RestaurantsPage} />
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/daily-ops" component={DailyOpsPage} />
@@ -144,7 +147,8 @@ function RoleRouter() {
             <Route path="/daily-ops" component={DailyOpsPage} />
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/sales" component={SalesPage} />
-            <Route path="/profitability" component={ProfitPage} />
+            <Route path="/monthly-settlement" component={MonthlySettlementPage} />
+            <Route path="/profitability">{() => <Redirect to="/monthly-settlement" />}</Route>
             <Route path="/purchase-management" component={PurchaseManagementPage} />
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />

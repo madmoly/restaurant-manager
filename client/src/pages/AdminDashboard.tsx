@@ -372,7 +372,7 @@ export default function AdminDashboard() {
                 <div
                   key={s.restaurantId}
                   className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/30 cursor-pointer transition-all"
-                  onClick={() => setLocation("/profitability")}
+                  onClick={() => setLocation("/monthly-settlement")}
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
