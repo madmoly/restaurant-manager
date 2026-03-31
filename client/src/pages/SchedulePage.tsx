@@ -1087,17 +1087,20 @@ export default function SchedulePage() {
                     >
                       <div className="flex items-center justify-between gap-1">
                         <span className="font-medium text-foreground truncate text-[11px] md:text-xs">
-                          {s.userName ?? s.tempWorkerName ?? "미배정"}
-                          {s.tempWorkerName && <span className="text-orange-500 ml-0.5">(임시)</span>}
+                          {(() => {
+                            const rawName = s.userName ?? s.tempWorkerName ?? "미배정";
+                            const displayName = rawName.length >= 2 ? rawName.slice(1) : rawName;
+                            return displayName;
+                          })()}
+                          {s.tempWorkerName && <span className="text-orange-500 ml-0.5">임</span>}
                         </span>
                         <span className="text-muted-foreground text-[10px] md:text-[11px] shrink-0">
-                          {presetInfo ? presetInfo.label : `${fmtTime(s.startTime)}~${fmtTime(s.endTime)}`}
-                          {(s.breakMinutes ?? 0) > 0 && <span className="ml-0.5 text-orange-500">(휴{s.breakMinutes}분)</span>}
+                          {presetInfo ? presetInfo.label.charAt(0) : `${fmtTime(s.startTime)}~${fmtTime(s.endTime)}`}
                         </span>
                       </div>
                       {(s.status === "draft" || s.status === "canceled") && (
                         <span className={`inline-block px-1 py-0.5 rounded text-[9px] md:text-[10px] font-medium mt-0.5 ${st.color}`}>
-                          {st.label}
+                          {st.label.charAt(0)}
                         </span>
                       )}
                     </button>
