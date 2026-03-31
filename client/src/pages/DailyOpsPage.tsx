@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDate } from 'date-fns';
-import { useLocation } from 'wouter';
+import { useLocation, useSearch } from 'wouter';
 import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
 import { resizeImage } from '@/lib/imageResize';
@@ -3051,7 +3051,12 @@ type TabType = 'open' | 'purchase' | 'midday' | 'close';
 
 export default function DailyOpsPage() {
   const { selectedRestaurant } = useRestaurant();
-  const [date, setDate] = useState(formatDate(new Date(), 'yyyy-MM-dd'));
+  const searchString = useSearch();
+  const urlDate = new URLSearchParams(searchString).get('date');
+  const [date, setDate] = useState(() => {
+    if (urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate)) return urlDate;
+    return formatDate(new Date(), 'yyyy-MM-dd');
+  });
   const [activeTab, setActiveTab] = useState<TabType>('open');
 
   if (!selectedRestaurant) {

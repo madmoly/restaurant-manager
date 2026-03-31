@@ -5,8 +5,9 @@ import { getHolidayName } from "@/lib/koreanHolidays";
 import {
   ChevronLeft, ChevronRight, CalendarDays, CheckCircle2, Clock,
   XCircle, Users, TrendingUp, TrendingDown, ClipboardCheck, X, Receipt,
-  Wallet, ShoppingCart, ArrowRight, Minus,
+  Wallet, ShoppingCart, ArrowRight, Minus, ExternalLink,
 } from "lucide-react";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
   Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription,
@@ -30,8 +31,8 @@ function fmtTime(d: string | Date) {
 }
 
 // ─── 일별 상세 콘텐츠 (Drawer/Panel 공용) ──────────────────────────────────
-function DayDetailContent({ restaurantId, date }: {
-  restaurantId: number; date: string;
+function DayDetailContent({ restaurantId, date, onNavigate }: {
+  restaurantId: number; date: string; onNavigate?: () => void;
 }) {
   const { data, isLoading } = trpc.dailyOps.getDayDetail.useQuery(
     { restaurantId, date },
@@ -184,6 +185,21 @@ function DayDetailContent({ restaurantId, date }: {
           </div>
         </section>
       )}
+
+      {/* 일일운영 바로가기 */}
+      {onNavigate && (
+        <section className="pt-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full gap-1.5 text-xs"
+            onClick={onNavigate}
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            일일운영 상세 보기
+          </Button>
+        </section>
+      )}
     </div>
   );
 }
@@ -192,6 +208,7 @@ function DayDetailContent({ restaurantId, date }: {
 // ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
 export default function OpsCalendarPage() {
   const { selectedRestaurant: current } = useRestaurant();
+  const [, setLocation] = useLocation();
   const restaurantId = current?.id ?? 0;
 
   const today = new Date();
@@ -448,7 +465,7 @@ export default function OpsCalendarPage() {
             <DrawerDescription className="text-xs">일별 운영 상세</DrawerDescription>
           </DrawerHeader>
           <div className="px-4 pb-6 overflow-y-auto">
-            {selectedDate && <DayDetailContent restaurantId={restaurantId} date={selectedDate} />}
+            {selectedDate && <DayDetailContent restaurantId={restaurantId} date={selectedDate} onNavigate={() => setLocation(`/daily-ops?date=${selectedDate}`)} />}
           </div>
         </DrawerContent>
       </Drawer>
@@ -466,7 +483,7 @@ export default function OpsCalendarPage() {
             </Button>
           </div>
           <div className="flex-1 overflow-y-auto px-4 py-3">
-            <DayDetailContent restaurantId={restaurantId} date={selectedDate} />
+            <DayDetailContent restaurantId={restaurantId} date={selectedDate} onNavigate={() => setLocation(`/daily-ops?date=${selectedDate}`)} />
           </div>
         </div>
       )}
