@@ -671,6 +671,9 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   annualLeavePay: decimal("annualLeavePay", { precision: 12, scale: 2 }),       // 포괄연차수당
   hourlyWage: decimal("hourlyWage", { precision: 10, scale: 2 }),               // 통상시급
   monthlyContractHours: decimal("monthlyContractHours", { precision: 6, scale: 2 }), // 월소정+주휴시간
+  // ── 부속서류 ──
+  includeNda: boolean("includeNda").default(false).notNull(),           // 비밀유지서약서 포함
+  includePrivacyConsent: boolean("includePrivacyConsent").default(false).notNull(), // 개인정보수집동의서 포함
   nightShiftConsent: boolean("nightShiftConsent").default(false).notNull(),
   specialTerms: text("specialTerms"),
   status: mysqlEnum("status", ["draft", "sent", "signed", "expired", "cancelled"]).notNull().default("draft"),

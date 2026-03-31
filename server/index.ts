@@ -101,6 +101,8 @@ app.use(express.json());
     await addColumnIfNotExists("employment_electronic_contracts", "annualLeavePay", "DECIMAL(12,2) DEFAULT NULL");
     await addColumnIfNotExists("employment_electronic_contracts", "hourlyWage", "DECIMAL(10,2) DEFAULT NULL");
     await addColumnIfNotExists("employment_electronic_contracts", "monthlyContractHours", "DECIMAL(6,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "includeNda", "BOOLEAN NOT NULL DEFAULT FALSE");
+    await addColumnIfNotExists("employment_electronic_contracts", "includePrivacyConsent", "BOOLEAN NOT NULL DEFAULT FALSE");
 
     // 계좌이체 입금자명
     await addColumnIfNotExists("daily_sales_detail", "transferDepositor", "VARCHAR(100) DEFAULT NULL");

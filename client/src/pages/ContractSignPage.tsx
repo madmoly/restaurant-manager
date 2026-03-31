@@ -251,6 +251,70 @@ export default function ContractSignPage({ token }: { token: string }) {
               </tbody>
             </table>
 
+            {/* ═══ 표준 근로조건 조항 ═══ */}
+            <div className="space-y-4 text-[13px] leading-relaxed" style={{ color: "#374151" }}>
+
+              {/* 근로시간·휴게 상세 */}
+              <div>
+                <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>근로시간 및 휴게시간</h3>
+                <div className="space-y-1" style={{ paddingLeft: "8px" }}>
+                  <p>① 1일 소정근로시간은 {(() => {
+                    const [sh, sm] = (contract.workStartTime || "09:00").split(":").map(Number);
+                    const [eh, em] = (contract.workEndTime || "18:00").split(":").map(Number);
+                    let mins = (eh * 60 + em) - (sh * 60 + sm) - (contract.breakMinutes ?? 60);
+                    if (mins < 0) mins += 24 * 60;
+                    return `${Math.floor(mins / 60)}시간 ${mins % 60 > 0 ? `${mins % 60}분` : ""}`.trim();
+                  })()}이며, 1주 소정근로시간은 {Number(contract.weeklyHours)}시간으로 한다.</p>
+                  <p>② 휴게시간은 {contract.breakMinutes ?? 60}분으로 하며, 근로자는 자유롭게 이용할 수 있다.</p>
+                  <p>③ 실제 근무 스케줄은 사업주가 작성한 스케줄표에 따르되, 근로자에게 사전에 고지한다.</p>
+                </div>
+              </div>
+
+              {/* 연장·야간·휴일근로 */}
+              <div>
+                <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>연장·야간·휴일근로</h3>
+                <div className="space-y-1" style={{ paddingLeft: "8px" }}>
+                  <p>① 사업주는 근로자의 동의를 얻어 1주 12시간 한도 내에서 연장근로를 실시할 수 있다.</p>
+                  {contract.wageType === "monthly" && contract.basePay ? (
+                    <p>② 본 계약의 임금에는 상기 임금 구성항목에 명시된 고정연장근로수당이 포함되어 있으며, 해당 시간 범위 내의 연장근로에 대해서는 별도의 수당을 지급하지 아니한다.</p>
+                  ) : (
+                    <p>② 연장·야간(22:00~06:00)·휴일근로 시 관련 법령에 따라 가산수당을 지급한다.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* 퇴직 및 해고 */}
+              <div>
+                <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>계약 해지 및 퇴직</h3>
+                <div className="space-y-1" style={{ paddingLeft: "8px" }}>
+                  <p>① 근로자가 자발적으로 퇴직하고자 할 때에는 최소 1개월 전에 사업주에게 서면으로 통보하여야 한다.</p>
+                  <p>② 사업주가 근로자를 해고하고자 할 때에는 30일 전에 예고하거나 30일분의 통상임금을 지급한다.</p>
+                  {contract.contractEnd && (
+                    <p>③ 계약기간 만료 시 재계약 여부는 근무성적, 경영상 필요 등을 고려하여 결정한다.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* 비밀유지·손해배상 */}
+              <div>
+                <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>비밀유지 및 손해배상</h3>
+                <div className="space-y-1" style={{ paddingLeft: "8px" }}>
+                  <p>① 근로자는 업무상 취득한 영업비밀, 고객정보, 경영정보를 재직 중은 물론 퇴직 후에도 제3자에게 누설하거나 업무 외 목적으로 사용하여서는 아니 된다.</p>
+                  <p>② 근로자가 고의 또는 중대한 과실로 사업주에게 손해를 끼친 경우 배상 책임을 진다.</p>
+                </div>
+              </div>
+
+              {/* 근태·물품관리 */}
+              <div>
+                <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>근태 및 물품관리</h3>
+                <div className="space-y-1" style={{ paddingLeft: "8px" }}>
+                  <p>① 근로자는 출·퇴근 시 사업주가 정한 방법으로 근태를 기록하여야 한다.</p>
+                  <p>② 사업주가 지급한 업무용 물품(유니폼, 열쇠, 장비 등)은 퇴직 시 반납하여야 한다.</p>
+                  <p>③ 근로자는 식품위생법 등 관련 법령에서 요구하는 위생관리 기준을 준수하여야 한다.</p>
+                </div>
+              </div>
+            </div>
+
             {/* 특약사항 */}
             {contract.specialTerms && (
               <div>
@@ -268,6 +332,62 @@ export default function ContractSignPage({ token }: { token: string }) {
               <p>근로자는 본 계약서 사본을 교부받을 권리가 있습니다. (근로기준법 제17조 제2항)</p>
               <p>본 계약서의 전자 서명은 전자서명법에 따라 법적 효력을 가집니다.</p>
             </div>
+
+            {/* ═══ 부속서류 1: 비밀유지서약서 ═══ */}
+            {contract.includeNda && (
+              <div className="pt-6 space-y-3" style={{ borderTop: "2px solid #111827" }}>
+                <h2 className="text-lg font-bold text-center tracking-wide" style={{ color: "#111827" }}>비밀유지서약서</h2>
+                <div className="text-[13px] leading-relaxed space-y-3" style={{ color: "#374151" }}>
+                  <p>
+                    <strong>{contract.employeeName}</strong> (이하 "서약자"라 한다)은(는){" "}
+                    <strong>{contract.affiliatedCompany || contract.restaurantName || `매장 #${contract.restaurantId}`}</strong>
+                    (이하 "회사"라 한다)에 입사함에 있어 다음 사항을 서약합니다.
+                  </p>
+                  <div style={{ paddingLeft: "8px" }} className="space-y-1.5">
+                    <p>1. 서약자는 재직 중 업무상 알게 된 회사의 영업비밀, 경영정보, 고객정보, 매출·원가 정보, 레시피, 운영 노하우 등 일체의 비밀정보를 재직 중은 물론 퇴직 후에도 제3자에게 누설, 공개, 전달하거나 사적 목적으로 이용하지 아니한다.</p>
+                    <p>2. 서약자는 업무 중 취득한 자료(문서, 데이터, 사진, 전자파일 등)를 회사의 사전 서면 승인 없이 외부로 반출하거나 복사·촬영하지 아니한다.</p>
+                    <p>3. 서약자는 퇴직 시 업무 관련 자료 일체를 회사에 반환하며, 개인 기기에 저장된 업무 자료를 삭제한다.</p>
+                    <p>4. 서약자가 본 서약을 위반하여 회사에 손해를 끼친 경우 민·형사상 책임을 지며, 손해배상의 의무를 진다.</p>
+                    <p>5. 본 서약서의 효력은 서약자의 퇴직 후에도 존속한다.</p>
+                  </div>
+                  <p className="text-xs pt-2" style={{ color: "#6b7280" }}>본 서약서는 근로계약서와 동시에 체결되며, 전자서명으로 효력을 가집니다.</p>
+                </div>
+              </div>
+            )}
+
+            {/* ═══ 부속서류 2: 개인정보 수집·이용 동의서 ═══ */}
+            {contract.includePrivacyConsent && (
+              <div className="pt-6 space-y-3" style={{ borderTop: "2px solid #111827" }}>
+                <h2 className="text-lg font-bold text-center tracking-wide" style={{ color: "#111827" }}>개인정보 수집·이용 동의서</h2>
+                <div className="text-[13px] leading-relaxed space-y-3" style={{ color: "#374151" }}>
+                  <p>
+                    <strong>{contract.affiliatedCompany || contract.restaurantName || `매장 #${contract.restaurantId}`}</strong>
+                    (이하 "회사"라 한다)은(는) 「개인정보 보호법」에 따라 근로자의 개인정보를 다음과 같이 수집·이용합니다.
+                  </p>
+                  <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse", border: "1px solid #d1d5db" }}>
+                    <tbody>
+                      <tr style={{ borderBottom: "1px solid #d1d5db" }}>
+                        <td style={{ padding: "6px 10px", fontWeight: 600, background: "#f3f4f6", width: "30%", verticalAlign: "top" }}>수집 항목</td>
+                        <td style={{ padding: "6px 10px" }}>성명, 생년월일, 연락처, 주소, 계좌정보, 건강진단서, 근로계약 관련 정보</td>
+                      </tr>
+                      <tr style={{ borderBottom: "1px solid #d1d5db" }}>
+                        <td style={{ padding: "6px 10px", fontWeight: 600, background: "#f3f4f6", verticalAlign: "top" }}>수집·이용 목적</td>
+                        <td style={{ padding: "6px 10px" }}>근로계약 체결·이행, 급여 지급, 4대보험 신고, 근태·인사 관리, 법령상 의무 이행</td>
+                      </tr>
+                      <tr style={{ borderBottom: "1px solid #d1d5db" }}>
+                        <td style={{ padding: "6px 10px", fontWeight: 600, background: "#f3f4f6", verticalAlign: "top" }}>보유·이용 기간</td>
+                        <td style={{ padding: "6px 10px" }}>근로관계 종료 후 관련 법령에 따른 보존기간까지 (근로기준법 3년, 국세기본법 5년 등)</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "6px 10px", fontWeight: 600, background: "#f3f4f6", verticalAlign: "top" }}>동의 거부 권리</td>
+                        <td style={{ padding: "6px 10px" }}>동의를 거부할 권리가 있으나, 거부 시 근로계약 체결 및 급여 지급 등에 제한이 있을 수 있습니다.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p className="text-xs pt-1" style={{ color: "#6b7280" }}>본 동의서는 근로계약서와 동시에 체결되며, 전자서명으로 효력을 가집니다.</p>
+                </div>
+              </div>
+            )}
 
             {/* 서명 영역 */}
             <div className="pt-6" style={{ borderTop: "1px solid #e5e7eb" }}>

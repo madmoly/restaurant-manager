@@ -928,6 +928,8 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     specialTerms: "",
     employerBusinessNumber: "",
     weeklyHoliday: "일요일",
+    includeNda: true,
+    includePrivacyConsent: true,
   });
 
   // ── 최근 계약서 템플릿 자동 적용 (새 계약서 + 첫 로드 시 1회) ──
@@ -958,6 +960,8 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         affiliatedCompany: latestTemplate.affiliatedCompany || prev.affiliatedCompany,
         employerBusinessNumber: (latestTemplate as any).employerBusinessNumber || prev.employerBusinessNumber,
         workPlaceAddress: (latestTemplate as any).workPlaceAddress || prev.workPlaceAddress,
+        includeNda: (latestTemplate as any).includeNda ?? prev.includeNda,
+        includePrivacyConsent: (latestTemplate as any).includePrivacyConsent ?? prev.includePrivacyConsent,
       }));
       // 포괄임금 시간 값도 템플릿에서 복원
       if ((latestTemplate as any).fixedOvertimeHours) setFixedOvertimeHoursInput((latestTemplate as any).fixedOvertimeHours);
@@ -1335,6 +1339,25 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               value={form.specialTerms} onChange={(e) => setForm({ ...form, specialTerms: e.target.value })}
               placeholder="추가 약정사항이 있으면 기재" />
           </div>
+
+          {/* ═══ 부속서류 ═══ */}
+          <div className="space-y-2 pt-1">
+            <label className={labelCls}>부속서류 (계약서와 함께 서명)</label>
+            <div className="flex flex-col gap-1.5 pl-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.includeNda}
+                  onChange={(e) => setForm({ ...form, includeNda: e.target.checked })}
+                  className="rounded border-input" />
+                <span className="text-sm text-foreground">비밀유지서약서</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.includePrivacyConsent}
+                  onChange={(e) => setForm({ ...form, includePrivacyConsent: e.target.checked })}
+                  className="rounded border-input" />
+                <span className="text-sm text-foreground">개인정보 수집·이용 동의서</span>
+              </label>
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-2 pt-4 justify-end">
@@ -1369,6 +1392,8 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               affiliatedCompany: form.affiliatedCompany || undefined,
               employerBusinessNumber: form.employerBusinessNumber || undefined,
               workPlaceAddress: form.workPlaceAddress || undefined,
+              includeNda: form.includeNda,
+              includePrivacyConsent: form.includePrivacyConsent,
               // 포괄임금 구성항목 (월급제 전용)
               ...(form.wageType === "monthly" && wageNum > 0 ? {
                 annualSalary: String(annualSalaryCalc),

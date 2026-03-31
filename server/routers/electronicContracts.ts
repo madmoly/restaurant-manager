@@ -189,6 +189,8 @@ export const electronicContractsRouter = router({
           annualLeavePay: employmentElectronicContracts.annualLeavePay,
           hourlyWage: employmentElectronicContracts.hourlyWage,
           monthlyContractHours: employmentElectronicContracts.monthlyContractHours,
+          includeNda: employmentElectronicContracts.includeNda,
+          includePrivacyConsent: employmentElectronicContracts.includePrivacyConsent,
         })
         .from(employmentElectronicContracts)
         .where(eq(employmentElectronicContracts.restaurantId, input.restaurantId))
@@ -241,6 +243,8 @@ export const electronicContractsRouter = router({
         annualLeavePay: z.string().optional(),
         hourlyWage: z.string().optional(),
         monthlyContractHours: z.string().optional(),
+        includeNda: z.boolean().optional(),
+        includePrivacyConsent: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -291,6 +295,8 @@ export const electronicContractsRouter = router({
           annualLeavePay: input.annualLeavePay,
           hourlyWage: input.hourlyWage,
           monthlyContractHours: input.monthlyContractHours,
+          includeNda: input.includeNda ?? false,
+          includePrivacyConsent: input.includePrivacyConsent ?? false,
           status: "draft",
           createdBy: ctx.user.userId,
         })
