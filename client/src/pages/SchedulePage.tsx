@@ -990,7 +990,7 @@ export default function SchedulePage() {
               disabled={confirmRange.isPending}
               className="text-xs gap-1.5"
             >
-              <Send className="w-3.5 h-3.5" /> 스케줄 확정
+              <Send className="w-3.5 h-3.5" /> 초안 전체 확정
             </Button>
           </div>
         )}
@@ -1084,11 +1084,9 @@ export default function SchedulePage() {
                             return rawName.length >= 2 ? rawName.slice(1) : rawName;
                           })()}
                         </span>
-                        {(s.status === "draft" || s.status === "canceled") && (
-                          <span className={`shrink-0 px-1 py-0 rounded text-[9px] md:text-[10px] font-medium leading-tight ${st.color}`}>
-                            {st.label.charAt(0)}
-                          </span>
-                        )}
+                        <span className={`shrink-0 px-1 py-0 rounded text-[9px] md:text-[10px] font-medium leading-tight ${st.color}`}>
+                          {st.label.charAt(0)}
+                        </span>
                         {s.tempWorkerName && (
                           <span className="shrink-0 px-1 py-0 rounded text-[9px] md:text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400">
                             임시
