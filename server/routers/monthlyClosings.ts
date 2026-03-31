@@ -161,14 +161,6 @@ export const monthlyClosingsRouter = router({
         }
         if (baseRate > 0) {
           laborCost += hours * baseRate;
-          // 야간 할증 (22:00~06:00 구간 +50%)
-          const startMin = startDt.getHours() * 60 + startDt.getMinutes();
-          let nightMin = 0;
-          for (let m = Math.floor(startMin); m < Math.floor(startMin + grossMin); m++) {
-            const mod = ((m % 1440) + 1440) % 1440;
-            if (mod >= 1320 || mod < 360) nightMin++;
-          }
-          if (nightMin > 0) laborCost += (nightMin / 60) * baseRate * 0.5;
         }
       }
       laborCost = Math.round(laborCost);

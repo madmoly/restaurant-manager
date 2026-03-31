@@ -141,14 +141,6 @@ export const dailyClosingsRouter = router({
         }
         if (rate > 0) {
           laborCostCalc += hrs * rate;
-          // 야간 할증
-          const sM = sDt.getHours() * 60 + sDt.getMinutes();
-          let nM = 0;
-          for (let m = Math.floor(sM); m < Math.floor(sM + gMin); m++) {
-            const mod = ((m % 1440) + 1440) % 1440;
-            if (mod >= 1320 || mod < 360) nM++;
-          }
-          if (nM > 0) laborCostCalc += (nM / 60) * rate * 0.5;
         }
       }
 

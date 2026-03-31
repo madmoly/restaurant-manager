@@ -900,28 +900,11 @@ export const schedulesRouter = router({
           baseHourlyRate = Number(r.wageAmount) / monthlyContractH;
         }
 
-        // ── 할증 계산 (5인 이상 사업장 기준) ──
-        // 야간(22:00~06:00): +50%, 연장(일 8h 초과): +50%
         let wage = 0;
         if (isDailyTemp) {
           wage = Number(r.tempWageAmount);
         } else if (baseHourlyRate > 0) {
-          // 기본 근무 임금
           wage = hours * baseHourlyRate;
-
-          // 야간 할증: 22:00~06:00 구간의 근무시간에 50% 가산
-          const nightStart = 22 * 60; // 22:00 in minutes
-          const nightEnd = 6 * 60;    // 06:00 in minutes
-          const startMin = startDt.getHours() * 60 + startDt.getMinutes();
-          const endMin = startMin + grossMin;
-          let nightMinutes = 0;
-          for (let m = Math.floor(startMin); m < Math.floor(endMin); m++) {
-            const mod = ((m % 1440) + 1440) % 1440; // 0~1439
-            if (mod >= nightStart || mod < nightEnd) nightMinutes++;
-          }
-          if (nightMinutes > 0) {
-            wage += (nightMinutes / 60) * baseHourlyRate * 0.5;
-          }
         }
 
         companyMap[company].employees[empKey].totalHours += hours;
