@@ -1381,7 +1381,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             </div>
           </div>
 
-          {/* ═══ 4대보험 / 식대 ═══ */}
+          {/* ═══ 4대보험 / 식사제공 ═══ */}
           <div className="space-y-2 py-1">
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -1397,14 +1397,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 <span className="text-sm text-foreground">식사 제공</span>
               </label>
             </div>
-            {form.mealProvided && (
-              <div className="flex items-center gap-2 pl-6">
-                <label className="text-xs text-muted-foreground">식대(월)</label>
-                <input type="number" className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm"
-                  value={form.mealAllowance} onChange={(e) => setForm({ ...form, mealAllowance: e.target.value })} placeholder="0" />
-                <span className="text-xs text-muted-foreground">원</span>
-              </div>
-            )}
             {isUnder15Hours && form.socialInsurance && (
               <p className="text-[10px] text-amber-500 pl-6">주 15시간 미만 시 4대보험 의무가입 대상 아님</p>
             )}
@@ -1463,7 +1455,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               hasProbation: false,
               probationMonths: 0,
               mealProvided: form.mealProvided,
-              mealAllowance: form.mealProvided ? form.mealAllowance || undefined : undefined,
               workPlace: form.workPlace || undefined,
               jobDescription: form.jobDescription || undefined,
               specialTerms: form.specialTerms || undefined,

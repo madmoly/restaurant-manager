@@ -230,11 +230,7 @@ export default function ContractSignPage({ token }: { token: string }) {
                 {contract.mealProvided && (
                   <ContractRow
                     label="11. 식사제공"
-                    value={
-                      Number(contract.mealAllowance) > 0
-                        ? `제공 (식대 월 ${Number(contract.mealAllowance).toLocaleString()}원)`
-                        : "제공"
-                    }
+                    value="제공"
                   />
                 )}
               </tbody>
