@@ -457,6 +457,8 @@ export const electronicContractsRouter = router({
       z.object({
         token: z.string(),
         signature: z.string(), // base64 서명 이미지
+        bankAccount: z.string().optional(), // 계좌번호 (직원 입력)
+        residentNumber: z.string().optional(), // 주민번호 (직원 입력)
       }),
     )
     .mutation(async ({ input }) => {
@@ -476,6 +478,8 @@ export const electronicContractsRouter = router({
           status: "signed",
           signedAt: new Date(),
           employeeSignature: input.signature,
+          ...(input.bankAccount ? { employeeBankAccount: input.bankAccount } : {}),
+          ...(input.residentNumber ? { employeeResidentNumber: input.residentNumber } : {}),
         })
         .where(eq(employmentElectronicContracts.id, contract.id));
 
@@ -502,6 +506,8 @@ export const electronicContractsRouter = router({
             weeklyHours: contract.weeklyHours ?? null,
             weeklyOffDays: 1,
             socialInsurance: contract.socialInsurance ?? true,
+            bankAccount: input.bankAccount ?? null,
+            residentNumber: input.residentNumber ?? null,
             isActive: true,
           } as any);
           console.log(`[signContract] synced employeeContracts for userId=${contract.employeeId} restaurantId=${contract.restaurantId}`);

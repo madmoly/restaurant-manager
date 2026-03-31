@@ -21,6 +21,8 @@ export default function ContractSignPage({ token }: { token: string }) {
   const [agreed, setAgreed] = useState(false);
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [showSignPad, setShowSignPad] = useState(false);
+  const [bankAccount, setBankAccount] = useState("");
+  const [residentNumber, setResidentNumber] = useState("");
   const [emailInput, setEmailInput] = useState("");
   const [emailSending, setEmailSending] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
@@ -85,7 +87,12 @@ export default function ContractSignPage({ token }: { token: string }) {
 
   const handleSign = () => {
     if (!signatureData) return;
-    sign.mutate({ token, signature: signatureData });
+    sign.mutate({
+      token,
+      signature: signatureData,
+      ...(bankAccount ? { bankAccount } : {}),
+      ...(residentNumber ? { residentNumber } : {}),
+    });
   };
 
   // ─── 스타일 상수 (인라인으로 다크모드 영향 차단) ────────────────────────────
@@ -442,6 +449,32 @@ export default function ContractSignPage({ token }: { token: string }) {
         {!isSigned && !isDraft && (
           <div className="mt-6 rounded-lg shadow-sm p-6 no-print" style={cardStyle}>
             <h2 className="font-semibold mb-4" style={{ color: "#111827" }}>전자 서명</h2>
+
+            {/* 직원 정보 입력 */}
+            <div className="space-y-3 mb-5 p-4 rounded-lg" style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
+              <p className="text-xs font-medium" style={{ color: "#374151" }}>급여 지급을 위해 아래 정보를 입력해주세요</p>
+              <div>
+                <label className="text-xs" style={{ color: "#6b7280" }}>계좌번호 (은행명 포함)</label>
+                <input
+                  value={bankAccount}
+                  onChange={(e) => setBankAccount(e.target.value)}
+                  placeholder="예: 국민은행 123-456-789012"
+                  className="w-full mt-1 px-3 py-2 rounded-md text-sm"
+                  style={{ border: "1px solid #d1d5db", background: "#ffffff" }}
+                />
+              </div>
+              <div>
+                <label className="text-xs" style={{ color: "#6b7280" }}>주민등록번호</label>
+                <input
+                  value={residentNumber}
+                  onChange={(e) => setResidentNumber(e.target.value)}
+                  placeholder="예: 990101-1234567"
+                  className="w-full mt-1 px-3 py-2 rounded-md text-sm"
+                  style={{ border: "1px solid #d1d5db", background: "#ffffff" }}
+                />
+                <p className="text-[10px] mt-1" style={{ color: "#9ca3af" }}>4대보험 신고 및 급여 지급 목적으로만 사용됩니다</p>
+              </div>
+            </div>
 
             <label className="flex items-start gap-3 mb-4 cursor-pointer">
               <input

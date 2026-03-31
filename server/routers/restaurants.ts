@@ -211,6 +211,7 @@ export const restaurantsRouter = router({
           storeRole: restaurantUsers.role,
           healthCertUrl: users.healthCertUrl,
           healthCertExpiry: users.healthCertExpiry,
+          bankBookUrl: users.bankBookUrl,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
           resignedAt: restaurantUsers.resignedAt,

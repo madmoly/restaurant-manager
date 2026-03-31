@@ -28,6 +28,7 @@ export const users = mysqlTable("users", {
   isTutorial: boolean("isTutorial").default(false).notNull(),
   healthCertUrl: varchar("healthCertUrl", { length: 500 }),
   healthCertExpiry: date("healthCertExpiry"),
+  bankBookUrl: varchar("bankBookUrl", { length: 500 }),
   mustChangePassword: boolean("mustChangePassword").default(false).notNull(),
   // SUB대표: 상위 대표(admin) userId. NULL = 최상위 대표 또는 일반 사용자
   parentId: int("parentId"),
@@ -249,6 +250,8 @@ export const employeeContracts = mysqlTable("employee_contracts", {
   weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }),
   weeklyOffDays: int("weeklyOffDays").default(1),
   socialInsurance: boolean("socialInsurance").default(true),
+  bankAccount: varchar("bankAccount", { length: 100 }),
+  residentNumber: varchar("residentNumber", { length: 20 }),
   isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -682,6 +685,9 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   signedAt: timestamp("signedAt"),
   employeeSignature: text("employeeSignature"),
   signedIp: varchar("signedIp", { length: 45 }),
+  // ── 직원이 서명 시 입력 ──
+  employeeBankAccount: varchar("employeeBankAccount", { length: 100 }), // 계좌번호 (은행명 포함)
+  employeeResidentNumber: varchar("employeeResidentNumber", { length: 20 }), // 주민등록번호
   previousContractId: int("previousContractId"),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

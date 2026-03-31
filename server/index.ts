@@ -615,11 +615,18 @@ app.use(express.json());
     await addColumnIfNotExists("counterparties", "phone", "VARCHAR(30) DEFAULT NULL");
     await addColumnIfNotExists("counterparties", "address", "VARCHAR(200) DEFAULT NULL");
 
-    // employee_contracts에 socialInsurance 추가
+    // employee_contracts에 socialInsurance, bankAccount, residentNumber 추가
     await addColumnIfNotExists("employee_contracts", "socialInsurance", "BOOLEAN DEFAULT TRUE");
+    await addColumnIfNotExists("employee_contracts", "bankAccount", "VARCHAR(100) DEFAULT NULL");
+    await addColumnIfNotExists("employee_contracts", "residentNumber", "VARCHAR(20) DEFAULT NULL");
 
-    // employment_electronic_contracts에 employeePhone 추가
+    // employment_electronic_contracts에 employeePhone, bankAccount, residentNumber 추가
     await addColumnIfNotExists("employment_electronic_contracts", "employeePhone", "VARCHAR(30) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "employeeBankAccount", "VARCHAR(100) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "employeeResidentNumber", "VARCHAR(20) DEFAULT NULL");
+
+    // users에 bankBookUrl 추가
+    await addColumnIfNotExists("users", "bankBookUrl", "VARCHAR(500) DEFAULT NULL");
 
     await conn.end();
     console.log("[migrate] all migrations complete");

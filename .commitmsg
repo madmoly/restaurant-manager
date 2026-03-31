@@ -1,9 +1,8 @@
-초안 계약서 수정 기능 + 전화번호 표시 + 인건비 정산 보험구분/공제 표시
+인건비 정산서 전면 재설계 + 계좌/주민번호 + 통장사본 업로드
 
-- 초안(draft) 상태 계약서 수정 기능 (서버 updateEmploymentContract + 클라이언트 모달)
-- 계약서에 직원 전화번호 표시 (ContractSignPage 헤더 + 서명란)
-- 계약서 작성 폼에 연락처 입력 필드 추가
-- 인건비 정산 테이블에 4대보험/3.3%공제 구분 컬럼 추가
-- 미가입시 3.3% 공제액 자동 계산 표시
-- Excel/PDF 내보내기에 보험구분/공제 컬럼 포함
-- employee_contracts에 socialInsurance 컬럼 추가 (서명 시 자동 동기화)
+- 인건비 정산표 카드형 레이아웃: 계약급여, 계약휴무, 실근무, 실휴무, 대체휴무, 연차, 보험구분, 계좌번호, 주민번호
+- 계약서 서명 시 직원이 계좌번호/주민번호 입력 (ContractSignPage)
+- 서명 완료 시 employeeContracts에 bankAccount/residentNumber 자동 동기화
+- 직원관리에 통장사본 이미지 업로드 기능 (보건증과 동일 패턴)
+- Excel/PDF 내보내기에 전체 항목 포함
+- DB: employee_contracts에 bankAccount/residentNumber, users에 bankBookUrl 추가

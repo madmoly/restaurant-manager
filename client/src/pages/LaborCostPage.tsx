@@ -78,11 +78,15 @@ export default function LaborCostPage() {
           emp.position ?? "-",
           emp.wageType === "hourly" ? "시급" : emp.wageType === "monthly" ? "월급" : emp.wageType === "daily" ? "일급" : "-",
           emp.wageAmount ? Number(emp.wageAmount) : 0,
+          emp.contractDaysOff ?? 0,
           emp.shifts,
           Number(emp.totalHours.toFixed(1)),
+          emp.daysOff ?? 0,
           emp.socialInsurance ? "4대보험" : "3.3%공제",
           wage,
           deduction,
+          emp.bankAccount ?? "-",
+          emp.residentNumber ?? "-",
           emp.contractStart ? new Date(emp.contractStart).toLocaleDateString("ko-KR") : "-",
           emp.contractEnd ? new Date(emp.contractEnd).toLocaleDateString("ko-KR") : "-",
         ]);
@@ -91,7 +95,7 @@ export default function LaborCostPage() {
     return rows;
   };
 
-  const headers = ["소속회사", "이름", "직위", "급여유형", "급여액", "출근횟수", "총근무시간", "보험구분", "인건비(원)", "3.3%공제", "계약시작", "계약종료"];
+  const headers = ["소속회사", "이름", "직위", "급여유형", "급여액", "계약휴무", "실근무일", "총근무시간", "실휴무일", "보험구분", "인건비(원)", "3.3%공제", "계좌번호", "주민번호", "계약시작", "계약종료"];
   const fileName = `인건비정산_${year}년${month}월_${current?.name ?? ""}`;
 
   const handleExportExcel = async () => {
@@ -100,7 +104,7 @@ export default function LaborCostPage() {
     if (!rows.length) return;
     const XLSX = await import("xlsx");
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    ws["!cols"] = headers.map((_h: string, i: number) => ({ wch: i === 0 ? 14 : i === 8 ? 14 : i === 9 ? 12 : 10 }));
+    ws["!cols"] = headers.map((_h: string, i: number) => ({ wch: i === 0 ? 14 : i === 10 ? 14 : i === 12 ? 22 : i === 13 ? 16 : 10 }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "인건비정산");
     const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
@@ -140,8 +144,10 @@ export default function LaborCostPage() {
           4: { halign: "right" },
           5: { halign: "right" },
           6: { halign: "right" },
+          7: { halign: "right" },
           8: { halign: "right" },
-          9: { halign: "right" },
+          10: { halign: "right" },
+          11: { halign: "right" },
         },
       });
 
@@ -261,87 +267,101 @@ export default function LaborCostPage() {
                 </div>
 
                 {isExpanded && (
-                  <div className="border-t border-border">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-muted/50">
-                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">이름</th>
-                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">급여</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">출근</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">휴무</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">계약휴무</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">시간</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">대체</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">연차</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">보험</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">인건비</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {company.employees.map((emp, i) => (
-                          <tr key={i} className={`border-t border-border/50 group ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
-                            <td className="px-4 py-2">
-                              <div className="font-medium text-foreground flex items-center gap-1">
+                  <div className="border-t border-border divide-y divide-border/50">
+                    {company.employees.map((emp, i) => {
+                      const subUsed = emp.substituteLeave && emp.substituteLeave.used > 0;
+                      const annUsed = emp.annualLeave && emp.annualLeave.used > 0;
+                      return (
+                        <div key={i} className={`px-4 py-3 space-y-2 ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
+                          {/* 1행: 이름 + 실급여 */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-semibold text-foreground flex items-center gap-1">
                                 {emp.name}
-                                {emp.recheckRequired && (
-                                  <span title="완료된 스케줄이 수정됨 — 정산 재확인 필요">
-                                    <AlertTriangle className="w-3 h-3 text-amber-500" />
-                                  </span>
-                                )}
+                                {emp.position && <span className="text-[10px] text-muted-foreground font-normal">({emp.position})</span>}
+                                {emp.recheckRequired && <AlertTriangle className="w-3 h-3 text-amber-500" />}
                               </div>
-                              {emp.position && (
-                                <div className="text-[10px] text-muted-foreground">{emp.position}</div>
-                              )}
                               {emp.hireDate && (
                                 <div className="text-[10px] text-muted-foreground">입사 {fmtDate(emp.hireDate)}</div>
                               )}
-                            </td>
-                            <td className="px-4 py-2">
-                              <div className="text-muted-foreground">{wageLabel(emp.wageType, emp.wageAmount)}</div>
-                              {(emp.contractStart || emp.contractEnd) && (
-                                <div className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                                  <FileText className="w-2.5 h-2.5 inline" />
-                                  {fmtDate(emp.contractStart)}~{fmtDate(emp.contractEnd)}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.shifts}일</td>
-                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.daysOff ?? 0}일</td>
-                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.contractDaysOff ?? 0}일</td>
-                            <td className="px-4 py-2 text-right text-muted-foreground">{emp.totalHours.toFixed(1)}h</td>
-                            <td className="px-4 py-2 text-right text-muted-foreground">
-                              {emp.substituteLeave ? (
-                                <span title={`발생 ${emp.substituteLeave.earned} / 사용 ${emp.substituteLeave.used}`}>
-                                  {emp.substituteLeave.remaining}일
-                                </span>
-                              ) : <span className="text-muted-foreground/50">-</span>}
-                            </td>
-                            <td className="px-4 py-2 text-right text-muted-foreground">
-                              {emp.annualLeave ? (
-                                <span title={`발생 ${emp.annualLeave.earned} / 사용 ${emp.annualLeave.used}`}>
-                                  {emp.annualLeave.remaining}일
-                                </span>
-                              ) : <span className="text-muted-foreground/50">-</span>}
-                            </td>
-                            <td className="px-4 py-2 text-right">
-                              {emp.socialInsurance ? (
-                                <span className="text-xs text-green-600 dark:text-green-400">4대보험</span>
-                              ) : (
-                                <span className="text-xs text-orange-600 dark:text-orange-400">3.3%</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-2 text-right font-medium text-foreground">
-                              <div>₩{fmtWon(emp.totalWage)}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-sm font-bold text-foreground">₩{fmtWon(emp.totalWage)}</div>
                               {!emp.socialInsurance && emp.totalWage > 0 && (
                                 <div className="text-[10px] text-orange-600 dark:text-orange-400">
-                                  공제 ₩{fmtWon(Math.round(emp.totalWage * 0.033))}
+                                  3.3% 공제 ₩{fmtWon(Math.round(emp.totalWage * 0.033))}
                                 </div>
                               )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            </div>
+                          </div>
+                          {/* 2행: 주요 항목 그리드 */}
+                          <div className="grid grid-cols-4 gap-x-3 gap-y-1 text-xs">
+                            <div>
+                              <span className="text-muted-foreground">계약급여</span>
+                              <div className="font-medium text-foreground">{wageLabel(emp.wageType, emp.wageAmount)}</div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">계약휴무</span>
+                              <div className="font-medium text-foreground">{emp.contractDaysOff ?? 0}일</div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">실근무</span>
+                              <div className="font-medium text-foreground">{emp.shifts}일 / {emp.totalHours.toFixed(1)}h</div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">실휴무</span>
+                              <div className="font-medium text-foreground">{emp.daysOff ?? 0}일</div>
+                            </div>
+                          </div>
+                          {/* 3행: 대체휴무/연차/보험 */}
+                          <div className="grid grid-cols-4 gap-x-3 gap-y-1 text-xs">
+                            <div>
+                              <span className="text-muted-foreground">대체휴무</span>
+                              <div className="font-medium text-foreground">
+                                {subUsed ? "사용" : "미사용"}
+                                {emp.substituteLeave && <span className="text-muted-foreground"> (잔여 {emp.substituteLeave.remaining}일)</span>}
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">연차</span>
+                              <div className="font-medium text-foreground">
+                                {annUsed ? "사용" : "미사용"}
+                                {emp.annualLeave && <span className="text-muted-foreground"> (잔여 {emp.annualLeave.remaining}일)</span>}
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">보험구분</span>
+                              <div className="font-medium">
+                                {emp.socialInsurance ? (
+                                  <span className="text-green-600 dark:text-green-400">4대보험</span>
+                                ) : (
+                                  <span className="text-orange-600 dark:text-orange-400">3.3%공제</span>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">계약기간</span>
+                              <div className="font-medium text-foreground text-[10px]">
+                                {emp.contractStart ? `${fmtDate(emp.contractStart)}~${fmtDate(emp.contractEnd)}` : "-"}
+                              </div>
+                            </div>
+                          </div>
+                          {/* 4행: 계좌/주민번호 (있을 때만) */}
+                          {(emp.bankAccount || emp.residentNumber) && (
+                            <div className="grid grid-cols-2 gap-x-3 text-xs pt-1 border-t border-border/30">
+                              <div>
+                                <span className="text-muted-foreground">계좌번호</span>
+                                <div className="font-medium text-foreground">{emp.bankAccount || "-"}</div>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">주민번호</span>
+                                <div className="font-medium text-foreground">{emp.residentNumber || "-"}</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

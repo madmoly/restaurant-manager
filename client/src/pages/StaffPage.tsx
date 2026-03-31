@@ -7,7 +7,7 @@ import {
   Users, Plus, ChevronDown, ChevronUp, FileText, Trash2, X, UserCog,
   Copy, ExternalLink, Send, Eye, KeyRound, Camera, ShieldCheck,
   AlertTriangle, Loader2, Building2, Edit3, Check, UserPlus, Link,
-  Phone, Clock, CalendarDays, Briefcase, Info, Download, RefreshCw,
+  Phone, Clock, CalendarDays, Briefcase, Info, Download, RefreshCw, Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -105,6 +105,11 @@ export default function StaffPage() {
     onError(err) { toast.error(err.message); },
   });
 
+  const updateBankBook = trpc.users.updateBankBook.useMutation({
+    onSuccess() { toast.success("통장사본 업데이트됨"); utils.restaurants.getStaff.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+
   const updateCompany = trpc.restaurants.updateStaffCompany.useMutation({
     onSuccess() { toast.success("소속회사 변경됨"); setEditingCompany(null); utils.restaurants.getStaff.invalidate(); },
     onError(err) { toast.error(err.message); },
@@ -193,6 +198,25 @@ export default function StaffPage() {
       toast.error("보건증 업로드 실패: " + err.message);
     } finally {
       setUploadingHealthCert(null);
+    }
+  };
+
+  // 통장사본 업로드 핸들러
+  const bankBookInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingBankBook, setUploadingBankBook] = useState<number | null>(null);
+
+  const handleBankBookUpload = async (userId: number, file: File) => {
+    setUploadingBankBook(userId);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+      const { url: imageUrl } = await uploadRes.json();
+      await updateBankBook.mutateAsync({ userId, bankBookUrl: imageUrl });
+    } catch (err: any) {
+      toast.error("통장사본 업로드 실패: " + err.message);
+    } finally {
+      setUploadingBankBook(null);
     }
   };
 
@@ -596,6 +620,43 @@ export default function StaffPage() {
                         ) : s.healthCertUrl ? (
                           <span className="text-xs text-muted-foreground">만료일 정보 없음</span>
                         ) : null}
+                      </div>
+                    </div>
+
+                    {/* 통장사본 */}
+                    <div className="flex items-start gap-3">
+                      <label className="text-xs font-medium text-muted-foreground w-16 pt-1 flex items-center gap-1">
+                        <Wallet className="w-3 h-3" /> 통장사본
+                      </label>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <input
+                          ref={bankBookInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleBankBookUpload(s.userId, file);
+                            e.target.value = "";
+                          }}
+                        />
+                        <Button
+                          size="sm" variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => bankBookInputRef.current?.click()}
+                          disabled={uploadingBankBook === s.userId}
+                        >
+                          {uploadingBankBook === s.userId ? (
+                            <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> 업로드 중...</>
+                          ) : (
+                            <><Camera className="w-3 h-3 mr-1" /> {s.bankBookUrl ? "재업로드" : "업로드"}</>
+                          )}
+                        </Button>
+                        {s.bankBookUrl && (
+                          <a href={s.bankBookUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                            이미지 보기
+                          </a>
+                        )}
                       </div>
                     </div>
 

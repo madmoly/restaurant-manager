@@ -222,4 +222,14 @@ export const usersRouter = router({
       await db.update(users).set(update).where(eq(users.id, input.userId));
       return { ok: true };
     }),
+
+  updateBankBook: managerProcedure
+    .input(z.object({
+      userId: z.number(),
+      bankBookUrl: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      await db.update(users).set({ bankBookUrl: input.bankBookUrl }).where(eq(users.id, input.userId));
+      return { ok: true };
+    }),
 });
