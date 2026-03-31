@@ -139,15 +139,31 @@ export const electronicContractsRouter = router({
     .input(z.object({ restaurantId: z.number() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      // 소속회사별 가장 최근 계약서의 사업자등록번호를 함께 반환
       const rows = await db
-        .selectDistinct({ affiliatedCompany: employmentElectronicContracts.affiliatedCompany })
+        .select({
+          affiliatedCompany: employmentElectronicContracts.affiliatedCompany,
+          employerBusinessNumber: sql<string>`(
+            SELECT ec2.employerBusinessNumber
+            FROM employment_electronic_contracts ec2
+            WHERE ec2.restaurantId = ${input.restaurantId}
+              AND ec2.affiliatedCompany = ${employmentElectronicContracts.affiliatedCompany}
+              AND ec2.employerBusinessNumber IS NOT NULL
+              AND ec2.employerBusinessNumber != ''
+            ORDER BY ec2.createdAt DESC
+            LIMIT 1
+          )`.as("latestBizNumber"),
+        })
         .from(employmentElectronicContracts)
         .where(and(
           eq(employmentElectronicContracts.restaurantId, input.restaurantId),
           isNotNull(employmentElectronicContracts.affiliatedCompany),
           ne(employmentElectronicContracts.affiliatedCompany, ""),
-        ));
-      return rows.map((r) => r.affiliatedCompany!).filter(Boolean);
+        ))
+        .groupBy(employmentElectronicContracts.affiliatedCompany);
+      return rows
+        .filter((r) => r.affiliatedCompany)
+        .map((r) => ({ name: r.affiliatedCompany!, businessNumber: r.employerBusinessNumber || "" }));
     }),
 
   /** 매장의 가장 최근 계약서 내용 반환 (새 계약서 작성 시 기본값으로 사용) */
@@ -251,6 +267,18 @@ export const electronicContractsRouter = router({
       // 매장 접근권 검증
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
 
+      // 동일 직원의 기존 활성 계약서 자동 만료 처리 (직원 1명당 1계약)
+      if (input.employeeId) {
+        await db
+          .update(employmentElectronicContracts)
+          .set({ status: "expired" })
+          .where(and(
+            eq(employmentElectronicContracts.restaurantId, input.restaurantId),
+            eq(employmentElectronicContracts.employeeId, input.employeeId),
+            sql`${employmentElectronicContracts.status} IN ('draft', 'sent', 'signed')`,
+          ));
+      }
+
       const token = randomBytes(32).toString("hex");
       const [result] = await db
         .insert(employmentElectronicContracts)
@@ -321,6 +349,29 @@ export const electronicContractsRouter = router({
         .set({ status: "sent", sentAt: new Date() })
         .where(eq(employmentElectronicContracts.id, input.id));
       return { ok: true, token: contract.token };
+    }),
+
+  /** 초안 계약서 삭제 (draft 상태만) */
+  deleteContract: ownerProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const [contract] = await db
+        .select({
+          status: employmentElectronicContracts.status,
+          restaurantId: employmentElectronicContracts.restaurantId,
+        })
+        .from(employmentElectronicContracts)
+        .where(eq(employmentElectronicContracts.id, input.id))
+        .limit(1);
+      if (!contract) throw new TRPCError({ code: "NOT_FOUND" });
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, contract.restaurantId, true);
+      if (contract.status !== "draft") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "초안 상태의 계약서만 삭제할 수 있습니다" });
+      }
+      await db
+        .delete(employmentElectronicContracts)
+        .where(eq(employmentElectronicContracts.id, input.id));
+      return { ok: true };
     }),
 
   /** 계약서 서명 (상태 → signed, 비로그인 접근 가능) */

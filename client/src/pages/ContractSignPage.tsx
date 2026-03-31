@@ -450,34 +450,33 @@ export default function ContractSignPage({ token }: { token: string }) {
             </label>
 
             {agreed && (
-              <>
-                {!showSignPad ? (
-                  <button
-                    className="w-full py-2.5 px-4 rounded-lg font-medium text-white flex items-center justify-center gap-2"
-                    style={{ background: "#2563eb" }}
-                    onClick={() => setShowSignPad(true)}
-                  >
-                    <Pen className="w-4 h-4" /> 서명하기
-                  </button>
-                ) : (
-                  <div className="space-y-3">
-                    <SignaturePad onSave={setSignatureData} />
-                    {signatureData && (
-                      <button
-                        className="w-full py-2.5 px-4 rounded-lg font-medium text-white disabled:opacity-50"
-                        style={{ background: "#2563eb" }}
-                        onClick={handleSign}
-                        disabled={sign.isPending}
-                      >
-                        {sign.isPending ? "서명 처리 중..." : "서명 제출"}
-                      </button>
-                    )}
-                    {sign.error && (
-                      <p className="text-sm" style={{ color: "#dc2626" }}>{sign.error.message}</p>
-                    )}
-                  </div>
+              <button
+                className="w-full py-2.5 px-4 rounded-lg font-medium text-white flex items-center justify-center gap-2"
+                style={{ background: "#2563eb" }}
+                onClick={() => setShowSignPad(true)}
+              >
+                <Pen className="w-4 h-4" /> {signatureData ? "서명 다시하기" : "서명하기"}
+              </button>
+            )}
+
+            {signatureData && agreed && (
+              <div className="mt-3 space-y-3">
+                <div className="rounded-lg p-4 text-center" style={{ border: "1px solid #d1d5db", background: "#fafafa" }}>
+                  <p className="text-xs mb-2" style={{ color: "#6b7280" }}>서명 미리보기</p>
+                  <img src={signatureData} alt="서명 미리보기" className="mx-auto max-h-20" />
+                </div>
+                <button
+                  className="w-full py-2.5 px-4 rounded-lg font-medium text-white disabled:opacity-50"
+                  style={{ background: "#2563eb" }}
+                  onClick={handleSign}
+                  disabled={sign.isPending}
+                >
+                  {sign.isPending ? "서명 처리 중..." : "서명 제출"}
+                </button>
+                {sign.error && (
+                  <p className="text-sm" style={{ color: "#dc2626" }}>{sign.error.message}</p>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}
@@ -500,6 +499,46 @@ export default function ContractSignPage({ token }: { token: string }) {
           </div>
         )}
       </div>
+
+      {/* ═══ 풀스크린 서명 모달 ═══ */}
+      {showSignPad && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          background: "#ffffff",
+          display: "flex", flexDirection: "column",
+          touchAction: "none",
+        }}>
+          {/* 헤더 */}
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "16px 20px", borderBottom: "1px solid #e5e7eb",
+          }}>
+            <h3 style={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>전자 서명</h3>
+            <button
+              onClick={() => setShowSignPad(false)}
+              style={{ padding: "8px", borderRadius: "8px", color: "#6b7280" }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* 서명 캔버스 영역 */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "20px" }}>
+            <p style={{ fontSize: "14px", color: "#4b5563", marginBottom: "12px", textAlign: "center" }}>
+              아래 영역에 서명해주세요
+            </p>
+            <div style={{ flex: 1, position: "relative" }}>
+              <FullscreenSignaturePad
+                onSave={(data) => {
+                  setSignatureData(data);
+                  setShowSignPad(false);
+                }}
+                onCancel={() => setShowSignPad(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -527,6 +566,164 @@ function fmt(d: any): string {
 }
 
 // ─── 서명 패드 (Canvas) ───────────────────────────────────────────────────────
+
+// ─── 풀스크린 서명 패드 ─────────────────────────────────────────────────────
+
+function FullscreenSignaturePad({ onSave, onCancel }: { onSave: (data: string) => void; onCancel: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [drawing, setDrawing] = useState(false);
+  const [hasDrawn, setHasDrawn] = useState(false);
+
+  // 컨테이너 크기에 맞춰 캔버스 리사이즈
+  useEffect(() => {
+    const resize = () => {
+      const container = containerRef.current;
+      const canvas = canvasRef.current;
+      if (!container || !canvas) return;
+      const rect = container.getBoundingClientRect();
+      canvas.width = rect.width * 2; // 레티나 대응
+      canvas.height = rect.height * 2;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.scale(2, 2);
+        ctx.strokeStyle = "#1a1a1a";
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+      }
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+
+  const getPos = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    if ("touches" in e) {
+      return {
+        x: e.touches[0].clientX - rect.left,
+        y: e.touches[0].clientY - rect.top,
+      };
+    }
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }, []);
+
+  const startDraw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
+    setDrawing(true);
+    const { x, y } = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }, [getPos]);
+
+  const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    if (!drawing) return;
+    e.preventDefault();
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
+    const { x, y } = getPos(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    setHasDrawn(true);
+  }, [drawing, getPos]);
+
+  const endDraw = useCallback(() => {
+    setDrawing(false);
+  }, []);
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!ctx || !canvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasDrawn(false);
+  };
+
+  const confirm = () => {
+    if (hasDrawn && canvasRef.current) {
+      onSave(canvasRef.current.toDataURL("image/png"));
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: "16px" }}>
+      <div
+        ref={containerRef}
+        style={{
+          flex: 1, borderRadius: "12px", border: "2px dashed #d1d5db",
+          background: "#fafafa", position: "relative", overflow: "hidden",
+          minHeight: "200px",
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          style={{ cursor: "crosshair", touchAction: "none", display: "block" }}
+          onMouseDown={startDraw}
+          onMouseMove={draw}
+          onMouseUp={endDraw}
+          onMouseLeave={endDraw}
+          onTouchStart={startDraw}
+          onTouchMove={draw}
+          onTouchEnd={endDraw}
+        />
+        {!hasDrawn && (
+          <div style={{
+            position: "absolute", inset: 0,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            pointerEvents: "none",
+          }}>
+            <p style={{ fontSize: "16px", color: "#9ca3af" }}>손가락 또는 마우스로 서명</p>
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: "12px" }}>
+        <button
+          onClick={onCancel}
+          style={{
+            flex: 1, padding: "14px", borderRadius: "12px",
+            border: "1px solid #d1d5db", fontSize: "15px", fontWeight: 500,
+            color: "#374151", background: "#ffffff",
+          }}
+        >
+          취소
+        </button>
+        <button
+          onClick={clear}
+          style={{
+            padding: "14px 20px", borderRadius: "12px",
+            border: "1px solid #d1d5db", fontSize: "15px", fontWeight: 500,
+            color: "#6b7280", background: "#ffffff",
+            display: "flex", alignItems: "center", gap: "6px",
+          }}
+        >
+          <RotateCcw style={{ width: "16px", height: "16px" }} /> 지우기
+        </button>
+        <button
+          onClick={confirm}
+          disabled={!hasDrawn}
+          style={{
+            flex: 1, padding: "14px", borderRadius: "12px",
+            fontSize: "15px", fontWeight: 600,
+            color: "#ffffff",
+            background: hasDrawn ? "#2563eb" : "#93c5fd",
+            opacity: hasDrawn ? 1 : 0.6,
+          }}
+        >
+          서명 완료
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── 인라인 서명 패드 (레거시, 미사용) ──────────────────────────────────────
 
 function SignaturePad({ onSave }: { onSave: (data: string) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);

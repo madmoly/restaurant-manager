@@ -144,6 +144,11 @@ export default function StaffPage() {
     onError(err) { toast.error(err.message); },
   });
 
+  const deleteContract = trpc.electronicContracts.deleteContract.useMutation({
+    onSuccess() { toast.success("초안 삭제됨"); utils.electronicContracts.listEmploymentContracts.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+
   // 보건증 업로드 핸들러
   const healthCertInputRef = useRef<HTMLInputElement>(null);
   const [uploadingHealthCert, setUploadingHealthCert] = useState<number | null>(null);
@@ -724,14 +729,27 @@ export default function StaffPage() {
                       </button>
                     )}
                     {c.status === "draft" && (
-                      <Button
-                        size="sm" variant="default"
-                        className="h-7 text-xs ml-auto"
-                        onClick={() => sendContract.mutate({ id: c.id })}
-                        disabled={sendContract.isPending}
-                      >
-                        <Send className="w-3.5 h-3.5 mr-1" /> 직원에게 발송
-                      </Button>
+                      <div className="flex items-center gap-1.5 ml-auto">
+                        <button
+                          onClick={() => {
+                            if (confirm("이 초안을 삭제하시겠습니까?")) {
+                              deleteContract.mutate({ id: c.id });
+                            }
+                          }}
+                          disabled={deleteContract.isPending}
+                          className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> 삭제
+                        </button>
+                        <Button
+                          size="sm" variant="default"
+                          className="h-7 text-xs"
+                          onClick={() => sendContract.mutate({ id: c.id })}
+                          disabled={sendContract.isPending}
+                        >
+                          <Send className="w-3.5 h-3.5 mr-1" /> 직원에게 발송
+                        </Button>
+                      </div>
                     )}
                     {c.status === "sent" && (
                       <span className="text-[11px] text-muted-foreground ml-auto flex items-center gap-1">
@@ -1075,14 +1093,20 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               </div>
               {showCompanyList && companies && companies.length > 0 && (
                 <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-card border border-border rounded-lg shadow-lg max-h-40 overflow-y-auto">
-                  {companies.map((c: string) => (
+                  {companies.map((c: any) => (
                     <button
-                      key={c}
+                      key={c.name || c}
                       type="button"
-                      onClick={() => { setForm({ ...form, affiliatedCompany: c }); setShowCompanyList(false); }}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors ${form.affiliatedCompany === c ? "bg-primary/10 font-medium" : ""}`}
+                      onClick={() => {
+                        const name = c.name || c;
+                        const biz = c.businessNumber || "";
+                        setForm({ ...form, affiliatedCompany: name, ...(biz ? { employerBusinessNumber: biz } : {}) });
+                        setShowCompanyList(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors ${form.affiliatedCompany === (c.name || c) ? "bg-primary/10 font-medium" : ""}`}
                     >
-                      {c}
+                      <span>{c.name || c}</span>
+                      {c.businessNumber && <span className="ml-2 text-xs text-muted-foreground">{c.businessNumber}</span>}
                     </button>
                   ))}
                 </div>
