@@ -3,7 +3,7 @@ import { eq, and, desc, sql, isNotNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants } from "../../drizzle/schema";
+import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants, employerPresets } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -439,6 +439,72 @@ export const electronicContractsRouter = router({
           eq(employmentElectronicContracts.restaurantId, input.restaurantId),
           eq(employmentElectronicContracts.affiliatedCompany, input.companyName),
         ));
+      return { ok: true };
+    }),
+
+  // ═══ 사업주 프리셋 (태그) ═══
+
+  listEmployerPresets: managerProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      return db.select().from(employerPresets)
+        .where(eq(employerPresets.restaurantId, input.restaurantId))
+        .orderBy(desc(employerPresets.isDefault), employerPresets.companyName);
+    }),
+
+  addEmployerPreset: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      companyName: z.string().min(1),
+      businessNumber: z.string().optional(),
+      isDefault: z.boolean().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      // 기본값 설정 시 기존 기본값 해제
+      if (input.isDefault) {
+        await db.update(employerPresets).set({ isDefault: false })
+          .where(eq(employerPresets.restaurantId, input.restaurantId));
+      }
+      const [result] = await db.insert(employerPresets).values({
+        restaurantId: input.restaurantId,
+        companyName: input.companyName,
+        businessNumber: input.businessNumber || null,
+        isDefault: input.isDefault ?? false,
+        createdBy: ctx.user.userId,
+      });
+      return { id: (result as any).insertId };
+    }),
+
+  updateEmployerPreset: managerProcedure
+    .input(z.object({
+      id: z.number(),
+      restaurantId: z.number(),
+      companyName: z.string().min(1),
+      businessNumber: z.string().optional(),
+      isDefault: z.boolean().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      if (input.isDefault) {
+        await db.update(employerPresets).set({ isDefault: false })
+          .where(eq(employerPresets.restaurantId, input.restaurantId));
+      }
+      await db.update(employerPresets).set({
+        companyName: input.companyName,
+        businessNumber: input.businessNumber || null,
+        isDefault: input.isDefault ?? false,
+      }).where(and(eq(employerPresets.id, input.id), eq(employerPresets.restaurantId, input.restaurantId)));
+      return { ok: true };
+    }),
+
+  deleteEmployerPreset: managerProcedure
+    .input(z.object({ id: z.number(), restaurantId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      await db.delete(employerPresets)
+        .where(and(eq(employerPresets.id, input.id), eq(employerPresets.restaurantId, input.restaurantId)));
       return { ok: true };
     }),
 

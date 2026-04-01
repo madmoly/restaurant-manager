@@ -652,6 +652,20 @@ app.use(express.json());
     // employment_electronic_contracts에 weeklyOffDays 추가
     await addColumnIfNotExists("employment_electronic_contracts", "weeklyOffDays", "INT DEFAULT 1");
 
+    // 사업주 프리셋 테이블
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS employer_presets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        companyName VARCHAR(100) NOT NULL,
+        businessNumber VARCHAR(30) DEFAULT NULL,
+        isDefault BOOLEAN DEFAULT FALSE NOT NULL,
+        createdBy INT DEFAULT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        INDEX idx_employer_presets_restaurant (restaurantId)
+      )
+    `).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

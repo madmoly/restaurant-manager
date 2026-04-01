@@ -954,3 +954,15 @@ export const settlementImages = mysqlTable("settlement_images", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type SettlementImage = typeof settlementImages.$inferSelect;
+
+// ─── 사업주 프리셋 (계약서 사업주 태그) ─────────────────────────────────────────
+export const employerPresets = mysqlTable("employer_presets", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  companyName: varchar("companyName", { length: 100 }).notNull(),
+  businessNumber: varchar("businessNumber", { length: 30 }),  // 사업자등록번호
+  isDefault: boolean("isDefault").default(false).notNull(),    // 기본 선택 여부
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type EmployerPreset = typeof employerPresets.$inferSelect;

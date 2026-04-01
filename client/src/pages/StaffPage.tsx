@@ -992,7 +992,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     { restaurantId },
   );
   const [templateApplied, setTemplateApplied] = useState(false);
-  const [showCompanyList, setShowCompanyList] = useState(false);
+  // showCompanyList removed — replaced by employer presets tags
 
   const ec = editingContract; // 수정 모드 시 기존 데이터
   const [form, setForm] = useState({
@@ -1108,6 +1108,20 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     onError(err) { toast.error(err.message); },
   });
 
+  // 사업주 프리셋
+  const employerPresetsQuery = trpc.electronicContracts.listEmployerPresets.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const addPresetMut = trpc.electronicContracts.addEmployerPreset.useMutation({
+    onSuccess() { toast.success("사업주 프리셋 저장됨"); utils.electronicContracts.listEmployerPresets.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+  const deletePresetMut = trpc.electronicContracts.deleteEmployerPreset.useMutation({
+    onSuccess() { toast.success("프리셋 삭제됨"); utils.electronicContracts.listEmployerPresets.invalidate(); },
+    onError(err) { toast.error(err.message); },
+  });
+
   const selectStaff = (userId: number) => {
     const staff = staffList.find((s: any) => s.userId === userId);
     if (staff) {
@@ -1152,59 +1166,30 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
 
           {/* ═══ 사업주 정보 + 사업장 규모 ═══ */}
           <div className="rounded-lg border border-border p-3 space-y-2">
-            <div className="relative">
+            <div>
               <label className={labelCls}>사업주 (소속회사)</label>
-              <div className="flex gap-2 mt-1">
-                <input className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={form.affiliatedCompany}
-                  onChange={(e) => { setForm({ ...form, affiliatedCompany: e.target.value }); setShowCompanyList(false); }}
-                  onFocus={() => { if (companies && companies.length > 0) setShowCompanyList(true); }}
-                  placeholder="계약서 사업주명" />
-                {companies && companies.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowCompanyList(!showCompanyList)}
-                    className="shrink-0 px-2.5 py-2 rounded-md border border-input bg-background text-xs text-muted-foreground hover:bg-accent transition-colors"
-                    title="기존 회사 목록"
-                  >
-                    ▾
-                  </button>
-                )}
-              </div>
-              {showCompanyList && companies && companies.length > 0 && (
-                <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-card border border-border rounded-lg shadow-lg max-h-40 overflow-y-auto">
-                  {companies.map((c: any) => (
-                    <div key={c.name || c} className={`flex items-center hover:bg-accent transition-colors ${form.affiliatedCompany === (c.name || c) ? "bg-primary/10 font-medium" : ""}`}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const name = c.name || c;
-                          const biz = c.businessNumber || "";
-                          setForm({ ...form, affiliatedCompany: name, ...(biz ? { employerBusinessNumber: biz } : {}) });
-                          setShowCompanyList(false);
-                        }}
-                        className="flex-1 text-left px-3 py-2 text-sm"
-                      >
-                        <span>{c.name || c}</span>
-                        {c.businessNumber && <span className="ml-2 text-xs text-muted-foreground">{c.businessNumber}</span>}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm(`"${c.name || c}" 사업주를 목록에서 삭제하시겠습니까?`)) {
-                            removeCompany.mutate({ restaurantId, companyName: c.name || c });
-                          }
-                        }}
-                        className="shrink-0 px-2 py-1 mr-1 text-muted-foreground hover:text-red-500 transition-colors"
-                        title="삭제"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+              {/* 프리셋 태그 */}
+              {(employerPresetsQuery.data ?? []).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1.5 mb-2">
+                  {(employerPresetsQuery.data ?? []).map((p: any) => (
+                    <button key={p.id} type="button"
+                      onClick={() => setForm({ ...form, affiliatedCompany: p.companyName, employerBusinessNumber: p.businessNumber || "" })}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs transition-colors ${
+                        form.affiliatedCompany === p.companyName
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-card border-border text-muted-foreground hover:bg-accent"
+                      }`}
+                    >
+                      <span>{p.companyName}</span>
+                      {p.businessNumber && <span className="opacity-60">({p.businessNumber})</span>}
+                      {p.isDefault && <span className="text-[9px] opacity-70">기본</span>}
+                    </button>
                   ))}
                 </div>
               )}
+              <input className={inputCls} value={form.affiliatedCompany}
+                onChange={(e) => setForm({ ...form, affiliatedCompany: e.target.value })}
+                placeholder="계약서 사업주명" />
               <p className={subLabelCls}>계약서에 사업주로 표기됩니다</p>
             </div>
             <div>
@@ -1213,6 +1198,15 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 onChange={(e) => setForm({ ...form, employerBusinessNumber: e.target.value })}
                 placeholder="000-00-00000" />
             </div>
+            {/* 현재 입력값을 프리셋으로 저장 */}
+            {form.affiliatedCompany && !(employerPresetsQuery.data ?? []).some((p: any) => p.companyName === form.affiliatedCompany) && (
+              <button type="button"
+                onClick={() => addPresetMut.mutate({ restaurantId, companyName: form.affiliatedCompany, businessNumber: form.employerBusinessNumber || undefined })}
+                className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+              >
+                + 현재 사업주를 프리셋으로 저장
+              </button>
+            )}
             <div className="flex items-center justify-between pt-2">
               <label className={labelCls}>사업장 규모</label>
               <div className="flex gap-1 bg-muted p-0.5 rounded-lg">
@@ -1252,7 +1246,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>직위</label>
-              <input className={inputCls} value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} />
+              <select className={inputCls} value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}>
+                <option value="점장">점장</option>
+                <option value="매니져">매니져</option>
+                <option value="직원">직원</option>
+              </select>
             </div>
             <div>
               <label className={labelCls}>계약유형</label>
