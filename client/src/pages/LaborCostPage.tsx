@@ -4,7 +4,7 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   ChevronLeft, ChevronRight, Building2, Users, Clock, Wallet,
   ChevronDown, ChevronUp, FileText, Download, CalendarCheck, CalendarDays,
-  AlertTriangle, Check, X, Plus, Minus,
+  AlertTriangle, Check, X, Plus, Minus, Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
@@ -200,6 +200,12 @@ export default function LaborCostPage() {
         <Button variant="ghost" size="sm" onClick={prevMonth}><ChevronLeft className="w-4 h-4" /></Button>
         <div className="text-base font-bold text-foreground">{year}년 {month}월</div>
         <Button variant="ghost" size="sm" onClick={nextMonth}><ChevronRight className="w-4 h-4" /></Button>
+      </div>
+
+      {/* 안내 배너 */}
+      <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 text-xs text-blue-600 dark:text-blue-400">
+        <Info className="w-4 h-4 shrink-0" />
+        <span>확정 또는 완료된 스케줄만 인건비에 반영됩니다. 초안·취소 상태의 스케줄은 정산에서 제외됩니다.</span>
       </div>
 
       {/* 정산 재확인 배너 */}
