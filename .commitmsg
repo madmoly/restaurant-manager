@@ -1,6 +1,6 @@
-fix: settlementImages + employerPresets 스키마 추가 (빌드 에러 해결)
+revert: 발주 재설계 전체 원복 (원본 복원)
 
-- drizzle/schema.ts: settlement_images, employer_presets 테이블 정의 추가
-- server/index.ts: 두 테이블 CREATE TABLE IF NOT EXISTS 자동 마이그레이션 추가
+- PurchaseManagementPage, DailyOpsPage, purchasesV2, purchases, schema, index 원본 복원
+- settlementImages/employerPresets 스키마는 원본에 이미 포함
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
