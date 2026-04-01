@@ -2293,10 +2293,12 @@ function CloseTab({
     for (const tab of tabs) {
       const total = tab.templates.length;
       if (total === 0) continue;
-      const checked = (tab.log?.checkedItemIds as number[] ?? []).length;
+      // 현재 템플릿 ID와 로그의 체크 ID 교집합으로 비교 (템플릿 추가/삭제 대응)
+      const templateIds = new Set(tab.templates.map((t: any) => t.id));
+      const logChecked = (tab.log?.checkedItemIds as number[] ?? []).filter(id => templateIds.has(id));
       totalItems += total;
-      totalChecked += checked;
-      if (checked < total) incomplete.push(tab.label);
+      totalChecked += logChecked.length;
+      if (logChecked.length < total) incomplete.push(tab.label);
     }
     return { incomplete, totalItems, totalChecked, allDone: incomplete.length === 0 && totalItems > 0 };
   }, [
