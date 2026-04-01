@@ -2947,14 +2947,33 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
 
   if (calcLoading) return null;
 
+  // 휴무일 확인 (지정 휴무 + 정기 휴무 요일)
+  const closedDaysQuery = trpc.storeClosures.listByMonth.useQuery(
+    { restaurantId, year: dateObj.getFullYear(), month: dateObj.getMonth() + 1 },
+    { enabled: restaurantId > 0 }
+  );
+  const weeklyClosuresQuery = trpc.storeClosures.getWeeklyClosures.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 }
+  );
+  const isClosedDay = useMemo(() => {
+    const specificClosed = (closedDaysQuery.data ?? []).some(
+      (d: any) => (typeof d.closedDate === 'string' ? d.closedDate : d.closedDate?.toISOString?.()?.slice(0, 10)) === date
+    );
+    if (specificClosed) return true;
+    const dayOfWeek = dateObj.getDay();
+    return (weeklyClosuresQuery.data ?? []).some((w: any) => w.weekday === dayOfWeek);
+  }, [closedDaysQuery.data, weeklyClosuresQuery.data, date]);
+
   const salesTotal = calculated?.salesTotal ?? '0';
   const purchasesTotal = calculated?.purchasesTotal ?? '0';
   const profit = Number(salesTotal) - Number(purchasesTotal) - Number(laborCost) - dailyFixed;
 
-  // 마감 불가 조건: 체크리스트 + 매입확인 + 스케줄(draft 없어야 함)
+  // 마감 불가 조건: 체크리스트 + 매입확인 + 스케줄(draft 없어야 함) + 매출0 검증
   const checklistOk = checklistStatus.totalItems === 0 || checklistAllDone;
   const scheduleOk = scheduleStatus.allDone; // draft === 0
-  const canClose = checklistOk && purchaseConfirmed && scheduleOk;
+  const salesOk = isClosedDay || Number(salesTotal) > 0; // 휴무일 아닌데 매출 0이면 차단
+  const canClose = checklistOk && purchaseConfirmed && scheduleOk && salesOk;
 
   const handleSaveClosing = () => {
     save.mutate({
@@ -3061,6 +3080,11 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
           {!scheduleOk && (
             <p className="text-[11px] text-amber-600 dark:text-amber-400">
               · 미확정 스케줄 {scheduleStatus.draft}건 — 스케줄 페이지에서 확정 필요 (초안 상태는 마감 불가)
+            </p>
+          )}
+          {!salesOk && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+              · 매출 0원 — 휴무일이 아닌 경우 매출을 입력해야 마감할 수 있습니다
             </p>
           )}
         </div>
