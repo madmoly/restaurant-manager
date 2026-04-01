@@ -221,7 +221,7 @@ export const dailyOpsRouter = router({
           and(
             eq(schedules.restaurantId, input.restaurantId),
             sql`DATE(${schedules.startTime}) = ${input.date}`,
-            sql`${schedules.status} IN ('draft', 'published', 'confirmed')`,
+            sql`${schedules.status} != 'canceled'`,
           )
         );
 
