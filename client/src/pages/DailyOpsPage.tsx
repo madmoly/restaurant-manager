@@ -27,6 +27,8 @@ import {
   RotateCw,
   RotateCcw,
   Search,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 // ============================================================================
@@ -3093,10 +3095,23 @@ export default function DailyOpsPage() {
           </div>
           {(() => {
             const info = formatDateWithHoliday(date);
+            const shiftDate = (delta: number) => {
+              const d = new Date(date + "T12:00:00");
+              d.setDate(d.getDate() + delta);
+              setDate(formatDate(d, "yyyy-MM-dd"));
+            };
             return (
-              <p className="text-xl font-bold text-foreground">
-                {info.display}
-              </p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => shiftDate(-1)} className="p-1 rounded-md hover:bg-muted active:bg-muted/80 transition-colors">
+                  <ChevronLeft className="w-5 h-5 text-muted-foreground" />
+                </button>
+                <p className="text-xl font-bold text-foreground flex-1 text-center">
+                  {info.display}
+                </p>
+                <button onClick={() => shiftDate(1)} className="p-1 rounded-md hover:bg-muted active:bg-muted/80 transition-colors">
+                  <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                </button>
+              </div>
             );
           })()}
         </div>
