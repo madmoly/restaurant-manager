@@ -2977,9 +2977,7 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
 
   const completeDayMut = trpc.schedules.completeDay.useMutation();
 
-  if (calcLoading) return null;
-
-  // 휴무일 확인 (지정 휴무 + 정기 휴무 요일)
+  // 휴무일 확인 (지정 휴무 + 정기 휴무 요일) — Hook은 조건부 return 전에 선언
   const closedDaysQuery = trpc.storeClosures.listByMonth.useQuery(
     { restaurantId, year: dateObj.getFullYear(), month: dateObj.getMonth() + 1 },
     { enabled: restaurantId > 0 }
@@ -2996,6 +2994,8 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
     const dayOfWeek = dateObj.getDay();
     return (weeklyClosuresQuery.data ?? []).some((w: any) => w.weekday === dayOfWeek);
   }, [closedDaysQuery.data, weeklyClosuresQuery.data, date]);
+
+  if (calcLoading) return null;
 
   const salesTotal = calculated?.salesTotal ?? '0';
   const purchasesTotal = calculated?.purchasesTotal ?? '0';
