@@ -264,9 +264,6 @@ function ChecklistSection({
   });
 
   const saveLogMutation = trpc.storeChecklists.saveLog.useMutation({
-    onSuccess: () => {
-      toast.success(`${label} 체크리스트가 저장되었습니다.`);
-    },
     onError: (error: any) => {
       toast.error(`저장 실패: ${error.message}`);
     },
@@ -290,9 +287,25 @@ function ChecklistSection({
   }, [logQuery.data]);
 
   const handleToggleItem = (itemId: number) => {
-    setCheckedItemIds((prev) =>
-      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
-    );
+    setCheckedItemIds((prev) => {
+      const next = prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId];
+      // 자동 저장
+      const updatedCheckedItems = templatesQuery.data
+        ?.filter((item) => next.includes(item.id))
+        .map((item) => ({
+          itemId: item.id,
+          answer: textValues[item.id] || undefined,
+          photoUrl: photoValues[item.id] || undefined,
+        })) || [];
+      saveLogMutation.mutate({
+        restaurantId,
+        logDate: date,
+        targetTab,
+        checkedItemIds: next,
+        checkedItems: updatedCheckedItems,
+      });
+      return next;
+    });
   };
 
   const handleTextChange = (itemId: number, value: string) => {
@@ -305,7 +318,22 @@ function ChecklistSection({
       const reader = new FileReader();
       reader.onload = (e) => {
         const dataUrl = e.target?.result as string;
-        setPhotoValues((prev) => ({ ...prev, [itemId]: dataUrl }));
+        setPhotoValues((prev) => {
+          const next = { ...prev, [itemId]: dataUrl };
+          // 사진 첨부 후 자동 저장
+          const updatedCheckedItems = templatesQuery.data
+            ?.filter((item) => checkedItemIds.includes(item.id))
+            .map((item) => ({
+              itemId: item.id,
+              answer: textValues[item.id] || undefined,
+              photoUrl: item.id === itemId ? dataUrl : (next[item.id] || undefined),
+            })) || [];
+          saveLogMutation.mutate({
+            restaurantId, logDate: date, targetTab,
+            checkedItemIds, checkedItems: updatedCheckedItems,
+          });
+          return next;
+        });
       };
       reader.readAsDataURL(resized);
     } catch (error) {
@@ -313,7 +341,8 @@ function ChecklistSection({
     }
   };
 
-  const handleSaveLog = async () => {
+  // 텍스트/사진 값 변경 시 수동 저장 (debounce 대신 명시 저장)
+  const saveCurrentState = () => {
     const updatedCheckedItems = templatesQuery.data
       ?.filter((item) => checkedItemIds.includes(item.id))
       .map((item) => ({
@@ -321,7 +350,6 @@ function ChecklistSection({
         answer: textValues[item.id] || undefined,
         photoUrl: photoValues[item.id] || undefined,
       })) || [];
-
     saveLogMutation.mutate({
       restaurantId,
       logDate: date,
@@ -379,8 +407,10 @@ function ChecklistSection({
                     <div className="mt-2">
                       <Input
                         placeholder="입력"
+                        autoComplete="off"
                         value={textValues[item.id] || ''}
                         onChange={(e) => handleTextChange(item.id, e.target.value)}
+                        onBlur={() => saveCurrentState()}
                         className="text-xs h-8"
                       />
                     </div>
@@ -434,16 +464,7 @@ function ChecklistSection({
         )}
       </div>
 
-      <div className="p-4 border-t border-border">
-        <Button
-          onClick={handleSaveLog}
-          disabled={saveLogMutation.isPending}
-          className="w-full"
-          variant="secondary"
-        >
-          {saveLogMutation.isPending ? '저장 중...' : '저장'}
-        </Button>
-      </div>
+      {/* 자동저장 — 체크/텍스트blur/사진 시 즉시 저장 */}
     </Card>
   );
 }
