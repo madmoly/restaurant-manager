@@ -153,7 +153,7 @@ export const purchasesV2Router = router({
     .input(
       z.object({
         restaurantId: z.number(),
-        counterpartyId: z.number(),
+        counterpartyId: z.number().optional(),
         purchaseDate: z.string(),
         status: z.enum(["received", "ordered"]).default("received"),
         note: z.string().optional(),
@@ -185,7 +185,7 @@ export const purchasesV2Router = router({
         .insert(purchaseOrdersV2)
         .values({
           restaurantId: input.restaurantId,
-          counterpartyId: input.counterpartyId,
+          counterpartyId: input.counterpartyId ?? null,
           purchaseDate: new Date(input.purchaseDate),
           status: input.status,
           note: input.note,
@@ -696,5 +696,111 @@ export const purchasesV2Router = router({
       await db.delete(purchaseOrdersV2)
         .where(eq(purchaseOrdersV2.id, input.orderId));
       return { ok: true };
+    }),
+
+  /** 월별 거래처별 매입 요약 (거래처별 합산 + 전표 목록 + 품목 상세) */
+  monthlySummaryByCounterparty: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
+    .query(async ({ input }) => {
+      const mm = String(input.month).padStart(2, "0");
+      const startDate = `${input.year}-${mm}-01`;
+      const endDate = `${input.year}-${mm}-31`;
+
+      // 1) 해당 월 전체 전표 + 품목 조인
+      const rows = await db.execute(sql`
+        SELECT
+          o.id AS orderId,
+          o.counterpartyId,
+          c.name AS counterpartyName,
+          c.counterpartyType,
+          o.purchaseDate,
+          o.status,
+          o.totalAmount,
+          o.note AS orderNote,
+          oi.id AS itemRowId,
+          oi.rawItemName,
+          COALESCE(i.name, oi.rawItemName) AS itemName,
+          oi.quantity,
+          oi.unitName,
+          oi.unitPrice,
+          oi.lineTotal
+        FROM purchase_orders_v2 o
+        LEFT JOIN counterparties c ON o.counterpartyId = c.id
+        LEFT JOIN purchase_order_items_v2 oi ON oi.purchaseOrderId = o.id
+        LEFT JOIN items i ON oi.itemId = i.id
+        WHERE o.restaurantId = ${input.restaurantId}
+          AND o.purchaseDate >= ${startDate}
+          AND o.purchaseDate <= ${endDate}
+        ORDER BY c.name, o.purchaseDate DESC, o.id, oi.id
+      `);
+
+      // 2) 거래처별 그룹핑
+      type OrderEntry = {
+        orderId: number;
+        purchaseDate: string;
+        status: string;
+        totalAmount: number;
+        note: string | null;
+        items: { itemRowId: number; itemName: string; quantity: string | null; unitName: string | null; unitPrice: string | null; lineTotal: string | null }[];
+      };
+      type CpGroup = {
+        counterpartyId: number | null;
+        counterpartyName: string;
+        counterpartyType: string | null;
+        totalAmount: number;
+        orderCount: number;
+        orders: OrderEntry[];
+      };
+
+      const cpMap = new Map<string, CpGroup>();
+      const orderMap = new Map<number, OrderEntry>();
+
+      for (const row of (rows[0] as unknown as any[])) {
+        const cpKey = row.counterpartyName || "미지정";
+
+        if (!cpMap.has(cpKey)) {
+          cpMap.set(cpKey, {
+            counterpartyId: row.counterpartyId,
+            counterpartyName: cpKey,
+            counterpartyType: row.counterpartyType,
+            totalAmount: 0,
+            orderCount: 0,
+            orders: [],
+          });
+        }
+        const cpGroup = cpMap.get(cpKey)!;
+
+        if (!orderMap.has(row.orderId)) {
+          const order: OrderEntry = {
+            orderId: row.orderId,
+            purchaseDate: typeof row.purchaseDate === "string"
+              ? row.purchaseDate.substring(0, 10)
+              : new Date(row.purchaseDate).toISOString().substring(0, 10),
+            status: row.status,
+            totalAmount: Number(row.totalAmount || 0),
+            note: row.orderNote,
+            items: [],
+          };
+          orderMap.set(row.orderId, order);
+          cpGroup.orders.push(order);
+          cpGroup.totalAmount += order.totalAmount;
+          cpGroup.orderCount += 1;
+        }
+
+        const orderEntry = orderMap.get(row.orderId)!;
+        if (row.itemRowId) {
+          orderEntry.items.push({
+            itemRowId: row.itemRowId,
+            itemName: row.itemName || row.rawItemName || "품목명 없음",
+            quantity: row.quantity,
+            unitName: row.unitName,
+            unitPrice: row.unitPrice,
+            lineTotal: row.lineTotal,
+          });
+        }
+      }
+
+      // 3) 금액순 정렬
+      return Array.from(cpMap.values()).sort((a, b) => b.totalAmount - a.totalAmount);
     }),
 });

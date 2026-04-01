@@ -7,13 +7,14 @@ import {
   Package, Wallet, Truck, AlertTriangle, Check,
   ChevronDown, ChevronUp, Pencil, X, Save,
   Merge, Copy, Trash2, ChevronLeft, ChevronRight,
+  CalendarRange,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-type TabId = "suppliers" | "compare" | "trend" | "pending" | "items" | "duplicates";
+type TabId = "suppliers" | "monthly" | "compare" | "trend" | "pending" | "items" | "duplicates";
 
 export default function PurchaseManagementPage() {
   const { selectedRestaurant: current } = useRestaurant();
@@ -26,6 +27,7 @@ export default function PurchaseManagementPage() {
 
   const tabs: { id: TabId; label: string; icon: any }[] = [
     { id: "suppliers", label: "거래처", icon: Wallet },
+    { id: "monthly", label: "월별매입", icon: CalendarRange },
     { id: "items", label: "품목관리", icon: Package },
     { id: "compare", label: "가격비교", icon: ArrowUpDown },
     { id: "trend", label: "단가추이", icon: TrendingUp },
@@ -60,6 +62,7 @@ export default function PurchaseManagementPage() {
       {/* 탭 콘텐츠 */}
       <div className="p-4 space-y-4">
         {activeTab === "suppliers" && <SuppliersTab restaurantId={restaurantId} />}
+        {activeTab === "monthly" && <MonthlyPurchaseTab restaurantId={restaurantId} />}
         {activeTab === "items" && <ItemManagementTab restaurantId={restaurantId} />}
         {activeTab === "compare" && <PriceCompareTab restaurantId={restaurantId} />}
         {activeTab === "trend" && <PriceTrendTab restaurantId={restaurantId} />}
@@ -827,6 +830,172 @@ function DuplicatesTab({ restaurantId }: { restaurantId: number }) {
             </div>
           </Card>
         ))
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 월별매입 탭 — 거래처별 월간 매입 목록
+// ═══════════════════════════════════════════════════════════════════════
+const CP_TYPE_LABELS_MONTHLY: Record<string, string> = {
+  supplier: "공급", online: "온라인", mart: "마트", repair: "수리", other: "기타",
+};
+
+function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [expandedCp, setExpandedCp] = useState<string | null>(null);
+  const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
+
+  const { data, isLoading } = trpc.purchasesV2.monthlySummaryByCounterparty.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 },
+  );
+
+  const prevMonth = () => {
+    if (month === 1) { setYear(y => y - 1); setMonth(12); }
+    else setMonth(m => m - 1);
+    setExpandedCp(null);
+    setExpandedOrder(null);
+  };
+  const nextMonth = () => {
+    if (month === 12) { setYear(y => y + 1); setMonth(1); }
+    else setMonth(m => m + 1);
+    setExpandedCp(null);
+    setExpandedOrder(null);
+  };
+
+  const cpList = data || [];
+  const grandTotal = cpList.reduce((s, c) => s + c.totalAmount, 0);
+  const totalOrders = cpList.reduce((s, c) => s + c.orderCount, 0);
+
+  return (
+    <div className="space-y-4">
+      {/* 월 선택 */}
+      <div className="flex items-center justify-center gap-3">
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={prevMonth}>
+          <ChevronLeft size={16} />
+        </Button>
+        <span className="text-sm font-semibold min-w-[120px] text-center">
+          {year}년 {month}월
+        </span>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={nextMonth}>
+          <ChevronRight size={16} />
+        </Button>
+      </div>
+
+      {/* 월 합계 요약 */}
+      {!isLoading && cpList.length > 0 && (
+        <Card className="p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              거래처 {cpList.length}곳 · 전표 {totalOrders}건
+            </span>
+            <span className="text-base font-bold text-foreground tabular-nums">
+              ₩{grandTotal.toLocaleString()}
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {/* 거래처별 목록 */}
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground text-center py-8">로딩 중...</p>
+      ) : cpList.length === 0 ? (
+        <Card className="p-6 text-center text-sm text-muted-foreground">
+          {year}년 {month}월 매입 데이터가 없습니다
+        </Card>
+      ) : (
+        cpList.map((cp) => {
+          const cpKey = cp.counterpartyName;
+          const isExpanded = expandedCp === cpKey;
+          const pct = grandTotal > 0 ? ((cp.totalAmount / grandTotal) * 100).toFixed(1) : "0";
+
+          return (
+            <Card key={cpKey} className="overflow-hidden">
+              {/* 거래처 헤더 */}
+              <button
+                onClick={() => { setExpandedCp(isExpanded ? null : cpKey); setExpandedOrder(null); }}
+                className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-medium text-foreground text-sm truncate">{cp.counterpartyName}</span>
+                  {cp.counterpartyType && (
+                    <Badge variant="secondary" className="text-[10px] shrink-0">
+                      {CP_TYPE_LABELS_MONTHLY[cp.counterpartyType] || cp.counterpartyType}
+                    </Badge>
+                  )}
+                  <span className="text-xs text-muted-foreground shrink-0">{cp.orderCount}건</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="text-right">
+                    <span className="text-sm font-bold text-foreground tabular-nums">
+                      ₩{cp.totalAmount.toLocaleString()}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground ml-1">({pct}%)</span>
+                  </div>
+                  {isExpanded ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
+                </div>
+              </button>
+
+              {/* 전표 목록 (펼침) */}
+              {isExpanded && (
+                <div className="border-t border-border divide-y divide-border">
+                  {cp.orders.map((order) => {
+                    const isOrderExpanded = expandedOrder === order.orderId;
+                    return (
+                      <div key={order.orderId}>
+                        <button
+                          onClick={() => setExpandedOrder(isOrderExpanded ? null : order.orderId)}
+                          className="w-full px-4 py-2.5 flex items-center justify-between text-sm hover:bg-muted/20 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-xs text-muted-foreground tabular-nums">{order.purchaseDate}</span>
+                            <Badge
+                              variant={order.status === "received" ? "default" : "secondary"}
+                              className="text-[10px]"
+                            >
+                              {order.status === "received" ? "입고" : "발주"}
+                            </Badge>
+                            {order.note && <span className="text-xs text-muted-foreground truncate max-w-[120px]">{order.note}</span>}
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-sm font-semibold tabular-nums text-foreground">
+                              ₩{order.totalAmount.toLocaleString()}
+                            </span>
+                            {order.items.length > 0 && (
+                              isOrderExpanded
+                                ? <ChevronUp size={12} className="text-muted-foreground" />
+                                : <ChevronDown size={12} className="text-muted-foreground" />
+                            )}
+                          </div>
+                        </button>
+
+                        {/* 품목 상세 */}
+                        {isOrderExpanded && order.items.length > 0 && (
+                          <div className="bg-muted/20 px-4 py-2 space-y-1">
+                            {order.items.map((item) => (
+                              <div key={item.itemRowId} className="flex items-center justify-between text-xs">
+                                <span className="text-foreground truncate max-w-[45%]">{item.itemName}</span>
+                                <div className="flex items-center gap-2 text-muted-foreground tabular-nums">
+                                  {item.quantity && <span>{item.quantity}{item.unitName || ""}</span>}
+                                  {item.unitPrice && <span>@₩{Number(item.unitPrice).toLocaleString()}</span>}
+                                  <span className="font-medium text-foreground">₩{Number(item.lineTotal || 0).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          );
+        })
       )}
     </div>
   );
