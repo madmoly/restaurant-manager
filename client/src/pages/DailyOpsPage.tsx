@@ -892,6 +892,7 @@ function PurchaseTab({
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [attachmentUrl, setAttachmentUrl] = useState<string | undefined>(undefined);
   const [receivingOrderId, setReceivingOrderId] = useState<number | null>(null); // 입고전환 대상 발주 ID
+  const [instantPurchase, setInstantPurchase] = useState(false); // 즉시구매(결제완료) — 발주=입고 동시
 
   // OCR 상태
   const [ocrProcessing, setOcrProcessing] = useState(false);
@@ -929,7 +930,7 @@ function PurchaseTab({
 
   const createOrder = trpc.purchasesV2.createOrder.useMutation({
     onSuccess() {
-      toast.success(inputMode === 'order' ? '발주가 등록되었습니다.' : '입고가 등록되었습니다.');
+      toast.success(instantPurchase ? '즉시구매가 등록되었습니다.' : inputMode === 'order' ? '발주가 등록되었습니다.' : '입고가 등록되었습니다.');
       utils.purchasesV2.listByDate.invalidate();
       utils.purchasesV2.pendingOrders.invalidate();
       resetForm();
@@ -985,6 +986,7 @@ function PurchaseTab({
     setOcrDateSuggestion(null);
     setOcrRetryCount(0);
     setReceivingOrderId(null);
+    setInstantPurchase(false);
   };
 
   // 미입고 발주 → 입고 전환 시작
@@ -1245,7 +1247,7 @@ function PurchaseTab({
   };
 
   const handleCreate = () => {
-    const isOrderMode = inputMode === 'order';
+    const isOrderMode = inputMode === 'order' && !instantPurchase;
     const isReceiveFromOrder = inputMode === 'receive' && receivingOrderId;
 
     // 날짜 불일치 미확인 시 저장 차단
@@ -1487,11 +1489,22 @@ function PurchaseTab({
             </div>
           </div>
 
-          {/* 발주 모드 안내 */}
+          {/* 발주 모드 안내 + 즉시구매 */}
           {inputMode === 'order' && !receivingOrderId && (
-            <p className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/20 px-2 py-1 rounded">
-              거래처, 품목, 또는 발주서 사진만으로도 등록 가능 — 금액은 입고 시 입력
-            </p>
+            <div className="space-y-1.5">
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/20 px-2 py-1 rounded">
+                {instantPurchase
+                  ? '즉시구매: 발주와 동시에 입고/지출 처리됩니다 (쿠팡, 마트 등)'
+                  : '거래처, 품목, 또는 발주서 사진만으로도 등록 가능 — 금액은 입고 시 입력'}
+              </p>
+              <label className="flex items-center gap-2 cursor-pointer px-1">
+                <Checkbox
+                  checked={instantPurchase}
+                  onCheckedChange={(v) => setInstantPurchase(!!v)}
+                />
+                <span className="text-xs text-muted-foreground">즉시구매 (결제완료 — 발주 즉시 지출 처리)</span>
+              </label>
+            </div>
           )}
           {receivingOrderId && (
             <p className="text-[11px] text-green-600 dark:text-green-400 bg-green-100/50 dark:bg-green-900/20 px-2 py-1 rounded">
@@ -1985,7 +1998,7 @@ function PurchaseTab({
             onClick={handleCreate}
             disabled={createOrder.isPending || receiveOrderMutation.isPending}
             className={`w-full py-3 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 ${
-              inputMode === 'order'
+              inputMode === 'order' && !instantPurchase
                 ? 'bg-amber-500 hover:bg-amber-600 text-white'
                 : 'bg-blue-600 hover:bg-blue-700 text-white'
             }`}
@@ -1993,6 +2006,7 @@ function PurchaseTab({
             {createOrder.isPending || receiveOrderMutation.isPending
               ? '등록 중...'
               : receivingOrderId ? '✓ 입고 확인'
+              : instantPurchase ? '✓ 즉시구매 등록'
               : inputMode === 'order' ? '📋 발주 등록'
               : '✓ 입고 등록'}
           </button>

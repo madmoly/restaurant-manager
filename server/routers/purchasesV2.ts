@@ -312,10 +312,15 @@ export const purchasesV2Router = router({
         summary: `입고 전환 (${Number(existing.totalAmount).toLocaleString()}원 → ${newTotal.toLocaleString()}원)`,
       };
 
+      // 입고일 = 오늘(KST 기준)
+      const kstNow = new Date(Date.now() + 9 * 3600000);
+      const receivedDate = kstNow.toISOString().slice(0, 10);
+
       await db
         .update(purchaseOrdersV2)
         .set({
           status: "received",
+          purchaseDate: receivedDate,
           receivedAt: new Date(),
           totalAmount: String(newTotal),
           lastModifiedBy: ctx.user.userId,
