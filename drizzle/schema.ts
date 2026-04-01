@@ -966,30 +966,3 @@ export const employerPresets = mysqlTable("employer_presets", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type EmployerPreset = typeof employerPresets.$inferSelect;
-
-// ─── 즉시지출 카테고리 ────────────────────────────────────────────────────────
-export const expenseCategories = mysqlTable("expense_categories", {
-  id: int("id").autoincrement().primaryKey(),
-  restaurantId: int("restaurantId").notNull(),
-  name: varchar("name", { length: 100 }).notNull(),
-  sortOrder: int("sortOrder").default(0).notNull(),
-  isActive: boolean("isActive").default(true).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-export type ExpenseCategory = typeof expenseCategories.$inferSelect;
-
-// ─── 즉시지출 기록 ──────────────────────────────────────────────────────────
-export const dailyExpenses = mysqlTable("daily_expenses", {
-  id: int("id").autoincrement().primaryKey(),
-  restaurantId: int("restaurantId").notNull(),
-  date: date("date").notNull(),
-  categoryId: int("categoryId"),                                // expense_categories 참조
-  category: varchar("category", { length: 50 }),                // 레거시 호환
-  title: varchar("title", { length: 200 }).notNull(),
-  amount: decimal("amount", { precision: 14, scale: 2 }).default("0").notNull(),
-  note: text("note"),
-  attachmentUrl: text("attachmentUrl"),
-  createdBy: int("createdBy"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-export type DailyExpense = typeof dailyExpenses.$inferSelect;

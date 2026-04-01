@@ -153,7 +153,7 @@ export const purchasesV2Router = router({
     .input(
       z.object({
         restaurantId: z.number(),
-        counterpartyId: z.number().optional(),
+        counterpartyId: z.number(),
         purchaseDate: z.string(),
         status: z.enum(["received", "ordered"]).default("received"),
         note: z.string().optional(),
@@ -185,7 +185,7 @@ export const purchasesV2Router = router({
         .insert(purchaseOrdersV2)
         .values({
           restaurantId: input.restaurantId,
-          counterpartyId: input.counterpartyId ?? null,
+          counterpartyId: input.counterpartyId,
           purchaseDate: new Date(input.purchaseDate),
           status: input.status,
           note: input.note,
