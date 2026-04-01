@@ -3117,7 +3117,7 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
           )}
           {!scheduleOk && (
             <p className="text-[11px] text-amber-600 dark:text-amber-400">
-              · 미확정 스케줄 {scheduleStatus.draft}건 — 스케줄 페이지에서 확정 필요 (초안 상태는 마감 불가)
+              · 미확정 스케줄 {scheduleStatus.draft}건 — <a href={`/schedule?date=${date}`} className="underline font-medium hover:text-amber-800">스케줄 수정</a> (초안 상태는 마감 불가)
             </p>
           )}
         </div>

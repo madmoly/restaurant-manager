@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearch } from "wouter";
 import { trpc } from "../lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { useRestaurant } from "@/contexts/RestaurantContext";
@@ -664,7 +665,12 @@ export default function SchedulePage() {
   const effectiveRole = getEffectiveRole(user?.role ?? "user", current?.storeRole ?? null);
   const isManager = isManagerLevel(effectiveRole);
 
-  const [baseDate, setBaseDate] = useState(new Date());
+  const search = useSearch();
+  const [baseDate, setBaseDate] = useState(() => {
+    const params = new URLSearchParams(search);
+    const d = params.get('date');
+    return d ? new Date(d + 'T12:00:00') : new Date();
+  });
   const weekDates = useMemo(() => getWeekDates(baseDate), [baseDate]);
 
   const weekStart = fmtDate(weekDates[0]);
