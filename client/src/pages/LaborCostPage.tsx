@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   ChevronLeft, ChevronRight, Building2, Users, Clock, Wallet,
   ChevronDown, ChevronUp, FileText, Download, CalendarCheck, CalendarDays,
-  AlertTriangle, Check, X, Plus, Minus, Info, UserX,
+  AlertTriangle, Check, X, Plus, Minus, Info, UserX, Edit3, Save, Phone, CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
@@ -314,7 +314,7 @@ export default function LaborCostPage() {
                       {/* 정규 직원 */}
                       <div className="divide-y divide-border/50">
                         {regularEmps.map((emp, i) => (
-                          <EmployeeRow key={`r-${i}`} emp={emp} />
+                          <EmployeeRow key={`r-${i}`} emp={emp} restaurantId={restaurantId} />
                         ))}
                       </div>
                       {/* 임시근로자 */}
@@ -326,7 +326,7 @@ export default function LaborCostPage() {
                           </div>
                           <div className="divide-y divide-border/50">
                             {tempEmps.map((emp, i) => (
-                              <EmployeeRow key={`t-${i}`} emp={emp} />
+                              <EmployeeRow key={`t-${i}`} emp={emp} restaurantId={restaurantId} />
                             ))}
                           </div>
                         </div>
@@ -344,7 +344,25 @@ export default function LaborCostPage() {
 }
 
 /* ─── 직원 행 컴포넌트 ─────────────────────────────── */
-function EmployeeRow({ emp }: { emp: any }) {
+function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) {
+  const utils = trpc.useUtils();
+  const updateTempInfo = trpc.schedules.updateTempWorkerInfo.useMutation({
+    onSuccess() { utils.schedules.laborCostByCompany.invalidate(); },
+  });
+  const [editingTemp, setEditingTemp] = useState(false);
+  const [tempBank, setTempBank] = useState(emp.bankAccount ?? "");
+  const [tempPhoneVal, setTempPhoneVal] = useState(emp.phone ?? "");
+
+  const saveTempInfo = () => {
+    updateTempInfo.mutate({
+      restaurantId,
+      tempWorkerName: emp.name,
+      bankAccount: tempBank,
+      phone: tempPhoneVal,
+    });
+    setEditingTemp(false);
+  };
+
   const subUsed = emp.substituteLeave && emp.substituteLeave.used > 0;
   const annUsed = emp.annualLeave && emp.annualLeave.used > 0;
   return (
@@ -449,8 +467,63 @@ function EmployeeRow({ emp }: { emp: any }) {
           </div>
         </div>
       )}
-      {/* 4행: 계좌/주민번호 (있을 때만) */}
-      {(emp.bankAccount || emp.residentNumber) && (
+      {/* 4행: 계좌/주민번호/연락처 */}
+      {emp.isTemp ? (
+        <div className="text-xs pt-1 border-t border-border/30">
+          {editingTemp ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-3 h-3 text-muted-foreground shrink-0" />
+                <input
+                  className="flex-1 px-2 py-1 border border-input rounded text-xs bg-background"
+                  placeholder="계좌번호"
+                  value={tempBank}
+                  onChange={(e) => setTempBank(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Phone className="w-3 h-3 text-muted-foreground shrink-0" />
+                <input
+                  className="flex-1 px-2 py-1 border border-input rounded text-xs bg-background"
+                  placeholder="연락처"
+                  value={tempPhoneVal}
+                  onChange={(e) => setTempPhoneVal(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-1.5 justify-end">
+                <button onClick={() => setEditingTemp(false)} className="text-[11px] text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent">취소</button>
+                <button onClick={saveTempInfo} disabled={updateTempInfo.isPending} className="text-[11px] text-primary font-medium px-2 py-1 rounded hover:bg-primary/10 flex items-center gap-1">
+                  <Save className="w-3 h-3" /> 저장
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                {emp.bankAccount && (
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <CreditCard className="w-3 h-3" /> {emp.bankAccount}
+                  </span>
+                )}
+                {emp.phone && (
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <Phone className="w-3 h-3" /> {emp.phone}
+                  </span>
+                )}
+                {!emp.bankAccount && !emp.phone && (
+                  <span className="text-muted-foreground/60">계좌/연락처 미등록</span>
+                )}
+              </div>
+              <button
+                onClick={() => { setTempBank(emp.bankAccount ?? ""); setTempPhoneVal(emp.phone ?? ""); setEditingTemp(true); }}
+                className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-primary/10"
+              >
+                <Edit3 className="w-3 h-3" /> {emp.bankAccount || emp.phone ? "수정" : "입력"}
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (emp.bankAccount || emp.residentNumber) ? (
         <div className="grid grid-cols-2 gap-x-3 text-xs pt-1 border-t border-border/30">
           <div>
             <span className="text-muted-foreground">계좌번호</span>
@@ -461,7 +534,7 @@ function EmployeeRow({ emp }: { emp: any }) {
             <div className="font-medium text-foreground">{emp.residentNumber || "-"}</div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

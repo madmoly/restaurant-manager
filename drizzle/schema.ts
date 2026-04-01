@@ -285,6 +285,8 @@ export const schedules = mysqlTable("schedules", {
   tempWorkerName: varchar("tempWorkerName", { length: 100 }),
   tempWageType: mysqlEnum("tempWageType", ["hourly", "daily"]),
   tempWageAmount: decimal("tempWageAmount", { precision: 10, scale: 2 }),
+  tempBankAccount: varchar("tempBankAccount", { length: 100 }),
+  tempPhone: varchar("tempPhone", { length: 30 }),
   restaurantId: int("restaurantId").notNull(),
   startTime: timestamp("startTime").notNull(),
   endTime: timestamp("endTime").notNull(),

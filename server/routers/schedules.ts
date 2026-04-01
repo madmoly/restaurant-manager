@@ -770,6 +770,8 @@ export const schedulesRouter = router({
           tempWorkerName: schedules.tempWorkerName,
           tempWageType: schedules.tempWageType,
           tempWageAmount: schedules.tempWageAmount,
+          tempBankAccount: schedules.tempBankAccount,
+          tempPhone: schedules.tempPhone,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
           wageType: employeeContracts.wageType,
@@ -869,6 +871,7 @@ export const schedulesRouter = router({
           socialInsurance: boolean;
           bankAccount: string | null;
           residentNumber: string | null;
+          phone: string | null;
         }>;
         totalHours: number;
         totalWage: number;
@@ -898,8 +901,9 @@ export const schedulesRouter = router({
             recheckRequired: false,
             // 미지정(소속회사 없음) 또는 임시근로자 → 3.3% 공제 고정
             socialInsurance: (r.userId && r.socialInsurance != null) ? r.socialInsurance : false,
-            bankAccount: r.bankAccount ?? null,
+            bankAccount: r.bankAccount ?? r.tempBankAccount ?? null,
             residentNumber: r.residentNumber ?? null,
+            phone: r.tempPhone ?? null,
           };
         }
 
@@ -1098,5 +1102,28 @@ export const schedulesRouter = router({
       }
 
       return { ok: true, updated, total: rows.length };
+    }),
+
+  /** 임시근로자 계좌/연락처 업데이트 — 같은 이름의 모든 스케줄에 일괄 반영 */
+  updateTempWorkerInfo: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      tempWorkerName: z.string().min(1),
+      bankAccount: z.string().optional(),
+      phone: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const updates: Record<string, any> = {};
+      if (input.bankAccount !== undefined) updates.tempBankAccount = input.bankAccount || null;
+      if (input.phone !== undefined) updates.tempPhone = input.phone || null;
+      if (Object.keys(updates).length === 0) return { ok: true, updated: 0 };
+      const result = await db.update(schedules)
+        .set(updates)
+        .where(and(
+          eq(schedules.restaurantId, input.restaurantId),
+          sql`${schedules.tempWorkerName} = ${input.tempWorkerName}`,
+        ));
+      return { ok: true };
     }),
 });
