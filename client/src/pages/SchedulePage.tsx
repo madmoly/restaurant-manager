@@ -1064,7 +1064,7 @@ export default function SchedulePage() {
               </div>
 
               <div className="space-y-1">
-                {daySchedules.map((s) => {
+                {daySchedules.filter(s => s.status !== "canceled").map((s) => {
                   const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.draft;
                   const presetInfo = s.shiftPreset ? (() => {
                     const dbPreset = shiftPresets.find((p: any) => p.presetType === s.shiftPreset);

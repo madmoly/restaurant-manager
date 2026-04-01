@@ -115,6 +115,28 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
         )}
       </section>
 
+      {/* 취소된 스케줄 */}
+      {data.canceledSchedules && data.canceledSchedules.length > 0 && (
+        <section>
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <Users className="w-3.5 h-3.5 text-red-400" /> 취소된 스케줄 ({data.canceledSchedules.length}건)
+          </h4>
+          <div className="space-y-1">
+            {data.canceledSchedules.map((s: any) => (
+              <div key={s.id} className="flex items-center justify-between bg-red-50 dark:bg-red-900/10 rounded-lg px-3 py-2 border border-red-200/50 dark:border-red-800/30">
+                <span className="text-xs font-medium text-red-600 dark:text-red-400 line-through">{s.name}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-red-400 dark:text-red-500">
+                    {fmtTime(s.startTime)}~{fmtTime(s.endTime)}
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-red-500/15 text-red-600 dark:text-red-400">취소</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* 매출 */}
       <section>
         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">

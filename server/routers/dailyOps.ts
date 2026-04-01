@@ -748,12 +748,14 @@ export const dailyOpsRouter = router({
         .where(and(eq(dailySalesDetail.restaurantId, input.restaurantId), sql`${dailySalesDetail.saleDate} = ${input.date}`))
         .limit(1);
 
-      // 3. 스케줄 목록
-      const scheduleRows = await db
+      // 3. 스케줄 목록 (전체 조회 후 active/canceled 분리)
+      const allScheduleRows = await db
         .select({ id: schedules.id, userName: users.name, startTime: schedules.startTime, endTime: schedules.endTime, status: schedules.status, shiftPreset: schedules.shiftPreset, tempWorkerName: schedules.tempWorkerName })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
-        .where(and(eq(schedules.restaurantId, input.restaurantId), sql`DATE(${schedules.startTime}) = ${input.date}`, sql`${schedules.status} != 'canceled'`));
+        .where(and(eq(schedules.restaurantId, input.restaurantId), sql`DATE(${schedules.startTime}) = ${input.date}`));
+      const scheduleRows = allScheduleRows.filter(s => s.status !== "canceled");
+      const canceledRows = allScheduleRows.filter(s => s.status === "canceled");
 
       // 4. 매입 목록
       const purchaseRows = await db
@@ -789,6 +791,13 @@ export const dailyOpsRouter = router({
           startTime: s.startTime,
           endTime: s.endTime,
           status: s.status,
+          shiftPreset: s.shiftPreset,
+        })),
+        canceledSchedules: canceledRows.map(s => ({
+          id: s.id,
+          name: s.userName ?? s.tempWorkerName ?? "미지정",
+          startTime: s.startTime,
+          endTime: s.endTime,
           shiftPreset: s.shiftPreset,
         })),
         purchases: purchaseRows.map(p => ({
