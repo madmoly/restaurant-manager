@@ -27,13 +27,15 @@ function shouldShowOnDate(
     specificDate?: string | Date | null; // 레거시 호환
     effectiveFrom?: string | Date | null;
     effectiveTo?: string | Date | null;
+    createdAt?: string | Date | null;
   },
   dateStr: string,
 ): boolean {
-  // 적용 기간 필터: effectiveFrom 이전 / effectiveTo 이후면 미표시
-  if (template.effectiveFrom) {
-    const from = typeof template.effectiveFrom === "string"
-      ? template.effectiveFrom : template.effectiveFrom.toISOString().slice(0, 10);
+  // 적용 기간 필터: effectiveFrom 우선, 없으면 createdAt 폴백 (생성 이전 날짜에 미표시)
+  const fromRaw = template.effectiveFrom || template.createdAt;
+  if (fromRaw) {
+    const from = typeof fromRaw === "string"
+      ? fromRaw.slice(0, 10) : fromRaw.toISOString().slice(0, 10);
     if (dateStr < from) return false;
   }
   if (template.effectiveTo) {
