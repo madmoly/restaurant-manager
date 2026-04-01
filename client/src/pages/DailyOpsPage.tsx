@@ -2460,6 +2460,7 @@ function CloseTab({
               type="text"
               inputMode="numeric"
               placeholder="0"
+              autoComplete="off"
               value={cashAmount}
               onChange={(e) => setCashAmount(handleWonInput(e.target.value))}
               className="mt-1 text-right"
@@ -2474,6 +2475,7 @@ function CloseTab({
               type="text"
               inputMode="numeric"
               placeholder="0"
+              autoComplete="off"
               value={cardAmount}
               onChange={(e) => setCardAmount(handleWonInput(e.target.value))}
               className="mt-1 text-right"
@@ -2488,6 +2490,7 @@ function CloseTab({
               type="text"
               inputMode="numeric"
               placeholder="0"
+              autoComplete="off"
               value={giftCardAmount}
               onChange={(e) => setGiftCardAmount(handleWonInput(e.target.value))}
               className="mt-1 text-right"
@@ -2503,12 +2506,14 @@ function CloseTab({
                 type="text"
                 inputMode="numeric"
                 placeholder="금액"
+                autoComplete="off"
                 value={transferAmount}
                 onChange={(e) => setTransferAmount(handleWonInput(e.target.value))}
                 className="flex-1 text-right"
               />
               <Input
                 placeholder="입금자명"
+                autoComplete="off"
                 value={transferDepositor}
                 onChange={(e) => setTransferDepositor(e.target.value)}
                 className="w-28"
@@ -2523,6 +2528,7 @@ function CloseTab({
               <div key={idx} className="flex gap-2 mt-2">
                 <Input
                   placeholder="항목명"
+                  autoComplete="off"
                   value={item.itemName}
                   onChange={(e) => {
                     const newItems = [...otherItems];
@@ -2535,6 +2541,7 @@ function CloseTab({
                   type="text"
                   inputMode="numeric"
                   placeholder="금액"
+                  autoComplete="off"
                   value={item.amount ? fmtNum(item.amount) : ''}
                   onChange={(e) => {
                     const newItems = [...otherItems];
