@@ -598,8 +598,8 @@ app.use(express.json());
     }
 
     // ─── 임시근로자 계좌/연락처 컬럼 ───
-    await conn.query(`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS tempBankAccount VARCHAR(100) DEFAULT NULL`).catch(() => {});
-    await conn.query(`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS tempPhone VARCHAR(30) DEFAULT NULL`).catch(() => {});
+    await addColumnIfNotExists("schedules", "tempBankAccount", "VARCHAR(100) DEFAULT NULL");
+    await addColumnIfNotExists("schedules", "tempPhone", "VARCHAR(30) DEFAULT NULL");
 
     // ─── 매장별 근무 프리셋 시간 테이블 ───
     await conn.query(`
