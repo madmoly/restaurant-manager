@@ -59,7 +59,7 @@ export default function EmployeeDashboard() {
     { enabled: !!selectedRestaurantId },
   );
 
-  // 일일운영 체크리스트 상태
+  // 운영일지 체크리스트 상태
   const dailyOpsQuery = trpc.dailyOps.getByDate.useQuery(
     { restaurantId: selectedRestaurantId!, date: today },
     { enabled: !!selectedRestaurantId },
@@ -144,7 +144,7 @@ export default function EmployeeDashboard() {
         </CardContent>
       </Card>
 
-      {/* 일일 운영 업무 요약 */}
+      {/* 운영일지 업무 요약 */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
@@ -185,7 +185,7 @@ export default function EmployeeDashboard() {
                 ))}
                 <Link href="/daily-ops">
                   <Button variant="outline" size="sm" className="w-full mt-1 text-xs h-8">
-                    일일 운영 바로가기 <ChevronRight className="h-3 w-3 ml-1" />
+                    운영일지 바로가기 <ChevronRight className="h-3 w-3 ml-1" />
                   </Button>
                 </Link>
               </div>

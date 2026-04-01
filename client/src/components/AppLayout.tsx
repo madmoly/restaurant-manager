@@ -86,8 +86,8 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
 // ─── 매장별 운영 메뉴 (점장 기준, master/admin도 매장 선택 시 동일하게 표시) ──
 // 모바일 하단탭 목표:
 //   master/admin: 사업현황(1), 사용자관리/전체매장(2), 스케줄(3), 월정산(4)
-//   manager:      대시보드(1), 일일운영(2), 스케줄(3), 월정산(4)
-//   staff:        대시보드(1), 일일운영(2), 스케줄(3)
+//   manager:      대시보드(1), 운영일지(2), 스케줄(3), 월정산(4)
+//   staff:        대시보드(1), 운영일지(2), 스케줄(3)
 const STORE_NAV_GROUPS: NavGroup[] = [
   {
     label: "운영",
@@ -100,7 +100,7 @@ const STORE_NAV_GROUPS: NavGroup[] = [
         mobileTabPriority: { manager: 1, staff: 1 },
       },
       {
-        label: "일일 운영", href: "/daily-ops",
+        label: "운영일지", href: "/daily-ops",
         icon: <Activity className="h-4 w-4" />,
         mobileIcon: <Activity className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "staff"],

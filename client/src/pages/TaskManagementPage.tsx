@@ -61,7 +61,7 @@ export default function TaskManagementPage() {
     onSuccess: () => { utils.storeChecklists.listAllTemplates.invalidate(); resetForm(); },
   });
   const deleteMut = trpc.storeChecklists.deleteTemplate.useMutation({
-    onSuccess: () => { toast.success("비활성화되었습니다. 오늘부터 일일운영에서 제외됩니다."); utils.storeChecklists.listAllTemplates.invalidate(); },
+    onSuccess: () => { toast.success("비활성화되었습니다. 오늘부터 운영일지에서 제외됩니다."); utils.storeChecklists.listAllTemplates.invalidate(); },
     onError: (e: any) => { toast.error("비활성화 실패: " + (e.message || "알 수 없는 오류")); },
   });
 
@@ -198,7 +198,7 @@ export default function TaskManagementPage() {
                   </Button>
                   <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive"
                     disabled={deleteMut.isPending}
-                    onClick={() => { if (confirm("이 업무를 비활성화하시겠습니까?\n오늘부터 일일운영에서 제외됩니다.")) deleteMut.mutate({ id: t.id, restaurantId }); }}>
+                    onClick={() => { if (confirm("이 업무를 비활성화하시겠습니까?\n오늘부터 운영일지에서 제외됩니다.")) deleteMut.mutate({ id: t.id, restaurantId }); }}>
                     <Trash2 className="w-3 h-3 mr-1" /> {deleteMut.isPending ? "처리 중..." : "비활성화"}
                   </Button>
                 </div>

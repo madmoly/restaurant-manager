@@ -75,9 +75,9 @@ const PAGE_GUIDES: Record<string, { title: string; tips: string[] }> = {
       "스케줄 상태: 초안 → 게시 → 확정 → 완료 순서로 진행됩니다.",
     ],
   },
-  // 일일운영
+  // 운영일지
   "daily-ops": {
-    title: "일일 운영",
+    title: "운영일지",
     tips: [
       "오픈/마감 체크리스트를 실행하고 기록합니다.",
       "발주서 이미지를 업로드하면 OCR로 품목이 자동 인식됩니다.",

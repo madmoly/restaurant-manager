@@ -44,10 +44,10 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
 
   return (
     <div className="space-y-4">
-      {/* 일일운영 상태 */}
+      {/* 운영일지 상태 */}
       <section>
         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-          <ClipboardCheck className="w-3.5 h-3.5" /> 일일 운영
+          <ClipboardCheck className="w-3.5 h-3.5" /> 운영일지
         </h4>
         <div className="bg-muted/50 rounded-lg p-3 space-y-1.5">
           <div className="flex items-center justify-between text-xs">
@@ -208,7 +208,7 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
         </section>
       )}
 
-      {/* 일일운영 바로가기 */}
+      {/* 운영일지 바로가기 */}
       {onNavigate && (
         <section className="pt-3">
           <Button
@@ -218,7 +218,7 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
             onClick={onNavigate}
           >
             <ExternalLink className="w-3.5 h-3.5" />
-            일일운영 상세 보기
+            운영일지 상세 보기
           </Button>
         </section>
       )}
