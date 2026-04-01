@@ -645,6 +645,22 @@ app.use(express.json());
       )
     `);
 
+    // expense_categories (매장별 커스텀 지출 카테고리)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS expense_categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        sortOrder INT NOT NULL DEFAULT 0,
+        isActive BOOLEAN NOT NULL DEFAULT TRUE,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ec_restaurant (restaurantId)
+      )
+    `);
+
+    // daily_expenses에 categoryId 컬럼 추가 (커스텀 카테고리 참조)
+    await addColumnIfNotExists("daily_expenses", "categoryId", "INT NULL AFTER category");
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

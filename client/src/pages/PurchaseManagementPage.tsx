@@ -1,41 +1,37 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { toast } from "sonner";
 import {
-  ArrowUpDown, TrendingUp, TrendingDown, Minus,
-  Package, Wallet, Truck, AlertTriangle, Check,
-  ChevronDown, ChevronUp, Pencil, X, Save,
-  Merge, Copy, Trash2, ChevronLeft, ChevronRight,
+  Truck, Wallet, Receipt, Check, Clock,
+  Plus, X, Save, Pencil, Trash2, Image,
+  ChevronLeft, ChevronRight, Settings,
+  Camera, FileText,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-type TabId = "suppliers" | "compare" | "trend" | "pending" | "items" | "duplicates";
+type TabId = "orders" | "expenses" | "suppliers";
 
 export default function PurchaseManagementPage() {
   const { selectedRestaurant: current } = useRestaurant();
   const restaurantId = current?.id ?? 0;
-  const [activeTab, setActiveTab] = useState<TabId>("suppliers");
+  const [activeTab, setActiveTab] = useState<TabId>("orders");
 
   if (!restaurantId) {
     return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
   }
 
   const tabs: { id: TabId; label: string; icon: any }[] = [
+    { id: "orders", label: "발주", icon: Truck },
+    { id: "expenses", label: "즉시지출", icon: Receipt },
     { id: "suppliers", label: "거래처", icon: Wallet },
-    { id: "items", label: "품목관리", icon: Package },
-    { id: "compare", label: "가격비교", icon: ArrowUpDown },
-    { id: "trend", label: "단가추이", icon: TrendingUp },
-    { id: "pending", label: "발주현황", icon: Truck },
-    { id: "duplicates", label: "중복관리", icon: Copy },
   ];
 
   return (
     <div className="max-w-3xl mx-auto">
-      {/* 탭 네비게이션 */}
       <div className="sticky top-0 z-10 bg-background border-b border-border">
         <div className="flex overflow-x-auto scrollbar-hide">
           {tabs.map((tab) => {
@@ -45,7 +41,7 @@ export default function PurchaseManagementPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`shrink-0 flex-1 min-w-[64px] flex flex-col items-center gap-0.5 py-3 text-xs font-medium border-b-2 transition-colors ${
+                className={`shrink-0 flex-1 min-w-[80px] flex flex-col items-center gap-0.5 py-3 text-xs font-medium border-b-2 transition-colors ${
                   active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -57,21 +53,727 @@ export default function PurchaseManagementPage() {
         </div>
       </div>
 
-      {/* 탭 콘텐츠 */}
       <div className="p-4 space-y-4">
+        {activeTab === "orders" && <OrdersTab restaurantId={restaurantId} />}
+        {activeTab === "expenses" && <ExpensesTab restaurantId={restaurantId} />}
         {activeTab === "suppliers" && <SuppliersTab restaurantId={restaurantId} />}
-        {activeTab === "items" && <ItemManagementTab restaurantId={restaurantId} />}
-        {activeTab === "compare" && <PriceCompareTab restaurantId={restaurantId} />}
-        {activeTab === "trend" && <PriceTrendTab restaurantId={restaurantId} />}
-        {activeTab === "pending" && <PendingOrdersTab restaurantId={restaurantId} />}
-        {activeTab === "duplicates" && <DuplicatesTab restaurantId={restaurantId} />}
       </div>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 거래처 관리 탭 (기존 CounterpartiesPage 기능 임베드)
+// 발주 탭: 사진+메모 등록 → 입고확인
+// ═══════════════════════════════════════════════════════════════════════
+function OrdersTab({ restaurantId }: { restaurantId: number }) {
+  const [filter, setFilter] = useState<"all" | "ordered" | "received">("all");
+  const [showForm, setShowForm] = useState(false);
+  const [now] = useState(() => new Date());
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+
+  const { data: orders, isLoading } = trpc.purchasesV2.listOrdersByMonth.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 },
+  );
+  const { data: pending } = trpc.purchasesV2.pendingOrders.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const utils = trpc.useUtils();
+
+  const filteredOrders = (orders || []).filter((o: any) =>
+    filter === "all" ? true : o.status === filter,
+  );
+  const pendingCount = pending?.length ?? 0;
+
+  const prevMonth = () => {
+    if (month === 1) { setYear(y => y - 1); setMonth(12); }
+    else setMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (month === 12) { setYear(y => y + 1); setMonth(1); }
+    else setMonth(m => m + 1);
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* 월 네비게이션 */}
+      <div className="flex items-center justify-between">
+        <button onClick={prevMonth} className="p-1"><ChevronLeft className="w-5 h-5" /></button>
+        <span className="text-sm font-bold">{year}년 {month}월</span>
+        <button onClick={nextMonth} className="p-1"><ChevronRight className="w-5 h-5" /></button>
+      </div>
+
+      {/* 미입고 알림 */}
+      {pendingCount > 0 && (
+        <div
+          className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center justify-between cursor-pointer"
+          onClick={() => setFilter("ordered")}
+        >
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-amber-600" />
+            <span className="text-sm text-amber-800 dark:text-amber-200">미입고 발주 {pendingCount}건</span>
+          </div>
+          <ChevronRight className="w-4 h-4 text-amber-600" />
+        </div>
+      )}
+
+      {/* 필터 + 추가 */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex gap-1">
+          {(["all", "ordered", "received"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                filter === f
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              {f === "all" ? "전체" : f === "ordered" ? "미입고" : "입고완료"}
+            </button>
+          ))}
+        </div>
+        <Button size="sm" onClick={() => setShowForm(true)} className="h-8 text-xs">
+          <Plus className="w-3.5 h-3.5 mr-1" /> 발주 등록
+        </Button>
+      </div>
+
+      {/* 발주 등록 폼 */}
+      {showForm && (
+        <OrderForm
+          restaurantId={restaurantId}
+          onClose={() => setShowForm(false)}
+          onSuccess={() => {
+            setShowForm(false);
+            utils.purchasesV2.listOrdersByMonth.invalidate();
+            utils.purchasesV2.pendingOrders.invalidate();
+          }}
+        />
+      )}
+
+      {/* 목록 */}
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground text-center py-8">로딩 중...</p>
+      ) : filteredOrders.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">발주 내역이 없습니다</p>
+      ) : (
+        filteredOrders.map((order: any) => (
+          <OrderCard
+            key={order.id}
+            order={order}
+            restaurantId={restaurantId}
+            onUpdate={() => {
+              utils.purchasesV2.listOrdersByMonth.invalidate();
+              utils.purchasesV2.pendingOrders.invalidate();
+            }}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+/** 발주 등록 폼 */
+function OrderForm({
+  restaurantId,
+  onClose,
+  onSuccess,
+}: {
+  restaurantId: number;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
+  const [note, setNote] = useState("");
+  const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  const { data: counterparties } = trpc.counterparties.list.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const createOrder = trpc.purchasesV2.createOrder.useMutation({
+    onSuccess: () => { toast.success("발주 등록 완료"); onSuccess(); },
+    onError: (err: any) => toast.error(err.message || "등록 실패"),
+  });
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const data = await res.json();
+      if (data.url) setAttachmentUrl(data.url);
+    } catch {
+      toast.error("업로드 실패");
+    }
+    setUploading(false);
+  };
+
+  return (
+    <Card className="p-4 space-y-3 border-primary/30">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold">발주 등록</h3>
+        <button onClick={onClose}><X className="w-4 h-4" /></button>
+      </div>
+
+      <div>
+        <label className="text-[10px] text-muted-foreground">발주일</label>
+        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-8 text-sm mt-0.5" />
+      </div>
+
+      <div>
+        <label className="text-[10px] text-muted-foreground">거래처 (선택)</label>
+        <select
+          value={counterpartyId ?? ""}
+          onChange={(e) => setCounterpartyId(e.target.value ? Number(e.target.value) : null)}
+          className="w-full h-8 rounded-md border border-border bg-background px-2 text-sm mt-0.5"
+        >
+          <option value="">미지정</option>
+          {(counterparties || []).map((cp: any) => (
+            <option key={cp.id} value={cp.id}>{cp.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="text-[10px] text-muted-foreground">메모</label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="발주 내용 메모..."
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm mt-0.5 min-h-[60px] resize-none"
+        />
+      </div>
+
+      <div>
+        <label className="text-[10px] text-muted-foreground">사진 첨부</label>
+        <div className="mt-1">
+          {attachmentUrl ? (
+            <div className="relative">
+              <img src={attachmentUrl} alt="발주 사진" className="w-full max-h-48 object-contain rounded-md border" />
+              <button
+                onClick={() => setAttachmentUrl("")}
+                className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ) : (
+            <label className="flex items-center justify-center gap-2 h-20 border-2 border-dashed border-border rounded-md cursor-pointer hover:border-primary/50 transition-colors">
+              <Camera className="w-5 h-5 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">{uploading ? "업로드 중..." : "사진 촬영/선택"}</span>
+              <input type="file" accept="image/*" capture="environment" onChange={handleUpload} className="hidden" />
+            </label>
+          )}
+        </div>
+      </div>
+
+      <Button
+        onClick={() => createOrder.mutate({ restaurantId, purchaseDate: date, counterpartyId, note: note || undefined, attachmentUrl: attachmentUrl || undefined })}
+        disabled={createOrder.isPending}
+        className="w-full h-9 text-sm"
+      >
+        발주 등록
+      </Button>
+    </Card>
+  );
+}
+
+/** 발주 카드 */
+function OrderCard({
+  order,
+  restaurantId,
+  onUpdate,
+}: {
+  order: any;
+  restaurantId: number;
+  onUpdate: () => void;
+}) {
+  const [showReceiveForm, setShowReceiveForm] = useState(false);
+  const [receiveAmount, setReceiveAmount] = useState("");
+  const [showImage, setShowImage] = useState(false);
+
+  const confirm = trpc.purchasesV2.confirmReceive.useMutation({
+    onSuccess: () => { toast.success("입고 확인 완료"); onUpdate(); setShowReceiveForm(false); },
+    onError: (err: any) => toast.error(err.message || "처리 실패"),
+  });
+  const deleteOrder = trpc.purchasesV2.deleteOrder.useMutation({
+    onSuccess: () => { toast.success("삭제됨"); onUpdate(); },
+  });
+
+  const dateStr = order.purchaseDate instanceof Date
+    ? order.purchaseDate.toISOString().split("T")[0]
+    : String(order.purchaseDate ?? "").split("T")[0];
+  const isOrdered = order.status === "ordered";
+
+  return (
+    <Card className={`p-3 ${isOrdered ? "border-amber-300 dark:border-amber-700" : ""}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <Badge variant={isOrdered ? "outline" : "secondary"} className={`text-[10px] ${isOrdered ? "border-amber-500 text-amber-600" : ""}`}>
+              {isOrdered ? "미입고" : "입고완료"}
+            </Badge>
+            <span className="text-xs text-muted-foreground">{dateStr}</span>
+          </div>
+          <div className="mt-1">
+            {order.counterpartyName && (
+              <p className="text-sm font-medium">{order.counterpartyName}</p>
+            )}
+            {order.note && (
+              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{order.note}</p>
+            )}
+            {Number(order.totalAmount) > 0 && (
+              <p className="text-sm font-bold text-foreground mt-1">
+                {Number(order.totalAmount).toLocaleString()}원
+              </p>
+            )}
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">{order.createdByName}</p>
+        </div>
+
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          {order.attachmentUrl && (
+            <button onClick={() => setShowImage(!showImage)} className="p-1.5 rounded-md bg-muted hover:bg-muted/80">
+              <Image className="w-4 h-4 text-muted-foreground" />
+            </button>
+          )}
+          {isOrdered && (
+            <Button size="sm" variant="outline" onClick={() => setShowReceiveForm(!showReceiveForm)} className="h-7 text-[10px] px-2">
+              <Check className="w-3 h-3 mr-0.5" /> 입고확인
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* 사진 미리보기 */}
+      {showImage && order.attachmentUrl && (
+        <div className="mt-2">
+          <img src={order.attachmentUrl} alt="발주 사진" className="w-full max-h-60 object-contain rounded-md border" />
+        </div>
+      )}
+
+      {/* 입고 확인 폼 */}
+      {showReceiveForm && (
+        <div className="mt-3 pt-3 border-t space-y-2">
+          <div>
+            <label className="text-[10px] text-muted-foreground">입고 금액 (원)</label>
+            <Input
+              type="number"
+              value={receiveAmount}
+              onChange={(e) => setReceiveAmount(e.target.value)}
+              placeholder="금액 입력 (선택)"
+              className="h-8 text-sm mt-0.5"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => confirm.mutate({
+                id: order.id,
+                totalAmount: receiveAmount ? receiveAmount : undefined,
+              })}
+              disabled={confirm.isPending}
+              className="flex-1 h-8 text-xs"
+            >
+              <Check className="w-3.5 h-3.5 mr-1" /> 입고 확인
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowReceiveForm(false)} className="h-8 text-xs">
+              취소
+            </Button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 즉시지출 탭
+// ═══════════════════════════════════════════════════════════════════════
+function ExpensesTab({ restaurantId }: { restaurantId: number }) {
+  const [now] = useState(() => new Date());
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [showForm, setShowForm] = useState(false);
+  const [showCategoryMgr, setShowCategoryMgr] = useState(false);
+
+  // 카테고리 자동 시드
+  const seedCategories = trpc.dailyExpenses.seedDefaultCategories.useMutation();
+  const { data: categories, isLoading: catLoading } = trpc.dailyExpenses.listCategories.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const { data: expenses, isLoading } = trpc.dailyExpenses.listByMonth.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 },
+  );
+  const { data: summary } = trpc.dailyExpenses.monthlySummary.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 },
+  );
+  const utils = trpc.useUtils();
+
+  // 카테고리가 없으면 자동 시드
+  useEffect(() => {
+    if (!catLoading && categories && categories.length === 0) {
+      seedCategories.mutate({ restaurantId }, {
+        onSuccess: () => utils.dailyExpenses.listCategories.invalidate(),
+      });
+    }
+  }, [catLoading, categories]);
+
+  const totalExpense = (summary || []).reduce((s: number, r: any) => s + r.total, 0);
+
+  const prevMonth = () => {
+    if (month === 1) { setYear(y => y - 1); setMonth(12); }
+    else setMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (month === 12) { setYear(y => y + 1); setMonth(1); }
+    else setMonth(m => m + 1);
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* 월 네비게이션 */}
+      <div className="flex items-center justify-between">
+        <button onClick={prevMonth} className="p-1"><ChevronLeft className="w-5 h-5" /></button>
+        <span className="text-sm font-bold">{year}년 {month}월</span>
+        <button onClick={nextMonth} className="p-1"><ChevronRight className="w-5 h-5" /></button>
+      </div>
+
+      {/* 월 합계 + 카테고리별 */}
+      <Card className="p-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-muted-foreground">월 즉시지출 합계</span>
+          <span className="text-lg font-bold">{totalExpense.toLocaleString()}원</span>
+        </div>
+        {(summary || []).length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {(summary || []).map((s: any, i: number) => (
+              <Badge key={i} variant="secondary" className="text-[10px]">
+                {s.categoryName} {s.total.toLocaleString()}원
+              </Badge>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* 추가 + 카테고리 관리 */}
+      <div className="flex items-center justify-between">
+        <Button size="sm" variant="outline" onClick={() => setShowCategoryMgr(!showCategoryMgr)} className="h-8 text-xs">
+          <Settings className="w-3.5 h-3.5 mr-1" /> 카테고리 관리
+        </Button>
+        <Button size="sm" onClick={() => setShowForm(true)} className="h-8 text-xs">
+          <Plus className="w-3.5 h-3.5 mr-1" /> 지출 등록
+        </Button>
+      </div>
+
+      {/* 카테고리 관리 */}
+      {showCategoryMgr && (
+        <CategoryManager
+          restaurantId={restaurantId}
+          categories={categories || []}
+          onClose={() => setShowCategoryMgr(false)}
+        />
+      )}
+
+      {/* 지출 등록 폼 */}
+      {showForm && (
+        <ExpenseForm
+          restaurantId={restaurantId}
+          categories={categories || []}
+          onClose={() => setShowForm(false)}
+          onSuccess={() => {
+            setShowForm(false);
+            utils.dailyExpenses.listByMonth.invalidate();
+            utils.dailyExpenses.monthlySummary.invalidate();
+          }}
+        />
+      )}
+
+      {/* 목록 */}
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground text-center py-8">로딩 중...</p>
+      ) : (expenses || []).length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">지출 내역이 없습니다</p>
+      ) : (
+        (expenses || []).map((exp: any) => (
+          <ExpenseCard
+            key={exp.id}
+            expense={exp}
+            restaurantId={restaurantId}
+            onUpdate={() => {
+              utils.dailyExpenses.listByMonth.invalidate();
+              utils.dailyExpenses.monthlySummary.invalidate();
+            }}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+/** 카테고리 관리 */
+function CategoryManager({
+  restaurantId,
+  categories,
+  onClose,
+}: {
+  restaurantId: number;
+  categories: any[];
+  onClose: () => void;
+}) {
+  const [newName, setNewName] = useState("");
+  const utils = trpc.useUtils();
+
+  const createCat = trpc.dailyExpenses.createCategory.useMutation({
+    onSuccess: () => {
+      toast.success("카테고리 추가됨");
+      setNewName("");
+      utils.dailyExpenses.listCategories.invalidate();
+    },
+    onError: (err: any) => toast.error(err.message || "추가 실패"),
+  });
+  const deactivateCat = trpc.dailyExpenses.deactivateCategory.useMutation({
+    onSuccess: () => {
+      toast.success("카테고리 삭제됨");
+      utils.dailyExpenses.listCategories.invalidate();
+    },
+  });
+
+  return (
+    <Card className="p-3 space-y-2 border-primary/30">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold">지출 카테고리 관리</h3>
+        <button onClick={onClose}><X className="w-4 h-4" /></button>
+      </div>
+      {categories.map((cat: any) => (
+        <div key={cat.id} className="flex items-center justify-between py-1">
+          <span className="text-sm">{cat.name}</span>
+          <button
+            onClick={() => { if (window.confirm(`"${cat.name}" 카테고리를 삭제하시겠습니까?`)) deactivateCat.mutate({ id: cat.id }); }}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ))}
+      <div className="flex gap-2 pt-1">
+        <Input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="새 카테고리명"
+          className="h-8 text-sm flex-1"
+          onKeyDown={(e) => { if (e.key === "Enter" && newName.trim()) createCat.mutate({ restaurantId, name: newName.trim() }); }}
+        />
+        <Button
+          size="sm"
+          onClick={() => { if (newName.trim()) createCat.mutate({ restaurantId, name: newName.trim() }); }}
+          disabled={!newName.trim() || createCat.isPending}
+          className="h-8 text-xs"
+        >
+          추가
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+/** 지출 등록 폼 */
+function ExpenseForm({
+  restaurantId,
+  categories,
+  onClose,
+  onSuccess,
+}: {
+  restaurantId: number;
+  categories: any[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [categoryId, setCategoryId] = useState<number>(categories[0]?.id ?? 0);
+  const [title, setTitle] = useState("");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  const create = trpc.dailyExpenses.create.useMutation({
+    onSuccess: () => { toast.success("지출 등록 완료"); onSuccess(); },
+    onError: (err: any) => toast.error(err.message || "등록 실패"),
+  });
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const data = await res.json();
+      if (data.url) setAttachmentUrl(data.url);
+    } catch {
+      toast.error("업로드 실패");
+    }
+    setUploading(false);
+  };
+
+  return (
+    <Card className="p-4 space-y-3 border-primary/30">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold">즉시지출 등록</h3>
+        <button onClick={onClose}><X className="w-4 h-4" /></button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] text-muted-foreground">지출일</label>
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-8 text-sm mt-0.5" />
+        </div>
+        <div>
+          <label className="text-[10px] text-muted-foreground">카테고리</label>
+          <select
+            value={categoryId}
+            onChange={(e) => setCategoryId(Number(e.target.value))}
+            className="w-full h-8 rounded-md border border-border bg-background px-2 text-sm mt-0.5"
+          >
+            {categories.map((cat: any) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-[10px] text-muted-foreground">제목</label>
+        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="지출 내용" className="h-8 text-sm mt-0.5" />
+      </div>
+
+      <div>
+        <label className="text-[10px] text-muted-foreground">금액 (원)</label>
+        <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" className="h-8 text-sm mt-0.5" />
+      </div>
+
+      <div>
+        <label className="text-[10px] text-muted-foreground">메모</label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="상세 메모 (선택)"
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm mt-0.5 min-h-[40px] resize-none"
+        />
+      </div>
+
+      <div>
+        <label className="text-[10px] text-muted-foreground">사진 첨부</label>
+        <div className="mt-1">
+          {attachmentUrl ? (
+            <div className="relative">
+              <img src={attachmentUrl} alt="지출 사진" className="w-full max-h-48 object-contain rounded-md border" />
+              <button onClick={() => setAttachmentUrl("")} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ) : (
+            <label className="flex items-center justify-center gap-2 h-16 border-2 border-dashed border-border rounded-md cursor-pointer hover:border-primary/50">
+              <Camera className="w-4 h-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">{uploading ? "업로드 중..." : "사진 첨부"}</span>
+              <input type="file" accept="image/*" capture="environment" onChange={handleUpload} className="hidden" />
+            </label>
+          )}
+        </div>
+      </div>
+
+      <Button
+        onClick={() => {
+          if (!title.trim()) { toast.error("제목을 입력해주세요"); return; }
+          if (!categoryId) { toast.error("카테고리를 선택해주세요"); return; }
+          create.mutate({
+            restaurantId,
+            expenseDate: date,
+            categoryId,
+            title: title.trim(),
+            amount: Number(amount) || 0,
+            note: note || undefined,
+            attachmentUrl: attachmentUrl || undefined,
+          });
+        }}
+        disabled={create.isPending}
+        className="w-full h-9 text-sm"
+      >
+        지출 등록
+      </Button>
+    </Card>
+  );
+}
+
+/** 지출 카드 */
+function ExpenseCard({
+  expense,
+  restaurantId,
+  onUpdate,
+}: {
+  expense: any;
+  restaurantId: number;
+  onUpdate: () => void;
+}) {
+  const [showImage, setShowImage] = useState(false);
+  const deleteExp = trpc.dailyExpenses.delete.useMutation({
+    onSuccess: () => { toast.success("삭제됨"); onUpdate(); },
+  });
+
+  const dateStr = String(expense.expenseDate ?? "").split("T")[0];
+  const catName = expense.categoryName || expense.category || "기타";
+
+  return (
+    <Card className="p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-[10px]">{catName}</Badge>
+            <span className="text-xs text-muted-foreground">{dateStr}</span>
+          </div>
+          <p className="text-sm font-medium mt-1">{expense.title}</p>
+          {expense.note && <p className="text-xs text-muted-foreground mt-0.5">{expense.note}</p>}
+          <p className="text-sm font-bold mt-1">{Number(expense.amount).toLocaleString()}원</p>
+        </div>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          {expense.attachmentUrl && (
+            <button onClick={() => setShowImage(!showImage)} className="p-1.5 rounded-md bg-muted hover:bg-muted/80">
+              <Image className="w-4 h-4 text-muted-foreground" />
+            </button>
+          )}
+          <button
+            onClick={() => { if (window.confirm("이 지출을 삭제하시겠습니까?")) deleteExp.mutate({ id: expense.id, restaurantId }); }}
+            className="p-1.5 rounded-md hover:bg-destructive/10"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
+          </button>
+        </div>
+      </div>
+      {showImage && expense.attachmentUrl && (
+        <div className="mt-2">
+          <img src={expense.attachmentUrl} alt="지출 사진" className="w-full max-h-60 object-contain rounded-md border" />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 거래처 관리 탭
 // ═══════════════════════════════════════════════════════════════════════
 const CP_TYPE_LABELS: Record<string, string> = {
   supplier: "공급업체", online: "온라인", mart: "마트", repair: "수리/AS", other: "기타",
@@ -142,7 +844,6 @@ function SuppliersTab({ restaurantId }: { restaurantId: number }) {
         counterpartiesList.map((cp: any) => (
           <Card key={cp.id} className="p-3">
             {editingId === cp.id ? (
-              /* ── 수정 모드 ── */
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-foreground">거래처 정보 수정</span>
@@ -198,7 +899,6 @@ function SuppliersTab({ restaurantId }: { restaurantId: number }) {
                 </div>
               </div>
             ) : (
-              /* ── 보기 모드 ── */
               <div className="flex items-start justify-between gap-2" onClick={() => startEdit(cp)} role="button">
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-foreground truncate">{cp.name}</p>
@@ -218,613 +918,6 @@ function SuppliersTab({ restaurantId }: { restaurantId: number }) {
                 <Pencil className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-1" />
               </div>
             )}
-          </Card>
-        ))
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// 가격비교 탭: 동일 품목 거래처별 단가 비교
-// ═══════════════════════════════════════════════════════════════════════
-function PriceCompareTab({ restaurantId }: { restaurantId: number }) {
-  const [search, setSearch] = useState("");
-  const { data, isLoading } = trpc.purchasesV2.itemPriceComparison.useQuery(
-    { restaurantId },
-    { enabled: restaurantId > 0 },
-  );
-
-  const items = (data || []).filter((item: any) =>
-    !search || item.itemName.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const multiSupplierItems = items.filter((item: any) => item.suppliers.length >= 2);
-  const singleSupplierItems = items.filter((item: any) => item.suppliers.length === 1);
-
-  return (
-    <div className="space-y-3">
-      <Input
-        placeholder="품목명 검색..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="h-9 text-sm"
-      />
-
-      {isLoading ? (
-        <p className="text-sm text-muted-foreground text-center py-8">로딩 중...</p>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-8">매입 데이터가 없습니다</p>
-      ) : (
-        <>
-          {/* 복수 거래처 품목 (비교 가능) */}
-          {multiSupplierItems.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-foreground flex items-center gap-1">
-                <ArrowUpDown className="w-3.5 h-3.5" /> 복수 거래처 비교 ({multiSupplierItems.length}개 품목)
-              </h3>
-              {multiSupplierItems.map((item: any) => {
-                const prices = item.suppliers.map((s: any) => Number(s.unitPrice));
-                const minPrice = Math.min(...prices);
-                const maxPrice = Math.max(...prices);
-                return (
-                  <Card key={item.itemName} className="p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-foreground text-sm">{item.itemName}</span>
-                      {maxPrice > minPrice && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300">
-                          차이 ₩{(maxPrice - minPrice).toLocaleString()}
-                        </span>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      {item.suppliers
-                        .sort((a: any, b: any) => Number(a.unitPrice) - Number(b.unitPrice))
-                        .map((s: any, si: number) => {
-                          const price = Number(s.unitPrice);
-                          const isCheapest = price === minPrice && prices.length > 1;
-                          const isMostExpensive = price === maxPrice && prices.length > 1 && maxPrice !== minPrice;
-                          return (
-                            <div key={si} className={`flex items-center justify-between text-xs px-2 py-1.5 rounded ${
-                              isCheapest ? "bg-green-50 dark:bg-green-900/20" : isMostExpensive ? "bg-red-50 dark:bg-red-900/20" : "bg-muted/30"
-                            }`}>
-                              <span className="text-foreground">{s.counterpartyName}</span>
-                              <div className="flex items-center gap-2">
-                                <span className={`font-medium tabular-nums ${
-                                  isCheapest ? "text-green-600 dark:text-green-400" : isMostExpensive ? "text-red-500" : "text-foreground"
-                                }`}>
-                                  ₩{price.toLocaleString()}/{s.unitName || '개'}
-                                </span>
-                                {isCheapest && <span className="text-[9px] text-green-600 dark:text-green-400">최저</span>}
-                                {isMostExpensive && <span className="text-[9px] text-red-500">최고</span>}
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-
-          {/* 단일 거래처 품목 */}
-          {singleSupplierItems.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-muted-foreground mt-4">단일 거래처 품목 ({singleSupplierItems.length}개)</h3>
-              {singleSupplierItems.map((item: any) => (
-                <div key={item.itemName} className="flex items-center justify-between px-3 py-2 bg-muted/20 rounded text-xs">
-                  <span className="text-foreground">{item.itemName}</span>
-                  <span className="text-muted-foreground">
-                    {item.suppliers[0]?.counterpartyName} · ₩{Number(item.suppliers[0]?.unitPrice).toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// 단가추이 탭: 시기별 품목 단가 변화
-// ═══════════════════════════════════════════════════════════════════════
-function PriceTrendTab({ restaurantId }: { restaurantId: number }) {
-  const [search, setSearch] = useState("");
-  const [months, setMonths] = useState(6);
-  const [expandedItem, setExpandedItem] = useState<string | null>(null);
-  const { data, isLoading } = trpc.purchasesV2.itemPriceTrend.useQuery(
-    { restaurantId, months },
-    { enabled: restaurantId > 0 },
-  );
-
-  const items = (data || []).filter((item: any) =>
-    !search || item.itemName.toLowerCase().includes(search.toLowerCase())
-  );
-
-  return (
-    <div className="space-y-3">
-      <div className="flex gap-2">
-        <Input
-          placeholder="품목명 검색..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 h-9 text-sm"
-        />
-        <select
-          value={months}
-          onChange={(e) => setMonths(Number(e.target.value))}
-          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-        >
-          <option value={3}>3개월</option>
-          <option value={6}>6개월</option>
-          <option value={12}>12개월</option>
-        </select>
-      </div>
-
-      {isLoading ? (
-        <p className="text-sm text-muted-foreground text-center py-8">로딩 중...</p>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-8">단가 데이터가 없습니다</p>
-      ) : (
-        <div className="space-y-2">
-          {items.map((item: any) => {
-            const expanded = expandedItem === item.itemName;
-            const changePercent = item.points.length >= 2
-              ? ((item.latestPrice - item.points[0].unitPrice) / item.points[0].unitPrice * 100)
-              : 0;
-
-            return (
-              <Card key={item.itemName} className="overflow-hidden">
-                <button
-                  onClick={() => setExpandedItem(expanded ? null : item.itemName)}
-                  className="w-full flex items-center justify-between p-3 text-left hover:bg-muted/30 transition-colors"
-                >
-                  <div>
-                    <span className="font-medium text-foreground text-sm">{item.itemName}</span>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-muted-foreground">
-                        현재 ₩{item.latestPrice.toLocaleString()}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        (₩{item.minPrice.toLocaleString()} ~ ₩{item.maxPrice.toLocaleString()})
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {changePercent !== 0 && (
-                      <span className={`text-xs font-medium flex items-center gap-0.5 ${
-                        changePercent > 0 ? "text-red-500" : "text-green-600 dark:text-green-400"
-                      }`}>
-                        {changePercent > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                        {changePercent > 0 ? "+" : ""}{changePercent.toFixed(1)}%
-                      </span>
-                    )}
-                    {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                  </div>
-                </button>
-
-                {expanded && (
-                  <div className="px-3 pb-3 border-t border-border pt-2 space-y-1">
-                    {item.points.map((p: any, pi: number) => {
-                      const prevPrice = pi > 0 ? item.points[pi - 1].unitPrice : null;
-                      const diff = prevPrice ? p.unitPrice - prevPrice : 0;
-                      return (
-                        <div key={pi} className="flex items-center justify-between text-xs py-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground w-20">
-                              {typeof p.purchaseDate === 'string'
-                                ? p.purchaseDate.substring(0, 10)
-                                : new Date(p.purchaseDate).toISOString().substring(0, 10)}
-                            </span>
-                            <span className="text-muted-foreground">{p.counterpartyName}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-foreground tabular-nums">₩{p.unitPrice.toLocaleString()}</span>
-                            {diff !== 0 && (
-                              <span className={`text-[10px] ${diff > 0 ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
-                                {diff > 0 ? "▲" : "▼"}{Math.abs(diff).toLocaleString()}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// 발주현황 탭: 거래처별 금액분석 + 미입고 발주
-// ═══════════════════════════════════════════════════════════════════════
-function PendingOrdersTab({ restaurantId }: { restaurantId: number }) {
-  const [months, setMonths] = useState(3);
-
-  const pendingQuery = trpc.purchasesV2.pendingOrders.useQuery(
-    { restaurantId },
-    { enabled: restaurantId > 0 },
-  );
-
-  const analysisQuery = trpc.purchasesV2.counterpartyAmountAnalysis.useQuery(
-    { restaurantId, months },
-    { enabled: restaurantId > 0 },
-  );
-
-  const updateOrder = trpc.purchasesV2.updateOrder.useMutation({
-    onSuccess() {
-      toast.success("입고 처리 완료");
-      pendingQuery.refetch();
-      analysisQuery.refetch();
-    },
-  });
-
-  const pending = pendingQuery.data || [];
-  const analysis = analysisQuery.data || [];
-  const totalPending = pending.reduce((s, o: any) => s + Number(o.totalAmount || 0), 0);
-
-  return (
-    <div className="space-y-4">
-      {/* 미입고 발주 */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-            <AlertTriangle className="w-4 h-4 text-amber-500" />
-            미입고 발주 ({pending.length}건)
-          </h3>
-          {totalPending > 0 && (
-            <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
-              ₩{totalPending.toLocaleString()}
-            </span>
-          )}
-        </div>
-
-        {pending.length === 0 ? (
-          <Card className="p-4 text-center">
-            <p className="text-sm text-muted-foreground">미입고 발주가 없습니다</p>
-          </Card>
-        ) : (
-          pending.map((order: any) => (
-            <Card key={order.id} className="p-3 border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-foreground text-sm">
-                    {order.counterpartyName || '미지정'} · ₩{Number(order.totalAmount).toLocaleString()}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    {typeof order.purchaseDate === 'string'
-                      ? order.purchaseDate.substring(0, 10)
-                      : new Date(order.purchaseDate).toISOString().substring(0, 10)}
-                    {order.note && ` · ${order.note}`}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-xs h-7 gap-1 border-green-300 text-green-600 hover:bg-green-50 dark:border-green-700 dark:text-green-400 dark:hover:bg-green-900/20"
-                  onClick={() => updateOrder.mutate({ id: order.id, status: "received" })}
-                  disabled={updateOrder.isPending}
-                >
-                  <Check className="w-3 h-3" /> 입고확인
-                </Button>
-              </div>
-            </Card>
-          ))
-        )}
-      </div>
-
-      {/* 거래처별 금액 분석 */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">거래처별 매입 분석</h3>
-          <select
-            value={months}
-            onChange={(e) => setMonths(Number(e.target.value))}
-            className="h-7 rounded-md border border-border bg-background px-2 text-xs"
-          >
-            <option value={1}>1개월</option>
-            <option value={3}>3개월</option>
-            <option value={6}>6개월</option>
-          </select>
-        </div>
-
-        {analysisQuery.isLoading ? (
-          <p className="text-sm text-muted-foreground text-center py-4">로딩 중...</p>
-        ) : analysis.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">해당 기간 매입 데이터가 없습니다</p>
-        ) : (
-          analysis.map((cp: any) => {
-            const total = cp.totalReceived + cp.totalOrdered;
-            return (
-              <Card key={cp.counterpartyName} className="p-3">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="font-medium text-foreground text-sm">{cp.counterpartyName}</span>
-                  <span className="text-sm font-bold text-foreground tabular-nums">₩{total.toLocaleString()}</span>
-                </div>
-                <div className="flex gap-3 text-xs text-muted-foreground">
-                  <span>입고 {cp.receivedCount}건 · ₩{cp.totalReceived.toLocaleString()}</span>
-                  {cp.orderedCount > 0 && (
-                    <span className="text-amber-600 dark:text-amber-400">
-                      미입고 {cp.orderedCount}건 · ₩{cp.totalOrdered.toLocaleString()}
-                    </span>
-                  )}
-                </div>
-              </Card>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// 품목관리 탭 — 유사 품목 합치기
-// ═══════════════════════════════════════════════════════════════════════
-function ItemManagementTab({ restaurantId }: { restaurantId: number }) {
-  const { data, isLoading, refetch } = trpc.items.findSimilarGroups.useQuery(
-    { restaurantId },
-    { enabled: restaurantId > 0 },
-  );
-  const mergeMut = trpc.items.merge.useMutation({
-    onSuccess: (res) => {
-      toast.success(`${res.merged}개 품목을 병합했습니다`);
-      refetch();
-    },
-    onError: (err) => toast.error(`병합 실패: ${err.message}`),
-  });
-
-  const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
-  const [targetId, setTargetId] = useState<number | null>(null);
-  const [showAll, setShowAll] = useState(false);
-  const [search, setSearch] = useState("");
-
-  if (isLoading) return <div className="text-center py-8 text-sm text-muted-foreground">로딩 중...</div>;
-
-  const groups = data?.groups || [];
-  const allItems = data?.allItems || [];
-
-  const filteredAll = search
-    ? allItems.filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
-    : allItems;
-
-  const handleMerge = (groupIdx: number, tId: number) => {
-    const group = groups[groupIdx];
-    if (!group) return;
-    const sourceIds = group.items.map(i => i.id).filter(id => id !== tId);
-    const targetItem = group.items.find(i => i.id === tId);
-    if (!targetItem || sourceIds.length === 0) return;
-
-    if (!confirm(`"${targetItem.name}"으로 ${sourceIds.length}개 품목을 합칩니다.\n거래처 매핑과 매입 이력이 모두 이동됩니다.\n계속하시겠습니까?`)) return;
-    mergeMut.mutate({ targetId: tId, sourceIds });
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* 요약 */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          전체 <span className="font-semibold text-foreground">{data?.totalItems ?? 0}</span>개 품목
-          {groups.length > 0 && (
-            <span className="ml-2 text-amber-600 dark:text-amber-400">
-              · 유사 그룹 <span className="font-semibold">{groups.length}</span>개 발견
-            </span>
-          )}
-        </div>
-        <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setShowAll(!showAll)}>
-          {showAll ? "유사 그룹만" : "전체 품목"}
-        </Button>
-      </div>
-
-      {/* 유사 그룹 병합 UI */}
-      {!showAll && (
-        <>
-          {groups.length === 0 ? (
-            <Card className="p-6 text-center text-sm text-muted-foreground">
-              <Check className="w-6 h-6 mx-auto mb-2 text-green-500" />
-              유사한 품목이 없습니다
-            </Card>
-          ) : (
-            groups.map((group, gi) => (
-              <Card key={gi} className="overflow-hidden">
-                <div className="px-4 py-2.5 bg-amber-50 dark:bg-amber-900/20 border-b border-border flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Merge size={14} className="text-amber-600" />
-                    <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-                      유사 품목 {group.items.length}개
-                    </span>
-                  </div>
-                  {selectedGroup === gi ? (
-                    <Button size="sm" variant="ghost" className="text-xs h-6 px-2" onClick={() => { setSelectedGroup(null); setTargetId(null); }}>
-                      취소
-                    </Button>
-                  ) : (
-                    <Button size="sm" variant="outline" className="text-xs h-6 px-2" onClick={() => { setSelectedGroup(gi); setTargetId(group.items[0].id); }}>
-                      합치기
-                    </Button>
-                  )}
-                </div>
-                <div className="divide-y divide-border">
-                  {group.items.map((item) => {
-                    const isTarget = selectedGroup === gi && targetId === item.id;
-                    return (
-                      <div
-                        key={item.id}
-                        className={`px-4 py-2.5 flex items-center justify-between text-sm ${isTarget ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}
-                        onClick={() => { if (selectedGroup === gi) setTargetId(item.id); }}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {selectedGroup === gi && (
-                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${isTarget ? "border-blue-500 bg-blue-500" : "border-muted-foreground/30"}`}>
-                              {isTarget && <Check size={10} className="text-white" />}
-                            </div>
-                          )}
-                          <span className="font-medium text-foreground truncate">{item.name}</span>
-                          {isTarget && <Badge className="text-[9px] bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 shrink-0">대표</Badge>}
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
-                          {item.counterpartyCount > 0 && <span>거래처 {item.counterpartyCount}</span>}
-                          {item.purchaseCount > 0 && <span>매입 {item.purchaseCount}</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {selectedGroup === gi && targetId && (
-                  <div className="px-4 py-2.5 bg-muted/30 border-t border-border">
-                    <Button
-                      size="sm"
-                      className="w-full text-xs"
-                      disabled={mergeMut.isPending}
-                      onClick={() => handleMerge(gi, targetId)}
-                    >
-                      <Merge size={12} className="mr-1" />
-                      "{group.items.find(i => i.id === targetId)?.name}"으로 합치기
-                    </Button>
-                  </div>
-                )}
-              </Card>
-            ))
-          )}
-        </>
-      )}
-
-      {/* 전체 품목 목록 */}
-      {showAll && (
-        <>
-          <Input
-            placeholder="품목명 검색..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8 text-sm"
-          />
-          <Card className="overflow-hidden">
-            <div className="divide-y divide-border max-h-[60vh] overflow-y-auto">
-              {filteredAll.map((item) => (
-                <div key={item.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-medium text-foreground truncate">{item.name}</span>
-                    {item.baseUnit && <span className="text-xs text-muted-foreground">({item.baseUnit})</span>}
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
-                    {item.counterpartyCount > 0 && <span>거래처 {item.counterpartyCount}</span>}
-                    {item.purchaseCount > 0 && <span>매입 {item.purchaseCount}</span>}
-                  </div>
-                </div>
-              ))}
-              {filteredAll.length === 0 && (
-                <div className="p-6 text-center text-sm text-muted-foreground">검색 결과 없음</div>
-              )}
-            </div>
-          </Card>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// 중복관리 탭 — 동일 날짜+거래처+금액 중복 감지/삭제
-// ═══════════════════════════════════════════════════════════════════════
-function DuplicatesTab({ restaurantId }: { restaurantId: number }) {
-  const now = new Date();
-  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
-
-  const { data: dupes, isLoading, refetch } = trpc.purchasesV2.findDuplicates.useQuery(
-    { restaurantId, month },
-    { enabled: restaurantId > 0 },
-  );
-
-  const deleteMut = trpc.purchasesV2.deleteDuplicate.useMutation({
-    onSuccess: () => {
-      toast.success("삭제 완료");
-      refetch();
-    },
-    onError: (err) => toast.error(`삭제 실패: ${err.message}`),
-  });
-
-  const handleDelete = (orderId: number, counterpartyName: string) => {
-    if (!confirm(`${counterpartyName}의 전표 #${orderId}를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
-    deleteMut.mutate({ orderId });
-  };
-
-  const prevMonth = () => {
-    const d = new Date(month + "-01");
-    d.setMonth(d.getMonth() - 1);
-    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  };
-  const nextMonth = () => {
-    const d = new Date(month + "-01");
-    d.setMonth(d.getMonth() + 1);
-    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* 월 선택 */}
-      <div className="flex items-center justify-center gap-3">
-        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={prevMonth}>
-          <ChevronLeft size={16} />
-        </Button>
-        <span className="text-sm font-semibold min-w-[100px] text-center">{month}</span>
-        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={nextMonth}>
-          <ChevronRight size={16} />
-        </Button>
-      </div>
-
-      {isLoading ? (
-        <div className="text-center py-8 text-sm text-muted-foreground">검색 중...</div>
-      ) : !dupes || dupes.length === 0 ? (
-        <Card className="p-6 text-center text-sm text-muted-foreground">
-          <Check className="w-6 h-6 mx-auto mb-2 text-green-500" />
-          {month}에 중복 전표가 없습니다
-        </Card>
-      ) : (
-        dupes.map((d, i) => (
-          <Card key={i} className="overflow-hidden">
-            <div className="px-4 py-2.5 bg-red-50 dark:bg-red-900/20 border-b border-border">
-              <div className="flex items-center gap-2">
-                <Copy size={14} className="text-red-500" />
-                <span className="text-xs font-semibold text-red-700 dark:text-red-400">
-                  중복 {d.count}건
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  · {d.purchaseDate} · {d.counterpartyName} · ₩{Number(d.totalAmount).toLocaleString()}
-                </span>
-              </div>
-            </div>
-            <div className="divide-y divide-border">
-              {d.ids.map((orderId, idx) => (
-                <div key={orderId} className="px-4 py-2.5 flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-foreground font-medium">#{orderId}</span>
-                    <Badge variant={d.status === "received" ? "default" : "secondary"} className="text-[10px]">
-                      {d.status === "received" ? "입고" : "발주"}
-                    </Badge>
-                    {idx === 0 && <span className="text-[10px] text-muted-foreground">(먼저 등록)</span>}
-                  </div>
-                  {idx > 0 && (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="text-xs h-7 px-2"
-                      disabled={deleteMut.isPending}
-                      onClick={() => handleDelete(orderId, d.counterpartyName)}
-                    >
-                      <Trash2 size={12} className="mr-1" /> 삭제
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
           </Card>
         ))
       )}

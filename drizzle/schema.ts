@@ -606,12 +606,25 @@ export const purchaseOrderItemsV2 = mysqlTable("purchase_order_items_v2", {
 
 export type PurchaseOrderItemV2 = typeof purchaseOrderItemsV2.$inferSelect;
 
+// ─── Expense Categories (매장별 커스텀 지출 카테고리) ───────────────────────
+export const expenseCategories = mysqlTable("expense_categories", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ExpenseCategory = typeof expenseCategories.$inferSelect;
+
 // ─── Daily Expenses (즉시 지출) ──────────────────────────────────────────────
 export const dailyExpenses = mysqlTable("daily_expenses", {
   id: int("id").autoincrement().primaryKey(),
   restaurantId: int("restaurantId").notNull(),
   expenseDate: date("expenseDate").notNull(),
   category: mysqlEnum("category", ["internet", "repair", "supply", "delivery", "other"]).default("other").notNull(),
+  categoryId: int("categoryId"),  // 커스텀 카테고리 참조 (우선, null이면 레거시 category 사용)
   title: varchar("title", { length: 200 }).notNull(),
   amount: decimal("amount", { precision: 14, scale: 2 }).default("0").notNull(),
   note: text("note"),

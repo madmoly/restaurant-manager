@@ -787,13 +787,7 @@ function OpenTab({
 // PURCHASE TAB – 발주(사진+메모+입고확인) + 즉시지출
 // ============================================================================
 
-const EXPENSE_CATEGORIES: { value: string; label: string }[] = [
-  { value: 'internet', label: '인터넷발주' },
-  { value: 'repair', label: '수리' },
-  { value: 'supply', label: '소모품' },
-  { value: 'delivery', label: '배달' },
-  { value: 'other', label: '기타' },
-];
+// 커스텀 카테고리: DB에서 조회 (expenseCategories via trpc.dailyExpenses.listCategories)
 
 // ─── 발주 입고확인 대기 배너 ─────────────────────────────────
 function PendingOrdersBanner({ restaurantId }: { restaurantId: number }) {
@@ -859,7 +853,7 @@ function PurchaseTab({
 
   // ─── 즉시지출 입력 상태 ───
   const [showExpenseForm, setShowExpenseForm] = useState(false);
-  const [expCategory, setExpCategory] = useState<string>('other');
+  const [expCategoryId, setExpCategoryId] = useState<number>(0);
   const [expTitle, setExpTitle] = useState('');
   const [expAmount, setExpAmount] = useState('');
   const [expNote, setExpNote] = useState('');
@@ -874,9 +868,11 @@ function PurchaseTab({
   const counterpartiesQuery = trpc.counterparties.list.useQuery({ restaurantId });
   const ordersQuery = trpc.purchasesV2.listByDate.useQuery({ restaurantId, date });
   const expensesQuery = trpc.dailyExpenses.listByDate.useQuery({ restaurantId, date });
+  const categoriesQuery = trpc.dailyExpenses.listCategories.useQuery({ restaurantId });
+  const expenseCategories = categoriesQuery.data || [];
 
   // ─── 뮤테이션 ───
-  const createOrderMut = trpc.purchasesV2.createSimpleOrder.useMutation({
+  const createOrderMut = trpc.purchasesV2.createOrder.useMutation({
     onSuccess: () => {
       toast.success('발주가 등록되었습니다');
       ordersQuery.refetch();
@@ -919,7 +915,7 @@ function PurchaseTab({
 
   const resetExpenseForm = () => {
     setShowExpenseForm(false);
-    setExpCategory('other');
+    setExpCategoryId(0);
     setExpTitle('');
     setExpAmount('');
     setExpNote('');
@@ -963,10 +959,11 @@ function PurchaseTab({
 
   const handleSubmitExpense = () => {
     if (!expTitle.trim()) { toast.error('항목명을 입력해주세요'); return; }
+    if (!expCategoryId) { toast.error('카테고리를 선택해주세요'); return; }
     createExpenseMut.mutate({
       restaurantId,
       expenseDate: date,
-      category: expCategory as any,
+      categoryId: expCategoryId,
       title: expTitle.trim(),
       amount: parseNum(expAmount),
       note: expNote || undefined,
@@ -978,7 +975,7 @@ function PurchaseTab({
   const expenses = expensesQuery.data || [];
   const cps = counterpartiesQuery.data || [];
   const cpName = (id: number | null) => cps.find(c => c.id === id)?.name || '미지정';
-  const expCatLabel = (cat: string) => EXPENSE_CATEGORIES.find(c => c.value === cat)?.label || cat;
+  const expCatLabel = (exp: any) => exp.categoryName || exp.category || '기타';
 
   return (
     <div className="space-y-4 p-4">
@@ -1133,17 +1130,17 @@ function PurchaseTab({
             <div>
               <label className="text-xs text-muted-foreground">분류</label>
               <div className="flex flex-wrap gap-1.5 mt-1">
-                {EXPENSE_CATEGORIES.map((cat) => (
+                {expenseCategories.map((cat: any) => (
                   <button
-                    key={cat.value}
-                    onClick={() => setExpCategory(cat.value)}
+                    key={cat.id}
+                    onClick={() => setExpCategoryId(cat.id)}
                     className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                      expCategory === cat.value
+                      expCategoryId === cat.id
                         ? 'bg-blue-600 text-white border-blue-600'
                         : 'bg-muted/50 text-foreground border-border hover:bg-muted'
                     }`}
                   >
-                    {cat.label}
+                    {cat.name}
                   </button>
                 ))}
               </div>
@@ -1225,7 +1222,7 @@ function PurchaseTab({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-muted-foreground font-medium">
-                      {expCatLabel(exp.category)}
+                      {expCatLabel(exp)}
                     </span>
                     <span className="font-medium text-foreground">{exp.title}</span>
                   </div>
