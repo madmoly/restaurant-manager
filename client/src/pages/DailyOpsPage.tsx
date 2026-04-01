@@ -1555,7 +1555,7 @@ function PurchaseTab({
       </div>
 
       {/* ─── 발주/입고 입력 폼 ─── */}
-      {inputMode !== 'none' && (
+      {(inputMode === 'order' || inputMode === 'receive') && (
         <Card className={`border p-4 space-y-3 ${inputMode === 'order' ? 'bg-amber-50/30 dark:bg-amber-900/5 border-amber-200 dark:border-amber-800' : 'bg-card border-border'}`}>
           {/* 헤더: 제목 + 간편입력 토글 + 닫기 */}
           <div className="flex items-center justify-between">
