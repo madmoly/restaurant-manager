@@ -3117,11 +3117,15 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
               · 미확정 스케줄 {scheduleStatus.draft}건 — 스케줄 페이지에서 확정 필요 (초안 상태는 마감 불가)
             </p>
           )}
-          {salesZero && (
-            <p className="text-[11px] text-amber-600 dark:text-amber-400">
-              · 매출 0원 — 마감 시 확인 메시지가 표시됩니다
-            </p>
-          )}
+        </div>
+      )}
+
+      {/* 매출 0원 안내 (휴무일 아닌 경우) */}
+      {salesZero && !existing && (
+        <div className="rounded-lg border border-orange-300 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-700 p-3">
+          <p className="text-[11px] text-orange-700 dark:text-orange-300">
+            ⚠ 매출이 0원입니다. 마감 확정 시 확인 메시지가 표시됩니다.
+          </p>
         </div>
       )}
 
