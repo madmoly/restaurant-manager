@@ -185,9 +185,12 @@ export const fixedCosts = mysqlTable("fixed_costs", {
   costName: varchar("costName", { length: 100 }).notNull(),
   // monthly: 월 고정, yearly: 연간(월할), quarterly: 분기별(3개월할), sales_ratio: 매출대비 %
   costType: mysqlEnum("costType", ["monthly", "yearly", "one_time", "quarterly", "sales_ratio"]).default("monthly").notNull(),
+  category: varchar("category", { length: 50 }).default("기타"),  // 임대료, 관리비, 보험, 로열티/수수료, 유틸리티, 기타
   amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
   // yearly→12분할, quarterly→3분할, sales_ratio→amount는 % 값 (예: 5.5 = 5.5%)
-  effectiveMonth: varchar("effectiveMonth", { length: 7 }), // YYYY-MM (레거시)
+  startMonth: varchar("startMonth", { length: 7 }),   // YYYY-MM, 적용 시작월 (NULL=무기한)
+  endMonth: varchar("endMonth", { length: 7 }),        // YYYY-MM, 적용 종료월 (NULL=무기한)
+  effectiveMonth: varchar("effectiveMonth", { length: 7 }), // YYYY-MM (레거시, 신규에서 미사용)
   attachmentUrl: varchar("attachmentUrl", { length: 500 }),  // 첨부파일 URL
   note: text("note"),
   isActive: boolean("isActive").default(true).notNull(),
@@ -922,31 +925,6 @@ export const storeInfoCards = mysqlTable("store_info_cards", {
 });
 export type StoreInfoCard = typeof storeInfoCards.$inferSelect;
 
-// ─── 즉시지출 카테고리 ───────────────────────────────────────────────────────
-export const expenseCategories = mysqlTable("expense_categories", {
-  id: int("id").autoincrement().primaryKey(),
-  restaurantId: int("restaurantId").notNull(),
-  name: varchar("name", { length: 100 }).notNull(),
-  sortOrder: int("sortOrder").default(0).notNull(),
-  isActive: boolean("isActive").default(true).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
-// ─── 즉시지출 기록 ───────────────────────────────────────────────────────────
-export const dailyExpenses = mysqlTable("daily_expenses", {
-  id: int("id").autoincrement().primaryKey(),
-  restaurantId: int("restaurantId").notNull(),
-  date: date("date").notNull(),
-  categoryId: int("categoryId"),
-  category: varchar("category", { length: 50 }),
-  title: varchar("title", { length: 200 }).notNull(),
-  amount: decimal("amount", { precision: 14, scale: 2 }).default("0").notNull(),
-  note: text("note"),
-  attachmentUrl: text("attachmentUrl"),
-  createdBy: int("createdBy"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
 // ─── 매장별 근무 프리셋 시간 ─────────────────────────────────────────────────
 export const restaurantShiftPresets = mysqlTable("restaurant_shift_presets", {
   id: int("id").autoincrement().primaryKey(),
@@ -991,3 +969,30 @@ export const employerPresets = mysqlTable("employer_presets", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type EmployerPreset = typeof employerPresets.$inferSelect;
+
+// ─── 즉시지출 카테고리 ────────────────────────────────────────────────────────
+export const expenseCategories = mysqlTable("expense_categories", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ExpenseCategory = typeof expenseCategories.$inferSelect;
+
+// ─── 즉시지출 기록 ──────────────────────────────────────────────────────────
+export const dailyExpenses = mysqlTable("daily_expenses", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  date: date("date").notNull(),
+  categoryId: int("categoryId"),                                // expense_categories 참조
+  category: varchar("category", { length: 50 }),                // 레거시 호환
+  title: varchar("title", { length: 200 }).notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).default("0").notNull(),
+  note: text("note"),
+  attachmentUrl: text("attachmentUrl"),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type DailyExpense = typeof dailyExpenses.$inferSelect;

@@ -4,11 +4,12 @@ import { router, adminProcedure, protectedProcedure } from "../trpc";
 import { db } from "../db";
 import {
   restaurants, restaurantUsers, users, sales, purchaseOrders,
-  dailyClosings, fixedCosts, dailyOperations, intermediateSales,
+  dailyClosings, dailyOperations, intermediateSales,
   schedules, dailySalesDetail, businessGroups,
 } from "../../drizzle/schema";
 import { ROLE_LEVEL } from "@shared/permissions";
 import { getOwnedRestaurants, getOwnedRestaurantIds, realStoreCondition } from "../helpers/restaurantScope";
+import { calcMonthlyFixedCosts } from "../helpers/fixedCostCalc";
 
 export const adminRouter = router({
   /**
@@ -53,16 +54,13 @@ export const adminRouter = router({
             .from(dailyClosings)
             .where(and(eq(dailyClosings.restaurantId, r.id), between(dailyClosings.closingDate, start, end)));
 
-          // 고정비 합계 (effectiveMonth는 'YYYY-MM' 문자열)
-          const monthStr = `${input.year}-${String(input.month).padStart(2, "0")}`;
-          const [fixedRow] = await db
-            .select({ total: sql<string>`COALESCE(SUM(${fixedCosts.amount}), 0)` })
-            .from(fixedCosts)
-            .where(and(eq(fixedCosts.restaurantId, r.id), eq(fixedCosts.effectiveMonth, monthStr)));
-
           const salesTotal = Number(salesRow?.total ?? 0);
-          const purchasesTotal = Number(purchaseRow?.total ?? 0);          const laborCost = Number(closingRow?.laborCost ?? 0);
-          const fixedCostTotal = Number(fixedRow?.total ?? 0);
+          const purchasesTotal = Number(purchaseRow?.total ?? 0);
+          const laborCost = Number(closingRow?.laborCost ?? 0);
+
+          // 고정비 합계 (공통 함수 — costType별 월할 + 기간 필터 + sales_ratio 포함)
+          const fixedResult = await calcMonthlyFixedCosts(r.id, input.year, input.month, salesTotal);
+          const fixedCostTotal = fixedResult.totalWithRatio;
           const profit = salesTotal - purchasesTotal - laborCost - fixedCostTotal;
 
           return {
@@ -181,8 +179,8 @@ export const adminRouter = router({
           total: sql<number>`COUNT(*)`,
           active: sql<number>`SUM(CASE WHEN ${users.isActive} = true THEN 1 ELSE 0 END)`,
           admins: sql<number>`SUM(CASE WHEN ${users.role} = 'admin' THEN 1 ELSE 0 END)`,
-          users: sql<number>`SUM(CASE WHEN ${users.role} IN ('user', 'manager', 'employee') THEN 1 ELSE 0 END)`,
-        })
+          managers: sql<number>`SUM(CASE WHEN ${users.role} = 'manager' THEN 1 ELSE 0 END)`,
+          employees: sql<number>`SUM(CASE WHEN ${users.role} = 'staff' THEN 1 ELSE 0 END)`,        })
         .from(users);
 
       // 매장 통계 (tutorial 제외 — active+archived 모두 포함하므로 deletedAt 필터 없음)

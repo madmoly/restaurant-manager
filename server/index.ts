@@ -179,6 +179,16 @@ app.use(express.json());
       console.log("[migrate] fixed_costs costType:", e.message);
     }
     await addColumnIfNotExists("fixed_costs", "attachmentUrl", "VARCHAR(500) DEFAULT NULL");
+    await addColumnIfNotExists("fixed_costs", "category", "VARCHAR(50) DEFAULT '기타'");
+    await addColumnIfNotExists("fixed_costs", "startMonth", "VARCHAR(7) DEFAULT NULL");
+    await addColumnIfNotExists("fixed_costs", "endMonth", "VARCHAR(7) DEFAULT NULL");
+    // 기존 데이터 startMonth 백필: createdAt 기반 YYYY-MM
+    try {
+      await conn.query(`UPDATE fixed_costs SET startMonth = DATE_FORMAT(createdAt, '%Y-%m') WHERE startMonth IS NULL AND isActive = 1`);
+      console.log("[migrate] fixed_costs.startMonth backfilled");
+    } catch (e: any) {
+      console.log("[migrate] fixed_costs startMonth backfill:", e.message);
+    }
 
     // ─── Phase 4: 시스템 관리 테이블 ─────────────────────────────────────────
     // 감사 로그
@@ -666,34 +676,34 @@ app.use(express.json());
       )
     `).catch(() => {});
 
-    // 즉시지출 카테고리 테이블
+    // expense_categories (매장별 커스텀 지출 카테고리)
     await conn.query(`
       CREATE TABLE IF NOT EXISTS expense_categories (
         id INT AUTO_INCREMENT PRIMARY KEY,
         restaurantId INT NOT NULL,
         name VARCHAR(100) NOT NULL,
-        sortOrder INT DEFAULT 0 NOT NULL,
-        isActive BOOLEAN DEFAULT TRUE NOT NULL,
-        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        INDEX idx_exp_cat_restaurant (restaurantId)
+        sortOrder INT NOT NULL DEFAULT 0,
+        isActive BOOLEAN NOT NULL DEFAULT TRUE,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ec_restaurant (restaurantId)
       )
     `).catch(() => {});
 
-    // 즉시지출 기록 테이블
+    // daily_expenses (즉시지출 기록)
     await conn.query(`
       CREATE TABLE IF NOT EXISTS daily_expenses (
         id INT AUTO_INCREMENT PRIMARY KEY,
         restaurantId INT NOT NULL,
         date DATE NOT NULL,
-        categoryId INT DEFAULT NULL,
-        category VARCHAR(50) DEFAULT NULL,
+        categoryId INT NULL,
+        category VARCHAR(50) NULL,
         title VARCHAR(200) NOT NULL,
-        amount DECIMAL(14,2) DEFAULT 0 NOT NULL,
-        note TEXT DEFAULT NULL,
-        attachmentUrl TEXT DEFAULT NULL,
-        createdBy INT DEFAULT NULL,
-        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        INDEX idx_daily_exp_store_date (restaurantId, date)
+        amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+        note TEXT NULL,
+        attachmentUrl TEXT NULL,
+        createdBy INT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_de_restaurant_date (restaurantId, date)
       )
     `).catch(() => {});
 
