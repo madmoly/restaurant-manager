@@ -2392,10 +2392,13 @@ function CloseTab({
     restaurantId,
   });
 
+  const utils = trpc.useUtils();
   const saveSalesMutation = trpc.dailyOps.saveDailySales.useMutation({
     onSuccess: () => {
       toast.success('매출이 저장되었습니다.');
       salesQuery.refetch();
+      // 마감탭 매출/손익 갱신 → 마감 조건 재평가
+      utils.dailyClosings.calculateDay.invalidate();
     },
     onError: (error: any) => {
       toast.error(`저장 실패: ${error.message}`);
