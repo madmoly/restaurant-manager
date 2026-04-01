@@ -1368,7 +1368,9 @@ function PurchaseTab({
   const orders = ordersQuery.data || [];
   const counterpartiesList = counterpartiesQuery.data || [];
   const cpItems = cpItemsQuery.data || [];
-  const totalAmount = orders.reduce((sum, o: any) => sum + Number(o.totalAmount || 0), 0);
+  const receivedOrders = orders.filter((o: any) => o.status === 'received');
+  const pendingOrders = orders.filter((o: any) => o.status !== 'received');
+  const totalAmount = receivedOrders.reduce((sum, o: any) => sum + Number(o.totalAmount || 0), 0);
   const formTotal = purchaseItems.reduce((sum, i) => sum + parseFloat(i.lineTotal || '0'), 0);
 
   return (
@@ -1383,7 +1385,14 @@ function PurchaseTab({
       {/* ─── 일별 매입 현황 ─── */}
       <Card className="bg-card border-border p-4">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-foreground">매입 현황</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-foreground">매입 현황</h3>
+            {pendingOrders.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 font-medium">
+                미입고 {pendingOrders.length}건
+              </span>
+            )}
+          </div>
           <span className="text-sm font-bold text-foreground">₩{totalAmount.toLocaleString()}</span>
         </div>
         {orders.length === 0 ? (
@@ -1400,8 +1409,10 @@ function PurchaseTab({
                     <span className="font-medium text-foreground truncate">
                       {order.counterpartyName || '미지정 거래처'}
                     </span>
-                    {order.status === 'ordered' && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 font-medium">발주</span>
+                    {order.status === 'ordered' ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 font-medium">발주 (미입고)</span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 font-medium">입고</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
@@ -2909,6 +2920,13 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
   const [closingNote, setClosingNote] = useState('');
   const utils = trpc.useUtils();
 
+  // 미입고 발주 건수 확인
+  const purchaseOrdersQuery = trpc.purchasesV2.listByDate.useQuery(
+    { restaurantId, date },
+    { enabled: restaurantId > 0 }
+  );
+  const pendingOrderCount = (purchaseOrdersQuery.data ?? []).filter((o: any) => o.status !== 'received').length;
+
   const { data: calculated, isLoading: calcLoading } = trpc.dailyClosings.calculateDay.useQuery(
     { restaurantId, date },
     { enabled: restaurantId > 0 }
@@ -3101,6 +3119,15 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
               · 매출 0원 — 휴무일이 아닌 경우 매출을 입력해야 마감할 수 있습니다
             </p>
           )}
+        </div>
+      )}
+
+      {/* 미입고 발주 경고 (차단은 아님, 안내) */}
+      {pendingOrderCount > 0 && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-700 p-3">
+          <p className="text-[11px] text-blue-700 dark:text-blue-300">
+            ⚠ 미입고 발주 {pendingOrderCount}건이 있습니다. 발주 상태의 매입은 정산에 반영되지 않습니다.
+          </p>
         </div>
       )}
 

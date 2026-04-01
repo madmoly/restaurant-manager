@@ -74,13 +74,14 @@ export const dailyClosingsRouter = router({
         if (Number(salesRow?.total ?? 0) > 0) salesTotalStr = salesRow!.total;
       }
 
-      // 당일 매입: purchaseOrdersV2 (현행) → 없으면 purchaseOrders (레거시) 폴백
+      // 당일 매입: purchaseOrdersV2 (입고 완료분만) → 없으면 purchaseOrders (레거시) 폴백
       const [purchaseV2Row] = await db
         .select({ total: sql<string>`COALESCE(SUM(${purchaseOrdersV2.totalAmount}), 0)` })
         .from(purchaseOrdersV2)
         .where(and(
           eq(purchaseOrdersV2.restaurantId, input.restaurantId),
-          sql`${purchaseOrdersV2.purchaseDate} = ${input.date}`
+          sql`${purchaseOrdersV2.purchaseDate} = ${input.date}`,
+          eq(purchaseOrdersV2.status, "received"),
         ));
 
       let purchasesTotalStr = purchaseV2Row?.total ?? "0";

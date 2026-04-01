@@ -88,7 +88,7 @@ export const monthlyClosingsRouter = router({
         );
       const salesTotal = Number(salesRow?.total ?? 0);
 
-      // 2. 매입 합계 (V2)
+      // 2. 매입 합계 (V2, 입고 완료분만)
       const [purchRow] = await db
         .select({ total: sum(purchaseOrdersV2.totalAmount) })
         .from(purchaseOrdersV2)
@@ -97,6 +97,7 @@ export const monthlyClosingsRouter = router({
             eq(purchaseOrdersV2.restaurantId, input.restaurantId),
             gte(purchaseOrdersV2.purchaseDate, new Date(startDate)),
             sql`${purchaseOrdersV2.purchaseDate} <= ${endDate}`,
+            eq(purchaseOrdersV2.status, "received"),
           ),
         );
       const purchasesTotal = Number(purchRow?.total ?? 0);
@@ -351,14 +352,15 @@ export const monthlyClosingsRouter = router({
         cpRows.forEach(r => { cpNameMap[r.id] = r.name; });
       }
 
-      const purchasesTotal = purchaseRows.reduce((s, r) => s + Number(r.totalAmount ?? 0), 0);
+      const receivedRows = purchaseRows.filter(r => r.status === "received");
+      const purchasesTotal = receivedRows.reduce((s, r) => s + Number(r.totalAmount ?? 0), 0);
       const purchaseCount = purchaseRows.length;
-      const purchaseReceivedCount = purchaseRows.filter(r => r.status === "received").length;
+      const purchaseReceivedCount = receivedRows.length;
       const purchasePendingCount = purchaseRows.filter(r => r.status !== "received").length;
 
-      // 거래처별 그룹핑
+      // 거래처별 그룹핑 (입고 완료분만)
       const cpMap: Record<number, { name: string; amount: number; count: number }> = {};
-      for (const r of purchaseRows) {
+      for (const r of receivedRows) {
         const cpId = r.counterpartyId ?? 0;
         if (!cpMap[cpId]) cpMap[cpId] = { name: cpNameMap[cpId] || "미지정", amount: 0, count: 0 };
         cpMap[cpId].amount += Number(r.totalAmount ?? 0);
@@ -506,7 +508,7 @@ export const monthlyClosingsRouter = router({
       const [prevPurchAgg] = await db
         .select({ total: sql<string>`COALESCE(SUM(${purchaseOrdersV2.totalAmount}), 0)` })
         .from(purchaseOrdersV2)
-        .where(and(eq(purchaseOrdersV2.restaurantId, restaurantId), between(purchaseOrdersV2.purchaseDate, prevStart, prevEnd)));
+        .where(and(eq(purchaseOrdersV2.restaurantId, restaurantId), between(purchaseOrdersV2.purchaseDate, prevStart, prevEnd), eq(purchaseOrdersV2.status, "received")));
 
       // 전월 인건비 — monthly_closings에서 가져오기 (없으면 null)
       const [prevClosing] = await db.select().from(monthlyClosings)
