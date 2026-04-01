@@ -3004,10 +3004,13 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
   // 마감 불가 조건: 체크리스트 + 매입확인 + 스케줄(draft 없어야 함) + 매출0 검증
   const checklistOk = checklistStatus.totalItems === 0 || checklistAllDone;
   const scheduleOk = scheduleStatus.allDone; // draft === 0
-  const salesOk = isClosedDay || Number(salesTotal) > 0; // 휴무일 아닌데 매출 0이면 차단
-  const canClose = checklistOk && purchaseConfirmed && scheduleOk && salesOk;
+  const salesZero = !isClosedDay && Number(salesTotal) === 0;
+  const canClose = checklistOk && purchaseConfirmed && scheduleOk;
 
   const handleSaveClosing = () => {
+    if (salesZero && !existing) {
+      if (!window.confirm('매출이 0원입니다. 매출 0원으로 마감하시겠습니까?')) return;
+    }
     save.mutate({
       restaurantId,
       closingDate: date,
@@ -3114,9 +3117,9 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
               · 미확정 스케줄 {scheduleStatus.draft}건 — 스케줄 페이지에서 확정 필요 (초안 상태는 마감 불가)
             </p>
           )}
-          {!salesOk && (
+          {salesZero && (
             <p className="text-[11px] text-amber-600 dark:text-amber-400">
-              · 매출 0원 — 휴무일이 아닌 경우 매출을 입력해야 마감할 수 있습니다
+              · 매출 0원 — 마감 시 확인 메시지가 표시됩니다
             </p>
           )}
         </div>
