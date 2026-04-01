@@ -632,6 +632,22 @@ app.use(express.json());
     // users에 bankBookUrl 추가
     await addColumnIfNotExists("users", "bankBookUrl", "VARCHAR(500) DEFAULT NULL");
 
+    // 월정산 증빙 이미지 테이블
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS settlement_images (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        year INT NOT NULL,
+        month INT NOT NULL,
+        counterpartyId INT DEFAULT NULL,
+        imageUrl TEXT NOT NULL,
+        note VARCHAR(200) DEFAULT NULL,
+        uploadedBy INT DEFAULT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_settlement_store_month (restaurantId, year, month)
+      )
+    `);
+
     // employment_electronic_contracts에 weeklyOffDays 추가
     await addColumnIfNotExists("employment_electronic_contracts", "weeklyOffDays", "INT DEFAULT 1");
 

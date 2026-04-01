@@ -168,6 +168,47 @@ uploadRouter.post("/fixed-cost-attachment", fixedCostUpload.single("file"), (req
 });
 
 /**
+ * POST /api/upload/settlement-image
+ * multipart/form-data: field name = "file"
+ * 월정산 증빙 이미지 (10MB)
+ */
+const SETTLEMENT_DIR = path.join(UPLOAD_ROOT, "settlement");
+if (!fs.existsSync(SETTLEMENT_DIR)) fs.mkdirSync(SETTLEMENT_DIR, { recursive: true });
+
+const settlementStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, SETTLEMENT_DIR);
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname) || ".jpg";
+    const unique = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+    cb(null, unique);
+  },
+});
+
+const settlementUpload = multer({
+  storage: settlementStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter(_req, file, cb) {
+    if (!file.mimetype.startsWith("image/")) {
+      cb(new Error("이미지 파일만 업로드 가능합니다"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+uploadRouter.post("/settlement-image", settlementUpload.single("file"), (req: Request, res: Response) => {
+  if (!req.file) {
+    res.status(400).json({ error: "파일이 없습니다" });
+    return;
+  }
+  const relativePath = path.relative(UPLOAD_ROOT, req.file.path).replace(/\\/g, "/");
+  const url = `/uploads/${relativePath}`;
+  res.json({ url });
+});
+
+/**
  * POST /api/upload/rotate-image
  * 업로드된 이미지를 90° 시계방향 회전 → 파일 덮어쓰기
  * Body: { url: "/uploads/orders/..." }

@@ -18,6 +18,7 @@ import {
   storeClosedDays,
   storeWeeklyClosures,
   counterparties,
+  settlementImages,
 } from "../../drizzle/schema";
 
 export const monthlyClosingsRouter = router({
@@ -586,5 +587,66 @@ export const monthlyClosingsRouter = router({
           closedByName,
         },
       };
+    }),
+
+  /** 월정산 증빙 이미지 목록 조회 */
+  getImages: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const rows = await db
+        .select({
+          id: settlementImages.id,
+          counterpartyId: settlementImages.counterpartyId,
+          imageUrl: settlementImages.imageUrl,
+          note: settlementImages.note,
+          uploadedBy: settlementImages.uploadedBy,
+          uploaderName: users.name,
+          createdAt: settlementImages.createdAt,
+        })
+        .from(settlementImages)
+        .leftJoin(users, eq(settlementImages.uploadedBy, users.id))
+        .where(and(
+          eq(settlementImages.restaurantId, input.restaurantId),
+          eq(settlementImages.year, input.year),
+          eq(settlementImages.month, input.month),
+        ))
+        .orderBy(settlementImages.createdAt);
+      return rows;
+    }),
+
+  /** 월정산 증빙 이미지 등록 */
+  addImage: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      year: z.number(),
+      month: z.number(),
+      counterpartyId: z.number().nullable(),
+      imageUrl: z.string(),
+      note: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const [result] = await db.insert(settlementImages).values({
+        restaurantId: input.restaurantId,
+        year: input.year,
+        month: input.month,
+        counterpartyId: input.counterpartyId,
+        imageUrl: input.imageUrl,
+        note: input.note ?? null,
+        uploadedBy: ctx.user.userId,
+      });
+      return { id: result.insertId };
+    }),
+
+  /** 월정산 증빙 이미지 삭제 */
+  deleteImage: managerProcedure
+    .input(z.object({ id: z.number(), restaurantId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      await db.delete(settlementImages).where(
+        and(eq(settlementImages.id, input.id), eq(settlementImages.restaurantId, input.restaurantId))
+      );
+      return { success: true };
     }),
 });

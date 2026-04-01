@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/hooks/useAuth";
@@ -6,9 +6,11 @@ import {
   CheckCircle2, Circle, AlertTriangle, TrendingUp, TrendingDown,
   ChevronDown, ChevronUp, Lock, Loader2, ArrowUpRight, ArrowDownRight,
   Calendar, CreditCard, Banknote, Gift, ArrowRightLeft, MoreHorizontal,
+  Camera, X, Image as ImageIcon, Trash2,
 } from "lucide-react";
 import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 type Section = "collection" | "income" | "metrics" | "comparison" | null;
 type IncomeExpand = "sales" | "purchases" | "labor" | "fixed" | null;
@@ -44,6 +46,38 @@ export default function MonthlySettlementPage() {
   const closeMutation = trpc.monthlyClosings.close.useMutation({
     onSuccess: () => refetch(),
   });
+
+  // 증빙 이미지
+  const imagesQuery = trpc.monthlyClosings.getImages.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 },
+  );
+  const addImageMut = trpc.monthlyClosings.addImage.useMutation({
+    onSuccess: () => imagesQuery.refetch(),
+  });
+  const deleteImageMut = trpc.monthlyClosings.deleteImage.useMutation({
+    onSuccess: () => imagesQuery.refetch(),
+  });
+  const [uploadingCpId, setUploadingCpId] = useState<number | null>(null);
+  const [viewImage, setViewImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageUpload = async (cpId: number | null, file: File) => {
+    setUploadingCpId(cpId);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/upload/settlement-image", { method: "POST", body: form });
+      if (!res.ok) throw new Error("업로드 실패");
+      const { url } = await res.json();
+      await addImageMut.mutateAsync({ restaurantId, year, month, counterpartyId: cpId, imageUrl: url });
+      toast.success("증빙 사진이 저장되었습니다");
+    } catch {
+      toast.error("업로드 실패");
+    } finally {
+      setUploadingCpId(null);
+    }
+  };
 
   const handleClose = () => {
     if (!confirm(`${year}년 ${month}월 월정산을 확정하시겠습니까?\n\n확정 후에도 재확정이 가능합니다.`)) return;
@@ -228,14 +262,62 @@ export default function MonthlySettlementPage() {
           locked={!isPrivileged}
         >
           {income.purchasesByCounterparty.length > 0 ? (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="text-xs font-medium text-muted-foreground mb-2">거래처별</div>
-              {income.purchasesByCounterparty.map((cp) => (
-                <div key={cp.id} className="flex items-center justify-between text-xs">
-                  <span className="text-foreground">{cp.name} <span className="text-muted-foreground">({cp.count}건)</span></span>
-                  <span className="font-medium text-foreground tabular-nums">{cp.amount.toLocaleString()}원</span>
-                </div>
-              ))}
+              {income.purchasesByCounterparty.map((cp) => {
+                const cpImages = (imagesQuery.data ?? []).filter((img: any) => img.counterpartyId === cp.id);
+                return (
+                  <div key={cp.id} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-foreground">{cp.name} <span className="text-muted-foreground">({cp.count}건)</span></span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-foreground tabular-nums">{cp.amount.toLocaleString()}원</span>
+                        {isPrivileged && (
+                          <label className="cursor-pointer text-muted-foreground hover:text-primary transition-colors">
+                            {uploadingCpId === cp.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) handleImageUpload(cp.id, f);
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                    {cpImages.length > 0 && (
+                      <div className="flex gap-1.5 overflow-x-auto pb-1">
+                        {cpImages.map((img: any) => (
+                          <div key={img.id} className="relative shrink-0 group">
+                            <img
+                              src={img.imageUrl}
+                              alt="증빙"
+                              className="w-14 h-14 object-cover rounded border border-border cursor-pointer"
+                              onClick={() => setViewImage(img.imageUrl)}
+                            />
+                            {isPrivileged && (
+                              <button
+                                onClick={() => {
+                                  if (confirm("이 증빙 사진을 삭제하시겠습니까?")) {
+                                    deleteImageMut.mutate({ id: img.id, restaurantId });
+                                  }
+                                }}
+                                className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">매입 데이터 없음</p>
@@ -413,6 +495,27 @@ export default function MonthlySettlementPage() {
           </div>
         )}
       </Card>
+
+      {/* 이미지 전체보기 오버레이 */}
+      {viewImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setViewImage(null)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white bg-black/50 rounded-full p-2"
+            onClick={() => setViewImage(null)}
+          >
+            <X className="w-6 h-6" />
+          </button>
+          <img
+            src={viewImage}
+            alt="증빙 사진"
+            className="max-w-full max-h-[90vh] object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }

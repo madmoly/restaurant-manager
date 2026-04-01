@@ -939,3 +939,17 @@ export const restaurantShiftPresets = mysqlTable("restaurant_shift_presets", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type RestaurantShiftPreset = typeof restaurantShiftPresets.$inferSelect;
+
+// ─── 월정산 증빙 이미지 ─────────────────────────────────────────────────────
+export const settlementImages = mysqlTable("settlement_images", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  year: int("year").notNull(),
+  month: int("month").notNull(),
+  counterpartyId: int("counterpartyId"),              // NULL = 기타/전체
+  imageUrl: text("imageUrl").notNull(),
+  note: varchar("note", { length: 200 }),
+  uploadedBy: int("uploadedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type SettlementImage = typeof settlementImages.$inferSelect;
