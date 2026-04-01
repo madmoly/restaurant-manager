@@ -352,7 +352,9 @@ export const monthlyClosingsRouter = router({
       }
 
       const purchasesTotal = purchaseRows.reduce((s, r) => s + Number(r.totalAmount ?? 0), 0);
-      const purchaseCount = purchaseRows.filter(r => r.status === "received").length;
+      const purchaseCount = purchaseRows.length;
+      const purchaseReceivedCount = purchaseRows.filter(r => r.status === "received").length;
+      const purchasePendingCount = purchaseRows.filter(r => r.status !== "received").length;
 
       // 거래처별 그룹핑
       const cpMap: Record<number, { name: string; amount: number; count: number }> = {};
@@ -550,7 +552,8 @@ export const monthlyClosingsRouter = router({
           salesInputDays,
           salesMissingDates,
           purchaseCount,
-          purchaseTotal: purchaseRows.length,
+          purchaseReceivedCount,
+          purchasePendingCount,
           zeroLaborDates,
           fixedCostCount: fixedBreakdown.length + ratioItems.length,
           draftScheduleCount,

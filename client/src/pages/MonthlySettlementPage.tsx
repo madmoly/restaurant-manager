@@ -104,8 +104,8 @@ export default function MonthlySettlementPage() {
   const checks = [
     { done: collection.unclosedDates.length === 0, label: "일마감" },
     { done: collection.salesMissingDates.length === 0, label: "매출" },
-    { done: collection.purchaseCount > 0, label: "매입" },
-    { done: collection.zeroLaborDates.length === 0 && collection.draftScheduleCount === 0, label: "인건비" },
+    { done: collection.purchaseCount > 0 && collection.purchasePendingCount === 0, label: "매입" },
+    { done: collection.draftScheduleCount === 0, label: "인건비" },
     { done: collection.fixedCostCount > 0, label: "고정비" },
   ];
   const completedChecks = checks.filter(c => c.done).length;
@@ -190,20 +190,24 @@ export default function MonthlySettlementPage() {
             />
             {/* 매입 */}
             <CheckItem
-              done={collection.purchaseCount > 0}
+              done={collection.purchaseCount > 0 && collection.purchasePendingCount === 0}
               label="매입 데이터"
-              detail={collection.purchaseCount > 0 ? `${collection.purchaseTotal}건 등록` : "매입 데이터 없음"}
+              detail={
+                collection.purchaseCount === 0
+                  ? "매입 데이터 없음"
+                  : collection.purchasePendingCount > 0
+                    ? `총 ${collection.purchaseCount}건 중 미확정 ${collection.purchasePendingCount}건`
+                    : `${collection.purchaseCount}건 전체 확정(입고)`
+              }
             />
             {/* 인건비 */}
             <CheckItem
-              done={collection.zeroLaborDates.length === 0 && collection.draftScheduleCount === 0}
-              label="인건비"
+              done={collection.draftScheduleCount === 0}
+              label="인건비 (스케줄)"
               detail={
-                collection.zeroLaborDates.length > 0
-                  ? `인건비 0원인 날 ${collection.zeroLaborDates.length}일`
-                  : collection.draftScheduleCount > 0
-                    ? `미확정 스케줄 ${collection.draftScheduleCount}건`
-                    : "스케줄 기반 인건비 계산 완료"
+                collection.draftScheduleCount > 0
+                  ? `미확정 스케줄 ${collection.draftScheduleCount}건 (확정/완료만 인건비 반영)`
+                  : "전체 스케줄 확정 완료"
               }
             />
             {/* 고정비 */}
