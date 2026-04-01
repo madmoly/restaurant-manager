@@ -1,8 +1,11 @@
-월정산 거래처별 증빙 이미지 업로드/조회/삭제 기능
+발주 재설계: 사진+메모 간소화, 즉시지출 커스텀 카테고리, DailyOpsPage 호환 수정
 
-- settlement_images 테이블 추가 (매장+연월+거래처별)
-- /api/upload/settlement-image 엔드포인트
-- monthlyClosings.getImages/addImage/deleteImage API
-- 월정산 매입 드릴다운에서 거래처별 사진 업로드/썸네일/전체보기
+- purchasesV2: OCR/품목 레벨 제거, 사진+메모+입고확인으로 간소화
+- dailyExpenses: 커스텀 카테고리(expense_categories 테이블) CRUD 추가
+- purchases.monthlyTotal: v2 발주 입고 + 즉시지출 합산 반환 (수익분석 연동)
+- PurchaseManagementPage: 발주/즉시지출/거래처 3탭 전면 재작성
+- DailyOpsPage: DB 카테고리 연동으로 수정 (EXPENSE_CATEGORIES 상수 제거)
+- schema: expenseCategories 테이블 + dailyExpenses.categoryId 컬럼 추가
+- 자동 마이그레이션: expense_categories CREATE TABLE + categoryId ALTER TABLE
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

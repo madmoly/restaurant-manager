@@ -661,6 +661,37 @@ app.use(express.json());
     // daily_expenses에 categoryId 컬럼 추가 (커스텀 카테고리 참조)
     await addColumnIfNotExists("daily_expenses", "categoryId", "INT NULL AFTER category");
 
+    // settlement_images (월정산 정산서 이미지)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS settlement_images (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        year INT NOT NULL,
+        month INT NOT NULL,
+        counterpartyId INT NULL,
+        imageUrl TEXT NOT NULL,
+        claimedAmount INT NULL,
+        note TEXT NULL,
+        uploadedBy INT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_si_restaurant_period (restaurantId, year, month)
+      )
+    `).catch(() => {});
+
+    // employer_presets (사업주 프리셋 - 전자계약서 소속회사)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS employer_presets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        companyName VARCHAR(100) NOT NULL,
+        businessNumber VARCHAR(50) NULL,
+        isDefault BOOLEAN NOT NULL DEFAULT FALSE,
+        createdBy INT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ep_restaurant (restaurantId)
+      )
+    `).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {
