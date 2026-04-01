@@ -2322,9 +2322,12 @@ function CloseTab({
   );
   const scheduleStatus = useMemo(() => {
     const schedules = daySchedulesQuery.data ?? [];
-    if (schedules.length === 0) return { allDone: true, total: 0, completed: 0 };
+    if (schedules.length === 0) return { allDone: true, total: 0, completed: 0, confirmed: 0, draft: 0 };
     const completed = schedules.filter((s: any) => s.status === 'completed').length;
-    return { allDone: completed === schedules.length, total: schedules.length, completed };
+    const confirmed = schedules.filter((s: any) => s.status === 'confirmed').length;
+    const draft = schedules.filter((s: any) => s.status === 'draft').length;
+    // confirmed는 마감 시 자동 완료되므로, draft만 없으면 OK
+    return { allDone: draft === 0, total: schedules.length, completed, confirmed, draft };
   }, [daySchedulesQuery.data]);
 
   const midSalesQuery = trpc.dailyOps.getMidSales.useQuery({
@@ -2855,7 +2858,7 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
   checklistAllDone: boolean;
   checklistStatus: { totalChecked: number; totalItems: number; incomplete: string[] };
   purchaseConfirmed: boolean;
-  scheduleStatus: { allDone: boolean; total: number; completed: number };
+  scheduleStatus: { allDone: boolean; total: number; completed: number; confirmed: number; draft: number };
   alreadyCloseChecked: boolean;
 }) {
   const [laborCost, setLaborCost] = useState('0');
@@ -2910,15 +2913,17 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
     },
   });
 
+  const completeDayMut = trpc.schedules.completeDay.useMutation();
+
   if (calcLoading) return null;
 
   const salesTotal = calculated?.salesTotal ?? '0';
   const purchasesTotal = calculated?.purchasesTotal ?? '0';
   const profit = Number(salesTotal) - Number(purchasesTotal) - Number(laborCost) - dailyFixed;
 
-  // 마감 불가 조건: 체크리스트 + 매입확인 + 스케줄완료
+  // 마감 불가 조건: 체크리스트 + 매입확인 + 스케줄(draft 없어야 함)
   const checklistOk = checklistStatus.totalItems === 0 || checklistAllDone;
-  const scheduleOk = scheduleStatus.allDone;
+  const scheduleOk = scheduleStatus.allDone; // draft === 0
   const canClose = checklistOk && purchaseConfirmed && scheduleOk;
 
   const handleSaveClosing = () => {
@@ -2939,6 +2944,10 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
         date,
         closeNote: closeNote || undefined,
       });
+    }
+    // confirmed 스케줄 → completed 자동 처리
+    if (scheduleStatus.confirmed > 0) {
+      completeDayMut.mutate({ restaurantId, date });
     }
   };
 
@@ -3021,19 +3030,26 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
           )}
           {!scheduleOk && (
             <p className="text-[11px] text-amber-600 dark:text-amber-400">
-              · 근무 스케줄 미완료 ({scheduleStatus.completed}/{scheduleStatus.total}명) — 전원 완료 처리 필요
+              · 미확정 스케줄 {scheduleStatus.draft}건 — 스케줄 페이지에서 확정 필요 (초안 상태는 마감 불가)
             </p>
           )}
         </div>
       )}
 
+      {/* confirmed 스케줄 자동완료 안내 */}
+      {canClose && !existing && scheduleStatus.confirmed > 0 && (
+        <p className="text-[11px] text-blue-600 dark:text-blue-400">
+          확정 스케줄 {scheduleStatus.confirmed}건이 마감 시 자동으로 완료 처리됩니다.
+        </p>
+      )}
+
       <Button
         onClick={handleSaveClosing}
-        disabled={save.isPending || checkCloseMutation.isPending || (!existing && !canClose)}
+        disabled={save.isPending || checkCloseMutation.isPending || completeDayMut.isPending || (!existing && !canClose)}
         className="w-full"
         size="lg"
       >
-        {save.isPending || checkCloseMutation.isPending
+        {save.isPending || checkCloseMutation.isPending || completeDayMut.isPending
           ? '저장 중...'
           : !canClose && !existing
             ? '마감 조건 충족 후 확정 가능'
