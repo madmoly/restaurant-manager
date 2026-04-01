@@ -250,6 +250,11 @@ function ChecklistSection({
   const [checkedItemIds, setCheckedItemIds] = useState<number[]>([]);
   const [textValues, setTextValues] = useState<Record<number, string>>({});
   const [photoValues, setPhotoValues] = useState<Record<number, string>>({});
+  // ref로 최신 상태 추적 (클로저 문제 방지)
+  const textRef = useRef(textValues);
+  textRef.current = textValues;
+  const photoRef = useRef(photoValues);
+  photoRef.current = photoValues;
 
   const templatesQuery = trpc.storeChecklists.listTemplates.useQuery({
     restaurantId,
@@ -263,7 +268,12 @@ function ChecklistSection({
     targetTab,
   });
 
+  const checklistUtils = trpc.useUtils();
   const saveLogMutation = trpc.storeChecklists.saveLog.useMutation({
+    onSuccess: () => {
+      // 마감탭 체크리스트 완료 상태 실시간 갱신
+      checklistUtils.storeChecklists.getLog.invalidate({ restaurantId, logDate: date });
+    },
     onError: (error: any) => {
       toast.error(`저장 실패: ${error.message}`);
     },
@@ -286,24 +296,26 @@ function ChecklistSection({
     }
   }, [logQuery.data]);
 
+  const doSave = (ids: number[], txtOverride?: Record<number, string>, photoOverride?: Record<number, string>) => {
+    const txt = txtOverride ?? textRef.current;
+    const pht = photoOverride ?? photoRef.current;
+    const updatedCheckedItems = templatesQuery.data
+      ?.filter((item) => ids.includes(item.id))
+      .map((item) => ({
+        itemId: item.id,
+        answer: txt[item.id] || undefined,
+        photoUrl: pht[item.id] || undefined,
+      })) || [];
+    saveLogMutation.mutate({
+      restaurantId, logDate: date, targetTab,
+      checkedItemIds: ids, checkedItems: updatedCheckedItems,
+    });
+  };
+
   const handleToggleItem = (itemId: number) => {
     setCheckedItemIds((prev) => {
       const next = prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId];
-      // 자동 저장
-      const updatedCheckedItems = templatesQuery.data
-        ?.filter((item) => next.includes(item.id))
-        .map((item) => ({
-          itemId: item.id,
-          answer: textValues[item.id] || undefined,
-          photoUrl: photoValues[item.id] || undefined,
-        })) || [];
-      saveLogMutation.mutate({
-        restaurantId,
-        logDate: date,
-        targetTab,
-        checkedItemIds: next,
-        checkedItems: updatedCheckedItems,
-      });
+      doSave(next);
       return next;
     });
   };
@@ -320,18 +332,7 @@ function ChecklistSection({
         const dataUrl = e.target?.result as string;
         setPhotoValues((prev) => {
           const next = { ...prev, [itemId]: dataUrl };
-          // 사진 첨부 후 자동 저장
-          const updatedCheckedItems = templatesQuery.data
-            ?.filter((item) => checkedItemIds.includes(item.id))
-            .map((item) => ({
-              itemId: item.id,
-              answer: textValues[item.id] || undefined,
-              photoUrl: item.id === itemId ? dataUrl : (next[item.id] || undefined),
-            })) || [];
-          saveLogMutation.mutate({
-            restaurantId, logDate: date, targetTab,
-            checkedItemIds, checkedItems: updatedCheckedItems,
-          });
+          doSave(checkedItemIds, undefined, next);
           return next;
         });
       };
@@ -341,23 +342,7 @@ function ChecklistSection({
     }
   };
 
-  // 텍스트/사진 값 변경 시 수동 저장 (debounce 대신 명시 저장)
-  const saveCurrentState = () => {
-    const updatedCheckedItems = templatesQuery.data
-      ?.filter((item) => checkedItemIds.includes(item.id))
-      .map((item) => ({
-        itemId: item.id,
-        answer: textValues[item.id] || undefined,
-        photoUrl: photoValues[item.id] || undefined,
-      })) || [];
-    saveLogMutation.mutate({
-      restaurantId,
-      logDate: date,
-      targetTab,
-      checkedItemIds,
-      checkedItems: updatedCheckedItems,
-    });
-  };
+  const saveCurrentState = () => doSave(checkedItemIds);
 
   const isComplete =
     templatesQuery.data &&

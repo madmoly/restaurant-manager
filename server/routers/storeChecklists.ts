@@ -214,13 +214,15 @@ export const storeChecklistsRouter = router({
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const now = new Date();
       const kstDate = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-      const todayStr = kstDate.toISOString().slice(0, 10);
+      // 전날로 설정: shouldShowOnDate는 dateStr > to 이면 미표시이므로, 오늘부터 즉시 미표시
+      kstDate.setDate(kstDate.getDate() - 1);
+      const yesterdayStr = kstDate.toISOString().slice(0, 10);
 
       await db
         .update(storeChecklistTemplates)
         .set({
           isActive: false,
-          effectiveTo: todayStr,
+          effectiveTo: yesterdayStr,
           deactivatedBy: ctx.user.userId,
         })
         .where(
