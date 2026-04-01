@@ -1361,9 +1361,12 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             <div>
               <label className={labelCls}>주당 휴무일수</label>
               <select className={inputCls} value={form.weeklyOffDays} onChange={(e) => setForm({ ...form, weeklyOffDays: Number(e.target.value) })}>
+                <option value={0}>없음</option>
                 <option value={1}>1일</option>
                 <option value={2}>2일</option>
-                <option value={0}>없음</option>
+                <option value={3}>3일</option>
+                <option value={4}>4일</option>
+                <option value={5}>5일</option>
               </select>
             </div>
           </div>
