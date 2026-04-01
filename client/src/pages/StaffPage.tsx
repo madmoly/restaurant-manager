@@ -141,7 +141,8 @@ export default function StaffPage() {
       utils.electronicContracts.listEmploymentContracts.invalidate();
       if (data.token) {
         const url = `${window.location.origin}/sign/${data.token}`;
-        navigator.clipboard.writeText(url).then(() => toast.success("서명 링크가 클립보드에 복사되었습니다"));
+        const msg = `[근로계약서 서명]\n아래 링크를 눌러 계약서를 확인하고 서명해주세요.\n${url}`;
+        navigator.clipboard.writeText(msg).then(() => toast.success("계약서 서명 링크가 클립보드에 복사되었습니다"));
       }
     },
     onError(err) { toast.error(err.message); },
@@ -706,7 +707,10 @@ export default function StaffPage() {
               };
               const st = statusMap[c.status] ?? statusMap.draft;
               const signUrl = `${window.location.origin}/sign/${c.token}`;
-              const copyLink = () => { navigator.clipboard.writeText(signUrl).then(() => toast.success("서명 링크가 클립보드에 복사되었습니다")); };
+              const copyLink = () => {
+                const msg = `[근로계약서 서명]\n아래 링크를 눌러 계약서를 확인하고 서명해주세요.\n${signUrl}`;
+                navigator.clipboard.writeText(msg).then(() => toast.success("계약서 서명 링크가 클립보드에 복사되었습니다"));
+              };
               return (
                 <div key={c.id} className="border border-border rounded-lg bg-card overflow-hidden">
                   {/* 상단: 직원 정보 + 상태 */}
