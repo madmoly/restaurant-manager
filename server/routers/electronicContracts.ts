@@ -3,7 +3,7 @@ import { eq, and, desc, sql, isNotNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants, employerPresets } from "../../drizzle/schema";
+import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -198,6 +198,10 @@ export const electronicContractsRouter = router({
           workPlaceAddress: employmentElectronicContracts.workPlaceAddress,
           annualSalary: employmentElectronicContracts.annualSalary,
           basePay: employmentElectronicContracts.basePay,
+          fixedOvertimeHours: employmentElectronicContracts.fixedOvertimeHours,
+          fixedOvertimePay: employmentElectronicContracts.fixedOvertimePay,
+          fixedHolidayHours: employmentElectronicContracts.fixedHolidayHours,
+          fixedHolidayPay: employmentElectronicContracts.fixedHolidayPay,
           annualLeavePay: employmentElectronicContracts.annualLeavePay,
           hourlyWage: employmentElectronicContracts.hourlyWage,
           monthlyContractHours: employmentElectronicContracts.monthlyContractHours,
@@ -230,7 +234,6 @@ export const electronicContractsRouter = router({
         workEndTime: z.string().default("18:00"),
         breakMinutes: z.number().default(60),
         weeklyHoliday: z.string().default("일요일"),
-        weeklyOffDays: z.number().default(1),
         payDay: z.number().default(25),
         socialInsurance: z.boolean().default(true),
         over5Employees: z.boolean().default(false),
@@ -249,6 +252,10 @@ export const electronicContractsRouter = router({
         // 포괄임금 구성항목
         annualSalary: z.string().optional(),
         basePay: z.string().optional(),
+        fixedOvertimeHours: z.string().optional(),
+        fixedOvertimePay: z.string().optional(),
+        fixedHolidayHours: z.string().optional(),
+        fixedHolidayPay: z.string().optional(),
         annualLeavePay: z.string().optional(),
         hourlyWage: z.string().optional(),
         monthlyContractHours: z.string().optional(),
@@ -292,7 +299,6 @@ export const electronicContractsRouter = router({
           workEndTime: input.workEndTime,
           breakMinutes: input.breakMinutes,
           weeklyHoliday: input.weeklyHoliday,
-          weeklyOffDays: input.weeklyOffDays,
           payDay: input.payDay,
           socialInsurance: input.socialInsurance,
           over5Employees: input.over5Employees,
@@ -310,6 +316,10 @@ export const electronicContractsRouter = router({
           workPlaceAddress: input.workPlaceAddress,
           annualSalary: input.annualSalary,
           basePay: input.basePay,
+          fixedOvertimeHours: input.fixedOvertimeHours,
+          fixedOvertimePay: input.fixedOvertimePay,
+          fixedHolidayHours: input.fixedHolidayHours,
+          fixedHolidayPay: input.fixedHolidayPay,
           annualLeavePay: input.annualLeavePay,
           hourlyWage: input.hourlyWage,
           monthlyContractHours: input.monthlyContractHours,
@@ -319,6 +329,35 @@ export const electronicContractsRouter = router({
           createdBy: ctx.user.userId,
         })
         .$returningId();
+
+      // ── 초안 생성 시 employee_contracts에 비활성 레코드 생성 (인건비 정산 반영용) ──
+      if (input.employeeId) {
+        try {
+          // 기존 비활성(초안) 계약 정리: 같은 직원의 기존 비활성 레코드 삭제 후 재생성
+          await db.delete(employeeContracts).where(and(
+            eq(employeeContracts.userId, input.employeeId),
+            eq(employeeContracts.restaurantId, input.restaurantId),
+            eq(employeeContracts.isActive, false),
+          ));
+          await db.insert(employeeContracts).values({
+            userId: input.employeeId,
+            restaurantId: input.restaurantId,
+            wageType: input.wageType,
+            wageAmount: input.wageAmount,
+            position: input.position ?? null,
+            contractStart: input.contractStart ? new Date(input.contractStart) : null,
+            contractEnd: input.contractEnd ? new Date(input.contractEnd) : null,
+            weeklyHours: input.weeklyHours ?? null,
+            weeklyOffDays: 1,
+            socialInsurance: input.socialInsurance ?? true,
+            isActive: false, // 초안 상태 → 서명 완료 시 active로 전환
+          } as any);
+          console.log(`[createContract] draft employee_contracts created for userId=${input.employeeId}`);
+        } catch (e: any) {
+          console.error(`[createContract] employee_contracts draft sync error:`, e.message);
+        }
+      }
+
       return { id: result.id, token };
     }),
 
@@ -340,7 +379,6 @@ export const electronicContractsRouter = router({
         workEndTime: z.string().optional(),
         breakMinutes: z.number().optional(),
         weeklyHoliday: z.string().optional(),
-        weeklyOffDays: z.number().optional(),
         payDay: z.number().optional(),
         socialInsurance: z.boolean().optional(),
         over5Employees: z.boolean().optional(),
@@ -442,72 +480,6 @@ export const electronicContractsRouter = router({
       return { ok: true };
     }),
 
-  // ═══ 사업주 프리셋 (태그) ═══
-
-  listEmployerPresets: managerProcedure
-    .input(z.object({ restaurantId: z.number() }))
-    .query(async ({ input, ctx }) => {
-      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      return db.select().from(employerPresets)
-        .where(eq(employerPresets.restaurantId, input.restaurantId))
-        .orderBy(desc(employerPresets.isDefault), employerPresets.companyName);
-    }),
-
-  addEmployerPreset: managerProcedure
-    .input(z.object({
-      restaurantId: z.number(),
-      companyName: z.string().min(1),
-      businessNumber: z.string().optional(),
-      isDefault: z.boolean().optional(),
-    }))
-    .mutation(async ({ input, ctx }) => {
-      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      // 기본값 설정 시 기존 기본값 해제
-      if (input.isDefault) {
-        await db.update(employerPresets).set({ isDefault: false })
-          .where(eq(employerPresets.restaurantId, input.restaurantId));
-      }
-      const [result] = await db.insert(employerPresets).values({
-        restaurantId: input.restaurantId,
-        companyName: input.companyName,
-        businessNumber: input.businessNumber || null,
-        isDefault: input.isDefault ?? false,
-        createdBy: ctx.user.userId,
-      });
-      return { id: (result as any).insertId };
-    }),
-
-  updateEmployerPreset: managerProcedure
-    .input(z.object({
-      id: z.number(),
-      restaurantId: z.number(),
-      companyName: z.string().min(1),
-      businessNumber: z.string().optional(),
-      isDefault: z.boolean().optional(),
-    }))
-    .mutation(async ({ input, ctx }) => {
-      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      if (input.isDefault) {
-        await db.update(employerPresets).set({ isDefault: false })
-          .where(eq(employerPresets.restaurantId, input.restaurantId));
-      }
-      await db.update(employerPresets).set({
-        companyName: input.companyName,
-        businessNumber: input.businessNumber || null,
-        isDefault: input.isDefault ?? false,
-      }).where(and(eq(employerPresets.id, input.id), eq(employerPresets.restaurantId, input.restaurantId)));
-      return { ok: true };
-    }),
-
-  deleteEmployerPreset: managerProcedure
-    .input(z.object({ id: z.number(), restaurantId: z.number() }))
-    .mutation(async ({ input, ctx }) => {
-      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      await db.delete(employerPresets)
-        .where(and(eq(employerPresets.id, input.id), eq(employerPresets.restaurantId, input.restaurantId)));
-      return { ok: true };
-    }),
-
   /** 계약서 서명 (상태 → signed, 비로그인 접근 가능) */
   signContract: publicProcedure
     .input(
@@ -561,7 +533,7 @@ export const electronicContractsRouter = router({
             contractStart: contract.contractStart ? new Date(contract.contractStart) : null,
             contractEnd: contract.contractEnd ? new Date(contract.contractEnd) : null,
             weeklyHours: contract.weeklyHours ?? null,
-            weeklyOffDays: contract.weeklyOffDays ?? 1,
+            weeklyOffDays: 1,
             socialInsurance: contract.socialInsurance ?? true,
             bankAccount: input.bankAccount ?? null,
             residentNumber: input.residentNumber ?? null,

@@ -727,7 +727,7 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             sql`${schedules.startTime} >= ${fromStr}`,
             sql`${schedules.startTime} < ${toStr}`,
-            sql`${schedules.status} IN ('draft','confirmed','completed')`
+            sql`${schedules.status} IN ('draft','confirmed','completed','scheduled','published')`
           )
         )
         .orderBy(schedules.startTime);
@@ -756,8 +756,11 @@ export const schedulesRouter = router({
       console.log(`[laborCost] restaurantId=${input.restaurantId} year=${input.year} month=${input.month} fromUTC="${fromStr}" toUTC="${toStr}"`);
 
       // 전체 스케줄 (draft 포함) + 직원 정보 + 소속회사 + 시급 조인
-      const rows = await db
+      // 계약서 isActive 필터 제거 → 초안(비활성) 계약도 급여 반영
+      // 복수 계약 존재 시 중복 방지를 위해 scheduleId로 dedup
+      const rawRows = await db
         .select({
+          scheduleId: schedules.id,
           userId: schedules.userId,
           userName: users.name,
           startTime: schedules.startTime,
@@ -778,6 +781,7 @@ export const schedulesRouter = router({
           socialInsurance: employeeContracts.socialInsurance,
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
+          contractIsActive: employeeContracts.isActive,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
         })
         .from(schedules)
@@ -789,19 +793,31 @@ export const schedulesRouter = router({
         .leftJoin(employeeContracts, and(
           eq(employeeContracts.userId, schedules.userId),
           eq(employeeContracts.restaurantId, input.restaurantId),
-          eq(employeeContracts.isActive, true)
         ))
         .where(
           and(
             eq(schedules.restaurantId, input.restaurantId),
             sql`${schedules.startTime} >= ${fromStr}`,
             sql`${schedules.startTime} < ${toStr}`,
-            sql`${schedules.status} IN ('draft','confirmed','completed')`
+            sql`${schedules.status} IN ('draft','confirmed','completed','scheduled','published')`
           )
         )
         .orderBy(schedules.startTime);
 
-      console.log(`[laborCost] rows found: ${rows.length}`);
+      // 복수 계약 중복 제거: 같은 scheduleId → active 계약 우선, 없으면 비활성 계약 사용
+      const seenSchedules = new Map<number, typeof rawRows[0]>();
+      for (const r of rawRows) {
+        const existing = seenSchedules.get(r.scheduleId);
+        if (!existing) {
+          seenSchedules.set(r.scheduleId, r);
+        } else if (!existing.contractIsActive && r.contractIsActive) {
+          // 기존이 비활성이고 현재가 활성이면 교체
+          seenSchedules.set(r.scheduleId, r);
+        }
+      }
+      const rows = Array.from(seenSchedules.values());
+
+      console.log(`[laborCost] rows found: ${rows.length} (raw: ${rawRows.length})`);
 
       // ── 영업일수 계산 ──
       // 1) 정기 휴무 요일 조회
@@ -880,7 +896,8 @@ export const schedulesRouter = router({
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
             recheckRequired: false,
-            socialInsurance: r.socialInsurance ?? true,
+            // 미지정(소속회사 없음) 또는 임시근로자 → 3.3% 공제 고정
+            socialInsurance: (r.userId && r.socialInsurance != null) ? r.socialInsurance : false,
             bankAccount: r.bankAccount ?? null,
             residentNumber: r.residentNumber ?? null,
           };
@@ -960,11 +977,33 @@ export const schedulesRouter = router({
 
       return Object.values(companyMap).map(c => ({
         ...c,
-        employees: Object.values(c.employees).map(emp => {
+        employees: Object.entries(c.employees).map(([empKey, emp]) => {
           const uid = emp.userId;
           const lb = uid ? leaveMap[uid] : null;
+          const isTemp = empKey.startsWith("temp_");
+
+          // 0원 이유 판별
+          let zeroWageReason: string | null = null;
+          if (emp.totalWage === 0 && emp.shifts > 0) {
+            if (isTemp) {
+              if (!emp.wageType && !emp.wageAmount) {
+                zeroWageReason = "임시근로자 급여 미설정";
+              } else if (emp.wageAmount && Number(emp.wageAmount) === 0) {
+                zeroWageReason = "급여액이 0원으로 설정됨";
+              }
+            } else {
+              if (!emp.wageType && !emp.wageAmount) {
+                zeroWageReason = "근로계약서 미작성 (급여 정보 없음)";
+              } else if (emp.wageAmount && Number(emp.wageAmount) === 0) {
+                zeroWageReason = "계약서 급여액이 0원으로 설정됨";
+              }
+            }
+          }
+
           return {
             ...emp,
+            isTemp,
+            zeroWageReason,
             daysOff: Math.max(0, operatingDays - emp.shifts),
             substituteLeave: lb ? { earned: lb.substitute.earned, used: lb.substitute.used, remaining: lb.substitute.earned - lb.substitute.used } : null,
             annualLeave: lb ? { earned: lb.annual.earned, used: lb.annual.used, remaining: lb.annual.earned - lb.annual.used } : null,
