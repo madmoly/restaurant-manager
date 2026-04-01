@@ -54,6 +54,7 @@ export default function StaffPage() {
   const [resignDate, setResignDate] = useState(new Date().toISOString().slice(0, 10));
   const [resignReason, setResignReason] = useState("");
   const [showResigned, setShowResigned] = useState(false);
+  const [showResignedContracts, setShowResignedContracts] = useState(false);
   const [renewTarget, setRenewTarget] = useState<{ userId: number; name: string; affiliatedCompany?: string } | null>(null);
 
   const utils = trpc.useUtils();
@@ -695,15 +696,27 @@ export default function StaffPage() {
       )}
 
       {/* 근로계약서 목록 — 점장 이상 표시 */}
-      {isOwnerOrAdmin && contracts && contracts.length > 0 && (
+      {isOwnerOrAdmin && contracts && contracts.length > 0 && (() => {
+        const activeContracts = contracts.filter((c: any) => !c.resignedAt);
+        const resignedContracts = contracts.filter((c: any) => c.resignedAt);
+        const displayContracts = showResignedContracts ? contracts : activeContracts;
+        return (
         <div className="mt-4">
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
             <FileText className="w-4 h-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold text-foreground">근로계약서</h2>
-            <span className="text-xs text-muted-foreground">{contracts.length}건</span>
+            <span className="text-xs text-muted-foreground">{activeContracts.length}건</span>
+            {resignedContracts.length > 0 && (
+              <button
+                onClick={() => setShowResignedContracts(!showResignedContracts)}
+                className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${showResignedContracts ? "border-orange-300 bg-orange-50 text-orange-600 dark:border-orange-700 dark:bg-orange-900/30 dark:text-orange-400" : "border-input text-muted-foreground hover:bg-accent"}`}
+              >
+                퇴사자 {resignedContracts.length}건 {showResignedContracts ? "숨기기" : "보기"}
+              </button>
+            )}
           </div>
           <div className="space-y-2">
-            {contracts.map((c: any) => {
+            {displayContracts.map((c: any) => {
               const statusMap: Record<string, { label: string; color: string; icon: string }> = {
                 draft: { label: "초안", color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400", icon: "📝" },
                 sent: { label: "서명 대기중", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300", icon: "📨" },
@@ -712,19 +725,21 @@ export default function StaffPage() {
                 cancelled: { label: "취소됨", color: "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400", icon: "❌" },
               };
               const st = statusMap[c.status] ?? statusMap.draft;
+              const isResigned = !!c.resignedAt;
               const signUrl = `${window.location.origin}/sign/${c.token}`;
               const copyLink = () => {
                 const msg = `[근로계약서 서명]\n아래 링크를 눌러 계약서를 확인하고 서명해주세요.\n${signUrl}`;
                 navigator.clipboard.writeText(msg).then(() => toast.success("계약서 서명 링크가 클립보드에 복사되었습니다"));
               };
               return (
-                <div key={c.id} className="border border-border rounded-lg bg-card overflow-hidden">
+                <div key={c.id} className={`border rounded-lg overflow-hidden ${isResigned ? "border-orange-200 bg-orange-50/30 dark:border-orange-800 dark:bg-orange-950/20" : "border-border bg-card"}`}>
                   {/* 상단: 직원 정보 + 상태 */}
                   <div className="px-4 py-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-foreground">{c.employeeName}</span>
+                          <span className={`text-sm font-semibold ${isResigned ? "text-muted-foreground line-through" : "text-foreground"}`}>{c.employeeName}</span>
+                          {isResigned && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-400">퇴사</span>}
                           <span className="text-xs text-muted-foreground">{c.position}</span>
                           {c.affiliatedCompany && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent text-muted-foreground">{c.affiliatedCompany}</span>
@@ -825,10 +840,23 @@ export default function StaffPage() {
                         </Button>
                       </div>
                     )}
-                    {c.status === "sent" && (
+                    {c.status === "sent" && !isResigned && (
                       <span className="text-[11px] text-muted-foreground ml-auto flex items-center gap-1">
                         <Info className="w-3 h-3" /> 직원이 링크를 열어 서명하면 완료됩니다
                       </span>
+                    )}
+                    {isResigned && c.status !== "draft" && c.status !== "expired" && (
+                      <button
+                        onClick={() => {
+                          if (confirm(`퇴사자 ${c.employeeName}의 계약서를 삭제하시겠습니까?`)) {
+                            deleteContract.mutate({ id: c.id, force: true });
+                          }
+                        }}
+                        disabled={deleteContract.isPending}
+                        className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors ml-auto"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> 삭제
+                      </button>
                     )}
                   </div>
                 </div>
@@ -836,7 +864,8 @@ export default function StaffPage() {
             })}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ID/비밀번호 수정 모달 */}
       {editingCredentials && (

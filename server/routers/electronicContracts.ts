@@ -3,7 +3,7 @@ import { eq, and, desc, sql, isNotNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants } from "../../drizzle/schema";
+import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants, restaurantUsers } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -92,16 +92,30 @@ export const electronicContractsRouter = router({
 
   // ═══ 전자 근로계약서 ═══
 
-  /** 근로계약서 목록 */
+  /** 근로계약서 목록 (퇴사자 resignedAt 포함) */
   listEmploymentContracts: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      return db
-        .select()
+      const rows = await db
+        .select({
+          contract: employmentElectronicContracts,
+          resignedAt: restaurantUsers.resignedAt,
+        })
         .from(employmentElectronicContracts)
+        .leftJoin(
+          restaurantUsers,
+          and(
+            eq(employmentElectronicContracts.employeeId, restaurantUsers.userId),
+            eq(employmentElectronicContracts.restaurantId, restaurantUsers.restaurantId),
+          ),
+        )
         .where(eq(employmentElectronicContracts.restaurantId, input.restaurantId))
         .orderBy(desc(employmentElectronicContracts.createdAt));
+      return rows.map((r) => ({
+        ...r.contract,
+        resignedAt: r.resignedAt ? String(r.resignedAt) : null,
+      }));
     }),
 
   /** 근로계약서 상세 */
@@ -443,20 +457,40 @@ export const electronicContractsRouter = router({
       return { ok: true, token: contract.token };
     }),
 
-  /** 초안 계약서 삭제 (draft 상태만) */
+  /** 계약서 삭제 (초안/만료/퇴사자 계약서) */
   deleteContract: ownerProcedure
-    .input(z.object({ id: z.number() }))
+    .input(z.object({ id: z.number(), force: z.boolean().optional() }))
     .mutation(async ({ ctx, input }) => {
       const [contract] = await db
         .select({
           status: employmentElectronicContracts.status,
           restaurantId: employmentElectronicContracts.restaurantId,
+          employeeId: employmentElectronicContracts.employeeId,
         })
         .from(employmentElectronicContracts)
         .where(eq(employmentElectronicContracts.id, input.id))
         .limit(1);
       if (!contract) throw new TRPCError({ code: "NOT_FOUND" });
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, contract.restaurantId, true);
+
+      // 퇴사자 계약서는 force=true로 모든 상태 삭제 가능
+      if (input.force && contract.employeeId) {
+        const [ru] = await db
+          .select({ resignedAt: restaurantUsers.resignedAt })
+          .from(restaurantUsers)
+          .where(and(
+            eq(restaurantUsers.userId, contract.employeeId),
+            eq(restaurantUsers.restaurantId, contract.restaurantId),
+          ))
+          .limit(1);
+        if (ru?.resignedAt) {
+          // 퇴사자 → 삭제 허용
+          await db.delete(employmentElectronicContracts).where(eq(employmentElectronicContracts.id, input.id));
+          return { ok: true };
+        }
+      }
+
+      // 일반 삭제: draft/expired만 허용
       if (contract.status !== "draft" && contract.status !== "expired") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "초안 또는 만료된 계약서만 삭제할 수 있습니다" });
       }
