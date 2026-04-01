@@ -416,6 +416,12 @@ export default function StaffPage() {
                           <AlertTriangle className="w-3 h-3 inline mr-0.5" />보건증 {healthStatus.label}
                         </span>
                       )}
+                      {/* 계약서 미작성 */}
+                      {isOwnerOrAdmin && contracts && !contracts.some((c: any) => c.employeeId === s.userId) && !s.resignedAt && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
+                          계약서 없음
+                        </span>
+                      )}
                     </div>
                     {/* 부가 정보 행 */}
                     <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
