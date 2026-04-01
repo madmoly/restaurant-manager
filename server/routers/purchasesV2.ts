@@ -232,7 +232,48 @@ export const purchasesV2Router = router({
       return { id: orderId };
     }),
 
-  /** 발주 → 입고 전환 (품목/금액 갱신 포함) */
+  /** 간편 발주 등록 (사진 + 메모 + 거래처) */
+  createSimpleOrder: protectedProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        purchaseDate: z.string(),
+        counterpartyId: z.number().optional(),
+        note: z.string().optional(),
+        attachmentUrl: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const [result] = await db.insert(purchaseOrdersV2).values({
+        restaurantId: input.restaurantId,
+        purchaseDate: input.purchaseDate,
+        counterpartyId: input.counterpartyId || null,
+        status: "ordered",
+        note: input.note || null,
+        attachmentUrl: input.attachmentUrl || null,
+        totalAmount: "0",
+        createdBy: ctx.user.userId,
+      });
+      return { id: result.insertId };
+    }),
+
+  /** 간편 입고 확인 (발주 → 입고) */
+  confirmReceive: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      await db
+        .update(purchaseOrdersV2)
+        .set({
+          status: "received",
+          receivedAt: new Date(),
+          lastModifiedBy: ctx.user.userId,
+          lastModifiedAt: new Date(),
+        })
+        .where(eq(purchaseOrdersV2.id, input.id));
+      return { success: true };
+    }),
+
+  /** 발주 → 입고 전환 (품목/금액 갱신 포함) — 레거시 */
   receiveOrder: protectedProcedure
     .input(
       z.object({
@@ -312,15 +353,10 @@ export const purchasesV2Router = router({
         summary: `입고 전환 (${Number(existing.totalAmount).toLocaleString()}원 → ${newTotal.toLocaleString()}원)`,
       };
 
-      // 입고일 = 오늘(KST 기준)
-      const kstNow = new Date(Date.now() + 9 * 3600000);
-      const receivedDate = kstNow.toISOString().slice(0, 10);
-
       await db
         .update(purchaseOrdersV2)
         .set({
           status: "received",
-          purchaseDate: receivedDate,
           receivedAt: new Date(),
           totalAmount: String(newTotal),
           lastModifiedBy: ctx.user.userId,

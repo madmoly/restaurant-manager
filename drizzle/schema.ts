@@ -20,8 +20,8 @@ export const users = mysqlTable("users", {
   name: varchar("name", { length: 100 }).notNull(),
   email: varchar("email", { length: 320 }),
   phone: varchar("phone", { length: 30 }),
-  // 시스템 역할: master > admin > user (레거시: manager, employee)
-  role: mysqlEnum("role", ["master", "admin", "user", "manager", "employee"]).default("user").notNull(),
+  // 시스템 역할: master > admin > manager > employee
+  role: mysqlEnum("role", ["master", "admin", "manager", "employee"]).default("employee").notNull(),
   authProvider: varchar("authProvider", { length: 20 }).default("local"),
   authProviderId: varchar("authProviderId", { length: 255 }),
   isActive: boolean("isActive").default(true).notNull(),
@@ -467,10 +467,6 @@ export const storeChecklistTemplates = mysqlTable("store_checklist_templates", {
   repeatDays: json("repeatDays").$type<number[]>().default([]),  // weekly: 0=일~6=토, monthly: 1~31일
   specificDate: date("specificDate"),  // 레거시 (monthly 전환 후 미사용)
   isHighlight: boolean("isHighlight").default(false),
-  // 적용 기간: 생성일 이후만 일일운영에 표시, 삭제(비활성) 시 해당일부터 미적용
-  effectiveFrom: date("effectiveFrom"),   // NULL = 제한없음(기존 데이터 호환)
-  effectiveTo: date("effectiveTo"),       // NULL = 무기한 활성
-  deactivatedBy: int("deactivatedBy"),    // 비활성 처리한 사용자
   createdBy: int("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -610,6 +606,22 @@ export const purchaseOrderItemsV2 = mysqlTable("purchase_order_items_v2", {
 
 export type PurchaseOrderItemV2 = typeof purchaseOrderItemsV2.$inferSelect;
 
+// ─── Daily Expenses (즉시 지출) ──────────────────────────────────────────────
+export const dailyExpenses = mysqlTable("daily_expenses", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  expenseDate: date("expenseDate").notNull(),
+  category: mysqlEnum("category", ["internet", "repair", "supply", "delivery", "other"]).default("other").notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).default("0").notNull(),
+  note: text("note"),
+  attachmentUrl: text("attachmentUrl"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type DailyExpense = typeof dailyExpenses.$inferSelect;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Phase 3: 전자계약 + 알림 + 월마감
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -660,7 +672,6 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   workEndTime: varchar("workEndTime", { length: 5 }).default("18:00"),
   breakMinutes: int("breakMinutes").default(60),
   weeklyHoliday: varchar("weeklyHoliday", { length: 20 }).default("일요일"),
-  weeklyOffDays: int("weeklyOffDays").default(1), // 주당 휴무일수
   payDay: int("payDay").default(25),
   payMethod: mysqlEnum("payMethod", ["bank_transfer", "cash"]).default("bank_transfer"),
   mealProvided: boolean("mealProvided").default(false).notNull(),
@@ -939,30 +950,3 @@ export const restaurantShiftPresets = mysqlTable("restaurant_shift_presets", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type RestaurantShiftPreset = typeof restaurantShiftPresets.$inferSelect;
-
-// ─── 월정산 증빙 이미지 ─────────────────────────────────────────────────────
-export const settlementImages = mysqlTable("settlement_images", {
-  id: int("id").autoincrement().primaryKey(),
-  restaurantId: int("restaurantId").notNull(),
-  year: int("year").notNull(),
-  month: int("month").notNull(),
-  counterpartyId: int("counterpartyId"),              // NULL = 기타/전체
-  imageUrl: text("imageUrl").notNull(),
-  claimedAmount: int("claimedAmount"),                // 정산서 기재 금액 (원)
-  note: varchar("note", { length: 200 }),
-  uploadedBy: int("uploadedBy"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-export type SettlementImage = typeof settlementImages.$inferSelect;
-
-// ─── 사업주 프리셋 (계약서 사업주 태그) ─────────────────────────────────────────
-export const employerPresets = mysqlTable("employer_presets", {
-  id: int("id").autoincrement().primaryKey(),
-  restaurantId: int("restaurantId").notNull(),
-  companyName: varchar("companyName", { length: 100 }).notNull(),
-  businessNumber: varchar("businessNumber", { length: 30 }),  // 사업자등록번호
-  isDefault: boolean("isDefault").default(false).notNull(),    // 기본 선택 여부
-  createdBy: int("createdBy"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-export type EmployerPreset = typeof employerPresets.$inferSelect;
