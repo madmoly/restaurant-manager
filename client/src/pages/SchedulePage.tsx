@@ -1047,7 +1047,7 @@ export default function SchedulePage() {
                 >
                   {DAY_NAMES[i]} {date.getDate()}일
                   {daySchedules.length > 0 && (() => {
-                    const headcount = daySchedules.reduce((sum, s) =>
+                    const headcount = daySchedules.filter(s => s.status !== "canceled").reduce((sum, s) =>
                       sum + (s.shiftPreset === "open" || s.shiftPreset === "close" ? 0.5 : 1), 0);
                     return <span className="ml-1 text-[10px] md:text-xs font-normal">({headcount % 1 === 0 ? headcount : headcount.toFixed(1)}명)</span>;
                   })()}
