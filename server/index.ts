@@ -666,6 +666,37 @@ app.use(express.json());
       )
     `).catch(() => {});
 
+    // 즉시지출 카테고리 테이블
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS expense_categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        sortOrder INT DEFAULT 0 NOT NULL,
+        isActive BOOLEAN DEFAULT TRUE NOT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        INDEX idx_exp_cat_restaurant (restaurantId)
+      )
+    `).catch(() => {});
+
+    // 즉시지출 기록 테이블
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS daily_expenses (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        date DATE NOT NULL,
+        categoryId INT DEFAULT NULL,
+        category VARCHAR(50) DEFAULT NULL,
+        title VARCHAR(200) NOT NULL,
+        amount DECIMAL(14,2) DEFAULT 0 NOT NULL,
+        note TEXT DEFAULT NULL,
+        attachmentUrl TEXT DEFAULT NULL,
+        createdBy INT DEFAULT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        INDEX idx_daily_exp_store_date (restaurantId, date)
+      )
+    `).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

@@ -922,6 +922,31 @@ export const storeInfoCards = mysqlTable("store_info_cards", {
 });
 export type StoreInfoCard = typeof storeInfoCards.$inferSelect;
 
+// ─── 즉시지출 카테고리 ───────────────────────────────────────────────────────
+export const expenseCategories = mysqlTable("expense_categories", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// ─── 즉시지출 기록 ───────────────────────────────────────────────────────────
+export const dailyExpenses = mysqlTable("daily_expenses", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  date: date("date").notNull(),
+  categoryId: int("categoryId"),
+  category: varchar("category", { length: 50 }),
+  title: varchar("title", { length: 200 }).notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).default("0").notNull(),
+  note: text("note"),
+  attachmentUrl: text("attachmentUrl"),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 // ─── 매장별 근무 프리셋 시간 ─────────────────────────────────────────────────
 export const restaurantShiftPresets = mysqlTable("restaurant_shift_presets", {
   id: int("id").autoincrement().primaryKey(),

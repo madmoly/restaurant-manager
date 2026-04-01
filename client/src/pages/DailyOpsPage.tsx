@@ -814,7 +814,7 @@ function emptyPurchaseItem(): PurchaseItemRow {
   return { rawItemName: '', quantity: '', unitName: '개', unitPrice: '', lineTotal: '' };
 }
 
-type PurchaseInputMode = 'none' | 'order' | 'receive';
+type PurchaseInputMode = 'none' | 'order' | 'receive' | 'expense';
 
 function PendingOrdersBanner({ restaurantId, onReceive }: { restaurantId: number; onReceive?: (orderId: number) => void }) {
   const pendingQuery = trpc.purchasesV2.pendingOrders.useQuery(
@@ -912,6 +912,91 @@ function PurchaseTab({
     { counterpartyId: counterpartyId! },
     { enabled: counterpartyId !== undefined && counterpartyId > 0 },
   );
+
+  // ── 즉시지출 state ──
+  const [expCategoryId, setExpCategoryId] = useState<number>(0);
+  const [expTitle, setExpTitle] = useState('');
+  const [expAmount, setExpAmount] = useState('');
+  const [expNote, setExpNote] = useState('');
+  const [expAttachment, setExpAttachment] = useState<string | undefined>(undefined);
+  const [expUploading, setExpUploading] = useState(false);
+
+  // ── 즉시지출 queries ──
+  const expensesQuery = trpc.dailyExpenses.listByDate.useQuery(
+    { restaurantId, date },
+    { enabled: restaurantId > 0 },
+  );
+  const categoriesQuery = trpc.dailyExpenses.listCategories.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const categories = categoriesQuery.data || [];
+  const expenses = expensesQuery.data || [];
+  const totalExpenses = expenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
+
+  // 카테고리 시드 (최초 1회)
+  const seedCatMut = trpc.dailyExpenses.seedDefaultCategories.useMutation({
+    onSuccess: () => categoriesQuery.refetch(),
+  });
+  if (categories.length === 0 && !categoriesQuery.isLoading && restaurantId > 0 && !seedCatMut.isPending) {
+    seedCatMut.mutate({ restaurantId });
+  }
+
+  // ── 즉시지출 mutations ──
+  const createExpenseMut = trpc.dailyExpenses.create.useMutation({
+    onSuccess() {
+      toast.success('즉시지출이 등록되었습니다.');
+      utils.dailyExpenses.listByDate.invalidate();
+      setExpCategoryId(0);
+      setExpTitle('');
+      setExpAmount('');
+      setExpNote('');
+      setExpAttachment(undefined);
+      setInputMode('none');
+    },
+    onError(err: any) { toast.error(`등록 실패: ${err.message}`); },
+  });
+
+  const deleteExpenseMut = trpc.dailyExpenses.delete.useMutation({
+    onSuccess() {
+      toast.success('삭제됨');
+      utils.dailyExpenses.listByDate.invalidate();
+    },
+    onError(err: any) { toast.error(`삭제 실패: ${err.message}`); },
+  });
+
+  // ── 즉시지출 사진 업로드 ──
+  const handleExpensePhotoUpload = async (file: File) => {
+    try {
+      setExpUploading(true);
+      const formData = new FormData();
+      formData.append('photo', file);
+      const res = await fetch('/api/upload/order-image', { method: 'POST', body: formData });
+      if (!res.ok) throw new Error('업로드 실패');
+      const { url } = await res.json();
+      setExpAttachment(url);
+    } catch (err: any) {
+      toast.error(err.message || '사진 업로드 실패');
+    } finally {
+      setExpUploading(false);
+    }
+  };
+
+  // ── 즉시지출 등록 핸들러 ──
+  const handleExpenseSubmit = () => {
+    if (!expTitle.trim()) { toast.error('지출 내역을 입력하세요.'); return; }
+    const amt = parseNum(expAmount);
+    if (amt <= 0) { toast.error('금액을 입력하세요.'); return; }
+    createExpenseMut.mutate({
+      restaurantId,
+      date,
+      categoryId: expCategoryId > 0 ? expCategoryId : undefined,
+      title: expTitle,
+      amount: String(amt),
+      note: expNote || undefined,
+      attachmentUrl: expAttachment,
+    });
+  };
 
   const createOrder = trpc.purchasesV2.createOrder.useMutation({
     onSuccess() {
@@ -1455,6 +1540,17 @@ function PurchaseTab({
         >
           <Check className="w-5 h-5" />
           입고 입력
+        </button>
+        <button
+          onClick={() => { resetForm(); setInputMode(inputMode === 'expense' ? 'none' : 'expense'); }}
+          className={`flex-1 h-14 flex items-center justify-center gap-2 rounded-lg text-sm font-bold transition-all border-2 ${
+            inputMode === 'expense'
+              ? 'bg-violet-600 text-white border-violet-700 ring-2 ring-violet-300 shadow-md'
+              : 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border-violet-300 dark:border-violet-700 hover:bg-violet-100 dark:hover:bg-violet-900/50'
+          }`}
+        >
+          <Plus className="w-5 h-5" />
+          즉시지출
         </button>
       </div>
 
@@ -2006,6 +2102,138 @@ function PurchaseTab({
               : inputMode === 'order' ? '📋 발주 등록'
               : '✓ 입고 등록'}
           </button>
+        </Card>
+      )}
+
+      {/* ═══════════════ 즉시지출 입력 폼 ═══════════════ */}
+      {inputMode === 'expense' && (
+        <Card className="bg-violet-50/30 dark:bg-violet-900/5 border-violet-200 dark:border-violet-800 border p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-foreground text-sm">즉시지출 등록</h3>
+            <button onClick={() => setInputMode('none')} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+          </div>
+          <p className="text-[11px] text-violet-600 dark:text-violet-400 bg-violet-100/50 dark:bg-violet-900/20 px-2 py-1 rounded">
+            인터넷발주, 수리비, 소모품 등 발주/입고와 별개의 지출을 기록합니다
+          </p>
+
+          {/* 카테고리 */}
+          <div>
+            <Label className="text-xs">분류</Label>
+            <select
+              value={expCategoryId}
+              onChange={(e) => setExpCategoryId(Number(e.target.value))}
+              className="mt-1 w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+            >
+              <option value={0}>분류 선택</option>
+              {categories.map((cat: any) => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 내역 */}
+          <div>
+            <Label className="text-xs">내역</Label>
+            <Input
+              placeholder="지출 내역 (예: 쿠팡 세제, 화장실 수리)"
+              value={expTitle}
+              onChange={(e) => setExpTitle(e.target.value)}
+              className="mt-1 text-sm h-9"
+            />
+          </div>
+
+          {/* 금액 */}
+          <div>
+            <Label className="text-xs">금액</Label>
+            <Input
+              placeholder="0"
+              value={expAmount}
+              onChange={(e) => setExpAmount(handleWonInput(e.target.value))}
+              className="mt-1 text-sm h-10 text-right font-medium"
+              inputMode="numeric"
+            />
+          </div>
+
+          {/* 메모 */}
+          <div>
+            <Label className="text-xs">메모 (선택)</Label>
+            <Input placeholder="메모" value={expNote} onChange={(e) => setExpNote(e.target.value)} className="mt-1 text-sm h-8" />
+          </div>
+
+          {/* 증빙사진 */}
+          {expAttachment ? (
+            <div className="space-y-2">
+              <img
+                src={expAttachment}
+                alt="증빙"
+                className="w-full max-h-36 object-contain rounded border border-border cursor-pointer"
+                onClick={() => setViewerImage(expAttachment)}
+              />
+              <div className="flex justify-end">
+                <button onClick={() => setExpAttachment(undefined)} className="text-xs text-red-500 hover:text-red-600 flex items-center gap-1">
+                  <X className="w-3.5 h-3.5" /> 삭제
+                </button>
+              </div>
+            </div>
+          ) : expUploading ? (
+            <div className="flex items-center justify-center py-4">
+              <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+              <span className="ml-2 text-xs text-muted-foreground">업로드 중...</span>
+            </div>
+          ) : (
+            <label className="flex items-center gap-2 border border-dashed border-violet-300 dark:border-violet-700 rounded-lg p-3 cursor-pointer hover:bg-violet-50/50 dark:hover:bg-violet-900/10 transition-colors">
+              <Camera className="w-5 h-5 text-violet-500" />
+              <div>
+                <p className="text-xs font-medium text-foreground">증빙사진 첨부 (선택)</p>
+                <p className="text-[10px] text-muted-foreground">영수증, 결제내역 등</p>
+              </div>
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                if (e.target.files?.[0]) handleExpensePhotoUpload(e.target.files[0]);
+              }} />
+            </label>
+          )}
+
+          <button
+            onClick={handleExpenseSubmit}
+            disabled={createExpenseMut.isPending}
+            className="w-full py-3 rounded-lg text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white transition-colors disabled:opacity-50"
+          >
+            {createExpenseMut.isPending ? '등록 중...' : `즉시지출 등록${expAmount ? ` (₩${expAmount})` : ''}`}
+          </button>
+        </Card>
+      )}
+
+      {/* ─── 즉시지출 목록 ─── */}
+      {expenses.length > 0 && (
+        <Card className="bg-card border-border p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-foreground">즉시지출</h3>
+            <span className="text-sm font-bold text-foreground">₩{totalExpenses.toLocaleString()}</span>
+          </div>
+          <div className="space-y-2">
+            {expenses.map((exp: any) => (
+              <div key={exp.id} className="flex items-center justify-between text-sm border border-border rounded-lg px-3 py-2">
+                <div className="min-w-0">
+                  <span className="font-medium text-foreground">{exp.title}</span>
+                  {exp.categoryName && (
+                    <span className="text-[10px] ml-1.5 px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400">{exp.categoryName}</span>
+                  )}
+                  {exp.note && <p className="text-xs text-muted-foreground mt-0.5 truncate">{exp.note}</p>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="font-medium tabular-nums">₩{Number(exp.amount).toLocaleString()}</span>
+                  {exp.attachmentUrl && (
+                    <button onClick={() => setViewerImage(exp.attachmentUrl)} className="text-violet-500">
+                      <Camera className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { if (confirm('삭제할까요?')) deleteExpenseMut.mutate({ id: exp.id }); }} disabled={deleteExpenseMut.isPending}>
+                    <Trash2 className="w-3 h-3 text-red-500" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 

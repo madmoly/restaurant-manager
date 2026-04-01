@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, between, sql, desc } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
-import { purchaseOrders, purchaseOrderItems, counterparties } from "../../drizzle/schema";
+import { purchaseOrders, purchaseOrderItems, counterparties, dailyExpenses } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 
 export const purchasesRouter = router({
@@ -40,18 +40,37 @@ export const purchasesRouter = router({
       return { ...order, items };
     }),
 
-  /** 월간 매입 합계 */
+  /** 월간 매입 합계 (v1 매입 + 즉시지출) */
   monthlyTotal: protectedProcedure
     .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const start = new Date(input.year, input.month - 1, 1);
       const end = new Date(input.year, input.month, 0);
-      const [row] = await db
+      const mm = String(input.month).padStart(2, "0");
+      const startDate = `${input.year}-${mm}-01`;
+      const nm = input.month === 12 ? 1 : input.month + 1;
+      const ny = input.month === 12 ? input.year + 1 : input.year;
+      const endDate = `${ny}-${String(nm).padStart(2, "0")}-01`;
+
+      // v1 매입 합계
+      const [v1Row] = await db
         .select({ total: sql<string>`COALESCE(SUM(${purchaseOrders.totalAmount}), 0)` })
         .from(purchaseOrders)
         .where(and(eq(purchaseOrders.restaurantId, input.restaurantId), between(purchaseOrders.purchaseDate, start, end)));
-      return { total: row?.total ?? "0" };
+
+      // 즉시지출 합계
+      const [expRow] = await db
+        .select({ total: sql<string>`COALESCE(SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2))), 0)` })
+        .from(dailyExpenses)
+        .where(and(
+          eq(dailyExpenses.restaurantId, input.restaurantId),
+          sql`${dailyExpenses.date} >= ${startDate}`,
+          sql`${dailyExpenses.date} < ${endDate}`,
+        ));
+
+      const total = Number(v1Row?.total ?? 0) + Number(expRow?.total ?? 0);
+      return { total: String(total) };
     }),
 
   /** 매입 전표 생성 (헤더 + 항목 한번에) */
