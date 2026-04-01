@@ -18,8 +18,8 @@ import {
 const fmt = (n: number) => n.toLocaleString("ko-KR");
 const fmtW = (n: number) => `₩${fmt(n)}`;
 const fmtShort = (n: number) => {
-  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}억`;
-  if (n >= 10_000) return `${(n / 10_000).toFixed(0)}만`;
+  if (n >= 100_000_000) return `${Math.round(n / 100_000_000)}억`;
+  if (n >= 10_000) return `${Math.round(n / 10_000)}만`;
   return fmt(n);
 };
 

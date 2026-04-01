@@ -385,7 +385,7 @@ export default function MonthlySettlementPage() {
                                 }}
                                 className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[9px] text-center py-0.5 rounded-b truncate"
                               >
-                                {img.claimedAmount ? `${(img.claimedAmount / 10000).toFixed(0)}만` : "금액입력"}
+                                {img.claimedAmount ? `${Math.round(img.claimedAmount / 10000)}만` : "금액입력"}
                               </button>
                             )}
                           </div>

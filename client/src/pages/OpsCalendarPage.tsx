@@ -16,7 +16,7 @@ import {
 const DAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
 function fmtWon(n: number): string {
-  if (n >= 10000) return `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}만`;
+  if (n >= 10000) return `${Math.round(n / 10000)}만`;
   return n.toLocaleString();
 }
 function getDaysInMonth(year: number, month: number) {

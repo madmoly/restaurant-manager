@@ -351,7 +351,7 @@ function StatusRow({
 function formatKRW(n: number): string {
   const abs = Math.abs(n);
   const sign = n < 0 ? "-" : "";
-  if (abs >= 100000000) return sign + (abs / 100000000).toFixed(1).replace(/\.0$/, "") + "억";
+  if (abs >= 100000000) return sign + Math.round(abs / 100000000) + "억";
   if (abs >= 10000) return sign + Math.round(abs / 10000).toLocaleString() + "만";
   return sign + abs.toLocaleString();
 }
