@@ -1,11 +1,6 @@
-발주 재설계: 사진+메모 간소화, 즉시지출 커스텀 카테고리, DailyOpsPage 호환 수정
+fix: settlementImages + employerPresets 스키마 추가 (빌드 에러 해결)
 
-- purchasesV2: OCR/품목 레벨 제거, 사진+메모+입고확인으로 간소화
-- dailyExpenses: 커스텀 카테고리(expense_categories 테이블) CRUD 추가
-- purchases.monthlyTotal: v2 발주 입고 + 즉시지출 합산 반환 (수익분석 연동)
-- PurchaseManagementPage: 발주/즉시지출/거래처 3탭 전면 재작성
-- DailyOpsPage: DB 카테고리 연동으로 수정 (EXPENSE_CATEGORIES 상수 제거)
-- schema: expenseCategories 테이블 + dailyExpenses.categoryId 컬럼 추가
-- 자동 마이그레이션: expense_categories CREATE TABLE + categoryId ALTER TABLE
+- drizzle/schema.ts: settlement_images, employer_presets 테이블 정의 추가
+- server/index.ts: 두 테이블 CREATE TABLE IF NOT EXISTS 자동 마이그레이션 추가
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

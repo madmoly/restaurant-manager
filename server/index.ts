@@ -70,7 +70,7 @@ app.use(express.json());
 
     // users.role ENUM 확장: 'user' → 'master','admin','manager','employee' 모두 포함
     try {
-      await conn.query(`ALTER TABLE users MODIFY COLUMN role ENUM('master','admin','manager','employee','user') NOT NULL DEFAULT 'employee'`);
+      await conn.query(`ALTER TABLE users MODIFY COLUMN role ENUM('master','admin','user','manager','employee') NOT NULL DEFAULT 'user'`);
       console.log("[migrate] users.role ENUM updated");
     } catch (e: any) {
       if (!e.message.includes("Duplicate")) console.log("[migrate] role ENUM:", e.message);
@@ -128,6 +128,10 @@ app.use(express.json());
     await addColumnIfNotExists("store_checklist_templates", "repeatDays", "JSON DEFAULT NULL");
     await addColumnIfNotExists("store_checklist_templates", "specificDate", "DATE DEFAULT NULL");
     await addColumnIfNotExists("store_checklist_templates", "isHighlight", "BOOLEAN DEFAULT FALSE");
+    // 적용 기간: 생성일 이후만 일일운영에 표시, 삭제(비활성) 시 해당일부터 미적용
+    await addColumnIfNotExists("store_checklist_templates", "effectiveFrom", "DATE DEFAULT NULL");
+    await addColumnIfNotExists("store_checklist_templates", "effectiveTo", "DATE DEFAULT NULL");
+    await addColumnIfNotExists("store_checklist_templates", "deactivatedBy", "INT DEFAULT NULL");
 
     // repeatType enum 확장: monthly 추가 + none→daily 변환 + specificDate→monthly 변환
     try {
@@ -628,67 +632,37 @@ app.use(express.json());
     // users에 bankBookUrl 추가
     await addColumnIfNotExists("users", "bankBookUrl", "VARCHAR(500) DEFAULT NULL");
 
-    // daily_expenses (즉시 지출) 테이블
-    await conn.query(`
-      CREATE TABLE IF NOT EXISTS daily_expenses (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        restaurantId INT NOT NULL,
-        expenseDate DATE NOT NULL,
-        category ENUM('internet','repair','supply','delivery','other') NOT NULL DEFAULT 'other',
-        title VARCHAR(200) NOT NULL,
-        amount DECIMAL(14,2) NOT NULL DEFAULT 0,
-        note TEXT,
-        attachmentUrl TEXT,
-        createdBy INT NOT NULL,
-        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_expense_date (restaurantId, expenseDate)
-      )
-    `);
-
-    // expense_categories (매장별 커스텀 지출 카테고리)
-    await conn.query(`
-      CREATE TABLE IF NOT EXISTS expense_categories (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        restaurantId INT NOT NULL,
-        name VARCHAR(100) NOT NULL,
-        sortOrder INT NOT NULL DEFAULT 0,
-        isActive BOOLEAN NOT NULL DEFAULT TRUE,
-        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_ec_restaurant (restaurantId)
-      )
-    `);
-
-    // daily_expenses에 categoryId 컬럼 추가 (커스텀 카테고리 참조)
-    await addColumnIfNotExists("daily_expenses", "categoryId", "INT NULL AFTER category");
-
-    // settlement_images (월정산 정산서 이미지)
+    // 월정산 증빙 이미지 테이블
     await conn.query(`
       CREATE TABLE IF NOT EXISTS settlement_images (
         id INT AUTO_INCREMENT PRIMARY KEY,
         restaurantId INT NOT NULL,
         year INT NOT NULL,
         month INT NOT NULL,
-        counterpartyId INT NULL,
+        counterpartyId INT DEFAULT NULL,
         imageUrl TEXT NOT NULL,
-        claimedAmount INT NULL,
-        note TEXT NULL,
-        uploadedBy INT NULL,
+        note VARCHAR(200) DEFAULT NULL,
+        uploadedBy INT DEFAULT NULL,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_si_restaurant_period (restaurantId, year, month)
+        INDEX idx_settlement_store_month (restaurantId, year, month)
       )
-    `).catch(() => {});
+    `);
+    await addColumnIfNotExists("settlement_images", "claimedAmount", "INT DEFAULT NULL");
 
-    // employer_presets (사업주 프리셋 - 전자계약서 소속회사)
+    // employment_electronic_contracts에 weeklyOffDays 추가
+    await addColumnIfNotExists("employment_electronic_contracts", "weeklyOffDays", "INT DEFAULT 1");
+
+    // 사업주 프리셋 테이블
     await conn.query(`
       CREATE TABLE IF NOT EXISTS employer_presets (
         id INT AUTO_INCREMENT PRIMARY KEY,
         restaurantId INT NOT NULL,
         companyName VARCHAR(100) NOT NULL,
-        businessNumber VARCHAR(50) NULL,
-        isDefault BOOLEAN NOT NULL DEFAULT FALSE,
-        createdBy INT NULL,
-        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_ep_restaurant (restaurantId)
+        businessNumber VARCHAR(30) DEFAULT NULL,
+        isDefault BOOLEAN DEFAULT FALSE NOT NULL,
+        createdBy INT DEFAULT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        INDEX idx_employer_presets_restaurant (restaurantId)
       )
     `).catch(() => {});
 

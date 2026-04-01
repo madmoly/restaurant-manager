@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, between, sql, desc } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
-import { purchaseOrders, purchaseOrderItems, purchaseOrdersV2, dailyExpenses, counterparties } from "../../drizzle/schema";
+import { purchaseOrders, purchaseOrderItems, counterparties } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 
 export const purchasesRouter = router({
@@ -40,45 +40,18 @@ export const purchasesRouter = router({
       return { ...order, items };
     }),
 
-  /** 월간 매입 합계 (v2 입고 + 즉시지출 합산) */
+  /** 월간 매입 합계 */
   monthlyTotal: protectedProcedure
     .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      const mm = String(input.month).padStart(2, "0");
-      const startDate = `${input.year}-${mm}-01`;
-      const nm = input.month === 12 ? 1 : input.month + 1;
-      const ny = input.month === 12 ? input.year + 1 : input.year;
-      const endDate = `${ny}-${String(nm).padStart(2, "0")}-01`;
-
-      // 발주 입고 금액 (v2, status=received)
-      const [orderRow] = await db
-        .select({ total: sql<string>`COALESCE(SUM(CAST(totalAmount AS DECIMAL(14,2))), 0)` })
-        .from(purchaseOrdersV2)
-        .where(and(
-          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
-          eq(purchaseOrdersV2.status, "received"),
-          sql`${purchaseOrdersV2.purchaseDate} >= ${startDate}`,
-          sql`${purchaseOrdersV2.purchaseDate} < ${endDate}`,
-        ));
-
-      // 즉시지출 합계
-      const [expenseRow] = await db
-        .select({ total: sql<string>`COALESCE(SUM(CAST(amount AS DECIMAL(14,2))), 0)` })
-        .from(dailyExpenses)
-        .where(and(
-          eq(dailyExpenses.restaurantId, input.restaurantId),
-          sql`${dailyExpenses.expenseDate} >= ${startDate}`,
-          sql`${dailyExpenses.expenseDate} < ${endDate}`,
-        ));
-
-      const orderTotal = Number(orderRow?.total ?? 0);
-      const expenseTotal = Number(expenseRow?.total ?? 0);
-      return {
-        total: String(orderTotal + expenseTotal),
-        orderTotal: String(orderTotal),
-        expenseTotal: String(expenseTotal),
-      };
+      const start = new Date(input.year, input.month - 1, 1);
+      const end = new Date(input.year, input.month, 0);
+      const [row] = await db
+        .select({ total: sql<string>`COALESCE(SUM(${purchaseOrders.totalAmount}), 0)` })
+        .from(purchaseOrders)
+        .where(and(eq(purchaseOrders.restaurantId, input.restaurantId), between(purchaseOrders.purchaseDate, start, end)));
+      return { total: row?.total ?? "0" };
     }),
 
   /** 매입 전표 생성 (헤더 + 항목 한번에) */
