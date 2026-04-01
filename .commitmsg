@@ -1,8 +1,8 @@
-인건비 정산서 전면 재설계 + 계좌/주민번호 + 통장사본 업로드
+월정산 거래처별 증빙 이미지 업로드/조회/삭제 기능
 
-- 인건비 정산표 카드형 레이아웃: 계약급여, 계약휴무, 실근무, 실휴무, 대체휴무, 연차, 보험구분, 계좌번호, 주민번호
-- 계약서 서명 시 직원이 계좌번호/주민번호 입력 (ContractSignPage)
-- 서명 완료 시 employeeContracts에 bankAccount/residentNumber 자동 동기화
-- 직원관리에 통장사본 이미지 업로드 기능 (보건증과 동일 패턴)
-- Excel/PDF 내보내기에 전체 항목 포함
-- DB: employee_contracts에 bankAccount/residentNumber, users에 bankBookUrl 추가
+- settlement_images 테이블 추가 (매장+연월+거래처별)
+- /api/upload/settlement-image 엔드포인트
+- monthlyClosings.getImages/addImage/deleteImage API
+- 월정산 매입 드릴다운에서 거래처별 사진 업로드/썸네일/전체보기
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

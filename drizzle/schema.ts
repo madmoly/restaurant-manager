@@ -948,6 +948,7 @@ export const settlementImages = mysqlTable("settlement_images", {
   month: int("month").notNull(),
   counterpartyId: int("counterpartyId"),              // NULL = 기타/전체
   imageUrl: text("imageUrl").notNull(),
+  claimedAmount: int("claimedAmount"),                // 정산서 기재 금액 (원)
   note: varchar("note", { length: 200 }),
   uploadedBy: int("uploadedBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

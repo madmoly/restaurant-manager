@@ -58,9 +58,13 @@ export default function MonthlySettlementPage() {
   const deleteImageMut = trpc.monthlyClosings.deleteImage.useMutation({
     onSuccess: () => imagesQuery.refetch(),
   });
+  const updateAmountMut = trpc.monthlyClosings.updateImageAmount.useMutation({
+    onSuccess: () => imagesQuery.refetch(),
+  });
   const [uploadingCpId, setUploadingCpId] = useState<number | null>(null);
   const [viewImage, setViewImage] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [editingAmountId, setEditingAmountId] = useState<number | null>(null);
+  const [amountInput, setAmountInput] = useState("");
 
   const handleImageUpload = async (cpId: number | null, file: File) => {
     setUploadingCpId(cpId);
@@ -262,33 +266,72 @@ export default function MonthlySettlementPage() {
           locked={!isPrivileged}
         >
           {income.purchasesByCounterparty.length > 0 ? (
-            <div className="space-y-2">
-              <div className="text-xs font-medium text-muted-foreground mb-2">거래처별</div>
+            <div className="space-y-3">
+              <div className="text-xs font-medium text-muted-foreground mb-2">거래처별 (입고 합계 vs 정산서)</div>
               {income.purchasesByCounterparty.map((cp) => {
                 const cpImages = (imagesQuery.data ?? []).filter((img: any) => img.counterpartyId === cp.id);
+                // 정산서 금액: 해당 거래처 이미지 중 claimedAmount가 있는 것들의 합
+                const claimedTotal = cpImages.reduce((s: number, img: any) => s + (img.claimedAmount ?? 0), 0);
+                const hasClaimedAmount = cpImages.some((img: any) => img.claimedAmount != null && img.claimedAmount > 0);
+                const diff = hasClaimedAmount ? cp.amount - claimedTotal : null;
+                const hasMismatch = diff !== null && diff !== 0;
+
                 return (
-                  <div key={cp.id} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-foreground">{cp.name} <span className="text-muted-foreground">({cp.count}건)</span></span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium text-foreground tabular-nums">{cp.amount.toLocaleString()}원</span>
-                        {isPrivileged && (
-                          <label className="cursor-pointer text-muted-foreground hover:text-primary transition-colors">
-                            {uploadingCpId === cp.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) handleImageUpload(cp.id, f);
-                                e.target.value = "";
-                              }}
-                            />
-                          </label>
+                  <div key={cp.id} className="rounded-lg border border-border/50 p-2.5 space-y-1.5">
+                    {/* 거래처명 + 업로드 버튼 */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-foreground">{cp.name} <span className="text-muted-foreground">({cp.count}건)</span></span>
+                      {isPrivileged && (
+                        <label className="cursor-pointer text-muted-foreground hover:text-primary transition-colors">
+                          {uploadingCpId === cp.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) handleImageUpload(cp.id, f);
+                              e.target.value = "";
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    {/* 금액 비교 */}
+                    <div className="grid grid-cols-2 gap-1 text-[11px]">
+                      <div>
+                        <span className="text-muted-foreground">입고 합계</span>
+                        <div className="font-medium text-foreground tabular-nums">{cp.amount.toLocaleString()}원</div>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">정산서 금액</span>
+                        {hasClaimedAmount ? (
+                          <div className={`font-medium tabular-nums ${hasMismatch ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>
+                            {claimedTotal.toLocaleString()}원
+                          </div>
+                        ) : (
+                          <div className="text-muted-foreground">미입력</div>
                         )}
                       </div>
                     </div>
+
+                    {/* 차이 경고 */}
+                    {hasMismatch && (
+                      <div className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded ${
+                        diff! > 0 ? "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400" : "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
+                      }`}>
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span>
+                          {diff! > 0
+                            ? `입고가 정산서보다 ${diff!.toLocaleString()}원 많음`
+                            : `정산서가 입고보다 ${Math.abs(diff!).toLocaleString()}원 많음`
+                          }
+                        </span>
+                      </div>
+                    )}
+
+                    {/* 이미지 썸네일 + 정산서 금액 입력 */}
                     {cpImages.length > 0 && (
                       <div className="flex gap-1.5 overflow-x-auto pb-1">
                         {cpImages.map((img: any) => (
@@ -309,6 +352,36 @@ export default function MonthlySettlementPage() {
                                 className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                               >
                                 <X className="w-2.5 h-2.5" />
+                              </button>
+                            )}
+                            {/* 금액 표시/입력 */}
+                            {editingAmountId === img.id ? (
+                              <input
+                                type="number"
+                                autoFocus
+                                className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[9px] text-center py-0.5 rounded-b w-14 outline-none"
+                                placeholder="금액"
+                                value={amountInput}
+                                onChange={(e) => setAmountInput(e.target.value)}
+                                onBlur={() => {
+                                  const val = amountInput ? parseInt(amountInput) : null;
+                                  updateAmountMut.mutate({ id: img.id, restaurantId, claimedAmount: val });
+                                  setEditingAmountId(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                }}
+                              />
+                            ) : (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingAmountId(img.id);
+                                  setAmountInput(img.claimedAmount ? String(img.claimedAmount) : "");
+                                }}
+                                className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[9px] text-center py-0.5 rounded-b truncate"
+                              >
+                                {img.claimedAmount ? `${(img.claimedAmount / 10000).toFixed(0)}만` : "금액입력"}
                               </button>
                             )}
                           </div>

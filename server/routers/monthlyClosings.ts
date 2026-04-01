@@ -599,6 +599,7 @@ export const monthlyClosingsRouter = router({
           id: settlementImages.id,
           counterpartyId: settlementImages.counterpartyId,
           imageUrl: settlementImages.imageUrl,
+          claimedAmount: settlementImages.claimedAmount,
           note: settlementImages.note,
           uploadedBy: settlementImages.uploadedBy,
           uploaderName: users.name,
@@ -623,6 +624,7 @@ export const monthlyClosingsRouter = router({
       month: z.number(),
       counterpartyId: z.number().nullable(),
       imageUrl: z.string(),
+      claimedAmount: z.number().nullable().optional(),
       note: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
@@ -633,10 +635,22 @@ export const monthlyClosingsRouter = router({
         month: input.month,
         counterpartyId: input.counterpartyId,
         imageUrl: input.imageUrl,
+        claimedAmount: input.claimedAmount ?? null,
         note: input.note ?? null,
         uploadedBy: ctx.user.userId,
       });
       return { id: result.insertId };
+    }),
+
+  /** 정산서 금액 업데이트 */
+  updateImageAmount: managerProcedure
+    .input(z.object({ id: z.number(), restaurantId: z.number(), claimedAmount: z.number().nullable() }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      await db.update(settlementImages)
+        .set({ claimedAmount: input.claimedAmount })
+        .where(and(eq(settlementImages.id, input.id), eq(settlementImages.restaurantId, input.restaurantId)));
+      return { success: true };
     }),
 
   /** 월정산 증빙 이미지 삭제 */

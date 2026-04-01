@@ -647,6 +647,7 @@ app.use(express.json());
         INDEX idx_settlement_store_month (restaurantId, year, month)
       )
     `);
+    await addColumnIfNotExists("settlement_images", "claimedAmount", "INT DEFAULT NULL");
 
     // employment_electronic_contracts에 weeklyOffDays 추가
     await addColumnIfNotExists("employment_electronic_contracts", "weeklyOffDays", "INT DEFAULT 1");
