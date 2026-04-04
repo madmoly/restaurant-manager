@@ -1126,4 +1126,36 @@ export const schedulesRouter = router({
         ));
       return { ok: true };
     }),
+
+  /** 월간 요약 — 미니맵용 (날짜별 headcount + 초안 유무) */
+  monthlySummary: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      year: z.number(),
+      month: z.number().min(1).max(12),
+    }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const { restaurantId, year, month } = input;
+      const rows = await db.execute(sql`
+        SELECT
+          DATE(CONVERT_TZ(startTime, '+00:00', '+09:00')) as date,
+          SUM(CASE
+            WHEN shiftPreset IN ('open','close') THEN 0.5
+            ELSE 1
+          END) as headcount,
+          MAX(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as hasUnconfirmed
+        FROM schedules
+        WHERE restaurantId = ${restaurantId}
+          AND YEAR(CONVERT_TZ(startTime, '+00:00', '+09:00')) = ${year}
+          AND MONTH(CONVERT_TZ(startTime, '+00:00', '+09:00')) = ${month}
+          AND status != 'canceled'
+        GROUP BY DATE(CONVERT_TZ(startTime, '+00:00', '+09:00'))
+      `);
+      return ((rows as any)[0] as any[]).map((r: any) => ({
+        date: typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().split('T')[0],
+        headcount: Number(r.headcount) || 0,
+        hasUnconfirmed: !!r.hasUnconfirmed,
+      }));
+    }),
 });
