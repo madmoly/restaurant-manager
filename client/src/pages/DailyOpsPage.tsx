@@ -4,7 +4,7 @@ import { formatDate } from 'date-fns';
 import { useLocation, useSearch } from 'wouter';
 import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
-import { resizeImage } from '@/lib/imageResize';
+import { resizeImage, OCR_HIGH } from '@/lib/imageResize';
 import { formatDateWithHoliday, getHolidayName } from '@/lib/koreanHolidays';
 import { toast } from 'sonner';
 import {
@@ -29,6 +29,7 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  Loader2,
 } from 'lucide-react';
 
 // ============================================================================
@@ -2607,6 +2608,58 @@ function CloseTab({
   const [otherItems, setOtherItems] = useState<OtherItem[]>([]);
   const [specialItems, setSpecialItems] = useState<SpecialItem[]>([]);
   const [closeNote, setCloseNote] = useState('');
+  const [salesOcrLoading, setSalesOcrLoading] = useState(false);
+  const salesOcrInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSalesOcr = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    try {
+      setSalesOcrLoading(true);
+      // 리사이즈
+      const resized = await resizeImage(file, OCR_HIGH);
+      // 업로드
+      const formData = new FormData();
+      formData.append('photo', resized);
+      const uploadRes = await fetch('/api/upload/order-image', { method: 'POST', body: formData });
+      if (!uploadRes.ok) throw new Error('이미지 업로드 실패');
+      const { url } = await uploadRes.json();
+
+      // OCR 분석
+      toast.info('전표 분석 중...');
+      const ocrRes = await fetch('/api/ocr/extract-sales', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: url, restaurantId }),
+      });
+      if (!ocrRes.ok) {
+        const errData = await ocrRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'OCR 처리 실패');
+      }
+      const data = await ocrRes.json();
+      const m = data.mapped;
+
+      // 결과를 폼에 채우기
+      if (m.cashAmount) setCashAmount(fmtNum(m.cashAmount));
+      if (m.cardAmount) setCardAmount(fmtNum(m.cardAmount));
+      if (m.giftCardAmount) setGiftCardAmount(fmtNum(m.giftCardAmount));
+      if (m.transferAmount) setTransferAmount(fmtNum(m.transferAmount));
+      if (m.otherAmount) {
+        setOtherItems([{ itemName: '기타 (OCR)', amount: m.otherAmount }]);
+      }
+
+      toast.success('전표 인식 완료 — 금액을 확인해주세요');
+      if (data.confidence === 'low') {
+        toast.warning('인식 신뢰도가 낮습니다. 금액을 꼭 확인해주세요.');
+      }
+    } catch (err: any) {
+      toast.error(err.message || '전표 인식 실패');
+    } finally {
+      setSalesOcrLoading(false);
+    }
+  };
 
   const operationQuery = trpc.dailyOps.getByDate.useQuery({
     restaurantId,
@@ -2797,7 +2850,25 @@ function CloseTab({
 
       {/* 매출 입력 */}
       <Card className="bg-card border-border p-4">
-        <h3 className="font-semibold text-foreground mb-4">매출 입력</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-foreground">매출 입력</h3>
+          <button
+            onClick={() => salesOcrInputRef.current?.click()}
+            disabled={salesOcrLoading}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500/10 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-500/20 disabled:opacity-50"
+          >
+            {salesOcrLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+            전표 촬영
+          </button>
+          <input
+            ref={salesOcrInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleSalesOcr}
+          />
+        </div>
         <div className="space-y-3 mb-4">
           <div>
             <Label htmlFor="cash" className="text-sm">
