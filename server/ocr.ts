@@ -1077,7 +1077,7 @@ ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
 
     // 보건증은 단순 구조 → haiku로 충분 (비용 절감)
     const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-sonnet-4-20250514",
       max_tokens: 1024,
       messages: [{
         role: "user",
@@ -1695,55 +1695,65 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     // base64 로드
     const { base64, mediaType } = loadImageBase64Raw(filePath);
 
-    const salesOcrPrompt = `당신은 한국 요식업 POS 마감 전표를 분석하는 전문가입니다.
+    const salesOcrPrompt = `당신은 한국 요식업 POS 마감 전표(거래별 점검표, 일마감 보고서 등)를 분석하는 전문가입니다.
 
-이미지에서 다음을 추출하세요:
+## 목표
+전표에서 **결제수단별 최종 매출 금액**을 정확히 추출합니다.
 
-1. **전표 기본 정보**
-   - posVendor: POS 제조사명 (HYUNDAI, OKPOS, POSBANK, KIOSK 등, 알 수 없으면 "unknown")
-   - saleDate: 거래 날짜 (YYYY-MM-DD, 알 수 없으면 "")
-   - receiptNo: 전표 번호 (알 수 없으면 "")
+## 전표 구조 이해 (중요!)
+한국 POS 전표는 보통 다음 구조입니다:
+- 컬럼: 거래내역 | 건수 | 순매출(금액) | 에누리(할인)
+- **"*" 표시 행은 소계/합계**입니다 (예: "* 현금 매출계", "* 신용거래계", "* 총 매출")
+- 세부 행과 소계 행이 반복됩니다. **소계 행의 금액이 정확한 값**입니다.
+- 금액 열이 여러 개일 수 있습니다 — **"순매출" 열의 숫자를 읽으세요**, "에누리" 열(보통 0)과 혼동하지 마세요.
 
-2. **매출 항목 전체** (items 배열)
-   모든 행을 빠짐없이 추출합니다. 각 행:
-   - label: 항목명 (전표에 표기된 그대로)
-   - count: 건수 (없으면 0)
-   - amount: 금액 (숫자만, 콤마 제거)
-   - type: 항목 성격 분류
-     - "cash": 현금매출
-     - "card": 카드매출 (신용카드, 체크카드 포함)
-     - "giftcard": 상품권 (자사/타사)
-     - "transfer": 계좌이체
-     - "point": 포인트 결제 (H.Point, OK캐쉬백 등)
-     - "delivery": 배달앱매출
-     - "discount": 할인
-     - "subtotal": 소계/합계 행 (저장 대상 아님)
-     - "other": 위에 해당 없음
+## 추출 규칙
 
-3. **총매출 (totalAmount)**
-   전표에서 최종 총매출/총합계 금액
+### 1. 전표 기본 정보
+- posVendor: POS 제조사 (HYUNDAI, OKPOS, POSBANK 등)
+- saleDate: 날짜 (YYYY-MM-DD)
+- receiptNo: 전표 번호
 
-주의사항:
+### 2. 핵심 매출 값 (결제수단별 최종 소계)
+아래 값을 전표에서 찾아 **items 배열**에 넣으세요. 각 항목은 해당 소계(*표시) 행의 금액입니다:
+
+| 찾을 키워드 | type | 설명 |
+|------------|------|------|
+| 현금 매출계, 현금매출 | "cash" | 현금 결제 합계 |
+| 신용거래계, 카드매출계, 신용판매 계 | "card" | 카드(신용+체크) 결제 합계. 자사+타사 합산된 최종 소계 사용 |
+| 상품권 매출계, 자상 매출계 | "giftcard" | 상품권 결제 합계 |
+| H.Point, 포인트 매출 | "point" | 포인트 결제 합계 |
+| 배달매출, 배민, 요기요, 쿠팡이츠 | "delivery" | 배달앱 합계 |
+| 계좌이체, 이체매출 | "transfer" | 이체 합계 |
+| 에누리, 할인 | "discount" | 할인 합계 |
+| 총 매출, 총매출 | "subtotal" | 전체 합계 (totalAmount에도 사용) |
+
+### 3. totalAmount
+"* 총 매출" 또는 "* 순 매출" 행의 금액.
+
+## 주의사항
 - 이미지가 회전되어 있을 수 있습니다. 텍스트 방향을 자동 감지하세요.
-- 소계/합계 행은 type="subtotal"로 분류하고, 실제 결제수단 항목과 구분하세요.
-- 금액이 0인 행도 포함하세요 (전표 구조 파악용).
-- 같은 카테고리의 세부 항목이 여러 개일 수 있습니다 (예: 신용카드, 체크카드 → 둘 다 type="card").
+- 금액을 읽을 때 **자릿수를 정확히** 세세요. 예: 1,249,300과 124,930은 다릅니다.
+- 소계 행과 세부 행이 있으면 **소계 행(* 표시)의 값**을 사용하세요.
+- 신용거래계(카드 합계)에는 자사매출+타사매출-반품이 포함됩니다. 개별 항목이 아닌 최종 합산 소계를 사용하세요.
 
-응답 형식 (JSON만, 다른 텍스트 없이):
+## 응답 형식 (JSON만, 다른 텍스트 없이)
 {
   "posVendor": "HYUNDAI",
   "saleDate": "2026-04-04",
   "receiptNo": "1237",
   "items": [
-    { "label": "현금매출", "count": 1, "amount": 26000, "type": "cash" },
-    { "label": "카드매출", "count": 7, "amount": 96000, "type": "card" }
+    { "label": "* 현금 매출계", "count": 7, "amount": 96600, "type": "cash" },
+    { "label": "* 신용거래계", "count": 80, "amount": 1249300, "type": "card" },
+    { "label": "상품권 매출계", "count": 1, "amount": 44100, "type": "giftcard" },
+    { "label": "* H.Point 매출", "count": 3, "amount": 23800, "type": "point" }
   ],
-  "totalAmount": 1413800,
+  "totalAmount": 1413000,
   "confidence": "high"
 }`;
 
     const aiResponse = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-sonnet-4-20250514",
       max_tokens: 4096,
       messages: [{
         role: "user",
@@ -1760,7 +1770,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     // JSON 파싱
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON 파싱 실패", model: "claude-haiku-4-5-20251001" });
+      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON 파싱 실패", model: "claude-sonnet-4-20250514" });
       res.status(422).json({ error: "전표 인식에 실패했습니다. 다시 촬영해주세요." });
       return;
     }
@@ -1769,7 +1779,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     try {
       ocrResult = JSON.parse(jsonMatch[0]);
     } catch {
-      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON parse error", model: "claude-haiku-4-5-20251001" });
+      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON parse error", model: "claude-sonnet-4-20250514" });
       res.status(422).json({ error: "전표 인식 결과를 파싱할 수 없습니다." });
       return;
     }
@@ -1786,7 +1796,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
       success: true,
       inputTokens: aiResponse.usage?.input_tokens,
       outputTokens: aiResponse.usage?.output_tokens,
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-sonnet-4-20250514",
       itemCount: ocrResult.items.length,
       requestPayloadSize: base64.length,
     });
@@ -1800,7 +1810,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     const responseTimeMs = Date.now() - startTime;
     console.error("[OCR-Sales] error:", err);
     await logOcrError("extract-sales 실패", { error: err.message }, Number(req.body?.restaurantId) || undefined);
-    await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(req.body?.restaurantId) || undefined, responseTimeMs, success: false, errorMessage: err.message, model: "claude-haiku-4-5-20251001" });
+    await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(req.body?.restaurantId) || undefined, responseTimeMs, success: false, errorMessage: err.message, model: "claude-sonnet-4-20250514" });
     res.status(500).json({ error: err.message, retryable: true });
   }
 });
