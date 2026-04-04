@@ -3,14 +3,14 @@
   "configurations": [
     {
       "name": "API Server (Express + tRPC)",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "watch", "server/index.ts"],
       "port": 3000
     },
     {
       "name": "Vite Client (React)",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev:web"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--host"],
       "port": 5173
     }
   ]
