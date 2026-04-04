@@ -1,6 +1,8 @@
-revert: 발주 재설계 전체 원복 (원본 복원)
+코드 품질 개선: DailyOps 분리, 마이그레이션 분리, Rate Limiting
 
-- PurchaseManagementPage, DailyOpsPage, purchasesV2, purchases, schema, index 원본 복원
-- settlementImages/employerPresets 스키마는 원본에 이미 포함
+- DailyOpsPage 3,492줄 → 9개 서브컴포넌트로 분리 (dailyops/ 디렉토리)
+- server/index.ts 마이그레이션 코드 750줄 → server/migration.ts로 분리
+- Rate Limiting 추가: 로그인(15분/20회), OCR(1분/10회), 에러리포트(1분/30회)
+- .claude/launch.json 개발 서버 설정 업데이트
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

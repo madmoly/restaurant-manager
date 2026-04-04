@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, sql, isNull } from "drizzle-orm";
+import { eq, and, sql, isNull, inArray } from "drizzle-orm";
 import { router, masterProcedure, adminProcedure } from "../trpc";
 import { db } from "../db";
 import { businessGroups, users, restaurants, restaurantUsers } from "../../drizzle/schema";
@@ -40,7 +40,7 @@ export const businessGroupsRouter = router({
           const [row] = await db
             .select({ count: sql<number>`COUNT(DISTINCT ${restaurantUsers.userId})` })
             .from(restaurantUsers)
-            .where(sql`${restaurantUsers.restaurantId} IN (${sql.raw(storeIds.join(","))})`);
+            .where(inArray(restaurantUsers.restaurantId, storeIds));
           staffCount = row?.count ?? 0;
         }
 

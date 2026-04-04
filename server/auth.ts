@@ -1,7 +1,10 @@
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 
-const SECRET = new TextEncoder().encode(process.env.JWT_SECRET || "dev-secret-change-me");
+if (!process.env.JWT_SECRET) {
+  throw new Error("[FATAL] JWT_SECRET 환경변수가 설정되지 않았습니다. 서버를 시작할 수 없습니다.");
+}
+const SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
 const EXPIRES_IN = "30d";
 
 export interface TokenPayload {
