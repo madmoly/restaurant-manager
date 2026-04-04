@@ -81,6 +81,7 @@ export const restaurants = mysqlTable("restaurants", {
   // 매출 입력 허용 시간대 (null이면 제한 없음)
   salesInputStartTime: varchar("salesInputStartTime", { length: 5 }),
   salesInputEndTime: varchar("salesInputEndTime", { length: 5 }),
+  fixedCashRegister: int("fixedCashRegister").default(200000).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

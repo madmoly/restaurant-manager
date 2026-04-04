@@ -608,9 +608,15 @@ export const schedulesRouter = router({
           status: schedules.status,
           shiftPreset: schedules.shiftPreset,
           note: schedules.note,
+          systemRole: users.role,
+          storeRole: restaurantUsers.role,
         })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
+        .leftJoin(restaurantUsers, and(
+          eq(restaurantUsers.userId, schedules.userId),
+          eq(restaurantUsers.restaurantId, schedules.restaurantId),
+        ))
         .where(
           and(
             eq(schedules.restaurantId, input.restaurantId),
