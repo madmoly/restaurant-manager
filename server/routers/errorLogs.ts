@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { desc, eq, and, gte, lte, sql } from "drizzle-orm";
+import { desc, eq, and, gte, lte, sql, inArray, or, isNull } from "drizzle-orm";
 import { router, publicProcedure, adminProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
 import { errorLogs, users, restaurants } from "../../drizzle/schema";
@@ -105,8 +105,8 @@ export const errorLogsRouter = router({
         .where(and(
           gte(errorLogs.createdAt, since),
           realIds.length > 0
-            ? sql`(${errorLogs.restaurantId} IN (${sql.raw(realIds.join(","))}) OR ${errorLogs.restaurantId} IS NULL)`
-            : sql`${errorLogs.restaurantId} IS NULL`,
+            ? or(inArray(errorLogs.restaurantId, realIds), isNull(errorLogs.restaurantId))
+            : isNull(errorLogs.restaurantId),
         ))
         .groupBy(errorLogs.restaurantId, restaurants.name)
         .orderBy(desc(sql`COUNT(*)`));

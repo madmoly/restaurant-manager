@@ -711,6 +711,45 @@ app.use(express.json());
       )
     `).catch(() => {});
 
+    // ─── 성능 인덱스 추가 ───────────────────────────────────────────────
+    const createIndexIfNotExists = async (table: string, indexName: string, columns: string) => {
+      const [rows] = await conn.query(
+        `SELECT COUNT(*) as cnt FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+        [table, indexName]
+      ) as any[];
+      if (rows[0].cnt === 0) {
+        await conn.query(`CREATE INDEX \`${indexName}\` ON \`${table}\` (${columns})`);
+        console.log(`[migrate] created index ${indexName} on ${table}`);
+      }
+    };
+
+    // 매출: 매장+날짜 조회
+    await createIndexIfNotExists("sales", "idx_sales_rest_date", "restaurantId, saleDate");
+    // 일일마감: 매장+날짜
+    await createIndexIfNotExists("daily_closings", "idx_dc_rest_date", "restaurantId, closingDate");
+    // 월간마감: 매장+연월
+    await createIndexIfNotExists("monthly_closings", "idx_mc_rest_ym", "restaurantId, year, month");
+    // 스케줄: 매장+날짜+상태
+    await createIndexIfNotExists("schedules", "idx_sched_rest_date", "restaurantId, workDate");
+    await createIndexIfNotExists("schedules", "idx_sched_status", "status");
+    // 일일운영: 매장+날짜
+    await createIndexIfNotExists("daily_operations", "idx_do_rest_date", "restaurantId, operationDate");
+    // 매입v2: 매장+날짜+상태
+    await createIndexIfNotExists("purchase_orders_v2", "idx_pov2_rest_date", "restaurantId, orderDate");
+    await createIndexIfNotExists("purchase_orders_v2", "idx_pov2_status", "status");
+    // 고정비: 매장+연월
+    await createIndexIfNotExists("fixed_costs", "idx_fc_rest_ym", "restaurantId, year, month");
+    // 알림: 사용자+읽음
+    await createIndexIfNotExists("notifications", "idx_notif_user_read", "userId, isRead");
+    // 에러로그: 생성일
+    await createIndexIfNotExists("error_logs", "idx_errlog_created", "createdAt");
+    // 체크리스트로그: 매장+날짜
+    await createIndexIfNotExists("daily_checklist_logs", "idx_dcl_rest_date", "restaurantId, logDate");
+    // 매장사용자: 사용자ID (역방향 조회)
+    await createIndexIfNotExists("restaurant_users", "idx_ru_userid", "userId");
+    // 근로계약: 매장+사용자
+    await createIndexIfNotExists("employee_contracts", "idx_ec_rest_user", "restaurantId, userId");
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {
