@@ -486,10 +486,28 @@ export default function StaffPage() {
                           <button onClick={() => setEditingCompany(null)} className="p-1 rounded hover:bg-accent text-muted-foreground">
                             <X className="w-3.5 h-3.5" />
                           </button>
+                          {/* 수동 편집 시 계약서 불일치 경고 */}
+                          {s.contractAffiliatedCompany && editingCompany!.value && editingCompany!.value !== s.contractAffiliatedCompany && (
+                            <span className="text-[10px] text-orange-600 dark:text-orange-400">
+                              ⚠ 계약서: {s.contractAffiliatedCompany}
+                            </span>
+                          )}
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs text-foreground">{s.affiliatedCompany || "(미지정)"}</span>
+                          {/* 계약서 기반 소속과 불일치 시 경고 표시 */}
+                          {s.contractAffiliatedCompany && s.affiliatedCompany !== s.contractAffiliatedCompany && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
+                              ⚠ 계약서: {s.contractAffiliatedCompany}
+                            </span>
+                          )}
+                          {/* 계약서 연동 표시 (일치 시) */}
+                          {s.contractAffiliatedCompany && s.affiliatedCompany === s.contractAffiliatedCompany && s.latestContractSignedAt && (
+                            <span className="text-[10px] text-muted-foreground">
+                              (계약서 연동)
+                            </span>
+                          )}
                           <button
                             onClick={() => setEditingCompany({ userId: s.userId, value: s.affiliatedCompany || "" })}
                             className="p-1 rounded hover:bg-accent text-muted-foreground"

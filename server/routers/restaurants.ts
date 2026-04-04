@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, sql, count } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
-import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets, auditLogs, employeeContracts } from "../../drizzle/schema";
+import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets, auditLogs, employeeContracts, employmentElectronicContracts } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { activeRealStoreCondition, getOwnedRestaurants } from "../helpers/restaurantScope";
 import { verifyStoreAccess } from "../middleware/storeAuth";
@@ -217,6 +217,22 @@ export const restaurantsRouter = router({
           resignedAt: restaurantUsers.resignedAt,
           resignReason: restaurantUsers.resignReason,
           createdAt: restaurantUsers.createdAt,
+          // 최신 서명 계약서의 소속회사
+          contractAffiliatedCompany: sql<string | null>`(
+            SELECT ec.affiliatedCompany FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("contractAffiliatedCompany"),
+          // 최신 서명 계약서 서명일
+          latestContractSignedAt: sql<string | null>`(
+            SELECT ec.signedAt FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("latestContractSignedAt"),
           // employeeContracts (현재 활성 계약)
           wageType: employeeContracts.wageType,
           wageAmount: employeeContracts.wageAmount,

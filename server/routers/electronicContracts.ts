@@ -578,6 +578,21 @@ export const electronicContractsRouter = router({
           console.error(`[signContract] employeeContracts sync error:`, e.message);
           // 동기화 실패해도 서명 자체는 성공으로 처리
         }
+
+        // ── 서명 완료 시 restaurantUsers.affiliatedCompany 동기화 ──
+        if (contract.affiliatedCompany) {
+          try {
+            await db.update(restaurantUsers)
+              .set({ affiliatedCompany: contract.affiliatedCompany })
+              .where(and(
+                eq(restaurantUsers.userId, contract.employeeId),
+                eq(restaurantUsers.restaurantId, contract.restaurantId),
+              ));
+            console.log(`[signContract] synced affiliatedCompany="${contract.affiliatedCompany}" for userId=${contract.employeeId}`);
+          } catch (e: any) {
+            console.error(`[signContract] affiliatedCompany sync error:`, e.message);
+          }
+        }
       }
 
       return { ok: true };
