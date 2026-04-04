@@ -24,6 +24,10 @@ run-migration-v2.mjs
 # Legacy docs
 porting-strategy.md
 
+# Claude Code
+.claude/credentials.json
+.commitmsg
+
 # System junk
 NVIDIA Corporation/
 package-lock.json

@@ -1,6 +1,15 @@
 # 331매장관리 (Restaurant Manager) — 프로젝트 문서
 
-> 마지막 갱신: 2026-03-30 (코드 기준 전면 최신화)
+> 마지막 갱신: 2026-04-04 (Claude Code 전환 + 04-01 변경사항 통합)
+
+## 작업 규칙 (Claude Code용)
+
+- 예정작업이 발생하면 반드시 `todo.md`에 기록할 것 (세션 간 연속성)
+- 컨텍스트 한계에 가까워지면 사전 경고 → 작업 마무리 후 새 세션 전환
+- 한글 커밋 메시지: `.commitmsg` 파일에 쓴 후 `git commit --file=.commitmsg`
+- `main` 브랜치 직접 push → Railway 자동 배포 (테스트 = 프로덕션)
+- 개발 환경: **Mac** (bash/zsh 기준, Windows CMD 안내 불필요)
+- 프로덕션 URL: https://restaurant-manager-production-a762.up.railway.app/
 
 ## 배포 환경
 
@@ -159,7 +168,8 @@ master(개발자) > admin(대표) > owner(점장) > supervisor(매니져) > staf
 | `/restaurants` | RestaurantsPage (매장 관리) | master, admin, manager |
 | `/sales` | SalesPage (매출) | 전체 |
 | `/daily-closing` | SalesPage (일마감 — 별칭) | admin |
-| `/profitability` | ProfitPage (수익분석/분석캘린더) | master, admin, manager, staff |
+| `/monthly-settlement` | MonthlySettlementPage (월정산) | master, admin, manager, staff |
+| `/profitability` | → `/monthly-settlement`로 리다이렉트 | — |
 | `/counterparties` | CounterpartiesPage (거래처) | master, admin, manager |
 | `/purchase-management` | PurchaseManagementPage (매입) | 전체 |
 | `/fixed-costs` | FixedCostsPage (고정비) | master, admin, manager |
@@ -325,6 +335,24 @@ master(개발자) > admin(대표) > owner(점장) > supervisor(매니져) > staf
 | storeInfo | storeInfo.ts | 업무정보 카드 |
 | businessGroups | businessGroups.ts | 사업그룹 CRUD |
 
+## 최근 주요 변경 (2026-04-01)
+
+### 월정산 페이지 전면 개편
+- ProfitPage(수익분석) → MonthlySettlementPage(월정산) 교체
+- `monthlyClosings.settlementData` API: 수집현황/손익/지표/전월비교/마감상태 통합 조회
+- 5섹션: 데이터수집현황 → 손익요약(결제수단별/거래처별/소속사별 드릴다운) → 운영지표 → 전월비교 → 월정산확정
+- ProfitPage.tsx는 미삭제 (dead code, 정리 필요)
+
+### 운영캘린더 → 일일운영 바로가기
+- OpsCalendarPage 날짜 상세뷰에 "일일운영 상세 보기" 버튼 추가
+- DailyOpsPage에 `?date=YYYY-MM-DD` URL 파라미터 지원
+
+### 체크리스트 적용 기간 관리
+- `store_checklist_templates`에 `effectiveFrom`, `effectiveTo`, `deactivatedBy` 컬럼 추가
+- 생성 시 effectiveFrom=오늘(KST) 자동설정 → 과거 일일운영에 소급 적용 방지
+- 삭제 → 소프트 비활성(effectiveTo=오늘, isActive=false) → 과거 참조 보존
+- 기존 데이터: effectiveFrom=NULL → 제한없음 (하위호환)
+
 ## 자동 마이그레이션
 
 `server/index.ts` 시작 시 자동 실행. 새 컬럼/테이블 추가 시:
@@ -338,9 +366,8 @@ await conn.query(`
 ## 개발 컨벤션
 
 ### Git 커밋
-- CMD에서 한글 커밋 메시지는 인코딩 문제 발생 → `.commitmsg` 파일에 쓴 후 `git commit --file=.commitmsg` 사용
+- 한글 커밋 메시지: `.commitmsg` 파일에 쓴 후 `git commit --file=.commitmsg` 사용
 - `main` 브랜치 직접 push → Railway 자동 배포
-- Windows 경로: `C:\Users\madmo\Documents\Claude\Projects\restaurant-manager\`
 
 ### 새 기능 추가 패턴
 1. **스키마**: `drizzle/schema.ts`에 테이블/컬럼 추가
