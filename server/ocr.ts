@@ -1585,6 +1585,227 @@ ocrRouter.get("/export-dataset/profiles", async (req: Request, res: Response) =>
 });
 
 // ============================================================
+// 매출 전표 OCR (POS 마감 전표 → 매출 항목 자동 추출)
+// ============================================================
+
+interface SalesOcrItem {
+  label: string;
+  count: number;
+  amount: number;
+  type: "cash" | "card" | "giftcard" | "transfer" | "point" | "delivery" | "discount" | "subtotal" | "other";
+  confidence?: "high" | "medium" | "low";
+}
+
+interface SalesOcrResult {
+  posVendor: string;
+  saleDate: string;
+  receiptNo: string;
+  items: SalesOcrItem[];
+  totalAmount: number;
+  confidence: "high" | "medium" | "low";
+}
+
+function validateSalesOcrResult(result: SalesOcrResult): SalesOcrResult {
+  // type이 subtotal/discount가 아닌 결제수단 항목 합산
+  const paymentItems = result.items.filter(i => i.type !== "subtotal" && i.type !== "discount");
+  const itemsSum = paymentItems.reduce((sum, i) => sum + i.amount, 0);
+
+  // totalAmount와 비교 (±5% 허용)
+  if (result.totalAmount > 0) {
+    const diff = Math.abs(itemsSum - result.totalAmount);
+    const tolerance = result.totalAmount * 0.05;
+    if (diff > tolerance) {
+      result.confidence = "low";
+    }
+  }
+
+  // 음수 금액 체크 (할인 제외)
+  result.items.forEach(item => {
+    if (item.amount < 0 && item.type !== "discount") {
+      item.confidence = "low";
+    }
+  });
+
+  return result;
+}
+
+function mapSalesOcrToStandard(result: SalesOcrResult) {
+  const sum = (type: string) =>
+    result.items.filter(i => i.type === type).reduce((s, i) => s + i.amount, 0);
+
+  return {
+    cashAmount: sum("cash"),
+    cardAmount: sum("card"),
+    giftCardAmount: sum("giftcard"),
+    transferAmount: sum("transfer"),
+    discountAmount: sum("discount"),
+    otherAmount: sum("point") + sum("delivery") + sum("other"),
+    totalAmount: result.totalAmount,
+  };
+}
+
+ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
+  const startTime = Date.now();
+  try {
+    const anthropic = getAnthropicClient();
+    if (!anthropic) {
+      res.status(500).json({ error: "ANTHROPIC_API_KEY가 설정되지 않았습니다." });
+      return;
+    }
+
+    const { imageUrl, restaurantId, rotation } = req.body;
+    if (!imageUrl || typeof imageUrl !== "string") {
+      res.status(400).json({ error: "imageUrl이 필요합니다" });
+      return;
+    }
+
+    const relativePath = imageUrl.replace(/^\/uploads\//, "");
+    const filePath = path.join(UPLOAD_ROOT, relativePath);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: "이미지 파일을 찾을 수 없습니다" });
+      return;
+    }
+
+    // EXIF 방향 보정
+    await fixExifOrientation(filePath);
+
+    // 수동 회전 적용
+    const rotationDeg = typeof rotation === "number" && [90, 180, 270].includes(rotation) ? rotation : 0;
+    if (rotationDeg > 0) {
+      const rotatedBuf = await sharp(filePath).rotate(rotationDeg).toBuffer();
+      fs.writeFileSync(filePath, rotatedBuf);
+    }
+
+    // 이미지 전처리 (매입 OCR과 동일 파이프라인)
+    try {
+      const meta = await sharp(filePath).metadata();
+      const maxDim = Math.max(meta.width || 0, meta.height || 0);
+      let pipeline = sharp(filePath);
+      if (maxDim > 3500) {
+        pipeline = pipeline.resize(3500, 3500, { fit: "inside", withoutEnlargement: true });
+      }
+      pipeline = pipeline.grayscale().normalize().linear(1.3, -(128 * 1.3 - 128)).gamma(1.2);
+      pipeline = pipeline.sharpen({ sigma: 2.0, m1: 2.0, m2: 1.0 });
+      const enhancedBuf = await pipeline.jpeg({ quality: 95, mozjpeg: true }).toBuffer();
+      fs.writeFileSync(filePath, enhancedBuf);
+    } catch (enhErr: any) {
+      console.warn(`[OCR-Sales] 이미지 전처리 실패 (원본 사용): ${enhErr.message}`);
+    }
+
+    // base64 로드
+    const { base64, mediaType } = loadImageBase64Raw(filePath);
+
+    const salesOcrPrompt = `당신은 한국 요식업 POS 마감 전표를 분석하는 전문가입니다.
+
+이미지에서 다음을 추출하세요:
+
+1. **전표 기본 정보**
+   - posVendor: POS 제조사명 (HYUNDAI, OKPOS, POSBANK, KIOSK 등, 알 수 없으면 "unknown")
+   - saleDate: 거래 날짜 (YYYY-MM-DD, 알 수 없으면 "")
+   - receiptNo: 전표 번호 (알 수 없으면 "")
+
+2. **매출 항목 전체** (items 배열)
+   모든 행을 빠짐없이 추출합니다. 각 행:
+   - label: 항목명 (전표에 표기된 그대로)
+   - count: 건수 (없으면 0)
+   - amount: 금액 (숫자만, 콤마 제거)
+   - type: 항목 성격 분류
+     - "cash": 현금매출
+     - "card": 카드매출 (신용카드, 체크카드 포함)
+     - "giftcard": 상품권 (자사/타사)
+     - "transfer": 계좌이체
+     - "point": 포인트 결제 (H.Point, OK캐쉬백 등)
+     - "delivery": 배달앱매출
+     - "discount": 할인
+     - "subtotal": 소계/합계 행 (저장 대상 아님)
+     - "other": 위에 해당 없음
+
+3. **총매출 (totalAmount)**
+   전표에서 최종 총매출/총합계 금액
+
+주의사항:
+- 이미지가 회전되어 있을 수 있습니다. 텍스트 방향을 자동 감지하세요.
+- 소계/합계 행은 type="subtotal"로 분류하고, 실제 결제수단 항목과 구분하세요.
+- 금액이 0인 행도 포함하세요 (전표 구조 파악용).
+- 같은 카테고리의 세부 항목이 여러 개일 수 있습니다 (예: 신용카드, 체크카드 → 둘 다 type="card").
+
+응답 형식 (JSON만, 다른 텍스트 없이):
+{
+  "posVendor": "HYUNDAI",
+  "saleDate": "2026-04-04",
+  "receiptNo": "1237",
+  "items": [
+    { "label": "현금매출", "count": 1, "amount": 26000, "type": "cash" },
+    { "label": "카드매출", "count": 7, "amount": 96000, "type": "card" }
+  ],
+  "totalAmount": 1413800,
+  "confidence": "high"
+}`;
+
+    const aiResponse = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 4096,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: mediaType as "image/jpeg" | "image/png" | "image/webp" | "image/gif", data: base64 } },
+          { type: "text", text: salesOcrPrompt },
+        ],
+      }],
+    });
+
+    const responseTimeMs = Date.now() - startTime;
+    const rawText = aiResponse.content.filter(c => c.type === "text").map(c => c.text).join("");
+
+    // JSON 파싱
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON 파싱 실패", model: "claude-haiku-4-5-20251001" });
+      res.status(422).json({ error: "전표 인식에 실패했습니다. 다시 촬영해주세요." });
+      return;
+    }
+
+    let ocrResult: SalesOcrResult;
+    try {
+      ocrResult = JSON.parse(jsonMatch[0]);
+    } catch {
+      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON parse error", model: "claude-haiku-4-5-20251001" });
+      res.status(422).json({ error: "전표 인식 결과를 파싱할 수 없습니다." });
+      return;
+    }
+
+    // 검증
+    ocrResult = validateSalesOcrResult(ocrResult);
+    const mapped = mapSalesOcrToStandard(ocrResult);
+
+    // API 사용량 로깅
+    await logOcrApiUsage({
+      endpoint: "extract-sales",
+      restaurantId: Number(restaurantId) || undefined,
+      responseTimeMs,
+      success: true,
+      inputTokens: aiResponse.usage?.input_tokens,
+      outputTokens: aiResponse.usage?.output_tokens,
+      model: "claude-haiku-4-5-20251001",
+      itemCount: ocrResult.items.length,
+      requestPayloadSize: base64.length,
+    });
+
+    res.json({
+      ...ocrResult,
+      mapped,
+    });
+
+  } catch (err: any) {
+    const responseTimeMs = Date.now() - startTime;
+    console.error("[OCR-Sales] error:", err);
+    await logOcrError("extract-sales 실패", { error: err.message }, Number(req.body?.restaurantId) || undefined);
+    await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(req.body?.restaurantId) || undefined, responseTimeMs, success: false, errorMessage: err.message, model: "claude-haiku-4-5-20251001" });
+    res.status(500).json({ error: err.message, retryable: true });
+  }
+});
+
+// ============================================================
 // Google Drive 데이터셋 업로드
 // ============================================================
 

@@ -388,6 +388,8 @@ export const dailySalesDetail = mysqlTable("daily_sales_detail", {
   confirmedAt: timestamp("confirmedAt"),
   recordedBy: int("recordedBy"),
   note: text("note"),
+  source: varchar("source", { length: 20 }).default("manual").notNull(),
+  ocrRawData: json("ocrRawData").$type<Record<string, unknown> | null>(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

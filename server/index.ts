@@ -714,6 +714,10 @@ app.use(express.json());
     // counterparty_items.isActive 추가
     await addColumnIfNotExists("counterparty_items", "isActive", "BOOLEAN NOT NULL DEFAULT true");
 
+    // daily_sales_detail: OCR 매출 전표 관련 컬럼
+    await addColumnIfNotExists("daily_sales_detail", "source", "VARCHAR(20) DEFAULT 'manual' NOT NULL");
+    await addColumnIfNotExists("daily_sales_detail", "ocrRawData", "JSON DEFAULT NULL");
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {
