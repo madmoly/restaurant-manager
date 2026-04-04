@@ -913,6 +913,16 @@ function PurchaseTab({
     { enabled: counterpartyId !== undefined && counterpartyId > 0 },
   );
 
+  // 마스터 품목 목록 (Combobox용)
+  const allItemsQuery = trpc.items.list.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+
+  // 품목 Combobox 상태 (행 인덱스별)
+  const [itemDropdownIdx, setItemDropdownIdx] = useState<number | null>(null);
+  const [itemSearchText, setItemSearchText] = useState<Record<number, string>>({});
+
   // ── 즉시지출 state ──
   const [expCategoryId, setExpCategoryId] = useState<number>(0);
   const [expTitle, setExpTitle] = useState('');
@@ -1438,6 +1448,10 @@ function PurchaseTab({
   const orders = ordersQuery.data || [];
   const counterpartiesList = counterpartiesQuery.data || [];
   const cpItems = cpItemsQuery.data || [];
+  const allItems = allItemsQuery.data || [];
+  // 거래처 품목에 없는 마스터 품목만 (Combobox 하단 영역용)
+  const cpItemIds = new Set(cpItems.map((ci: any) => ci.itemId));
+  const masterOnlyItems = allItems.filter((mi: any) => !cpItemIds.has(mi.id));
   const receivedOrders = orders.filter((o: any) => o.status === 'received');
   const pendingOrders = orders.filter((o: any) => o.status !== 'received');
   const totalAmount = receivedOrders.reduce((sum, o: any) => sum + Number(o.totalAmount || 0), 0);
@@ -1914,25 +1928,6 @@ function PurchaseTab({
             </div>
           ) : (
             <>
-              {/* 거래처 품목 빠른선택 */}
-              {counterpartyId && cpItems.length > 0 && (
-                <div>
-                  <Label className="text-xs text-muted-foreground">빠른 품목 추가</Label>
-                  <div className="flex flex-wrap gap-1.5 mt-1">
-                    {cpItems.map((cpItem: any) => (
-                      <button
-                        key={cpItem.id}
-                        onClick={() => addFromCpItem(cpItem)}
-                        className="text-xs px-2 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded hover:bg-blue-500/20 transition-colors"
-                      >
-                        {cpItem.supplierItemName || cpItem.itemName}
-                        {cpItem.lastPrice && <span className="ml-1 opacity-70">₩{Number(cpItem.lastPrice).toLocaleString()}</span>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* 항목 입력 */}
               <div className="space-y-2">
                 <Label className="text-xs">매입 항목</Label>
@@ -1957,16 +1952,136 @@ function PurchaseTab({
                         {isLowConf ? '판독 불확실 — 확인 필요' : '합계 보정됨 — 확인 필요'}
                       </div>
                     )}
-                    {/* 품명 + 규격 */}
+                    {/* 품명 Combobox + 규격 */}
                     <div>
                       <div className="flex gap-2">
-                        <div className="flex-1">
-                          <Input
-                            placeholder="품명"
-                            value={item.rawItemName}
-                            onChange={(e) => updateItem(idx, 'rawItemName', e.target.value)}
-                            className="w-full text-sm h-9 font-medium"
+                        <div className="flex-1 relative">
+                          <input
+                            type="text"
+                            placeholder="품명 검색 또는 입력"
+                            value={itemDropdownIdx === idx && itemSearchText[idx] !== undefined ? itemSearchText[idx] : item.rawItemName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setItemSearchText(prev => ({ ...prev, [idx]: val }));
+                              // 텍스트 변경 시 매칭 해제
+                              const updated = [...purchaseItems];
+                              updated[idx] = { ...updated[idx], rawItemName: val, matchedItemId: undefined, matchedItemName: undefined, counterpartyItemId: undefined };
+                              setPurchaseItems(updated);
+                              setItemDropdownIdx(idx);
+                            }}
+                            onFocus={() => {
+                              setItemDropdownIdx(idx);
+                              setItemSearchText(prev => ({ ...prev, [idx]: item.rawItemName }));
+                            }}
+                            onBlur={() => setTimeout(() => {
+                              if (itemDropdownIdx === idx) {
+                                setItemDropdownIdx(null);
+                                setItemSearchText(prev => { const n = { ...prev }; delete n[idx]; return n; });
+                              }
+                            }, 200)}
+                            className="w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground font-medium"
                           />
+                          {item.matchedItemName && (
+                            <Check className="absolute right-2 top-2.5 w-3.5 h-3.5 text-emerald-500" />
+                          )}
+                          {/* 품목 드롭다운 */}
+                          {itemDropdownIdx === idx && (() => {
+                            const searchVal = (itemSearchText[idx] ?? '').toLowerCase();
+                            const candidateIds = new Set((item.itemCandidates || []).map((c: any) => c.itemId));
+                            // 거래처 품목 필터
+                            const filteredCp = counterpartyId
+                              ? cpItems.filter((ci: any) => {
+                                  const name = (ci.supplierItemName || ci.itemName || '').toLowerCase();
+                                  return !searchVal || name.includes(searchVal);
+                                })
+                              : [];
+                            // 마스터 품목 필터 (상위 20개)
+                            const filteredMaster = masterOnlyItems
+                              .filter((mi: any) => {
+                                const name = (mi.name || '').toLowerCase();
+                                return !searchVal || name.includes(searchVal);
+                              })
+                              .slice(0, 20);
+                            if (filteredCp.length === 0 && filteredMaster.length === 0) return null;
+                            return (
+                              <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-card border border-border rounded-md shadow-lg">
+                                {filteredCp.map((ci: any) => (
+                                  <button
+                                    key={`cp-${ci.id}`}
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => {
+                                      const updated = [...purchaseItems];
+                                      const hasOcrPrice = !!updated[idx].unitPrice;
+                                      updated[idx] = {
+                                        ...updated[idx],
+                                        rawItemName: ci.supplierItemName || ci.itemName,
+                                        matchedItemId: ci.itemId,
+                                        matchedItemName: ci.supplierItemName || ci.itemName,
+                                        counterpartyItemId: ci.id,
+                                        unitName: ci.purchaseUnit || updated[idx].unitName || '개',
+                                        unitPrice: hasOcrPrice ? updated[idx].unitPrice : (ci.lastPrice || ci.defaultPrice || updated[idx].unitPrice),
+                                        itemCandidates: undefined,
+                                      };
+                                      // 합계 재계산
+                                      const qty = parseFloat(updated[idx].quantity || '0');
+                                      const price = parseFloat(updated[idx].unitPrice || '0');
+                                      if (qty > 0 && price > 0) updated[idx].lineTotal = String(Math.round(qty * price));
+                                      setPurchaseItems(updated);
+                                      setItemDropdownIdx(null);
+                                      setItemSearchText(prev => { const n = { ...prev }; delete n[idx]; return n; });
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-muted/50 transition-colors flex items-center justify-between"
+                                  >
+                                    <span className="truncate">
+                                      {ci.supplierItemName || ci.itemName}
+                                      {candidateIds.has(ci.itemId) && (
+                                        <span className="ml-1.5 text-[10px] px-1 py-0.5 bg-amber-500/15 text-amber-600 dark:text-amber-400 rounded">추천</span>
+                                      )}
+                                    </span>
+                                    {ci.lastPrice && (
+                                      <span className="text-xs text-muted-foreground ml-2 shrink-0">₩{Number(ci.lastPrice).toLocaleString()}</span>
+                                    )}
+                                  </button>
+                                ))}
+                                {filteredCp.length > 0 && filteredMaster.length > 0 && (
+                                  <div className="border-t border-border px-3 py-1">
+                                    <span className="text-[10px] text-muted-foreground">전체 품목</span>
+                                  </div>
+                                )}
+                                {filteredMaster.map((mi: any) => (
+                                  <button
+                                    key={`mi-${mi.id}`}
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => {
+                                      const updated = [...purchaseItems];
+                                      updated[idx] = {
+                                        ...updated[idx],
+                                        rawItemName: mi.name,
+                                        matchedItemId: mi.id,
+                                        matchedItemName: mi.name,
+                                        counterpartyItemId: undefined,
+                                        unitName: mi.baseUnit || updated[idx].unitName || '개',
+                                        itemCandidates: undefined,
+                                      };
+                                      setPurchaseItems(updated);
+                                      setItemDropdownIdx(null);
+                                      setItemSearchText(prev => { const n = { ...prev }; delete n[idx]; return n; });
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-muted/50 transition-colors flex items-center"
+                                  >
+                                    <span className="truncate">
+                                      {mi.name}
+                                      {candidateIds.has(mi.id) && (
+                                        <span className="ml-1.5 text-[10px] px-1 py-0.5 bg-amber-500/15 text-amber-600 dark:text-amber-400 rounded">추천</span>
+                                      )}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </div>
                         {(item.spec || ocrPreviewUrl) && (
                           <div className="w-24">
@@ -1979,40 +2094,9 @@ function PurchaseTab({
                           </div>
                         )}
                       </div>
-                      {item.originalName && item.originalName !== item.rawItemName && !item.matchedItemName && (
-                        <p className="text-[10px] text-muted-foreground mt-0.5 px-1 truncate">원본: {item.originalName}</p>
-                      )}
-                      {/* 자동매칭된 경우 원본명 표시 */}
-                      {item.matchedItemName && item.originalName && (
-                        <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 px-1 truncate">
-                          ✓ 자동매칭 (전표: {item.originalName || item.matchedItemName})
-                        </p>
-                      )}
-                      {/* 후보가 있지만 자동매칭은 안 된 경우 → 선택 칩 */}
-                      {!item.matchedItemId && item.itemCandidates && item.itemCandidates.length > 0 && (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          <span className="text-[10px] text-amber-600 dark:text-amber-400">혹시:</span>
-                          {item.itemCandidates.map((c: any) => (
-                            <button
-                              key={c.itemId}
-                              type="button"
-                              onClick={() => {
-                                const updated = [...purchaseItems];
-                                updated[idx] = {
-                                  ...updated[idx],
-                                  rawItemName: c.itemName,
-                                  matchedItemId: c.itemId,
-                                  matchedItemName: c.itemName,
-                                  itemCandidates: undefined,
-                                };
-                                setPurchaseItems(updated);
-                              }}
-                              className="px-1.5 py-0.5 text-[10px] bg-amber-500/15 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 rounded transition-colors"
-                            >
-                              {c.itemName}
-                            </button>
-                          ))}
-                        </div>
+                      {/* 전표 원본명 표시 */}
+                      {item.originalName && item.originalName !== item.rawItemName && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5 px-1 truncate">전표 원본: {item.originalName}</p>
                       )}
                     </div>
                     {/* 수량 + 단위 */}
