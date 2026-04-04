@@ -567,6 +567,7 @@ export const counterpartyItems = mysqlTable("counterparty_items", {
   defaultPrice: decimal("defaultPrice", { precision: 14, scale: 2 }),
   lastPrice: decimal("lastPrice", { precision: 14, scale: 2 }),
   isPreferred: boolean("isPreferred").default(false).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

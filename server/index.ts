@@ -711,6 +711,9 @@ app.use(express.json());
       )
     `).catch(() => {});
 
+    // counterparty_items.isActive 추가
+    await addColumnIfNotExists("counterparty_items", "isActive", "BOOLEAN NOT NULL DEFAULT true");
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

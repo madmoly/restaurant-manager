@@ -370,7 +370,7 @@ async function matchCounterpartyItems(
 
   try {
     const existingItems = await db
-      .select({ id: counterpartyItems.id, name: counterpartyItems.name, price: counterpartyItems.price })
+      .select({ id: counterpartyItems.id, name: counterpartyItems.supplierItemName, price: counterpartyItems.defaultPrice })
       .from(counterpartyItems)
       .where(and(
         eq(counterpartyItems.counterpartyId, counterpartyId),
@@ -382,12 +382,13 @@ async function matchCounterpartyItems(
     return items.map((item) => {
       // 기존 품목과 fuzzy 매칭
       const match = existingItems.find((ei) => {
+        if (!ei.name) return false;
         const eiName = ei.name.toLowerCase();
         const itemName = item.shortName.toLowerCase();
         return eiName === itemName || eiName.includes(itemName) || itemName.includes(eiName);
       });
 
-      if (match && match.price) {
+      if (match && match.price != null) {
         // 단가 이상 감지: 기존 평균 단가 대비 ±30% 이상이면 confidence 낮춤
         const currentPrice = parseFloat(item.unitPrice) || 0;
         const existingPrice = Number(match.price);
@@ -462,10 +463,10 @@ async function findItemCandidates(
 ): Promise<OcrItem[]> {
   try {
     // 거래처 품목 + 전체 품목 마스터 조회
-    let cpItems: { id: number; name: string; price: string | null }[] = [];
+    let cpItems: { id: number; name: string | null; price: string | null }[] = [];
     if (counterpartyId) {
       cpItems = await db
-        .select({ id: counterpartyItems.id, name: counterpartyItems.name, price: counterpartyItems.price })
+        .select({ id: counterpartyItems.id, name: counterpartyItems.supplierItemName, price: counterpartyItems.defaultPrice })
         .from(counterpartyItems)
         .where(and(
           eq(counterpartyItems.counterpartyId, counterpartyId),
@@ -488,6 +489,7 @@ async function findItemCandidates(
       let candidates: { itemId: number; itemName: string; score: number; source: "counterparty" | "master" }[] = [];
 
       for (const ci of cpItems) {
+        if (!ci.name) continue;
         const score = fuzzyScore(ocrNorm, normalizeKorean(ci.name));
         if (score >= 0.3) {
           candidates.push({ itemId: ci.id, itemName: ci.name, score, source: "counterparty" });
