@@ -383,6 +383,22 @@ export const dailyOpsRouter = router({
       return { ...detail, otherItems, specialItems };
     }),
 
+  getCumulativeSales: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      const d = new Date(input.date);
+      const monthStart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      const [row] = await db
+        .select({ total: sql<string>`COALESCE(SUM(${dailySalesDetail.totalAmount}), 0)` })
+        .from(dailySalesDetail)
+        .where(and(
+          eq(dailySalesDetail.restaurantId, input.restaurantId),
+          sql`${dailySalesDetail.saleDate} >= ${monthStart}`,
+          sql`${dailySalesDetail.saleDate} <= ${input.date}`
+        ));
+      return { cumulative: row?.total ?? "0" };
+    }),
+
   saveDailySales: managerProcedure
     .input(
       z.object({

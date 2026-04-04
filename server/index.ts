@@ -714,6 +714,9 @@ app.use(express.json());
     // counterparty_items.isActive 추가
     await addColumnIfNotExists("counterparty_items", "isActive", "BOOLEAN NOT NULL DEFAULT true");
 
+    // restaurants: 시재금 고정값
+    await addColumnIfNotExists("restaurants", "fixedCashRegister", "INT NOT NULL DEFAULT 200000");
+
     // daily_sales_detail: OCR 매출 전표 관련 컬럼
     await addColumnIfNotExists("daily_sales_detail", "source", "VARCHAR(20) DEFAULT 'manual' NOT NULL");
     await addColumnIfNotExists("daily_sales_detail", "ocrRawData", "JSON DEFAULT NULL");

@@ -30,6 +30,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  Copy,
 } from 'lucide-react';
 
 // ============================================================================
@@ -2728,6 +2729,25 @@ function CloseTab({
     return { allDone: draft === 0, total: schedules.length, completed, confirmed, draft };
   }, [daySchedulesQuery.data]);
 
+  // ── 보고 복사용 데이터 ──
+  const restaurantQuery = trpc.restaurants.get.useQuery(
+    { id: restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const cumulativeSalesQuery = trpc.dailyOps.getCumulativeSales.useQuery(
+    { restaurantId, date },
+    { enabled: restaurantId > 0 },
+  );
+  const tomorrowDate = useMemo(() => {
+    const d = new Date(date + 'T12:00:00');
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  }, [date]);
+  const tomorrowSchedules = trpc.schedules.getDaySchedules.useQuery(
+    { restaurantId, date: tomorrowDate },
+    { enabled: restaurantId > 0 },
+  );
+
   const midSalesQuery = trpc.dailyOps.getMidSales.useQuery({
     restaurantId,
     date,
@@ -2797,6 +2817,91 @@ function CloseTab({
       specialItems,
       note: closeNote || undefined,
     });
+  };
+
+  const getRoleLabel = (s: any): string => {
+    const storeRole = s.storeRole;
+    if (storeRole === 'owner' || storeRole === 'store_manager') return '점장';
+    if (storeRole === 'supervisor' || storeRole === 'manager') return '매니져';
+    return '사원';
+  };
+
+  const generateReportText = (): string => {
+    const rest = restaurantQuery.data;
+    const restName = rest?.name ?? '매장';
+    const cumulative = Number(cumulativeSalesQuery.data?.cumulative ?? 0);
+    const cash = parseNum(cashAmount);
+    const card = parseNum(cardAmount);
+    const gift = parseNum(giftCardAmount);
+    const transfer = parseNum(transferAmount);
+    const total = cash + card + gift + transfer + otherItems.reduce((s, i) => s + i.amount, 0);
+    const specialTotal = specialItems.reduce((s, i) => s + i.amount, 0);
+    const fixedCash = rest?.fixedCashRegister ?? 200000;
+
+    // 날짜 포맷 (4/5 토)
+    const dt = new Date(date + 'T12:00:00');
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    const dateStr = `${dt.getMonth() + 1}/${dt.getDate()} ${dayNames[dt.getDay()]}`;
+
+    const lines: string[] = [];
+    lines.push(`[${restName}] ${dateStr}`);
+    lines.push('');
+    lines.push(`누적매출: ${fmtNum(cumulative)}원`);
+    lines.push(`금일매출: ${fmtNum(total)}원`);
+    lines.push('');
+    lines.push(`현금: ${fmtNum(cash)}원`);
+    lines.push(`카드: ${fmtNum(card)}원`);
+    if (gift > 0) lines.push(`상품권: ${fmtNum(gift)}원`);
+    if (transfer > 0) lines.push(`이체: ${fmtNum(transfer)}원${transferDepositor ? ` (${transferDepositor})` : ''}`);
+    for (const item of otherItems) {
+      if (item.amount > 0) lines.push(`${item.itemName}: ${fmtNum(item.amount)}원`);
+    }
+    if (specialTotal > 0) {
+      lines.push('');
+      for (const item of specialItems) {
+        if (item.amount > 0) lines.push(`${item.typeName}: -${fmtNum(item.amount)}원${item.note ? ` (${item.note})` : ''}`);
+      }
+    }
+    lines.push('');
+    lines.push(`시재: ${fmtNum(fixedCash)}원`);
+
+    // 금일 근무자
+    const todaySchedules = (daySchedulesQuery.data ?? []).filter((s: any) => s.status !== 'canceled');
+    if (todaySchedules.length > 0) {
+      lines.push('');
+      lines.push('금일근무:');
+      for (const s of todaySchedules) {
+        const name = s.userName ?? s.tempWorkerName ?? '미배정';
+        const w = calcHeadcountWeight(s.startTime, s.endTime, rest?.openTime, rest?.closeTime, rest?.halfShiftThreshold);
+        if (w === 0.5) {
+          const hours = ((new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 3600000).toFixed(1).replace(/\.0$/, '');
+          lines.push(`  ${name} ${hours}시간`);
+        } else {
+          lines.push(`  ${name} ${getRoleLabel(s)}`);
+        }
+      }
+    }
+
+    // 내일 근무자
+    const tmrw = (tomorrowSchedules.data ?? []).filter((s: any) => s.status !== 'canceled');
+    if (tmrw.length > 0) {
+      const tmrwDt = new Date(tomorrowDate + 'T12:00:00');
+      const tmrwStr = `${tmrwDt.getMonth() + 1}/${tmrwDt.getDate()} ${dayNames[tmrwDt.getDay()]}`;
+      lines.push('');
+      lines.push(`내일근무 (${tmrwStr}):`);
+      for (const s of tmrw) {
+        const name = s.userName ?? s.tempWorkerName ?? '미배정';
+        const w = calcHeadcountWeight(s.startTime, s.endTime, rest?.openTime, rest?.closeTime, rest?.halfShiftThreshold);
+        if (w === 0.5) {
+          const hours = ((new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 3600000).toFixed(1).replace(/\.0$/, '');
+          lines.push(`  ${name} ${hours}시간`);
+        } else {
+          lines.push(`  ${name} ${getRoleLabel(s)}`);
+        }
+      }
+    }
+
+    return lines.join('\n');
   };
 
   const midSalesTotal = (midSalesQuery.data || []).reduce(
@@ -3098,13 +3203,29 @@ function CloseTab({
             </div>
           </div>
 
-          <Button
-            onClick={handleSaveSales}
-            disabled={saveSalesMutation.isPending}
-            className="w-full"
-          >
-            {saveSalesMutation.isPending ? '저장 중...' : '매출 저장'}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleSaveSales}
+              disabled={saveSalesMutation.isPending}
+              className="flex-1"
+            >
+              {saveSalesMutation.isPending ? '저장 중...' : '매출 저장'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const text = generateReportText();
+                navigator.clipboard.writeText(text).then(() => {
+                  toast.success('보고 텍스트가 클립보드에 복사되었습니다');
+                }).catch(() => {
+                  toast.error('복사 실패');
+                });
+              }}
+              className="shrink-0"
+            >
+              <Copy className="w-4 h-4 mr-1" /> 보고 복사
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -3129,12 +3250,42 @@ function CloseTab({
 
 const SHIFT_LABELS: Record<string, string> = { open: '오픈', close: '마감', full: '풀타임' };
 
+function timeToMinutes(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + (m || 0);
+}
 
+function calcHeadcountWeight(
+  startTime: string | Date,
+  endTime: string | Date,
+  openTime: string | null | undefined,
+  closeTime: string | null | undefined,
+  halfShiftThreshold: number | null | undefined,
+): number {
+  const st = startTime instanceof Date ? startTime : new Date(startTime);
+  const et = endTime instanceof Date ? endTime : new Date(endTime);
+  const workMinutes = (et.getTime() - st.getTime()) / 60000;
+  if (workMinutes <= 0) return 1;
+
+  const open = openTime ? timeToMinutes(openTime) : 0;
+  const close = closeTime ? timeToMinutes(closeTime) : 1440;
+  const storeMinutes = close > open ? close - open : 1440 - open + close;
+  if (storeMinutes <= 0) return 1;
+
+  const ratio = (workMinutes / storeMinutes) * 100;
+  const threshold = halfShiftThreshold ?? 60;
+  return ratio < threshold ? 0.5 : 1;
+}
 
 function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; date: string }) {
   const [expanded, setExpanded] = useState(true);
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
+
+  const { data: restaurant } = trpc.restaurants.get.useQuery(
+    { id: restaurantId },
+    { enabled: restaurantId > 0 }
+  );
 
   const { data: daySchedules = [], isLoading } = trpc.schedules.getDaySchedules.useQuery(
     { restaurantId, date },
@@ -3164,6 +3315,11 @@ function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; 
   const draft = daySchedules.filter((s: any) => s.status === 'draft');
   const total = daySchedules.length;
 
+  const weightedTotal = daySchedules.reduce((sum: number, s: any) => {
+    const w = calcHeadcountWeight(s.startTime, s.endTime, restaurant?.openTime, restaurant?.closeTime, restaurant?.halfShiftThreshold);
+    return sum + w;
+  }, 0);
+
   if (total === 0) return null;
 
   return (
@@ -3176,7 +3332,7 @@ function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; 
         <div className="flex items-center gap-2">
           <Users className="w-4 h-4 text-muted-foreground" />
           <span className="font-semibold text-foreground text-sm">근무 스케줄</span>
-          <span className="text-xs text-muted-foreground">({total}명)</span>
+          <span className="text-xs text-muted-foreground">({weightedTotal % 1 === 0 ? weightedTotal : weightedTotal.toFixed(1)}명)</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 text-[10px]">
@@ -3218,6 +3374,9 @@ function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; 
                     <span className="font-medium text-foreground truncate">
                       {s.userName ?? s.tempWorkerName ?? '미배정'}
                       {s.tempWorkerName && <span className="text-orange-500 ml-1 text-xs">(임시)</span>}
+                      {calcHeadcountWeight(s.startTime, s.endTime, restaurant?.openTime, restaurant?.closeTime, restaurant?.halfShiftThreshold) === 0.5 && (
+                        <span className="text-amber-500 ml-1 text-xs">(반차)</span>
+                      )}
                     </span>
                     <span className="text-xs text-muted-foreground shrink-0">
                       {fmtTs(s.startTime)}~{fmtTs(s.endTime)}

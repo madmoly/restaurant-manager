@@ -30,10 +30,27 @@ function fmtTime(d: string | Date) {
   return `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
 }
 
+function ttm(t: string): number { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); }
+function calcWeight(start: string | Date, end: string | Date, openTime?: string | null, closeTime?: string | null, threshold?: number | null): number {
+  const st = start instanceof Date ? start : new Date(start);
+  const et = end instanceof Date ? end : new Date(end);
+  const wk = (et.getTime() - st.getTime()) / 60000;
+  if (wk <= 0) return 1;
+  const o = openTime ? ttm(openTime) : 0;
+  const c = closeTime ? ttm(closeTime) : 1440;
+  const store = c > o ? c - o : 1440 - o + c;
+  if (store <= 0) return 1;
+  return (wk / store) * 100 < (threshold ?? 60) ? 0.5 : 1;
+}
+
 // ─── 일별 상세 콘텐츠 (Drawer/Panel 공용) ──────────────────────────────────
 function DayDetailContent({ restaurantId, date, onNavigate }: {
   restaurantId: number; date: string; onNavigate?: () => void;
 }) {
+  const { data: restaurant } = trpc.restaurants.get.useQuery(
+    { id: restaurantId },
+    { enabled: restaurantId > 0 },
+  );
   const { data, isLoading } = trpc.dailyOps.getDayDetail.useQuery(
     { restaurantId, date },
     { enabled: restaurantId > 0 },
@@ -90,7 +107,10 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
       {/* 스케줄 */}
       <section>
         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-          <Users className="w-3.5 h-3.5" /> 스케줄 ({data.schedules.length}명)
+          <Users className="w-3.5 h-3.5" /> 스케줄 ({(() => {
+            const w = data.schedules.reduce((s: number, sc: any) => s + calcWeight(sc.startTime, sc.endTime, restaurant?.openTime, restaurant?.closeTime, restaurant?.halfShiftThreshold), 0);
+            return w % 1 === 0 ? w : w.toFixed(1);
+          })()}명)
         </h4>
         {data.schedules.length === 0 ? (
           <p className="text-xs text-muted-foreground pl-1">등록된 스케줄 없음</p>
