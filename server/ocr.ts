@@ -6,7 +6,7 @@ import sharp from "sharp";
 import { execSync } from "child_process";
 import { UPLOAD_ROOT } from "./upload";
 import { db } from "./db";
-import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs, apiUsageLogs, purchaseOrdersV2, purchaseOrderItemsV2, items, restaurants } from "../drizzle/schema";
+import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs, apiUsageLogs, purchaseOrdersV2, purchaseOrderItemsV2, items, items as itemsTable, restaurants } from "../drizzle/schema";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { exportDatasetToGDrive, isGDriveConfigured, getLastExportResult } from "./gdrive";
 
@@ -370,8 +370,9 @@ async function matchCounterpartyItems(
 
   try {
     const existingItems = await db
-      .select({ id: counterpartyItems.id, name: counterpartyItems.supplierItemName, price: counterpartyItems.defaultPrice })
+      .select({ id: counterpartyItems.id, itemId: counterpartyItems.itemId, name: counterpartyItems.supplierItemName, itemName: itemsTable.name, price: counterpartyItems.defaultPrice })
       .from(counterpartyItems)
+      .leftJoin(itemsTable, eq(counterpartyItems.itemId, itemsTable.id))
       .where(and(
         eq(counterpartyItems.counterpartyId, counterpartyId),
         eq(counterpartyItems.isActive, true)
@@ -382,8 +383,9 @@ async function matchCounterpartyItems(
     return items.map((item) => {
       // 기존 품목과 fuzzy 매칭
       const match = existingItems.find((ei) => {
-        if (!ei.name) return false;
-        const eiName = ei.name.toLowerCase();
+        const displayName = ei.name || ei.itemName;
+        if (!displayName) return false;
+        const eiName = displayName.toLowerCase();
         const itemName = item.shortName.toLowerCase();
         return eiName === itemName || eiName.includes(itemName) || itemName.includes(eiName);
       });
@@ -463,11 +465,12 @@ async function findItemCandidates(
 ): Promise<OcrItem[]> {
   try {
     // 거래처 품목 + 전체 품목 마스터 조회
-    let cpItems: { id: number; name: string | null; price: string | null }[] = [];
+    let cpItems: { id: number; itemId: number | null; name: string | null; itemName: string | null; price: string | null }[] = [];
     if (counterpartyId) {
       cpItems = await db
-        .select({ id: counterpartyItems.id, name: counterpartyItems.supplierItemName, price: counterpartyItems.defaultPrice })
+        .select({ id: counterpartyItems.id, itemId: counterpartyItems.itemId, name: counterpartyItems.supplierItemName, itemName: items.name, price: counterpartyItems.defaultPrice })
         .from(counterpartyItems)
+        .leftJoin(items, eq(counterpartyItems.itemId, items.id))
         .where(and(
           eq(counterpartyItems.counterpartyId, counterpartyId),
           eq(counterpartyItems.isActive, true)
@@ -489,10 +492,11 @@ async function findItemCandidates(
       let candidates: { itemId: number; itemName: string; score: number; source: "counterparty" | "master" }[] = [];
 
       for (const ci of cpItems) {
-        if (!ci.name) continue;
-        const score = fuzzyScore(ocrNorm, normalizeKorean(ci.name));
-        if (score >= 0.3) {
-          candidates.push({ itemId: ci.id, itemName: ci.name, score, source: "counterparty" });
+        const displayName = ci.name || ci.itemName;
+        if (!displayName) continue;
+        const score = fuzzyScore(ocrNorm, normalizeKorean(displayName));
+        if (score >= 0.3 && ci.itemId) {
+          candidates.push({ itemId: ci.itemId, itemName: displayName, score, source: "counterparty" });
         }
       }
 
