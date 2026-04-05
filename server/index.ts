@@ -721,6 +721,13 @@ app.use(express.json());
     await addColumnIfNotExists("daily_sales_detail", "source", "VARCHAR(20) DEFAULT 'manual' NOT NULL");
     await addColumnIfNotExists("daily_sales_detail", "ocrRawData", "JSON DEFAULT NULL");
 
+    // ─── 발주 메모 재설계: purchaseOrdersV2 컬럼 추가 ───
+    await addColumnIfNotExists("purchase_orders_v2", "content", "TEXT DEFAULT NULL");
+    await addColumnIfNotExists("purchase_orders_v2", "counterpartyName", "VARCHAR(100) DEFAULT NULL");
+    await addColumnIfNotExists("purchase_orders_v2", "isReceived", "BOOLEAN NOT NULL DEFAULT FALSE");
+    // status enum에 'memo' 추가 (기존 received/ordered + memo)
+    await conn.query(`ALTER TABLE purchase_orders_v2 MODIFY COLUMN status ENUM('received','ordered','memo') NOT NULL DEFAULT 'received'`).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

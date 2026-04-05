@@ -71,6 +71,15 @@ export default function ManagerDashboard() {
   // ─── 알림 ────────────────────────────────────────────────────────────────
   const { data: notifications } = trpc.notifications.listMine.useQuery({ limit: 5 });
 
+  // ─── 미입�� 발주 리마인더 ─────────────────────────
+  const unreceivedQuery = trpc.purchasesV2.listUnreceived.useQuery(
+    { restaurantId },
+    { enabled },
+  );
+  const toggleReceivedMut = trpc.purchasesV2.toggleReceived.useMutation({
+    onSuccess() { unreceivedQuery.refetch(); },
+  });
+
   if (storesLoading) return <DashboardSkeleton />;
 
   if (!current) {
@@ -125,6 +134,38 @@ export default function ManagerDashboard() {
         <h1 className="text-base font-bold">{current.name}</h1>
         <p className="text-xs text-muted-foreground">{year}년 {month}월 현황</p>
       </div>
+
+      {/* ─── 미입고 발주 리마인더 ─── */}
+      {(unreceivedQuery.data ?? []).length > 0 && (
+        <Card className="p-3 border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20">
+          <div className="flex items-center gap-2 mb-2">
+            <ShoppingCart size={14} className="text-amber-600" />
+            <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">미입고 발주 {(unreceivedQuery.data ?? []).length}건</span>
+          </div>
+          <div className="space-y-1.5">
+            {(unreceivedQuery.data ?? []).slice(0, 3).map((item: any) => (
+              <div key={item.id} className="flex items-center justify-between text-xs">
+                <div className="min-w-0">
+                  <span className="font-medium text-foreground">{item.counterpartyName}</span>
+                  <span className="text-muted-foreground ml-1 truncate">{item.content?.slice(0, 20)}</span>
+                </div>
+                <button
+                  onClick={() => toggleReceivedMut.mutate({ id: item.id, isReceived: true })}
+                  disabled={toggleReceivedMut.isPending}
+                  className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 hover:bg-amber-200"
+                >
+                  입고확인
+                </button>
+              </div>
+            ))}
+            {(unreceivedQuery.data ?? []).length > 3 && (
+              <button onClick={() => setLocation('/daily-ops')} className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline">
+                +{(unreceivedQuery.data ?? []).length - 3}건 더보기
+              </button>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* ─── 섹션 1: 이번 달 수익 요약 ─── */}
       <Card className="p-3">

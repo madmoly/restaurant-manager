@@ -1,6 +1,6 @@
 # 331매장관리 (Restaurant Manager) — 프로젝트 문서
 
-> 마지막 갱신: 2026-04-04 (Claude Code 전환 + 04-01 변경사항 통합)
+> 마지막 갱신: 2026-04-05 (발주 메모 재설계 추가)
 
 ## 작업 규칙 (Claude Code용)
 
@@ -335,7 +335,19 @@ master(개발자) > admin(대표) > owner(점장) > supervisor(매니져) > staf
 | storeInfo | storeInfo.ts | 업무정보 카드 |
 | businessGroups | businessGroups.ts | 사업그룹 CRUD |
 
-## 최근 주요 변경 (2026-04-01)
+## 최근 주요 변경
+
+### 발주 메모 재설계 (2026-04-05, 진행중)
+- **스펙**: `docs/purchase-memo-redesign.md`
+- 매입탭 발주입력을 "발주 메모 + 입고 리마인더"로 단순화
+- `purchaseOrdersV2`에 `content`(자유텍스트), `counterpartyName`(미등록거래처), `isReceived`(입고확인) 컬럼 추가
+- `status`에 `'memo'` 값 추가 (기존 ordered/received와 구분)
+- 새 API: `createMemo`, `listMemosByDate`, `toggleReceived`, `listUnreceived`
+- OCR 전표입력은 별도 흐름으로 분리 유지
+- 대시보드/운영일지에 미입고 발주 리마인더 추가
+- PurchaseManagementPage의 거래처/월별매입/가격비교/단가추이는 변경 없음
+
+### 2026-04-01 변경사항
 
 ### 월정산 페이지 전면 개편
 - ProfitPage(수익분석) → MonthlySettlementPage(월정산) 교체

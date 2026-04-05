@@ -803,4 +803,127 @@ export const purchasesV2Router = router({
       // 3) 금액순 정렬
       return Array.from(cpMap.values()).sort((a, b) => b.totalAmount - a.totalAmount);
     }),
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 발주 메모 API
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** 발주 메모 생성 */
+  createMemo: protectedProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      counterpartyId: z.number().optional(),
+      counterpartyName: z.string().optional(),
+      content: z.string().min(1),
+      attachmentUrl: z.string().optional(),
+      purchaseDate: z.string().optional(),
+    }).refine(d => d.counterpartyId || d.counterpartyName, {
+      message: "거래처 선택 또는 직접입력이 필요합니다",
+    }))
+    .mutation(async ({ input, ctx }) => {
+      // 기본 날짜: 오늘 (KST)
+      const kstDate = input.purchaseDate ?? new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+      const [result] = await db.insert(purchaseOrdersV2).values({
+        restaurantId: input.restaurantId,
+        counterpartyId: input.counterpartyId ?? null,
+        counterpartyName: input.counterpartyName ?? null,
+        content: input.content,
+        purchaseDate: kstDate,
+        status: "memo",
+        isReceived: false,
+        totalAmount: "0",
+        attachmentUrl: input.attachmentUrl ?? null,
+        createdBy: ctx.user.userId,
+      });
+      return { id: result.insertId };
+    }),
+
+  /** 날짜별 발주 메모 조회 */
+  listMemosByDate: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+    .query(async ({ input }) => {
+      const rows = await db
+        .select({
+          id: purchaseOrdersV2.id,
+          counterpartyId: purchaseOrdersV2.counterpartyId,
+          counterpartyNameDirect: purchaseOrdersV2.counterpartyName,
+          counterpartyNameJoin: counterparties.name,
+          content: purchaseOrdersV2.content,
+          attachmentUrl: purchaseOrdersV2.attachmentUrl,
+          isReceived: purchaseOrdersV2.isReceived,
+          receivedAt: purchaseOrdersV2.receivedAt,
+          createdBy: purchaseOrdersV2.createdBy,
+          createdByName: users.name,
+          createdAt: purchaseOrdersV2.createdAt,
+        })
+        .from(purchaseOrdersV2)
+        .leftJoin(counterparties, eq(purchaseOrdersV2.counterpartyId, counterparties.id))
+        .leftJoin(users, eq(purchaseOrdersV2.createdBy, users.id))
+        .where(and(
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+          eq(purchaseOrdersV2.status, "memo"),
+          sql`${purchaseOrdersV2.purchaseDate} = ${input.date}`,
+        ))
+        .orderBy(desc(purchaseOrdersV2.createdAt));
+
+      return rows.map(r => ({
+        id: r.id,
+        counterpartyId: r.counterpartyId,
+        counterpartyName: r.counterpartyNameJoin ?? r.counterpartyNameDirect ?? "미지정",
+        content: r.content,
+        attachmentUrl: r.attachmentUrl,
+        isReceived: r.isReceived,
+        receivedAt: r.receivedAt,
+        createdBy: r.createdBy,
+        createdByName: r.createdByName,
+        createdAt: r.createdAt,
+      }));
+    }),
+
+  /** 입고 확인 토글 */
+  toggleReceived: protectedProcedure
+    .input(z.object({ id: z.number(), isReceived: z.boolean() }))
+    .mutation(async ({ input }) => {
+      await db.update(purchaseOrdersV2)
+        .set({
+          isReceived: input.isReceived,
+          receivedAt: input.isReceived ? new Date() : null,
+        })
+        .where(eq(purchaseOrdersV2.id, input.id));
+      return { ok: true };
+    }),
+
+  /** 미입고 발주 메모 조회 (리마인더용) */
+  listUnreceived: protectedProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input }) => {
+      const kstToday = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+      const rows = await db
+        .select({
+          id: purchaseOrdersV2.id,
+          counterpartyId: purchaseOrdersV2.counterpartyId,
+          counterpartyNameDirect: purchaseOrdersV2.counterpartyName,
+          counterpartyNameJoin: counterparties.name,
+          content: purchaseOrdersV2.content,
+          purchaseDate: purchaseOrdersV2.purchaseDate,
+          createdAt: purchaseOrdersV2.createdAt,
+        })
+        .from(purchaseOrdersV2)
+        .leftJoin(counterparties, eq(purchaseOrdersV2.counterpartyId, counterparties.id))
+        .where(and(
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+          eq(purchaseOrdersV2.status, "memo"),
+          eq(purchaseOrdersV2.isReceived, false),
+          sql`${purchaseOrdersV2.purchaseDate} < ${kstToday}`,
+        ))
+        .orderBy(desc(purchaseOrdersV2.purchaseDate));
+
+      return rows.map(r => ({
+        id: r.id,
+        counterpartyName: r.counterpartyNameJoin ?? r.counterpartyNameDirect ?? "미지정",
+        content: r.content,
+        purchaseDate: r.purchaseDate,
+        createdAt: r.createdAt,
+      }));
+    }),
 });

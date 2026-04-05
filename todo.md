@@ -1,6 +1,6 @@
 # Restaurant Manager — 작업 로드맵
 
-> 마지막 갱신: 2026-04-01
+> 마지막 갱신: 2026-04-05
 
 ## 완료된 작업 (아카이브)
 
@@ -39,6 +39,21 @@
 - ~~월마감 인건비 자동 계산 (스케줄×시급)~~ : 일마감에서 수동 입력된 laborCost를 admin 대시보드가 이미 참조. 자동 계산 추가 시 이중 집계 위험
 - ~~OCR 클라이언트 수동 이미지 회전 UI~~ : 서버 detectAndFixOrientation()이 AI 기반 자동 회전 처리. 수동 UI는 과잉
 - ~~OCR 사용자 수정 → 프로파일 피드백 루프~~ : 오인식 수정값이 프로파일 오염 가능. 현행 OCR 결과 기반 자동 학습이 더 안전
+
+---
+
+## 진행 중: 발주 메모 재설계 (2026-04-05~)
+
+> 스펙: `docs/purchase-memo-redesign.md`
+
+매입탭 발주입력을 "발주 메모 + 입고 리마인더"로 단순화. OCR 전표입력은 별도 유지.
+
+- [ ] Step 1: 스키마 수정 — purchaseOrdersV2에 content/counterpartyName/isReceived 추가, status에 'memo' 추가
+- [ ] Step 2: tRPC API — createMemo, listMemosByDate, toggleReceived, listUnreceived 4개
+- [ ] Step 3: DailyOpsPage 매입탭 UI 교체 — 메모 리스트 + 간단입력폼, OCR 분리 유지
+- [ ] Step 4: 리마인더 — 대시보드/운영일지에 미입고 발주 알림
+- [ ] Step 5: 기존 데이터 호환 확인
+- [ ] Step 6: 검증 (발주메모 CRUD + OCR 정상 + 월정산 연동)
 
 ---
 

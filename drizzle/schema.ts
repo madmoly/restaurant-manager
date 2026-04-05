@@ -585,8 +585,11 @@ export const purchaseOrdersV2 = mysqlTable("purchase_orders_v2", {
   counterpartyId: int("counterpartyId"),
   purchaseDate: date("purchaseDate").notNull(), // 발주일 = 정산 귀속 기준
   receivedAt: timestamp("receivedAt"),          // 입고 확인 시점 (NULL = 미입고)
-  status: mysqlEnum("status", ["received", "ordered"]).default("received").notNull(),
+  status: mysqlEnum("status", ["received", "ordered", "memo"]).default("received").notNull(),
   note: text("note"),
+  content: text("content"),
+  counterpartyName: varchar("counterpartyName", { length: 100 }),
+  isReceived: boolean("isReceived").default(false).notNull(),
   attachmentUrl: text("attachmentUrl"),
   totalAmount: decimal("totalAmount", { precision: 14, scale: 2 }).default("0").notNull(),
   createdBy: int("createdBy").notNull(),

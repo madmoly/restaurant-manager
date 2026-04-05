@@ -1,7 +1,7 @@
-feat: 반차 0.5명 가중 카운트 + 마감 보고 복사 버튼
+feat: 발주 메모 재설계 — 간편 메모 + 입고 리마인더
 
-- ClosingScheduleSummary/OpsCalendarPage: 반차 근무자 0.5명 가중 카운트 표시 + (반차) 라벨
-- CloseTab: 보고 복사 버튼 추가 (매장명/누적매출/금일매출/결제수단/시재/금일·내일 근무자)
-- restaurants.fixedCashRegister 컬럼 추가 (시재 고정값, 기본 20만원)
-- dailyOps.getCumulativeSales API 추가 (월초~당일 누적매출)
-- schedules.getDaySchedules: systemRole/storeRole 필드 추가
+- purchaseOrdersV2: content/counterpartyName/isReceived 컬럼 + status='memo' 추가
+- tRPC API: createMemo, listMemosByDate, toggleReceived, listUnreceived
+- DailyOpsPage 매입탭: 발주메모 리스트+입력폼으로 교체, OCR 전표입력은 별도 섹션 유지
+- ManagerDashboard: 미입고 발주 리마인더 카드 추가
+- 기존 매입 데이터(received/ordered) 호환 유지
