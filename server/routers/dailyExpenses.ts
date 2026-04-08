@@ -1,9 +1,33 @@
 import { z } from "zod";
 import { eq, and, sql, desc } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { dailyExpenses, expenseCategories } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+
+/** Drizzle/mysql2 에러의 실제 MySQL 원인(sqlMessage/code)을 surface. */
+function unwrapDbError(err: any, context: string): TRPCError {
+  const cause: any = err?.cause ?? err;
+  const sqlMessage: string | undefined = cause?.sqlMessage;
+  const code: string | undefined = cause?.code;
+  const errno: number | undefined = cause?.errno;
+  const parts = [context];
+  if (code) parts.push(`[${code}${errno ? `/${errno}` : ""}]`);
+  if (sqlMessage) parts.push(sqlMessage);
+  else if (err?.message) parts.push(String(err.message).split("\n")[0]);
+  console.error(`[dailyExpenses] ${context}`, {
+    code,
+    errno,
+    sqlMessage,
+    message: err?.message,
+  });
+  return new TRPCError({
+    code: "INTERNAL_SERVER_ERROR",
+    message: parts.join(" "),
+    cause: err,
+  });
+}
 
 export const dailyExpensesRouter = router({
   /** 카테고리 목록 */
@@ -85,35 +109,59 @@ export const dailyExpensesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      // 카테고리명도 같이 저장 (비정규화)
-      let catName: string | null = null;
-      if (input.categoryId) {
-        const [cat] = await db
-          .select({ name: expenseCategories.name })
-          .from(expenseCategories)
-          .where(eq(expenseCategories.id, input.categoryId));
-        catName = cat?.name ?? null;
+      try {
+        // 카테고리명도 같이 저장 (비정규화) — 카테고리 매장 소유 검증
+        let catName: string | null = null;
+        if (input.categoryId) {
+          const [cat] = await db
+            .select({ name: expenseCategories.name, restaurantId: expenseCategories.restaurantId })
+            .from(expenseCategories)
+            .where(eq(expenseCategories.id, input.categoryId));
+          if (!cat) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "존재하지 않는 지출 분류입니다." });
+          }
+          if (cat.restaurantId !== input.restaurantId) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "다른 매장의 지출 분류입니다." });
+          }
+          catName = cat.name;
+        }
+        const [result] = await db.insert(dailyExpenses).values({
+          restaurantId: input.restaurantId,
+          date: input.date,
+          categoryId: input.categoryId ?? null,
+          category: catName,
+          title: input.title,
+          amount: input.amount,
+          note: input.note && input.note.length > 0 ? input.note : null,
+          attachmentUrl: input.attachmentUrl && input.attachmentUrl.length > 0 ? input.attachmentUrl : null,
+          createdBy: ctx.user.userId,
+        });
+        return { id: result.insertId };
+      } catch (err: any) {
+        if (err instanceof TRPCError) throw err;
+        throw unwrapDbError(err, "즉시지출 등록 실패");
       }
-      const [result] = await db.insert(dailyExpenses).values({
-        restaurantId: input.restaurantId,
-        date: input.date,
-        categoryId: input.categoryId ?? null,
-        category: catName,
-        title: input.title,
-        amount: input.amount,
-        note: input.note ?? null,
-        attachmentUrl: input.attachmentUrl ?? null,
-        createdBy: ctx.user.userId,
-      });
-      return { id: result.insertId };
     }),
 
   /** 즉시지출 삭제 */
   delete: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
-      await db.delete(dailyExpenses).where(eq(dailyExpenses.id, input.id));
-      return { ok: true };
+    .mutation(async ({ ctx, input }) => {
+      // 1) 매장 소유 확인
+      const [row] = await db
+        .select({ restaurantId: dailyExpenses.restaurantId })
+        .from(dailyExpenses)
+        .where(eq(dailyExpenses.id, input.id));
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "존재하지 않는 지출입니다." });
+      }
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, row.restaurantId);
+      try {
+        await db.delete(dailyExpenses).where(eq(dailyExpenses.id, input.id));
+        return { ok: true };
+      } catch (err: any) {
+        throw unwrapDbError(err, "즉시지출 삭제 실패");
+      }
     }),
 
   /** 월별 즉시지출 합계 */
