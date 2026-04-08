@@ -350,6 +350,88 @@ export const systemRouter = router({
   // 7. DB 백업
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 6.5 [임시] 전화번호 로그인 도입 전 감사 (조사 후 revert 예정)
+  // ═══════════════════════════════════════════════════════════════════════════
+  /**
+   * READ-ONLY. users.phone 컬럼의 중복/정규화/충돌 조사.
+   * 결과 화면 노출 시 마스킹 처리. 본 엔드포인트는 조사 완료 후 revert.
+   */
+  auditPhoneDuplicates: masterProcedure.query(async () => {
+    const allUsers = await db
+      .select({ id: users.id, username: users.username, phone: users.phone })
+      .from(users);
+
+    const normalize = (raw: string | null | undefined): string | null => {
+      if (!raw) return null;
+      let s = String(raw).trim();
+      if (!s) return null;
+      s = s.replace(/^\+?82[-\s]?/, "0");
+      s = s.replace(/[^\d]/g, "");
+      return s || null;
+    };
+    const mask = (phone: string | null): string => {
+      if (!phone) return "-";
+      if (phone.length < 4) return "****";
+      return "*".repeat(phone.length - 4) + phone.slice(-4);
+    };
+
+    const rawMap = new Map<string, number[]>();
+    const normMap = new Map<string, { id: number; username: string; masked: string }[]>();
+    const lenDist = new Map<number, number>();
+    let nullCount = 0;
+    let emptyCount = 0;
+
+    for (const u of allUsers) {
+      if (u.phone === null) { nullCount++; continue; }
+      if (u.phone === "") { emptyCount++; continue; }
+      if (!rawMap.has(u.phone)) rawMap.set(u.phone, []);
+      rawMap.get(u.phone)!.push(u.id);
+
+      const n = normalize(u.phone);
+      if (n) {
+        if (!normMap.has(n)) normMap.set(n, []);
+        normMap.get(n)!.push({ id: u.id, username: u.username, masked: mask(n) });
+        lenDist.set(n.length, (lenDist.get(n.length) ?? 0) + 1);
+      }
+    }
+
+    const rawDuplicates = Array.from(rawMap.entries())
+      .filter(([, ids]) => ids.length > 1)
+      .map(([phone, ids]) => ({ masked: mask(phone), count: ids.length, ids }));
+
+    const normalizedDuplicates = Array.from(normMap.entries())
+      .filter(([, rows]) => rows.length > 1)
+      .map(([normalized, rows]) => ({
+        masked: mask(normalized),
+        count: rows.length,
+        rows,
+      }));
+
+    const numericOnlyUsernames = allUsers
+      .filter((u) => /^[0-9]+$/.test(u.username))
+      .map((u) => ({
+        id: u.id,
+        username: u.username,
+        phoneMasked: mask(normalize(u.phone)),
+      }));
+
+    return {
+      overview: {
+        total: allUsers.length,
+        nullPhone: nullCount,
+        emptyPhone: emptyCount,
+        withPhone: allUsers.length - nullCount - emptyCount,
+      },
+      rawDuplicates,
+      normalizedDuplicates,
+      numericOnlyUsernames,
+      lengthDistribution: Array.from(lenDist.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([length, count]) => ({ length, count })),
+    };
+  }),
+
   /** 백업 로그 목록 */
   backupList: masterProcedure.query(async () => {
     return db.select().from(dbBackupLogs).orderBy(desc(dbBackupLogs.createdAt)).limit(30);

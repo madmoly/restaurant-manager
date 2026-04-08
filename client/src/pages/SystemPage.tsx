@@ -51,7 +51,7 @@ const fmtBytes = (b: number) => {
 // 메인: 시스템 관리 (7탭)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type Tab = "status" | "announce" | "audit" | "session" | "settings" | "api" | "integrity" | "backup" | "errors" | "errorList" | "ocr";
+type Tab = "status" | "announce" | "audit" | "session" | "settings" | "api" | "integrity" | "backup" | "errors" | "errorList" | "ocr" | "phoneAudit";
 
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: "status", label: "현황", icon: <Activity size={12} /> },
@@ -65,6 +65,7 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: "errors", label: "에러개요", icon: <AlertTriangle size={12} /> },
   { key: "errorList", label: "에러목록", icon: <AlertOctagon size={12} /> },
   { key: "ocr", label: "OCR트래킹", icon: <BarChart3 size={12} /> },
+  { key: "phoneAudit", label: "[임시]전화감사", icon: <FileWarning size={12} /> },
 ];
 
 export default function SystemPage() {
@@ -104,7 +105,85 @@ export default function SystemPage() {
       {tab === "errors" && <ErrorOverviewTab />}
       {tab === "errorList" && <ErrorListTab />}
       {tab === "ocr" && <OcrStatsTab />}
+      {tab === "phoneAudit" && <PhoneAuditTab />}
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// [임시] 전화번호 로그인 도입 전 감사 탭 (조사 후 revert 예정)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function PhoneAuditTab() {
+  const audit = trpc.system.auditPhoneDuplicates.useQuery(undefined, { enabled: false });
+
+  return (
+    <Card className="p-5 space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">전화번호 중복/충돌 감사</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            전화번호 로그인 도입 전 일회성 조사. READ-ONLY. 결과 마스킹 처리됨. 조사 완료 후 코드 revert 예정.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => audit.refetch()} disabled={audit.isFetching}>
+          {audit.isFetching ? "조사 중..." : "감사 실행"}
+        </Button>
+      </div>
+
+      {audit.error && (
+        <div className="text-xs text-red-500 p-3 rounded bg-red-50 dark:bg-red-950/30">
+          오류: {audit.error.message}
+        </div>
+      )}
+
+      {audit.data && (
+        <div className="space-y-4">
+          <section>
+            <h4 className="text-xs font-semibold text-foreground mb-2">[1] users.phone 현황</h4>
+            <pre className="text-xs bg-muted/50 p-3 rounded overflow-x-auto">
+              {JSON.stringify(audit.data.overview, null, 2)}
+            </pre>
+          </section>
+
+          <section>
+            <h4 className="text-xs font-semibold text-foreground mb-2">
+              [2] 원본 phone 중복: {audit.data.rawDuplicates.length}건
+            </h4>
+            <pre className="text-xs bg-muted/50 p-3 rounded overflow-x-auto max-h-64">
+              {JSON.stringify(audit.data.rawDuplicates, null, 2)}
+            </pre>
+          </section>
+
+          <section>
+            <h4 className="text-xs font-semibold text-foreground mb-2">
+              [3] 정규화 후 phone 중복(핵심): {audit.data.normalizedDuplicates.length}건
+            </h4>
+            <pre className="text-xs bg-muted/50 p-3 rounded overflow-x-auto max-h-64">
+              {JSON.stringify(audit.data.normalizedDuplicates, null, 2)}
+            </pre>
+          </section>
+
+          <section>
+            <h4 className="text-xs font-semibold text-foreground mb-2">
+              [4] 숫자-only username: {audit.data.numericOnlyUsernames.length}건
+            </h4>
+            <pre className="text-xs bg-muted/50 p-3 rounded overflow-x-auto max-h-64">
+              {JSON.stringify(audit.data.numericOnlyUsernames, null, 2)}
+            </pre>
+          </section>
+
+          <section>
+            <h4 className="text-xs font-semibold text-foreground mb-2">
+              [5] 정규화 후 자릿수 분포 (한국 휴대폰 기대값: 11)
+            </h4>
+            <pre className="text-xs bg-muted/50 p-3 rounded overflow-x-auto">
+              {JSON.stringify(audit.data.lengthDistribution, null, 2)}
+            </pre>
+          </section>
+        </div>
+      )}
+    </Card>
   );
 }
 
