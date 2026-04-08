@@ -9,7 +9,7 @@
 - **데이터** = Railway DB 단일. 로컬 백업 보관 금지, 덤프 파일 repo 커밋 금지.
 - **작업관리** = GitHub Issues 단일. 로컬 `todo.md`, 작업 로그 파일 생성 금지.
 - **코드** = `origin/main` 단일. 다른 위치 clone/worktree 금지.
-- **로컬 경로** = `~/Code/restaurant-manager` 1개소. `~/Documents`, `~/Desktop`, `~/iCloud Drive` 하위에 clone 금지 (iCloud Drive는 현재 OFF지만 규칙은 유지).
+- **로컬 경로** = `~/Documents/Claude/Projects/restaurant-manager` 1개소. macOS Desktop&Documents iCloud 동기화는 OFF 상태(필수 전제). 동기화 재활성화 금지. `~/Desktop` 하위·`~/Library/Mobile Documents/com~apple~CloudDocs/` 직접 경로·기타 산재 경로(`~/Code`, `~/Documents/Projects`, `~/src`, `~/dev` 등) clone 금지.
 - **로컬 산출물** = `.env`, `_railway_sync.sh`, `backups/`, `*.sql`, scratch 파일은 `.gitignore` 강제 차단.
 - **로컬 런타임 없음** = `pnpm dev` 일상 사용 금지. 검증은 `pnpm run build` 통과 + Railway 자동 배포 결과로 함.
 
@@ -23,7 +23,7 @@
 
 **핸드오프 프로토콜**:
 1. Cowork에서 막히면 **현재 상태**(스테이징/임시파일/draft commit msg)를 인라인 메모로 정리 후 사용자에게 "Code에서 이어서 진행" 요청.
-2. Code 새 세션은 시작 시 `git rev-parse --show-toplevel` (→ `~/Code/restaurant-manager`인지 확인) + `git status -sb && git fetch && git log --oneline @{u}.. && git log --oneline ..@{u}` 로 전후 차이부터 검증.
+2. Code 새 세션은 시작 시 `git rev-parse --show-toplevel` (→ `~/Documents/Claude/Projects/restaurant-manager`인지 확인) + `git status -sb && git fetch && git log --oneline @{u}.. && git log --oneline ..@{u}` 로 전후 차이부터 검증.
 3. 잔존 lock(`.git/index.lock`, `.git/HEAD.lock`) 정리.
 4. 작업 마무리 후 배포 전 의무 요약 5항 보고 → 사용자 승인 → `git push`.
 
