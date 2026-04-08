@@ -1,6 +1,6 @@
 # 331매장관리 (Restaurant Manager) — 프로젝트 문서
 
-> 마지막 갱신: 2026-04-08 (새 MacBook 셋업 + 운영 환경 규칙 추가)
+> 마지막 갱신: 2026-04-09 (Cowork ↔ Claude Code 분담 규칙 추가, 구 MacBook 정책 완화)
 
 ## 작업 규칙 (Claude Code용)
 
@@ -30,11 +30,35 @@
 4. **리스크** — 예상 장애 지점, 롤백 방법
 5. **빌드 결과** — `pnpm run build` 통과 여부
 
-## 운영 환경 규칙 (Apple Silicon 단일 기기 — 2026-04-08)
+### Cowork ↔ Claude Code 분담 규칙 (2026-04-09 확정)
+
+이 프로젝트는 두 가지 어시스턴트 진입점에서 작업한다. 각자의 한계를 이해하고, 능력 범위 안에서만 작업한 뒤 필요 시 상대에게 핸드오프해야 한다.
+
+**Cowork (Claude.ai 웹의 코드 세션 — 구 MacBook 등 보조 기기)**
+- 능력: 파일 읽기/쓰기/수정, 일반적 Bash 실행, git status/diff/log/add/commit, 로컬 빌드 검증.
+- **한계**: 샌드박스 마운트가 `unlink()`를 거부함 → `rm`, `git checkout -- <file>`(추적 파일 복원), `git rebase`, `git reset --hard`, 이력 재작성, 대규모 파일 삭제가 모두 EPERM으로 실패. 작업 도중 `.git/index.lock` / `.git/HEAD.lock` 잔존 시 자체 정리 불가.
+- 적합한 작업: 새 파일 생성, 기존 파일 수정, 단발성 commit, 문서 작성, 스펙 정리, 코드 탐색.
+- 부적합 → Code로 핸드오프: rebase/머지 충돌 해결, 브랜치 정리, 잔존 lock 해제, 추적 파일 복원, 대량 삭제, `git push`.
+
+**Claude Code (Mac M3 터미널)**
+- 능력: Cowork 능력 일체 + 모든 unlink 계열 명령(rebase/reset/checkout/clean), `.git` 메타 정리, `pnpm install`, 환경변수 sync, 그리고 사용자 승인 후 `git push`.
+- 의무: Cowork에서 핸드오프 받은 작업의 마무리 책임자. 핸드오프 직전 Cowork가 남긴 `todo.md`/스테이징 상태/임시 파일을 먼저 점검한 뒤 진행.
+
+**핸드오프 프로토콜**
+1. Cowork가 막히면 즉시 작업을 중단하고 현재 상태(스테이징·미스테이징·임시파일·드래프트 commit 메시지)를 `todo.md` 또는 인라인 메모로 남길 것.
+2. 사용자에게 "Code에서 이어서 진행" 요청을 전달.
+3. Code는 새 세션에서 `git status -sb && git fetch && git log --oneline @{u}.. && git log --oneline ..@{u}` 로 전후 차이를 먼저 확인하고, 잔존 lock 파일을 정리한 뒤 작업 재개.
+4. Code가 마무리한 뒤에는 배포 전 의무 요약 5항(위 참조) 보고 → 사용자 승인 → `git push`.
+
+## 운영 환경 규칙 (Apple Silicon + 구 MacBook 병용 — 2026-04-09)
 
 ### 기기·런타임
-- **개발 기기**: MacBook Pro M3 16" (arm64) **단독 개발 기기**. Intel/Rosetta 환경 배제.
-- **구 MacBook**: 보조 열람 용도만 유지 (브라우저, Railway 대시보드 조회, 문서 확인). **git/pnpm/`.env`/배포 작업 금지** — 기기 간 Node·lockfile 드리프트 및 `.env` 동기화 혼선 방지.
+- **주 개발 기기**: MacBook Pro M3 16" (arm64). Intel/Rosetta 환경 배제.
+- **구 MacBook(Intel)**: 보조 워크트리로 병용 가능. 기획·문서 작성·Cowork 세션·코드 열람 등 **unlink/rebase가 필요 없는 작업** 위주. 다만 다음 규칙 엄수:
+  - **rebase/이력 재작성/대량 삭제는 금지** — Cowork 샌드박스 마운트가 `unlink()`를 거부해 git rebase가 중단됨. 해당 작업은 M3 Mac의 Claude Code로 핸드오프.
+  - **`.env` 파일 직접 편집 금지**. Railway sync 스크립트만 사용.
+  - **lockfile/pnpm install 작업은 M3에서만** — Node 아키텍처 드리프트 방지.
+  - 두 기기에서 동시에 같은 브랜치를 만지지 말 것 (작업 시작 전 `git fetch && git status` 확인).
 - **Homebrew 미설치**: 필요해질 때까지 설치 금지 (arm64/x86_64 혼재 방지). 필요 시 `/opt/homebrew`(arm64)만 허용.
 - **Node 관리**: `fnm` (arm64 네이티브). nvm/volta 병행 금지.
 - **패키지 매니저**: `pnpm` 고정. `npm install` / `yarn` 사용 금지.
