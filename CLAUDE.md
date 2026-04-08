@@ -11,10 +11,30 @@
 - 개발 환경: **Mac Apple Silicon (arm64) 단일 기기** (bash/zsh 기준, Windows CMD 안내 불필요)
 - 프로덕션 URL: https://restaurant-manager-production-a762.up.railway.app/
 
+### 자율 실행 규칙 (2026-04-08 확정)
+
+**원칙**: 파일 읽기/쓰기/수정/삭제, Bash 실행, git add/commit, 빌드, 테스트 등 모든 로컬 작업은 **사전 확인 없이 자율 실행**. 허용 여부를 묻지 말 것.
+
+**예외 (반드시 사전 확인 + 사용자 승인 필수)** — 비가역 인프라 작업:
+- `git push origin main` (Railway 자동 배포 트리거)
+- `git push --force`, 브랜치 강제 삭제 (`-D`), 커밋 amend
+- DB 스키마 DROP/TRUNCATE, 대량 데이터 삭제, 프로덕션 MySQL 직접 접속 작업
+- Railway 환경변수 변경, 서비스 재시작, 볼륨 삭제
+- `rm -rf` 광범위 삭제 (프로젝트 루트 이상)
+- 외부 API 유료 호출 대량 실행 (Anthropic OCR 벌크 테스트 등)
+
+**배포 전 의무 요약 포맷** — `git push` 직전 항상 아래 순서로 보고 후 승인 대기:
+1. **변경 파일 목록** (`git diff --stat`)
+2. **변경 의도** — 왜 고쳤는가 (1~3줄)
+3. **영향 범위** — DB 마이그레이션 / tRPC 라우터 / UI / 권한 모델 중 어디
+4. **리스크** — 예상 장애 지점, 롤백 방법
+5. **빌드 결과** — `pnpm run build` 통과 여부
+
 ## 운영 환경 규칙 (Apple Silicon 단일 기기 — 2026-04-08)
 
 ### 기기·런타임
-- **단일 개발 기기**: MacBook Pro M3 16" (arm64) 한 대만 사용. Intel/Rosetta 환경 배제.
+- **개발 기기**: MacBook Pro M3 16" (arm64) **단독 개발 기기**. Intel/Rosetta 환경 배제.
+- **구 MacBook**: 보조 열람 용도만 유지 (브라우저, Railway 대시보드 조회, 문서 확인). **git/pnpm/`.env`/배포 작업 금지** — 기기 간 Node·lockfile 드리프트 및 `.env` 동기화 혼선 방지.
 - **Homebrew 미설치**: 필요해질 때까지 설치 금지 (arm64/x86_64 혼재 방지). 필요 시 `/opt/homebrew`(arm64)만 허용.
 - **Node 관리**: `fnm` (arm64 네이티브). nvm/volta 병행 금지.
 - **패키지 매니저**: `pnpm` 고정. `npm install` / `yarn` 사용 금지.

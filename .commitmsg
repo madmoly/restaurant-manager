@@ -1,7 +1,12 @@
-feat: 발주 메모 재설계 — 간편 메모 + 입고 리마인더
+docs(CLAUDE.md): 자율 실행 규칙 + 구 MacBook 병용 정책 명문화
 
-- purchaseOrdersV2: content/counterpartyName/isReceived 컬럼 + status='memo' 추가
-- tRPC API: createMemo, listMemosByDate, toggleReceived, listUnreceived
-- DailyOpsPage 매입탭: 발주메모 리스트+입력폼으로 교체, OCR 전표입력은 별도 섹션 유지
-- ManagerDashboard: 미입고 발주 리마인더 카드 추가
-- 기존 매입 데이터(received/ordered) 호환 유지
+- 자율 실행 규칙 신규 블록 추가
+  · 파일 작업/Bash/git add·commit/빌드는 사전 확인 없이 자율 실행
+  · 비가역 인프라 작업(push, force push, DB DROP, 환경변수 변경 등)은 예외 → 사전 승인 필수
+  · git push origin main 직전 의무 요약 포맷 5단계 정의
+    (변경 파일 / 의도 / 영향 범위 / 리스크 / 빌드 결과)
+
+- 구 MacBook 병용 정책 (운영 환경 규칙 섹션 보강)
+  · "단일 개발 기기" → "단독 개발 기기"로 표현 변경
+  · 구 Mac은 보조 열람 용도(브라우저/대시보드/문서)만 허용
+  · 구 Mac에서 git/pnpm/.env/배포 작업 금지 (Node·lockfile 드리프트 방지)
