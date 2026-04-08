@@ -711,6 +711,56 @@ app.use(express.json());
       )
     `).catch(() => {});
 
+    // ─── daily_expenses 레거시 스키마 보정 ───
+    // 과거 reverted 커밋(974c3ed/666cf81)이 만든 구 스키마(expenseDate DATE, category ENUM, createdBy NOT NULL)를
+    // 현재 스키마(date DATE, category VARCHAR NULL, createdBy NULL)로 정규화한다.
+    // CREATE TABLE IF NOT EXISTS 는 기존 테이블을 건드리지 않으므로, 컬럼 단위로 조정해야 함.
+    try {
+      const [cols] = await conn.query(
+        `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_TYPE
+           FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_expenses'`
+      ) as any[];
+      const byName = new Map<string, any>((cols as any[]).map((c: any) => [c.COLUMN_NAME, c]));
+
+      // 1) expenseDate → date 이관
+      if (byName.has("expenseDate") && !byName.has("date")) {
+        await conn.query(`ALTER TABLE daily_expenses CHANGE COLUMN \`expenseDate\` \`date\` DATE NOT NULL`);
+        console.log("[migrate] daily_expenses: renamed expenseDate → date");
+      } else if (byName.has("expenseDate") && byName.has("date")) {
+        // 두 컬럼이 동시에 존재하는 희귀 상황: 구 컬럼의 값을 새 컬럼으로 백필 후 드롭
+        await conn.query(`UPDATE daily_expenses SET \`date\` = \`expenseDate\` WHERE \`date\` IS NULL OR \`date\` = '0000-00-00'`);
+        await conn.query(`ALTER TABLE daily_expenses DROP COLUMN \`expenseDate\``);
+        console.log("[migrate] daily_expenses: backfilled date from expenseDate, dropped expenseDate");
+      } else if (!byName.has("date")) {
+        // 두 컬럼 모두 없으면 신규로 추가
+        await conn.query(`ALTER TABLE daily_expenses ADD COLUMN \`date\` DATE NOT NULL DEFAULT (CURRENT_DATE)`);
+        console.log("[migrate] daily_expenses: added missing date column");
+      }
+
+      // 2) category ENUM → VARCHAR(50) NULL (커스텀 카테고리명 저장용)
+      const catCol = byName.get("category");
+      if (catCol && String(catCol.DATA_TYPE).toLowerCase() === "enum") {
+        await conn.query(`ALTER TABLE daily_expenses MODIFY COLUMN \`category\` VARCHAR(50) NULL`);
+        console.log("[migrate] daily_expenses: category ENUM → VARCHAR(50) NULL");
+      }
+
+      // 3) createdBy NOT NULL → NULL 허용
+      const createdByCol = byName.get("createdBy");
+      if (createdByCol && String(createdByCol.IS_NULLABLE).toUpperCase() === "NO") {
+        await conn.query(`ALTER TABLE daily_expenses MODIFY COLUMN \`createdBy\` INT NULL`);
+        console.log("[migrate] daily_expenses: createdBy → NULL");
+      }
+
+      // 4) categoryId 없으면 추가 (이미 666cf81 경로에서 추가되었을 수 있지만 idempotent)
+      if (!byName.has("categoryId")) {
+        await conn.query(`ALTER TABLE daily_expenses ADD COLUMN \`categoryId\` INT NULL`);
+        console.log("[migrate] daily_expenses: added categoryId");
+      }
+    } catch (e: any) {
+      console.error("[migrate] daily_expenses normalize failed:", e?.message);
+    }
+
     // counterparty_items.isActive 추가
     await addColumnIfNotExists("counterparty_items", "isActive", "BOOLEAN NOT NULL DEFAULT true");
 
