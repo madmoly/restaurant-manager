@@ -1,6 +1,23 @@
 # 331매장관리 (Restaurant Manager) — 프로젝트 문서
 
-> 마지막 갱신: 2026-04-09 (Cowork ↔ Claude Code 분담 규칙 추가, 구 MacBook 정책 완화)
+> 마지막 갱신: 2026-04-09 (프로젝트 경로 화이트리스트 + Cowork ↔ Code 분담 + 구 MacBook 정책 완화)
+
+## 프로젝트 경로 규칙 (2026-04-09 확정)
+
+**유일 허용 경로**: `~/Documents/Projects/restaurant-manager`
+
+**금지 경로** (작업·clone·worktree 일체 금지):
+- `~/Library/Mobile Documents/com~apple~CloudDocs/...` (iCloud Drive) — `.env`/DB 덤프 등 시크릿이 자동 동기화되어 외부 노출 위험
+- `~/Desktop`, `~/Code`, `~/code`, `~/src`, `~/Documents/Claude/...` 등 기타 산재 경로
+
+**근거**: 2026-04-09 감사 중 동일 저장소가 **4곳에 산재**(Documents/Projects, Documents/Claude/Projects, Code/, iCloud Drive)된 사실 발견. iCloud Drive 사본에서 `.env` 3개 + 프로덕션 DB 덤프 SQL 2개가 클라우드 동기화 중이었음. 클론 분기 → push 누락/되돌림/시크릿 노출 리스크가 실제로 발생.
+
+**세션 시작 의무**:
+1. 모든 작업 전에 `git rev-parse --show-toplevel` 실행해 화이트리스트 경로인지 확인.
+2. 일치하지 않으면 **즉시 중단**, 사용자에게 보고.
+3. 화이트리스트 밖 clone/worktree를 새로 발견하면 작업하지 말고 감사(브랜치 미푸시 여부, 시크릿 포함 여부) 후 폐기 또는 이주 결정을 사용자에게 요청.
+
+**시크릿 노출 발견 시**: 즉시 사용자에게 알리고, 해당 시크릿(JWT_SECRET / ANTHROPIC_API_KEY / DATABASE_URL 등) 로테이션을 권고. iCloud/Dropbox 등에 올라간 사본은 단순 삭제로는 부족 — 클라우드 서버 캐시 가능성을 가정해야 함.
 
 ## 작업 규칙 (Claude Code용)
 
