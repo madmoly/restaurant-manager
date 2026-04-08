@@ -1,6 +1,10 @@
 node_modules
 dist
 .env
+.env.bak*
+.env.railway
+.env.local
+_railway_sync.sh
 *.log
 .DS_Store
 

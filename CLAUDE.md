@@ -1,6 +1,6 @@
 # 331매장관리 (Restaurant Manager) — 프로젝트 문서
 
-> 마지막 갱신: 2026-04-05 (발주 메모 재설계 추가)
+> 마지막 갱신: 2026-04-08 (새 MacBook 셋업 + 운영 환경 규칙 추가)
 
 ## 작업 규칙 (Claude Code용)
 
@@ -8,8 +8,44 @@
 - 컨텍스트 한계에 가까워지면 사전 경고 → 작업 마무리 후 새 세션 전환
 - 한글 커밋 메시지: `.commitmsg` 파일에 쓴 후 `git commit --file=.commitmsg`
 - `main` 브랜치 직접 push → Railway 자동 배포 (테스트 = 프로덕션)
-- 개발 환경: **Mac** (bash/zsh 기준, Windows CMD 안내 불필요)
+- 개발 환경: **Mac Apple Silicon (arm64) 단일 기기** (bash/zsh 기준, Windows CMD 안내 불필요)
 - 프로덕션 URL: https://restaurant-manager-production-a762.up.railway.app/
+
+## 운영 환경 규칙 (Apple Silicon 단일 기기 — 2026-04-08)
+
+### 기기·런타임
+- **단일 개발 기기**: MacBook Pro M3 16" (arm64) 한 대만 사용. Intel/Rosetta 환경 배제.
+- **Homebrew 미설치**: 필요해질 때까지 설치 금지 (arm64/x86_64 혼재 방지). 필요 시 `/opt/homebrew`(arm64)만 허용.
+- **Node 관리**: `fnm` (arm64 네이티브). nvm/volta 병행 금지.
+- **패키지 매니저**: `pnpm` 고정. `npm install` / `yarn` 사용 금지.
+- **Git**: 시스템 기본 git 사용. Homebrew git 설치 금지 (PATH 충돌 방지).
+
+### 로컬 개발 정책
+- **로컬 dev 서버 미운영**: `pnpm dev` 일상 사용 금지. 수정 → commit → push → Railway 배포 → 프로덕션에서 확인.
+- **로컬 DB 미운영**: Railway MySQL 하나만 사용. 로컬 MySQL 설치 금지.
+- **로컬 검증 범위**: `pnpm run build` 통과 여부만 확인 (타입/번들 에러 조기 포착).
+- **`.env`의 `DATABASE_URL`**: Railway 내부(`*.railway.internal`) 값 그대로 둠 — 로컬에서 접속 안 하므로 문제없음.
+
+### 환경변수 관리
+- **단일 소스**: Railway 프로덕션 변수가 진실의 근거(source of truth).
+- **로컬 `.env` 갱신**: `_railway_sync.sh` 사용 (`railway variables --kv` 덤프 → 머지). 수동 편집 금지.
+- **Core 키 고정**: `NODE_ENV=development`, `PORT=3000`, `BASE_URL=http://localhost:3000`은 sync 시 로컬값으로 덮어씀.
+- **`.env.example`**: 10개 키 전부 명시 (`DATABASE_URL`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `GOOGLE_SERVICE_ACCOUNT_KEY`, `GOOGLE_DRIVE_FOLDER_ID`, `SMTP_USER`, `SMTP_PASS`, `NODE_ENV`, `PORT`, `BASE_URL`).
+- **민감값 커밋 금지**: `.env`, `.env.bak*`, `.env.railway`, `.env.local`, `_railway_sync.sh` 전부 `.gitignore`.
+
+### 신규 기기 셋업 시 체크리스트
+1. `file $(which node)` → `Mach-O 64-bit executable arm64` 확인
+2. `uname -m` → `arm64`
+3. `which brew` → 없음(미설치)이거나 `/opt/homebrew/bin/brew`만 허용
+4. `pnpm install` 후 `node_modules/sharp-libvips-darwin-arm64` 존재 확인
+5. `pnpm run build` 통과
+6. `./_railway_sync.sh` 로 `.env` 채움
+
+## 알려진 기술 부채 (2026-04-08 기록)
+
+- **`mysql2.createConnection` 남용**: `server/` 내 11개 파일에서 `mysql.createConnection()` 직접 호출. `server/db.ts`의 풀(pool)을 재사용하지 않음 → 커넥션 누수/한도 초과 리스크. Drizzle 인스턴스로 일원화 필요.
+- **클라이언트 번들 1.5MB**: `index-*.js` 청크 500kB 경고. `manualChunks` 설정 또는 동적 import 미적용. jspdf/xlsx/html2canvas 지연 로딩 후보.
+- **ignored build scripts 경고**: `sharp`, `esbuild`, `@tailwindcss/oxide`, `core-js` 등 postinstall 미실행. 필요 시 `pnpm approve-builds` 로 선별 승인.
 
 ## 배포 환경
 
