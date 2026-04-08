@@ -1,16 +1,18 @@
 # 331매장관리 (Restaurant Manager) — 프로젝트 문서
 
-> 마지막 갱신: 2026-04-09 (프로젝트 경로 화이트리스트 + Cowork ↔ Code 분담 + 구 MacBook 정책 완화)
+> 마지막 갱신: 2026-04-09 (프로젝트 경로 화이트리스트 — iCloud 밖 `~/Code`로 이주, 구 화이트리스트 폐기)
 
-## 프로젝트 경로 규칙 (2026-04-09 확정)
+## 프로젝트 경로 규칙 (2026-04-09 확정 · 1차 개정)
 
-**유일 허용 경로**: `~/Documents/Projects/restaurant-manager`
+**유일 허용 경로**: `~/Code/restaurant-manager`
 
 **금지 경로** (작업·clone·worktree 일체 금지):
-- `~/Library/Mobile Documents/com~apple~CloudDocs/...` (iCloud Drive) — `.env`/DB 덤프 등 시크릿이 자동 동기화되어 외부 노출 위험
-- `~/Desktop`, `~/Code`, `~/code`, `~/src`, `~/Documents/Claude/...` 등 기타 산재 경로
+- `~/Documents/...` 전체 — macOS "데스크탑 및 문서 폴더 iCloud 동기화"가 켜져 있는 한, Documents 하위 모든 파일이 자동으로 iCloud Drive에 업로드됨. `.gitignore`로 git 추적은 막아도 OS 동기화는 막을 수 없음.
+- `~/Desktop/...` 동일 사유 (Desktop도 iCloud 동기화 대상)
+- `~/Library/Mobile Documents/com~apple~CloudDocs/...` 직접 경로 (위와 같은 위치를 다른 마운트로 노출)
+- `~/code`, `~/src`, `~/dev` 등 임시·산재 경로 (`~/Code` 하나로 통일)
 
-**근거**: 2026-04-09 감사 중 동일 저장소가 **4곳에 산재**(Documents/Projects, Documents/Claude/Projects, Code/, iCloud Drive)된 사실 발견. iCloud Drive 사본에서 `.env` 3개 + 프로덕션 DB 덤프 SQL 2개가 클라우드 동기화 중이었음. 클론 분기 → push 누락/되돌림/시크릿 노출 리스크가 실제로 발생.
+**근거**: 2026-04-09 감사에서 동일 저장소가 **4곳에 산재**(`~/Documents/Projects`, `~/Documents/Claude/Projects`, `~/Code`, iCloud Drive 직접 경로) + 구 워크트리들이 `dataless` 플래그로 iCloud에 업로드된 흔적 확인. 최초 화이트리스트 `~/Documents/Projects/restaurant-manager` 자체가 iCloud 동기화 영역 안이라는 사실이 같은 날 추가 발견되어 즉시 `~/Code`로 이주.
 
 **세션 시작 의무**:
 1. 모든 작업 전에 `git rev-parse --show-toplevel` 실행해 화이트리스트 경로인지 확인.
