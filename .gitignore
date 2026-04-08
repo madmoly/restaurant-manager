@@ -35,3 +35,6 @@ porting-strategy.md
 # System junk
 NVIDIA Corporation/
 package-lock.json
+backups/
+todo.md
+analyze_schema.py
