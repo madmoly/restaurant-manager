@@ -728,6 +728,42 @@ app.use(express.json());
     // status enum에 'memo' 추가 (기존 received/ordered + memo)
     await conn.query(`ALTER TABLE purchase_orders_v2 MODIFY COLUMN status ENUM('received','ordered','memo') NOT NULL DEFAULT 'received'`).catch(() => {});
 
+    // ─── 계정·직원관리 재설계: users.phoneNormalized ───
+    await addColumnIfNotExists("users", "phoneNormalized", "VARCHAR(20) DEFAULT NULL");
+    await conn.query(
+      `CREATE INDEX idx_users_phone_normalized ON users(phoneNormalized)`
+    ).catch(() => {}); // 이미 존재하면 무시
+
+    // 기존 전화번호 → phoneNormalized 일괄 백필 (NULL인 것만)
+    await conn.query(
+      `UPDATE users SET phoneNormalized = REGEXP_REPLACE(phone, '[^0-9]', '') WHERE phoneNormalized IS NULL AND phone IS NOT NULL AND phone != ''`
+    ).catch((e: any) => { console.error("[migrate] phoneNormalized backfill:", e.message); });
+
+    // ─── 전자 근로계약서 스냅샷 필드 (서명 시점 박제) ───
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotName", "VARCHAR(100) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotPhone", "VARCHAR(30) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotAddress", "TEXT DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotResidentNumber", "VARCHAR(20) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotBankAccount", "VARCHAR(100) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotWage", "DECIMAL(12,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotWageType", "VARCHAR(20) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotWeeklyHours", "DECIMAL(5,2) DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotWeeklyOffDays", "INT DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotContractStart", "DATE DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotContractEnd", "DATE DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotAffiliatedCompany", "VARCHAR(100) DEFAULT NULL");
+
+    // users 테이블에 address 필드 (직원 정보에 필요)
+    await addColumnIfNotExists("users", "address", "TEXT DEFAULT NULL");
+
+    // 재입사 추적용: restaurant_users.rehiredAt
+    await addColumnIfNotExists("restaurant_users", "rehiredAt", "TIMESTAMP NULL DEFAULT NULL");
+
+    // 계약서 status enum에 'superseded' 추가 (신 계약서 서명 시 이전 active 계약서 상태)
+    await conn.query(
+      `ALTER TABLE employment_electronic_contracts MODIFY COLUMN status ENUM('draft','sent','signed','expired','cancelled','superseded') NOT NULL DEFAULT 'draft'`
+    ).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

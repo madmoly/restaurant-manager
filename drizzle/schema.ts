@@ -20,7 +20,11 @@ export const users = mysqlTable("users", {
   name: varchar("name", { length: 100 }).notNull(),
   email: varchar("email", { length: 320 }),
   phone: varchar("phone", { length: 30 }),
-  // 시스템 역할: master > admin > user (레거시: manager, employee)
+  // 숫자만 남긴 정규화 전화번호 (검색/중복체크 인덱스용)
+  phoneNormalized: varchar("phoneNormalized", { length: 20 }),
+  // 직원 주소 (계약서 서명 시 C군 sync 대상)
+  address: text("address"),
+  // 시스템 역할: master > admin > user (레거시: manager, employee — 신규 생성 금지)
   role: mysqlEnum("role", ["master", "admin", "user", "manager", "employee"]).default("user").notNull(),
   authProvider: varchar("authProvider", { length: 20 }).default("local"),
   authProviderId: varchar("authProviderId", { length: 255 }),
@@ -99,6 +103,8 @@ export const restaurantUsers = mysqlTable(
   role: mysqlEnum("role", ["owner", "supervisor", "staff", "store_manager", "manager", "employee"]).notNull().default("staff"),
     affiliatedCompany: varchar("affiliatedCompany", { length: 100 }),
     hireDate: date("hireDate"),
+    // 재입사 처리 시 기록 (퇴사 → 복귀)
+    rehiredAt: timestamp("rehiredAt"),
     resignedAt: date("resignedAt"),
     resignReason: varchar("resignReason", { length: 200 }),
     roleChangedAt: timestamp("roleChangedAt"),
@@ -241,6 +247,9 @@ export type DailyClosing = typeof dailyClosings.$inferSelect;
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─── Employee Contracts (직원 계약 정보) ──────────────────────────────────────
+// 직원의 "현재 유효한" 민감영역(급여/근무조건/계좌/주민번호)의 최신값.
+// 역사적 증거(서명된 계약서 스냅샷)는 employment_electronic_contracts 사용.
+// 이 테이블은 직원정보 화면 및 인건비 정산이 참조하며, 계약서 서명 이벤트로만 갱신된다.
 export const employeeContracts = mysqlTable("employee_contracts", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
@@ -697,7 +706,7 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   includePrivacyConsent: boolean("includePrivacyConsent").default(false).notNull(), // 개인정보수집동의서 포함
   nightShiftConsent: boolean("nightShiftConsent").default(false).notNull(),
   specialTerms: text("specialTerms"),
-  status: mysqlEnum("status", ["draft", "sent", "signed", "expired", "cancelled"]).notNull().default("draft"),
+  status: mysqlEnum("status", ["draft", "sent", "signed", "expired", "cancelled", "superseded"]).notNull().default("draft"),
   sentAt: timestamp("sentAt"),
   signedAt: timestamp("signedAt"),
   employeeSignature: text("employeeSignature"),
@@ -706,6 +715,19 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   employeeBankAccount: varchar("employeeBankAccount", { length: 100 }), // 계좌번호 (은행명 포함)
   employeeResidentNumber: varchar("employeeResidentNumber", { length: 20 }), // 주민등록번호
   previousContractId: int("previousContractId"),
+  // ── 서명 시점 스냅샷 (박제 — 서명 후 불변) ──
+  snapshotName: varchar("snapshotName", { length: 100 }),
+  snapshotPhone: varchar("snapshotPhone", { length: 30 }),
+  snapshotAddress: text("snapshotAddress"),
+  snapshotResidentNumber: varchar("snapshotResidentNumber", { length: 20 }),
+  snapshotBankAccount: varchar("snapshotBankAccount", { length: 100 }),
+  snapshotWage: decimal("snapshotWage", { precision: 12, scale: 2 }),
+  snapshotWageType: varchar("snapshotWageType", { length: 20 }),
+  snapshotWeeklyHours: decimal("snapshotWeeklyHours", { precision: 5, scale: 2 }),
+  snapshotWeeklyOffDays: int("snapshotWeeklyOffDays"),
+  snapshotContractStart: date("snapshotContractStart"),
+  snapshotContractEnd: date("snapshotContractEnd"),
+  snapshotAffiliatedCompany: varchar("snapshotAffiliatedCompany", { length: 100 }),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
