@@ -1,6 +1,27 @@
 # Restaurant Manager — 작업 로드맵
 
-> 마지막 갱신: 2026-04-05
+> 마지막 갱신: 2026-04-08
+
+## 2026-04-08: 계정·권한·직원관리 재설계 (claude/vigorous-mayer 브랜치)
+
+- [x] 단계 1: trpc.ts resignedAt 필터 + restaurants.addStaff 등 verifyStoreAccess 주입
+- [x] 단계 2: restaurants.list → getOwnedRestaurants (admin B 매장 누수 차단)
+- [x] 단계 3: users.phoneNormalized/address + restaurant_users.rehiredAt +
+      employment_electronic_contracts.snapshot* 12필드 + status 'superseded' + shared/contractFields.ts
+- [x] 단계 4: server/routers/staff.ts 신설 — quickAdd(rehire/concurrent 분기) / resign /
+      reinstate / resetPassword / changeRole / listActive(mismatchedFields) / listRecentlyResigned /
+      checkPhone / updateInfo
+- [x] 단계 5: electronicContracts.signContract 트랜잭션 — 스냅샷 박제 + 이전 계약
+      superseded + C군 단방향 sync (users / restaurant_users / employee_contracts)
+- [x] 단계 6: StaffPage — [+직원 추가] QuickAddModal + 지난 3개월 퇴사자 섹션;
+      UsersPage 헤더에 /staff 안내 링크
+- [x] 단계 7: scripts/normalize-legacy-roles.ts — legacy manager/employee 일회성 정규화
+- [ ] 단계 8: 프로덕션 수동 회귀 테스트 (배포 후)
+  - admin A가 admin B 매장 누수 없는지
+  - 매니져의 staff.quickAdd/resign FORBIDDEN 확인
+  - 재입사/겸직 3분기 quickAdd 플로우
+  - 전자계약 서명 → C군 즉시 반영
+
 
 ## 완료된 작업 (아카이브)
 
