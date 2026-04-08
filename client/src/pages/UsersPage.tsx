@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { toast } from "sonner";
+import { useAuth } from "../hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import {
   Plus, Users, ChevronDown, ChevronUp, Phone, X, Building2,
-  UserPlus, KeyRound, Store, Check,
+  UserPlus, KeyRound, Store, Check, Trash2, AlertTriangle,
 } from "lucide-react";
 
 const SYSTEM_ROLE_LABELS: Record<string, { label: string; color: string }> = {
@@ -21,6 +22,7 @@ const STORE_ROLE_LABELS: Record<string, string> = {
 };
 
 export default function UsersPage() {
+  const { user: currentUser } = useAuth();
   const utils = trpc.useUtils();
   const { data: usersList, isLoading } = trpc.users.listWithAssignments.useQuery();
   const { data: restaurantList } = trpc.restaurants.list.useQuery();
@@ -45,6 +47,42 @@ export default function UsersPage() {
     onSuccess() { toast.success("매장 배정 해제됨"); utils.users.listWithAssignments.invalidate(); },
     onError(err) { toast.error(err.message); },
   });
+
+  const deleteUser = trpc.users.delete.useMutation({
+    onSuccess() {
+      toast.success("사용자가 삭제되었습니다");
+      setExpandedUser(null);
+      utils.users.listWithAssignments.invalidate();
+    },
+    onError(err) { toast.error(err.message); },
+  });
+
+  /** 2단계 확인 후 사용자 삭제 실행 */
+  const handleDeleteUser = (u: { id: number; username: string; name: string; role: string; assignments: Array<any> }) => {
+    // 클라이언트 선차단
+    if (currentUser?.id === u.id) {
+      toast.error("본인 계정은 삭제할 수 없습니다");
+      return;
+    }
+    if ((u.role === "master" || u.role === "admin") && currentUser?.role !== "master") {
+      toast.error("대표/개발자 계정은 개발자만 삭제할 수 있습니다");
+      return;
+    }
+    if (u.assignments && u.assignments.length > 0) {
+      toast.error("매장 배정이 남아있습니다. 먼저 배정을 해제해 주세요");
+      return;
+    }
+    // 1단계: confirm
+    if (!confirm(`정말로 "${u.name}"(@${u.username}) 계정을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+    // 2단계: 아이디 재입력
+    const typed = prompt(`확인을 위해 삭제할 사용자의 아이디를 정확히 입력하세요:\n\n${u.username}`);
+    if (typed === null) return; // 취소
+    if (typed.trim() !== u.username) {
+      toast.error("아이디가 일치하지 않아 삭제가 취소되었습니다");
+      return;
+    }
+    deleteUser.mutate({ userId: u.id });
+  };
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
@@ -238,6 +276,52 @@ export default function UsersPage() {
                         {u.phone && <div>연락처: <span className="text-foreground">{u.phone}</span></div>}
                       </div>
                     </div>
+
+                    {/* 위험 영역 · 사용자 삭제 */}
+                    {(() => {
+                      const isSelf = currentUser?.id === u.id;
+                      const isPrivilegedTarget = u.role === "master" || u.role === "admin";
+                      const canDeletePrivileged = currentUser?.role === "master";
+                      const blockedByPrivilege = isPrivilegedTarget && !canDeletePrivileged;
+                      const blockedByAssignment = hasAssignments;
+                      const disabled = isSelf || blockedByPrivilege || blockedByAssignment || deleteUser.isPending;
+                      const blockReason = isSelf
+                        ? "본인 계정은 삭제할 수 없습니다"
+                        : blockedByPrivilege
+                          ? "대표/개발자 계정은 개발자만 삭제할 수 있습니다"
+                          : blockedByAssignment
+                            ? "매장 배정을 먼저 해제해 주세요"
+                            : null;
+
+                      return (
+                        <div className="border-t border-red-200 dark:border-red-900/50 pt-3">
+                          <div className="text-xs font-medium text-red-600 dark:text-red-400 flex items-center gap-1 mb-2">
+                            <AlertTriangle className="w-3 h-3" /> 위험 영역 · 사용자 삭제
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mb-2">
+                            계정을 영구 삭제합니다. 이 작업은 되돌릴 수 없으며, 삭제 전 매장 배정을 모두 해제해야 합니다.
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="text-xs h-7"
+                            disabled={disabled}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteUser(u);
+                            }}
+                          >
+                            <Trash2 className="w-3 h-3 mr-1" />
+                            {deleteUser.isPending ? "삭제 중..." : "사용자 삭제"}
+                          </Button>
+                          {blockReason && (
+                            <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5">
+                              {blockReason}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

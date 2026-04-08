@@ -116,6 +116,52 @@ export const usersRouter = router({
       return { ok: true };
     }),
 
+  /**
+   * 사용자 계정 삭제 (대표/개발자 전용)
+   * - 본인 삭제 금지
+   * - master/admin 계정 삭제는 master만 가능
+   * - restaurant_users 배정이 남아있으면 삭제 거부 (FK 없는 고아 레퍼런스 방지)
+   *
+   * 주의: schedules, audit_logs 등 FK 없는 테이블에는 고아 userId가 남을 수 있음.
+   * 추후 cascade 또는 soft-delete 전환 검토 필요.
+   */
+  delete: adminProcedure
+    .input(z.object({ userId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      // 1. 본인 삭제 금지
+      if (input.userId === ctx.user.userId) {
+        throw new Error("본인 계정은 삭제할 수 없습니다");
+      }
+
+      // 2. 대상 사용자 조회
+      const [target] = await db
+        .select({ id: users.id, role: users.role, username: users.username })
+        .from(users)
+        .where(eq(users.id, input.userId))
+        .limit(1);
+      if (!target) throw new Error("사용자를 찾을 수 없습니다");
+
+      // 3. master/admin 계정 삭제는 master만 가능 (권한 상승 방지와 대칭)
+      if ((target.role === "master" || target.role === "admin") && ctx.user.role !== "master") {
+        throw new Error("대표/개발자 계정은 개발자만 삭제할 수 있습니다");
+      }
+
+      // 4. 매장 배정 잔존 시 삭제 거부 (resignedAt 여부 무관 — 모든 row 체크)
+      const assignments = await db
+        .select({ restaurantId: restaurantUsers.restaurantId })
+        .from(restaurantUsers)
+        .where(eq(restaurantUsers.userId, input.userId));
+      if (assignments.length > 0) {
+        throw new Error(
+          `매장 배정이 ${assignments.length}건 남아있습니다. 먼저 배정을 해제해 주세요`
+        );
+      }
+
+      // 5. 실제 삭제 (물리 삭제)
+      await db.delete(users).where(eq(users.id, input.userId));
+      return { ok: true };
+    }),
+
   /** 점장/매니저가 직원 ID/비밀번호 수정 (자기 매장 직원만) */
   updateStaffCredentials: managerProcedure
     .input(z.object({
