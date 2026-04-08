@@ -964,13 +964,26 @@ function PurchaseTab({
   const expenses = expensesQuery.data || [];
   const totalExpenses = expenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
 
-  // 카테고리 시드 (최초 1회)
+  // 카테고리 시드 (최초 1회) — 렌더 본문 mutation 호출 금지, useEffect로 격리
   const seedCatMut = trpc.dailyExpenses.seedDefaultCategories.useMutation({
     onSuccess: () => categoriesQuery.refetch(),
   });
-  if (categories.length === 0 && !categoriesQuery.isLoading && restaurantId > 0 && !seedCatMut.isPending) {
-    seedCatMut.mutate({ restaurantId });
-  }
+  const seedAttemptedRef = useRef(false);
+  useEffect(() => {
+    seedAttemptedRef.current = false;
+  }, [restaurantId]);
+  useEffect(() => {
+    if (
+      restaurantId > 0 &&
+      !categoriesQuery.isLoading &&
+      (categoriesQuery.data?.length ?? 0) === 0 &&
+      !seedCatMut.isPending &&
+      !seedAttemptedRef.current
+    ) {
+      seedAttemptedRef.current = true;
+      seedCatMut.mutate({ restaurantId });
+    }
+  }, [restaurantId, categoriesQuery.isLoading, categoriesQuery.data, seedCatMut]);
 
   // ── 발주 메모 mutations ──
   const createMemoMut = trpc.purchasesV2.createMemo.useMutation({
