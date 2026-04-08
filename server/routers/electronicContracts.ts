@@ -3,9 +3,14 @@ import { eq, and, desc, sql, isNotNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants, restaurantUsers } from "../../drizzle/schema";
+import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants, restaurantUsers, users } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+
+function normalizePhone(phone: string | null | undefined): string {
+  if (!phone) return "";
+  return phone.replace(/[^0-9]/g, "");
+}
 
 export const electronicContractsRouter = router({
   // ═══ 매장 계약 조건 (임대/수수료/로열티 등) ═══
@@ -514,7 +519,17 @@ export const electronicContractsRouter = router({
       return { ok: true };
     }),
 
-  /** 계약서 서명 (상태 → signed, 비로그인 접근 가능) */
+  /** 계약서 서명 (상태 → signed, 비로그인 접근 가능)
+   *
+   * 트랜잭션으로 다음을 한 번에 처리:
+   *  1) 계약서 status='signed' + signedAt + employeeSignature + 12개 snapshot 필드 박제
+   *  2) 같은 (employeeId, restaurantId)의 이전 active 계약서(signed/sent/draft) → status='superseded'
+   *  3) C군 필드를 적재 대상 테이블로 분배:
+   *     - users: name, phone, phoneNormalized, address, (email은 제외)
+   *     - restaurant_users: affiliatedCompany, hireDate, weeklyOffDays
+   *     - employee_contracts: 기존 active 비활성화 + 새 active INSERT
+   *       (wage/wageType/weeklyHours + bankAccount + residentNumber + weeklyOffDays 포함)
+   */
   signContract: publicProcedure
     .input(
       z.object({
@@ -522,6 +537,9 @@ export const electronicContractsRouter = router({
         signature: z.string(), // base64 서명 이미지
         bankAccount: z.string().optional(), // 계좌번호 (직원 입력)
         residentNumber: z.string().optional(), // 주민번호 (직원 입력)
+        employeeName: z.string().optional(),
+        employeePhone: z.string().optional(),
+        employeeAddress: z.string().optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -535,64 +553,113 @@ export const electronicContractsRouter = router({
       if (contract.status === "signed")
         throw new TRPCError({ code: "BAD_REQUEST", message: "이미 서명된 계약서입니다" });
 
-      await db
-        .update(employmentElectronicContracts)
-        .set({
-          status: "signed",
-          signedAt: new Date(),
-          employeeSignature: input.signature,
-          ...(input.bankAccount ? { employeeBankAccount: input.bankAccount } : {}),
-          ...(input.residentNumber ? { employeeResidentNumber: input.residentNumber } : {}),
-        })
-        .where(eq(employmentElectronicContracts.id, contract.id));
+      // 최종값: 직원이 서명 시 입력한 값 > 계약서 본문 값
+      const finalName = input.employeeName ?? contract.employeeName;
+      const finalPhone = input.employeePhone ?? contract.employeePhone ?? null;
+      const finalAddress = input.employeeAddress ?? contract.employeeAddress ?? null;
+      const finalBankAccount = input.bankAccount ?? null;
+      const finalResidentNumber = input.residentNumber ?? null;
+      const finalAffiliatedCompany = contract.affiliatedCompany ?? null;
 
-      // ── 서명 완료 시 employeeContracts 자동 동기화 (upsert) ──
-      if (contract.employeeId && contract.restaurantId) {
-        try {
-          // 기존 활성 계약 비활성화
-          await db.update(employeeContracts)
-            .set({ isActive: false })
-            .where(and(
-              eq(employeeContracts.userId, contract.employeeId),
-              eq(employeeContracts.restaurantId, contract.restaurantId),
-              eq(employeeContracts.isActive, true),
-            ));
-          // 새 계약 정보 삽입
-          await db.insert(employeeContracts).values({
-            userId: contract.employeeId,
-            restaurantId: contract.restaurantId,
-            wageType: (contract.wageType as "hourly" | "monthly") ?? "hourly",
-            wageAmount: contract.wageAmount ?? "0",
-            position: contract.position ?? null,
-            contractStart: contract.contractStart ? new Date(contract.contractStart) : null,
-            contractEnd: contract.contractEnd ? new Date(contract.contractEnd) : null,
-            weeklyHours: contract.weeklyHours ?? null,
-            weeklyOffDays: 1,
-            socialInsurance: contract.socialInsurance ?? true,
-            bankAccount: input.bankAccount ?? null,
-            residentNumber: input.residentNumber ?? null,
-            isActive: true,
-          } as any);
-          console.log(`[signContract] synced employeeContracts for userId=${contract.employeeId} restaurantId=${contract.restaurantId}`);
-        } catch (e: any) {
-          console.error(`[signContract] employeeContracts sync error:`, e.message);
-          // 동기화 실패해도 서명 자체는 성공으로 처리
-        }
+      // 기존 스케줄 조회 — C군 sync 후 검증용 (예: 기존 users.name과 다르면 mismatch 해소 목적)
 
-        // ── 서명 완료 시 restaurantUsers.affiliatedCompany 동기화 ──
-        if (contract.affiliatedCompany) {
-          try {
-            await db.update(restaurantUsers)
-              .set({ affiliatedCompany: contract.affiliatedCompany })
+      try {
+        await db.transaction(async (tx) => {
+          // ── 1. 현재 계약서 서명 처리 + 스냅샷 박제 ──
+          await tx.update(employmentElectronicContracts)
+            .set({
+              status: "signed",
+              signedAt: new Date(),
+              employeeSignature: input.signature,
+              employeeBankAccount: finalBankAccount,
+              employeeResidentNumber: finalResidentNumber,
+              // 서명 시점 스냅샷
+              snapshotName: finalName,
+              snapshotPhone: finalPhone,
+              snapshotAddress: finalAddress,
+              snapshotResidentNumber: finalResidentNumber,
+              snapshotBankAccount: finalBankAccount,
+              snapshotWage: contract.wageAmount ?? null,
+              snapshotWageType: contract.wageType ?? null,
+              snapshotWeeklyHours: contract.weeklyHours ?? null,
+              snapshotWeeklyOffDays: contract.weeklyOffDays ?? 1,
+              snapshotContractStart: contract.contractStart ?? null,
+              snapshotContractEnd: contract.contractEnd ?? null,
+              snapshotAffiliatedCompany: finalAffiliatedCompany,
+            } as any)
+            .where(eq(employmentElectronicContracts.id, contract.id));
+
+          // ── 2. 이전 active 계약서 supersede ──
+          if (contract.employeeId && contract.restaurantId) {
+            await tx.update(employmentElectronicContracts)
+              .set({ status: "superseded" })
               .where(and(
-                eq(restaurantUsers.userId, contract.employeeId),
-                eq(restaurantUsers.restaurantId, contract.restaurantId),
+                eq(employmentElectronicContracts.employeeId, contract.employeeId),
+                eq(employmentElectronicContracts.restaurantId, contract.restaurantId),
+                ne(employmentElectronicContracts.id, contract.id),
+                sql`${employmentElectronicContracts.status} IN ('draft','sent','signed')`,
               ));
-            console.log(`[signContract] synced affiliatedCompany="${contract.affiliatedCompany}" for userId=${contract.employeeId}`);
-          } catch (e: any) {
-            console.error(`[signContract] affiliatedCompany sync error:`, e.message);
+
+            // ── 3. C군 단방향 sync ──
+
+            // 3-1. users (name / phone / phoneNormalized / address)
+            const usersUpdate: Record<string, any> = {};
+            if (finalName) usersUpdate.name = finalName;
+            if (finalPhone) {
+              usersUpdate.phone = finalPhone;
+              usersUpdate.phoneNormalized = normalizePhone(finalPhone);
+            }
+            if (finalAddress) usersUpdate.address = finalAddress;
+            if (Object.keys(usersUpdate).length > 0) {
+              await tx.update(users).set(usersUpdate).where(eq(users.id, contract.employeeId));
+            }
+
+            // 3-2. restaurant_users (affiliatedCompany — hireDate는 기존 유지)
+            const ruUpdate: Record<string, any> = {};
+            if (finalAffiliatedCompany !== null) ruUpdate.affiliatedCompany = finalAffiliatedCompany;
+            if (Object.keys(ruUpdate).length > 0) {
+              await tx.update(restaurantUsers)
+                .set(ruUpdate)
+                .where(and(
+                  eq(restaurantUsers.userId, contract.employeeId),
+                  eq(restaurantUsers.restaurantId, contract.restaurantId),
+                ));
+            }
+
+            // 3-3. employee_contracts (민감영역 현재상태)
+            //      기존 active 비활성 → 새 active INSERT
+            await tx.update(employeeContracts)
+              .set({ isActive: false })
+              .where(and(
+                eq(employeeContracts.userId, contract.employeeId),
+                eq(employeeContracts.restaurantId, contract.restaurantId),
+                eq(employeeContracts.isActive, true),
+              ));
+
+            await tx.insert(employeeContracts).values({
+              userId: contract.employeeId,
+              restaurantId: contract.restaurantId,
+              wageType: (contract.wageType as "hourly" | "monthly") ?? "hourly",
+              wageAmount: contract.wageAmount ?? "0",
+              position: contract.position ?? null,
+              contractStart: contract.contractStart ? new Date(contract.contractStart) : null,
+              contractEnd: contract.contractEnd ? new Date(contract.contractEnd) : null,
+              weeklyHours: contract.weeklyHours ?? null,
+              weeklyOffDays: contract.weeklyOffDays ?? 1,
+              socialInsurance: contract.socialInsurance ?? true,
+              bankAccount: finalBankAccount,
+              residentNumber: finalResidentNumber,
+              isActive: true,
+            } as any);
           }
-        }
+        });
+        console.log(`[signContract] tx complete for contract ${contract.id}`);
+      } catch (e: any) {
+        console.error(`[signContract] transaction failed:`, e.message);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "서명 처리 중 오류가 발생했습니다: " + e.message,
+        });
       }
 
       return { ok: true };
