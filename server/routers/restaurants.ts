@@ -50,10 +50,40 @@ async function geocodeAddress(address: string, userId?: number, restaurantId?: n
 }
 
 export const restaurantsRouter = router({
-  /** 전체 활성 매장 목록 — tutorial 사용자는 tutorial 매장, 실사용자는 실매장 */
+  /** 전체 활성 매장 목록
+   * - master: 전체 실매장
+   * - admin/sub-admin: 본인 소유 매장 (getOwnedRestaurants)
+   * - user(tutorial): tutorial 매장
+   * - user(real): listMine로 조회할 것 — 여기서는 빈 배열 반환 */
   list: protectedProcedure.query(async ({ ctx }) => {
-    const [me] = await db.select({ isTutorial: users.isTutorial }).from(users).where(eq(users.id, ctx.user.userId)).limit(1);
-    return db.select().from(restaurants).where(activeRealStoreCondition(me?.isTutorial ?? false));
+    const [me] = await db
+      .select({ isTutorial: users.isTutorial })
+      .from(users)
+      .where(eq(users.id, ctx.user.userId))
+      .limit(1);
+
+    // tutorial 사용자는 tutorial 매장만
+    if (me?.isTutorial) {
+      return db.select().from(restaurants).where(activeRealStoreCondition(true));
+    }
+
+    // master/admin은 소유 기반 스코핑
+    if (ctx.user.role === "master" || ctx.user.role === "admin") {
+      const owned = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
+      return owned.filter((r) => r.isActive);
+    }
+
+    // 일반 유저: 본인이 배정된 매장만
+    const rows = await db
+      .select({ restaurant: restaurants })
+      .from(restaurantUsers)
+      .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
+      .where(and(
+        eq(restaurantUsers.userId, ctx.user.userId),
+        sql`${restaurantUsers.resignedAt} IS NULL`,
+        activeRealStoreCondition(false),
+      ));
+    return rows.map((r) => r.restaurant);
   }),
 
   /** 소유 매장 + 직원수 + 당월 매출 요약 (admin 이상) */
