@@ -32,6 +32,7 @@ import { recipesRouter } from "./recipes";
 import { storeInfoRouter } from "./storeInfo";
 import { businessGroupsRouter } from "./businessGroups";
 import { dailyExpensesRouter } from "./dailyExpenses";
+import { staffRouter } from "./staff";
 
 export const appRouter = router({
   auth: authRouter,
@@ -67,6 +68,7 @@ export const appRouter = router({
   storeInfo: storeInfoRouter,
   businessGroups: businessGroupsRouter,
   dailyExpenses: dailyExpensesRouter,
+  staff: staffRouter,
 });
 
 export type AppRouter = typeof appRouter;
