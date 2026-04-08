@@ -57,6 +57,10 @@ export default function StaffPage() {
   const [showResignedContracts, setShowResignedContracts] = useState(false);
   const [renewTarget, setRenewTarget] = useState<{ userId: number; name: string; affiliatedCompany?: string } | null>(null);
 
+  // 빠른 직원 추가 (staff.quickAdd)
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showRecentlyResigned, setShowRecentlyResigned] = useState(false);
+
   const utils = trpc.useUtils();
 
   // 초대코드
@@ -87,6 +91,40 @@ export default function StaffPage() {
     { restaurantId },
     { enabled: restaurantId > 0 },
   );
+
+  // 최근 90일 내 퇴사자 — 재입사 원클릭 UI
+  const { data: recentlyResigned } = trpc.staff.listRecentlyResigned.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 && isOwnerOrAdmin },
+  );
+
+  const quickAdd = trpc.staff.quickAdd.useMutation({
+    onSuccess(data) {
+      if (data.status === "rehire") {
+        toast.success("재입사 복귀 처리되었습니다");
+      } else if (data.status === "concurrent") {
+        toast.success("다른 매장 근무자 — 본 매장에 추가되었습니다");
+      } else if (data.status === "existing") {
+        toast.success("기존 사용자를 이 매장에 배정했습니다");
+      } else {
+        let msg = "직원이 추가되었습니다";
+        if (data.tempPassword) {
+          msg += ` (임시비번: ${data.tempPassword})`;
+          navigator.clipboard.writeText(data.tempPassword).catch(() => {});
+        }
+        toast.success(msg);
+      }
+      if (data.inviteCode) {
+        const url = `${window.location.origin}/join/${data.inviteCode}`;
+        navigator.clipboard.writeText(url).catch(() => {});
+        toast.info(`초대 링크 복사됨: ${data.inviteCode}`);
+      }
+      setShowQuickAdd(false);
+      utils.restaurants.getStaff.invalidate();
+      utils.staff.listRecentlyResigned.invalidate();
+    },
+    onError(err) { toast.error(err.message); },
+  });
 
 
   const updateRole = trpc.restaurants.updateStaffRole.useMutation({
@@ -227,7 +265,7 @@ export default function StaffPage() {
     companyCounts[company] = (companyCounts[company] || 0) + 1;
   });
 
-  if (!restaurantId) {
+  if (!restaurantId || restaurantId <= 0) {
     return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
   }
 
@@ -241,7 +279,12 @@ export default function StaffPage() {
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">{current?.name}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {isOwnerOrAdmin && (
+            <Button size="sm" onClick={() => setShowQuickAdd(true)} className="text-xs">
+              <UserPlus className="w-3.5 h-3.5 mr-1" /> 직원 추가
+            </Button>
+          )}
           {isOwnerOrAdmin && (
             <Button size="sm" variant="outline" onClick={() => setShowContractForm(true)} className="text-xs">
               <FileText className="w-3.5 h-3.5 mr-1" /> 계약서
@@ -252,6 +295,60 @@ export default function StaffPage() {
           </Button>
         </div>
       </div>
+
+      {/* ═══ 지난 3개월 나간 사람 (재입사 빠른 복귀) ═══ */}
+      {isOwnerOrAdmin && recentlyResigned && recentlyResigned.length > 0 && (
+        <div className="border border-border rounded-lg bg-card">
+          <button
+            onClick={() => setShowRecentlyResigned(!showRecentlyResigned)}
+            className="w-full px-4 py-3 flex items-center justify-between hover:bg-accent/20 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="text-xs font-medium text-foreground">지난 3개월 나간 사람</span>
+              <span className="text-[11px] text-muted-foreground">{recentlyResigned.length}명</span>
+            </div>
+            {showRecentlyResigned ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
+          {showRecentlyResigned && (
+            <div className="border-t border-border px-4 py-3 space-y-2 bg-muted/20">
+              {recentlyResigned.map((r: any) => (
+                <div key={r.userId} className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-background border border-border">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium text-foreground truncate">{r.name}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {STORE_ROLE_LABELS[r.storeRole] || r.storeRole} · {r.phone || "연락처 없음"} · 퇴사 {r.resignedAt}
+                      {r.resignReason && ` — ${r.resignReason}`}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px] shrink-0"
+                    disabled={!r.phone || quickAdd.isPending}
+                    onClick={() => {
+                      if (!r.phone) {
+                        toast.error("전화번호가 없어 재입사 처리할 수 없습니다");
+                        return;
+                      }
+                      if (!confirm(`${r.name}을(를) 다시 등록합니다. 역할은 "${STORE_ROLE_LABELS[r.storeRole] || "직원"}"으로 복원됩니다.`)) return;
+                      quickAdd.mutate({
+                        restaurantId,
+                        name: r.name,
+                        phone: r.phone,
+                        role: (r.storeRole === "supervisor" ? "supervisor" : "staff"),
+                        sendInvite: false,
+                      });
+                    }}
+                  >
+                    <RefreshCw className="w-3 h-3 mr-1" /> 복귀
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ═══ 초대코드 섹션 ═══ */}
       {showInviteSection && (
@@ -925,6 +1022,16 @@ export default function StaffPage() {
           restaurantInfo={{ name: current?.name ?? "", address: current?.address ?? "" }}
           defaultEmployee={renewTarget}
           onClose={() => setRenewTarget(null)}
+        />
+      )}
+
+      {/* 빠른 직원 추가 모달 */}
+      {showQuickAdd && (
+        <QuickAddModal
+          restaurantId={restaurantId}
+          onClose={() => setShowQuickAdd(false)}
+          onSubmit={(form) => quickAdd.mutate({ restaurantId, ...form })}
+          isPending={quickAdd.isPending}
         />
       )}
 
@@ -1632,6 +1739,114 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             disabled={!form.employeeName || create.isPending || updateContract.isPending}
           >
             {(create.isPending || updateContract.isPending) ? "처리 중..." : editingContract ? "수정 저장" : "초안 생성"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 빠른 직원 추가 모달 (staff.quickAdd) ────────────────────────────────────
+
+function QuickAddModal({ restaurantId, onClose, onSubmit, isPending }: {
+  restaurantId: number;
+  onClose: () => void;
+  onSubmit: (f: { name: string; phone: string; role: "supervisor" | "staff"; sendInvite: boolean }) => void;
+  isPending: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [role, setRole] = useState<"supervisor" | "staff">("staff");
+  const [sendInvite, setSendInvite] = useState(true);
+
+  // 전화번호 실시간 체크 — 3자리 이상 입력 시 쿼리 활성화
+  const phoneQueryEnabled = phone.replace(/[^0-9]/g, "").length >= 8 && restaurantId > 0;
+  const { data: phoneCheck } = trpc.staff.checkPhone.useQuery(
+    { restaurantId, phone },
+    { enabled: phoneQueryEnabled },
+  );
+
+  const canSubmit = name.trim() && phone.trim() && phoneCheck?.status !== "duplicate" && !isPending;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-xl w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+            <UserPlus className="w-4 h-4" /> 직원 추가
+          </h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">이름 *</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="홍길동"
+              className="w-full text-sm px-3 py-2 rounded-md border border-input bg-background"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">전화번호 *</label>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="010-1234-5678"
+              className="w-full text-sm px-3 py-2 rounded-md border border-input bg-background"
+              inputMode="tel"
+            />
+            {phoneCheck && phoneCheck.status !== "new" && phoneCheck.status !== "empty" && (
+              <div className={`mt-1.5 text-[11px] px-2 py-1.5 rounded ${
+                phoneCheck.status === "duplicate" ? "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400" :
+                phoneCheck.status === "rehire" ? "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400" :
+                "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"
+              }`}>
+                {phoneCheck.status === "duplicate" && `⚠ 이미 본 매장에 등록된 직원입니다 (${(phoneCheck as any).name})`}
+                {phoneCheck.status === "rehire" && `↻ 본 매장 퇴사자 — 재입사 처리됩니다 (${(phoneCheck as any).name}, ${(phoneCheck as any).resignedAt} 퇴사)`}
+                {phoneCheck.status === "concurrent" && `ℹ 다른 매장 근무자 (${(phoneCheck as any).name}) — 겸직 등록됩니다`}
+                {phoneCheck.status === "existing" && `ℹ 기존 사용자 (${(phoneCheck as any).name}) — 본 매장에 추가됩니다`}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">역할</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setRole("staff")}
+                className={`flex-1 text-xs py-2 rounded-md border transition-colors ${
+                  role === "staff" ? "border-primary bg-primary/10 text-foreground" : "border-input bg-background text-muted-foreground"
+                }`}
+              >직원</button>
+              <button
+                type="button"
+                onClick={() => setRole("supervisor")}
+                className={`flex-1 text-xs py-2 rounded-md border transition-colors ${
+                  role === "supervisor" ? "border-primary bg-primary/10 text-foreground" : "border-input bg-background text-muted-foreground"
+                }`}
+              >매니져</button>
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={sendInvite}
+              onChange={(e) => setSendInvite(e.target.checked)}
+              className="rounded"
+            />
+            초대 링크도 같이 발급 (48시간 유효, 직원 자가등록용)
+          </label>
+        </div>
+        <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
+          <Button size="sm" variant="outline" onClick={onClose}>취소</Button>
+          <Button
+            size="sm"
+            disabled={!canSubmit}
+            onClick={() => onSubmit({ name: name.trim(), phone: phone.trim(), role, sendInvite })}
+          >
+            {isPending ? "처리 중..." : "추가"}
           </Button>
         </div>
       </div>

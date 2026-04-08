@@ -55,7 +55,7 @@ export default function UsersPage() {
             <Users className="w-5 h-5" /> 사용자 관리
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            사용자 계정 생성 · 매장 배정 · 역할 관리
+            시스템 계정 (개발자 · 대표 · 일반) 관리 — 일반 직원 추가는 <a href="/staff" className="text-blue-600 dark:text-blue-400 hover:underline">/staff 페이지</a>에서 처리됩니다
           </p>
         </div>
         <Button size="sm" onClick={() => setShowCreate(!showCreate)} className="text-xs">
