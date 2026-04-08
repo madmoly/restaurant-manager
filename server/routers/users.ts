@@ -60,7 +60,8 @@ export const usersRouter = router({
       username: z.string().min(2),
       password: z.string().min(4),
       name: z.string().min(1),
-      role: z.enum(["master", "admin", "user", "manager", "employee"]).default("user"),
+      // 레거시 manager/employee는 신규 생성 금지 — 직원은 /staff.quickAdd로 일원화
+      role: z.enum(["master", "admin", "user"]).default("user"),
       email: z.string().email().optional(),
       phone: z.string().optional(),
     }))

@@ -261,7 +261,9 @@ export const restaurantsRouter = router({
       userId: z.number(),
       role: z.enum(["owner", "supervisor", "staff", "store_manager", "manager", "employee"]).default("staff"),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
       // 이미 배정된 사용자인지 확인 — 기존 역할 보호
       const [existing] = await db
         .select({ role: restaurantUsers.role })
@@ -309,7 +311,8 @@ export const restaurantsRouter = router({
       userId: z.number(),
       hireDate: z.string().nullable(), // YYYY-MM-DD or null
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       await db
         .update(restaurantUsers)
         .set({ hireDate: input.hireDate })
@@ -327,7 +330,8 @@ export const restaurantsRouter = router({
       userId: z.number(),
       weeklyOffDays: z.number().min(0).max(7),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       // 활성 계약이 있으면 업데이트, 없으면 새로 생성
       const [existing] = await db.select({ id: employeeContracts.id })
         .from(employeeContracts)
@@ -469,7 +473,8 @@ export const restaurantsRouter = router({
   /** 직원 매장에서 제거 */
   removeStaff: managerProcedure
     .input(z.object({ restaurantId: z.number(), userId: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       await db
         .delete(restaurantUsers)
         .where(and(

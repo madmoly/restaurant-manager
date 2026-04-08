@@ -1,7 +1,7 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import type { Request } from "express";
 import { parse as parseCookie } from "cookie";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { verifyToken, type TokenPayload } from "./auth";
 import { ROLE_LEVEL } from "@shared/permissions";
 import { db } from "./db";
@@ -43,11 +43,14 @@ export const managerProcedure = protectedProcedure.use(async ({ ctx, next }) => 
     // master(4)/admin(3) >= manager(2) → 시스템 권한으로 즉시 통과
     return next({ ctx });
   }
-  // user(1) → 매장 역할로 판단
+  // user(1) → 매장 역할로 판단 (퇴사자 제외)
   const storeRoles = await db
     .select({ role: restaurantUsers.role })
     .from(restaurantUsers)
-    .where(eq(restaurantUsers.userId, ctx.user.userId));
+    .where(and(
+      eq(restaurantUsers.userId, ctx.user.userId),
+      isNull(restaurantUsers.resignedAt),
+    ));
   const hasStoreAuth = storeRoles.some(
     (r) => r.role === "owner" || r.role === "supervisor" ||
            r.role === "store_manager" || r.role === "manager" // 레거시 호환
@@ -70,7 +73,10 @@ export const ownerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   const storeRoles = await db
     .select({ role: restaurantUsers.role })
     .from(restaurantUsers)
-    .where(eq(restaurantUsers.userId, ctx.user.userId));
+    .where(and(
+      eq(restaurantUsers.userId, ctx.user.userId),
+      isNull(restaurantUsers.resignedAt),
+    ));
   const isOwner = storeRoles.some(
     (r) => r.role === "owner" || r.role === "store_manager" // 레거시 호환
   );
