@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, isNull } from "drizzle-orm";
 import { router, protectedProcedure, adminProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { users, restaurantUsers, restaurants } from "../../drizzle/schema";
@@ -146,14 +146,24 @@ export const usersRouter = router({
         throw new Error("대표/개발자 계정은 개발자만 삭제할 수 있습니다");
       }
 
-      // 4. 매장 배정 잔존 시 삭제 거부 (resignedAt 여부 무관 — 모든 row 체크)
-      const assignments = await db
+      // 4. 활성 매장 배정 잔존 시 삭제 거부
+      //    - restaurant_users.resignedAt IS NULL (퇴사 안 한 배정)
+      //    - restaurants.deletedAt IS NULL (archive 안 된 매장)
+      //    위 두 조건 모두 만족하는 row만 "활성 배정"으로 카운트.
+      //    퇴사 처리되었거나 매장이 archive 된 ru row는 논리적으로 정리됨 → user 삭제 허용.
+      //    (해당 ru row 자체는 user 삭제 후에도 잔존 가능 — orphan은 별도 cleanup 대상)
+      const activeAssignments = await db
         .select({ restaurantId: restaurantUsers.restaurantId })
         .from(restaurantUsers)
-        .where(eq(restaurantUsers.userId, input.userId));
-      if (assignments.length > 0) {
+        .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
+        .where(and(
+          eq(restaurantUsers.userId, input.userId),
+          isNull(restaurantUsers.resignedAt),
+          isNull(restaurants.deletedAt),
+        ));
+      if (activeAssignments.length > 0) {
         throw new Error(
-          `매장 배정이 ${assignments.length}건 남아있습니다. 먼저 배정을 해제해 주세요`
+          `활성 매장 배정이 ${activeAssignments.length}건 남아있습니다. 먼저 퇴사 처리하거나 매장을 archive 해 주세요`
         );
       }
 
