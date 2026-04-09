@@ -51,6 +51,7 @@ export const dailyOpsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const [existing] = await db
         .select()
         .from(dailyOperations)
@@ -98,6 +99,7 @@ export const dailyOpsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const [existing] = await db
         .select()
         .from(dailyOperations)
@@ -138,7 +140,8 @@ export const dailyOpsRouter = router({
   // ─── 어제 마감 요약 ─────────────────────────────────────────────────────
   getYesterdaySummary: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       // date의 전일
       const d = new Date(input.date);
       d.setDate(d.getDate() - 1);
@@ -179,7 +182,8 @@ export const dailyOpsRouter = router({
   // ─── 해당 요일 평균 매출 (최근 8주) ──────────────────────────────────────
   getWeekdayAvgSales: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const d = new Date(input.date);
       const dayOfWeek = d.getDay(); // 0=Sun, 6=Sat
       // 최근 8주 이내 같은 요일의 매출 평균
@@ -207,7 +211,8 @@ export const dailyOpsRouter = router({
   // ─── 금일 출근 인원 (draft/published/confirmed 스케줄 기반) ───────────────
   getTodayStaff: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const rows = await db
         .select({
           userName: users.name,
@@ -263,7 +268,8 @@ export const dailyOpsRouter = router({
   // ─── 중간매출 ──────────────────────────────────────────────────────────
   getMidSales: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const rows = await db
         .select()
         .from(intermediateSales)
@@ -287,6 +293,7 @@ export const dailyOpsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const [result] = await db.insert(intermediateSales).values({
         restaurantId: input.restaurantId,
         saleDate: input.date,
@@ -311,7 +318,8 @@ export const dailyOpsRouter = router({
   // ─── 발주 이미지 ────────────────────────────────────────────────────────
   getOrderImages: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       return db
         .select()
         .from(dailyOrderImages)
@@ -333,6 +341,7 @@ export const dailyOpsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const [result] = await db.insert(dailyOrderImages).values({
         restaurantId: input.restaurantId,
         imageDate: input.date,
@@ -356,7 +365,8 @@ export const dailyOpsRouter = router({
   // ─── 마감 매출 입력/조회 ─────────────────────────────────────────────────
   getDailySales: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const [detail] = await db
         .select()
         .from(dailySalesDetail)
@@ -385,7 +395,8 @@ export const dailyOpsRouter = router({
 
   getCumulativeSales: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const d = new Date(input.date);
       const monthStart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
       const [row] = await db
@@ -415,6 +426,7 @@ export const dailyOpsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const otherTotal = input.otherItems.reduce((s, i) => s + i.amount, 0);
       const specialTotal = input.specialItems.reduce((s, i) => s + i.amount, 0);
       const totalAmount =
@@ -506,7 +518,8 @@ export const dailyOpsRouter = router({
   // ─── 기타 매출 유형 템플릿 조회 ──────────────────────────────────────────
   getOtherItemTemplates: protectedProcedure
     .input(z.object({ restaurantId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       return db
         .select()
         .from(salesOtherItemTemplates)
@@ -516,7 +529,8 @@ export const dailyOpsRouter = router({
   // ─── 운영 캘린더 (월간 요약) ──────────────────────────────────────────────
   getMonthlyCalendar: protectedProcedure
     .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const startDate = `${input.year}-${String(input.month).padStart(2, "0")}-01`;
       const endDate =
         input.month === 12
@@ -745,7 +759,8 @@ export const dailyOpsRouter = router({
   // ─── 일별 상세 (운영캘린더 우측 패널용) ──────────────────────────────────
   getDayDetail: protectedProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       // 1. 일일운영 상태
       // 마감자 이름 포함 조회
       const opsRows = await db

@@ -45,7 +45,8 @@ export const leaveRequestsRouter = router({
       restaurantId: z.number(),
       status: z.enum(["pending", "approved", "rejected"]).optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const conditions = [eq(leaveRequests.restaurantId, input.restaurantId)];
       if (input.status) conditions.push(eq(leaveRequests.status, input.status) as any);
 
@@ -78,6 +79,7 @@ export const leaveRequestsRouter = router({
       reason: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       // 5일 전 제한 검증 (KST 기준)
       const target = new Date(input.leaveDate + "T00:00:00+09:00");
       const nowKST = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
@@ -122,6 +124,12 @@ export const leaveRequestsRouter = router({
       reviewNote: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      // PR2: id-only fetch → restaurantId 기반 매장 검증
+      const [target] = await db.select({ restaurantId: leaveRequests.restaurantId })
+        .from(leaveRequests).where(eq(leaveRequests.id, input.id)).limit(1);
+      if (!target) throw new Error("휴무 신청을 찾을 수 없습니다");
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, target.restaurantId, true);
+
       await db
         .update(leaveRequests)
         .set({
@@ -154,7 +162,8 @@ export const leaveRequestsRouter = router({
   /** 대기 중인 신청 수 (매니저 대시보드용) */
   pendingCount: managerProcedure
     .input(z.object({ restaurantId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const [result] = await db
         .select({ count: sql<number>`COUNT(*)` })
         .from(leaveRequests)

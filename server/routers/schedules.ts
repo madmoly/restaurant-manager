@@ -137,7 +137,11 @@ export const schedulesRouter = router({
   /** 내 스케줄 조회 */
   listByUser: protectedProcedure
     .input(z.object({ userId: z.number(), from: z.string(), to: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // PR2: 본인 또는 admin/master만 타인 스케줄 조회 허용
+      if (input.userId !== ctx.user.userId && ctx.user.role !== "admin" && ctx.user.role !== "master") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "본인 스케줄만 조회할 수 있습니다" });
+      }
       const fromKST = input.from.includes("T")
         ? new Date(input.from + (input.from.includes("+") ? "" : "+09:00"))
         : new Date(input.from + "T00:00:00+09:00");
@@ -179,6 +183,7 @@ export const schedulesRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       if (await isClosedDay(input.restaurantId, input.workDate)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
       }
@@ -222,6 +227,7 @@ export const schedulesRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       if (await isClosedDay(input.restaurantId, input.workDate)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
       }
@@ -255,6 +261,7 @@ export const schedulesRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       if (await isClosedDay(input.restaurantId, input.workDate)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
       }
@@ -345,12 +352,17 @@ export const schedulesRouter = router({
         editReason: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const { id, workDate, startTime, endTime, editReason, ...rest } = input;
 
       // 현재 상태 조회 (정책 분기용)
       const [current] = await db.select().from(schedules).where(eq(schedules.id, id)).limit(1);
       if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "스케줄을 찾을 수 없습니다." });
+      // 레코드의 restaurantId와 input.restaurantId 일치 검증 (cross-store id 위조 차단)
+      if (current.restaurantId !== input.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "스케줄을 찾을 수 없습니다." });
+      }
 
       // ── 상태별 수정 정책 ──
       if (current.status === "confirmed" || current.status === "completed") {
@@ -413,9 +425,11 @@ export const schedulesRouter = router({
   /** 삭제 — 상태별 정책 적용 */
   delete: managerProcedure
     .input(z.object({ id: z.number(), reason: z.string().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const [current] = await db.select().from(schedules).where(eq(schedules.id, input.id)).limit(1);
       if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "스케줄을 찾을 수 없습니다." });
+      // PR2: id-only fetch → restaurantId 기반 매장 검증
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, current.restaurantId, true);
 
       if (current.status === "draft") {
         // 초안: 바로 삭제
@@ -449,6 +463,7 @@ export const schedulesRouter = router({
   copyPreviousWeek: managerProcedure
     .input(z.object({ restaurantId: z.number(), targetWeekStart: z.string() }))
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const targetStart = new Date(input.targetWeekStart);
       const prevStart = new Date(targetStart);
       prevStart.setDate(prevStart.getDate() - 7);
@@ -533,7 +548,8 @@ export const schedulesRouter = router({
   /** 범위 확정 (draft → confirmed): 직원 공개 + 예상인건비 반영 */
   confirmRange: managerProcedure
     .input(z.object({ restaurantId: z.number(), from: z.string(), to: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       // KST 기준으로 범위 지정 (from은 YYYY-MM-DD, to는 YYYY-MM-DDT23:59:59 등)
       const fromStr = input.from.length === 10 ? input.from + "T00:00:00+09:00" : input.from + "+09:00";
       const toStr = input.to.includes("T") ? input.to.replace(/T.*/, "T23:59:59+09:00") : input.to + "T23:59:59+09:00";
@@ -556,7 +572,8 @@ export const schedulesRouter = router({
   /** 날짜별 확정 (draft → confirmed) */
   confirmDay: managerProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const dayStart = new Date(input.date + "T00:00:00+09:00");
       const dayEnd = new Date(input.date + "T23:59:59+09:00");
       const result = await db
@@ -576,7 +593,8 @@ export const schedulesRouter = router({
   /** 범위 완료 (confirmed → completed): 일마감 확인 후 */
   completeRange: managerProcedure
     .input(z.object({ restaurantId: z.number(), from: z.string(), to: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       await db
         .update(schedules)
         .set({ status: "completed", completedAt: new Date() })
@@ -594,7 +612,8 @@ export const schedulesRouter = router({
   /** 특정일 스케줄 조회 (일마감 화면용) */
   getDaySchedules: managerProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const dayStart = new Date(input.date + "T00:00:00+09:00");
       const dayEnd = new Date(input.date + "T23:59:59+09:00");
       return db
@@ -631,7 +650,8 @@ export const schedulesRouter = router({
   /** 특정일 confirmed → completed (일마감 연동) */
   completeDay: managerProcedure
     .input(z.object({ restaurantId: z.number(), date: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const dayStart = new Date(input.date + "T00:00:00+09:00");
       const dayEnd = new Date(input.date + "T23:59:59+09:00");
       const result = await db
@@ -651,9 +671,11 @@ export const schedulesRouter = router({
   /** 개별 스케줄 완료 처리 */
   completeOne: managerProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
-      const [existing] = await db.select({ status: schedules.status }).from(schedules).where(eq(schedules.id, input.id)).limit(1);
+    .mutation(async ({ input, ctx }) => {
+      const [existing] = await db.select({ status: schedules.status, restaurantId: schedules.restaurantId }).from(schedules).where(eq(schedules.id, input.id)).limit(1);
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      // PR2: id-only fetch → restaurantId 기반 매장 검증
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, existing.restaurantId, true);
       if (existing.status !== "confirmed") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "확정 상태인 스케줄만 완료 처리할 수 있습니다." });
       }
@@ -700,7 +722,8 @@ export const schedulesRouter = router({
   /** 과거 스케줄 월별 조회 (급여 정산용) */
   listPast: managerProcedure
     .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const monthStr = String(input.month).padStart(2, "0");
       const kstFrom = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
       const nm = input.month === 12 ? 1 : input.month + 1;
@@ -1030,7 +1053,8 @@ export const schedulesRouter = router({
       weekStart: z.string().optional(), // 미지정 시 전체
       weekEnd: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       // 1) 매장 프리셋 조회
       const presetRows = await db.select().from(restaurantShiftPresets)
         .where(and(
