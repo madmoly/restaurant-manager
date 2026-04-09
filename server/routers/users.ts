@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { eq, and, sql, isNull } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
-import { users, restaurantUsers, restaurants } from "../../drizzle/schema";
+import { users, restaurantUsers, restaurants, businessGroups } from "../../drizzle/schema";
 import { hashPassword } from "../auth";
 import { activeRealStoreCondition } from "../helpers/restaurantScope";
 
@@ -144,6 +145,32 @@ export const usersRouter = router({
       // 3. master/admin 계정 삭제는 master만 가능 (권한 상승 방지와 대칭)
       if ((target.role === "master" || target.role === "admin") && ctx.user.role !== "master") {
         throw new Error("대표/개발자 계정은 개발자만 삭제할 수 있습니다");
+      }
+
+      // 3-a. admin 계정 삭제 시 의존 자원 검증 (PR4-A — dangling FK 방지)
+      //   - business_groups.adminId 참조: 본인이 대표인 사업그룹
+      //   - restaurants.ownerAdminId (active only): 본인 소유 활성 매장
+      //   soft-deleted 매장(deletedAt set)은 검사 제외 — 복원 시점 dangling은 별도 PR.
+      if (target.role === "admin") {
+        const [bgRow] = await db
+          .select({ cnt: sql<number>`COUNT(*)` })
+          .from(businessGroups)
+          .where(eq(businessGroups.adminId, input.userId));
+        const [rRow] = await db
+          .select({ cnt: sql<number>`COUNT(*)` })
+          .from(restaurants)
+          .where(and(
+            eq(restaurants.ownerAdminId, input.userId),
+            isNull(restaurants.deletedAt),
+          ));
+        const bgCnt = Number(bgRow?.cnt ?? 0);
+        const rCnt = Number(rRow?.cnt ?? 0);
+        if (bgCnt + rCnt > 0) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `삭제 불가: 소유 사업그룹 ${bgCnt}건, 소유 매장 ${rCnt}건 존재. 먼저 이관 또는 제거 필요.`,
+          });
+        }
       }
 
       // 4. 활성 매장 배정 잔존 시 삭제 거부
