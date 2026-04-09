@@ -1500,6 +1500,51 @@ function PurchaseTab({
   const totalAmount = receivedOrders.reduce((sum, o: any) => sum + Number(o.totalAmount || 0), 0);
   const formTotal = purchaseItems.reduce((sum, i) => sum + parseFloat(i.lineTotal || '0'), 0);
 
+  // ── OCR 품목 매칭 적용 (드롭다운 선택 + 추천 칩 공통) ──
+  // 거래처 등록 품목(counterparty_items) 적용: 단가는 OCR 파싱 값 우선, 없으면 lastPrice/defaultPrice
+  const applyCpItem = (idx: number, ci: any) => {
+    setPurchaseItems(prev => {
+      const updated = [...prev];
+      if (!updated[idx]) return prev;
+      const hasOcrPrice = !!updated[idx].unitPrice;
+      updated[idx] = {
+        ...updated[idx],
+        rawItemName: ci.supplierItemName || ci.itemName,
+        matchedItemId: ci.itemId,
+        matchedItemName: ci.supplierItemName || ci.itemName,
+        counterpartyItemId: ci.id,
+        unitName: ci.purchaseUnit || updated[idx].unitName || '개',
+        unitPrice: hasOcrPrice ? updated[idx].unitPrice : (ci.lastPrice || ci.defaultPrice || updated[idx].unitPrice),
+        itemCandidates: undefined,
+      };
+      const qty = parseFloat(updated[idx].quantity || '0');
+      const price = parseFloat(updated[idx].unitPrice || '0');
+      if (qty > 0 && price > 0) updated[idx].lineTotal = String(Math.round(qty * price));
+      return updated;
+    });
+    setItemDropdownIdx(null);
+    setItemSearchText(prev => { const n = { ...prev }; delete n[idx]; return n; });
+  };
+  // 마스터 품목(items) 적용: 단가는 건드리지 않음 (거래처별 단가 없음)
+  const applyMasterItem = (idx: number, mi: any) => {
+    setPurchaseItems(prev => {
+      const updated = [...prev];
+      if (!updated[idx]) return prev;
+      updated[idx] = {
+        ...updated[idx],
+        rawItemName: mi.name,
+        matchedItemId: mi.id,
+        matchedItemName: mi.name,
+        counterpartyItemId: undefined,
+        unitName: mi.baseUnit || updated[idx].unitName || '개',
+        itemCandidates: undefined,
+      };
+      return updated;
+    });
+    setItemDropdownIdx(null);
+    setItemSearchText(prev => { const n = { ...prev }; delete n[idx]; return n; });
+  };
+
   return (
     <div className="space-y-4 p-4">
       {/* 매입 탭 체크리스트 */}
@@ -2325,26 +2370,7 @@ function PurchaseTab({
                                   key={`cp-${ci.id}`}
                                   type="button"
                                   onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => {
-                                    const updated = [...purchaseItems];
-                                    const hasOcrPrice = !!updated[idx].unitPrice;
-                                    updated[idx] = {
-                                      ...updated[idx],
-                                      rawItemName: ci.supplierItemName || ci.itemName,
-                                      matchedItemId: ci.itemId,
-                                      matchedItemName: ci.supplierItemName || ci.itemName,
-                                      counterpartyItemId: ci.id,
-                                      unitName: ci.purchaseUnit || updated[idx].unitName || '개',
-                                      unitPrice: hasOcrPrice ? updated[idx].unitPrice : (ci.lastPrice || ci.defaultPrice || updated[idx].unitPrice),
-                                      itemCandidates: undefined,
-                                    };
-                                    const qty = parseFloat(updated[idx].quantity || '0');
-                                    const price = parseFloat(updated[idx].unitPrice || '0');
-                                    if (qty > 0 && price > 0) updated[idx].lineTotal = String(Math.round(qty * price));
-                                    setPurchaseItems(updated);
-                                    setItemDropdownIdx(null);
-                                    setItemSearchText(prev => { const n = { ...prev }; delete n[idx]; return n; });
-                                  }}
+                                  onClick={() => applyCpItem(idx, ci)}
                                   className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-muted/50 transition-colors flex items-center justify-between"
                                 >
                                   <span className="truncate">
@@ -2368,21 +2394,7 @@ function PurchaseTab({
                                   key={`mi-${mi.id}`}
                                   type="button"
                                   onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => {
-                                    const updated = [...purchaseItems];
-                                    updated[idx] = {
-                                      ...updated[idx],
-                                      rawItemName: mi.name,
-                                      matchedItemId: mi.id,
-                                      matchedItemName: mi.name,
-                                      counterpartyItemId: undefined,
-                                      unitName: mi.baseUnit || updated[idx].unitName || '개',
-                                      itemCandidates: undefined,
-                                    };
-                                    setPurchaseItems(updated);
-                                    setItemDropdownIdx(null);
-                                    setItemSearchText(prev => { const n = { ...prev }; delete n[idx]; return n; });
-                                  }}
+                                  onClick={() => applyMasterItem(idx, mi)}
                                   className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-muted/50 transition-colors flex items-center"
                                 >
                                   <span className="truncate">
@@ -2412,6 +2424,31 @@ function PurchaseTab({
                       <p className="text-[10px] text-muted-foreground mt-0.5 px-1 truncate">전표 원본: {item.originalName}</p>
                     )}
                   </div>
+                  {/* OCR 추천 칩 — 자동매칭 실패 시 상위 3개 후보 제시 */}
+                  {!item.matchedItemId && (item.itemCandidates?.length ?? 0) > 0 && (
+                    <div className="flex flex-wrap items-center gap-1 mt-1 px-1">
+                      <span className="text-[10px] text-muted-foreground">비슷한 품목</span>
+                      {item.itemCandidates!.slice(0, 3).map((c: any) => (
+                        <button
+                          key={`${c.source}-${c.itemId}`}
+                          type="button"
+                          onClick={() => {
+                            if (c.source === 'counterparty') {
+                              const ci = cpItems.find((x: any) => x.itemId === c.itemId);
+                              if (ci) applyCpItem(idx, ci);
+                            } else {
+                              const mi = masterOnlyItems.find((x: any) => x.id === c.itemId);
+                              if (mi) applyMasterItem(idx, mi);
+                            }
+                          }}
+                          className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs hover:bg-amber-500/20 transition-colors"
+                        >
+                          {c.itemName}
+                          <span className="ml-1 text-[9px] opacity-70">{c.score}%</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {/* 수량 + 단위 */}
                   <div className="grid grid-cols-2 gap-2">
                     <div>
