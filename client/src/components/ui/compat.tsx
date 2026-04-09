@@ -110,7 +110,7 @@ export function Modal({ open, onClose, title, children, maxWidth = "max-w-lg" }:
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
       <div className={cn(
