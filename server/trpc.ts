@@ -2,10 +2,12 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import type { Request } from "express";
 import { parse as parseCookie } from "cookie";
 import { and, eq, isNull } from "drizzle-orm";
+import { z } from "zod";
 import { verifyToken, type TokenPayload } from "./auth";
 import { ROLE_LEVEL } from "@shared/permissions";
 import { db } from "./db";
 import { restaurantUsers } from "../drizzle/schema";
+import { verifyStoreAccess, requireStoreManager } from "./middleware/storeAuth";
 
 export type Context = {
   user: TokenPayload | null;
@@ -102,3 +104,69 @@ export const masterProcedure = protectedProcedure.use(({ ctx, next }) => {
   }
   return next({ ctx });
 });
+
+/**
+ * ─── 매장 단위 격리 procedure (PR1 도입 — 2026-04-09) ────────────────────────
+ *
+ * 매장 자원 라우터의 cross-store 누수 방지를 위한 표준 게이트.
+ * 하위 라우터는 본인 input 스키마를 추가로 `.input()`으로 merge 하면 됨
+ * (v11에서 .input() 연쇄는 자동 머지).
+ *
+ * 사용 예:
+ *   listOrdersByMonth: storeReadProcedure
+ *     .input(z.object({ year: z.number(), month: z.number() }))
+ *     .query(async ({ input, ctx }) => {
+ *       // input: { restaurantId, year, month }
+ *       // ctx.restaurantId / ctx.storeRole 사용 가능
+ *     });
+ *
+ * 가드 체인:
+ *   - storeReadProcedure   = 로그인 + restaurantId 접근 가능 (read)
+ *   - storeWriteProcedure  = 로그인 + restaurantId 쓰기 가능 (admin은 본인 매장 배정 필요)
+ *   - storeManagerProcedure = 위 + 매장 역할 owner/supervisor/store_manager/manager
+ *
+ * 모든 미들웨어가 ctx에 { restaurantId, storeRole } 주입.
+ */
+
+const storeBaseInput = z.object({ restaurantId: z.number() });
+
+export const storeReadProcedure = protectedProcedure
+  .input(storeBaseInput)
+  .use(async ({ ctx, input, next }) => {
+    const { storeRole } = await verifyStoreAccess(
+      ctx.user.userId,
+      ctx.user.role,
+      input.restaurantId,
+      false,
+    );
+    return next({
+      ctx: { ...ctx, restaurantId: input.restaurantId, storeRole },
+    });
+  });
+
+export const storeWriteProcedure = protectedProcedure
+  .input(storeBaseInput)
+  .use(async ({ ctx, input, next }) => {
+    const { storeRole } = await verifyStoreAccess(
+      ctx.user.userId,
+      ctx.user.role,
+      input.restaurantId,
+      true,
+    );
+    return next({
+      ctx: { ...ctx, restaurantId: input.restaurantId, storeRole },
+    });
+  });
+
+export const storeManagerProcedure = protectedProcedure
+  .input(storeBaseInput)
+  .use(async ({ ctx, input, next }) => {
+    const { storeRole } = await requireStoreManager(
+      ctx.user.userId,
+      ctx.user.role,
+      input.restaurantId,
+    );
+    return next({
+      ctx: { ...ctx, restaurantId: input.restaurantId, storeRole },
+    });
+  });

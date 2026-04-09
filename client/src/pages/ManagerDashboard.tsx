@@ -150,7 +150,7 @@ export default function ManagerDashboard() {
                   <span className="text-muted-foreground ml-1 truncate">{item.content?.slice(0, 20)}</span>
                 </div>
                 <button
-                  onClick={() => toggleReceivedMut.mutate({ id: item.id, isReceived: true })}
+                  onClick={() => toggleReceivedMut.mutate({ restaurantId, id: item.id, isReceived: true })}
                   disabled={toggleReceivedMut.isPending}
                   className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 hover:bg-amber-200"
                 >

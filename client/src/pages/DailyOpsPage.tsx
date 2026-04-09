@@ -935,8 +935,8 @@ function PurchaseTab({
   );
 
   const orderItemsQuery = trpc.purchasesV2.getOrderItems.useQuery(
-    { orderId: expandedId! },
-    { enabled: expandedId !== null },
+    { restaurantId, orderId: expandedId! },
+    { enabled: expandedId !== null && restaurantId > 0 },
   );
 
   // 거래처 선택 시 해당 품목 로드
@@ -1469,7 +1469,7 @@ function PurchaseTab({
                   size="sm"
                   variant="outline"
                   className="text-[10px] h-6 px-2 gap-0.5 border-green-300 text-green-600 hover:bg-green-50 dark:border-green-700 dark:text-green-400"
-                  onClick={() => toggleReceivedMut.mutate({ id: memo.id, isReceived: true })}
+                  onClick={() => toggleReceivedMut.mutate({ restaurantId, id: memo.id, isReceived: true })}
                   disabled={toggleReceivedMut.isPending}
                 >
                   <Check className="w-2.5 h-2.5" /> 입고확인
@@ -1521,10 +1521,10 @@ function PurchaseTab({
                   <div className="flex items-center gap-1 ml-2 shrink-0">
                     <Checkbox
                       checked={memo.isReceived}
-                      onCheckedChange={(v) => toggleReceivedMut.mutate({ id: memo.id, isReceived: !!v })}
+                      onCheckedChange={(v) => toggleReceivedMut.mutate({ restaurantId, id: memo.id, isReceived: !!v })}
                       disabled={toggleReceivedMut.isPending}
                     />
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { if (confirm('삭제할까요?')) deleteOrder.mutate({ id: memo.id }); }} disabled={deleteOrder.isPending}>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { if (confirm('삭제할까요?')) deleteOrder.mutate({ restaurantId, id: memo.id }); }} disabled={deleteOrder.isPending}>
                       <Trash2 className="w-3 h-3 text-red-500" />
                     </Button>
                   </div>
@@ -1878,7 +1878,7 @@ function PurchaseTab({
                     ))}
                     {order.note && <p className="text-xs text-muted-foreground mt-1">메모: {order.note}</p>}
                     <div className="flex justify-end pt-1">
-                      <Button variant="ghost" size="sm" onClick={() => { if (confirm('이 매입 기록을 삭제할까요?')) deleteOrder.mutate({ id: order.id }); }} disabled={deleteOrder.isPending}>
+                      <Button variant="ghost" size="sm" onClick={() => { if (confirm('이 매입 기록을 삭제할까요?')) deleteOrder.mutate({ restaurantId, id: order.id }); }} disabled={deleteOrder.isPending}>
                         <Trash2 className="w-3.5 h-3.5 text-red-500" />
                       </Button>
                     </div>

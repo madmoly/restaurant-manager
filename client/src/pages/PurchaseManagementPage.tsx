@@ -513,7 +513,7 @@ function PendingOrdersTab({ restaurantId }: { restaurantId: number }) {
                   size="sm"
                   variant="outline"
                   className="text-xs h-7 gap-1 border-green-300 text-green-600 hover:bg-green-50 dark:border-green-700 dark:text-green-400 dark:hover:bg-green-900/20"
-                  onClick={() => updateOrder.mutate({ id: order.id, status: "received" })}
+                  onClick={() => updateOrder.mutate({ restaurantId, id: order.id, status: "received" })}
                   disabled={updateOrder.isPending}
                 >
                   <Check className="w-3 h-3" /> 입고확인
@@ -756,7 +756,7 @@ function DuplicatesTab({ restaurantId }: { restaurantId: number }) {
 
   const handleDelete = (orderId: number, counterpartyName: string) => {
     if (!confirm(`${counterpartyName}의 전표 #${orderId}를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
-    deleteMut.mutate({ orderId });
+    deleteMut.mutate({ restaurantId, orderId });
   };
 
   const prevMonth = () => {

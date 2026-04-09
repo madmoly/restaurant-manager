@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
-import { router, protectedProcedure, managerProcedure } from "../trpc";
+import { router, storeReadProcedure, storeWriteProcedure } from "../trpc";
+import { TRPCError } from "@trpc/server";
 import { db } from "../db";
 import {
   purchaseOrdersV2,
@@ -29,8 +30,8 @@ function triggerDatasetExport() {
 
 export const purchasesV2Router = router({
   /** 월별 매입 전표 목록 */
-  listOrdersByMonth: protectedProcedure
-    .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
+  listOrdersByMonth: storeReadProcedure
+    .input(z.object({ year: z.number(), month: z.number() }))
     .query(async ({ input }) => {
       const mm = String(input.month).padStart(2, "0");
       const startDate = `${input.year}-${mm}-01`;
@@ -66,8 +67,8 @@ export const purchasesV2Router = router({
     }),
 
   /** 일별 매입 전표 목록 (발주+입고 모두) */
-  listByDate: protectedProcedure
-    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+  listByDate: storeReadProcedure
+    .input(z.object({ date: z.string() }))
     .query(async ({ input }) => {
       const dateStr = input.date; // yyyy-MM-dd
       return db
@@ -97,10 +98,11 @@ export const purchasesV2Router = router({
         .orderBy(desc(purchaseOrdersV2.createdAt));
     }),
 
-  /** 전표 상세 항목 */
-  getOrderItems: protectedProcedure
+  /** 전표 상세 항목 — order의 restaurantId 검증 (cross-store 누수 차단) */
+  getOrderItems: storeReadProcedure
     .input(z.object({ orderId: z.number() }))
     .query(async ({ input }) => {
+      // order가 input.restaurantId 소속인지 검증 (innerJoin + restaurantId 필터)
       return db
         .select({
           id: purchaseOrderItemsV2.id,
@@ -118,15 +120,18 @@ export const purchasesV2Router = router({
           note: purchaseOrderItemsV2.note,
         })
         .from(purchaseOrderItemsV2)
+        .innerJoin(purchaseOrdersV2, eq(purchaseOrderItemsV2.purchaseOrderId, purchaseOrdersV2.id))
         .leftJoin(items, eq(purchaseOrderItemsV2.itemId, items.id))
-        .where(eq(purchaseOrderItemsV2.purchaseOrderId, input.orderId));
+        .where(and(
+          eq(purchaseOrderItemsV2.purchaseOrderId, input.orderId),
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+        ));
     }),
 
   /** 거래처별 최근 전표 */
-  getRecentOrdersByCounterparty: protectedProcedure
+  getRecentOrdersByCounterparty: storeReadProcedure
     .input(
       z.object({
-        restaurantId: z.number(),
         counterpartyId: z.number(),
         limit: z.number().default(5),
       }),
@@ -149,10 +154,9 @@ export const purchasesV2Router = router({
    *  발주(ordered): items 없어도 가능 (거래처/사진만으로 등록)
    *  입고(received): 기존과 동일
    */
-  createOrder: protectedProcedure
+  createOrder: storeWriteProcedure
     .input(
       z.object({
-        restaurantId: z.number(),
         counterpartyId: z.number().optional(),
         purchaseDate: z.string(),
         status: z.enum(["received", "ordered"]).default("received"),
@@ -233,7 +237,7 @@ export const purchasesV2Router = router({
     }),
 
   /** 발주 → 입고 전환 (품목/금액 갱신 포함) */
-  receiveOrder: protectedProcedure
+  receiveOrder: storeWriteProcedure
     .input(
       z.object({
         id: z.number(),
@@ -255,14 +259,16 @@ export const purchasesV2Router = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // 기존 발주 조회
+      // 기존 발주 조회 — restaurantId 일치 검증 (cross-store 누수 차단)
       const [existing] = await db
         .select()
         .from(purchaseOrdersV2)
-        .where(eq(purchaseOrdersV2.id, input.id))
+        .where(and(
+          eq(purchaseOrdersV2.id, input.id),
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+        ))
         .limit(1);
       if (!existing) {
-        const { TRPCError } = await import("@trpc/server");
         throw new TRPCError({ code: "NOT_FOUND", message: "발주를 찾을 수 없습니다" });
       }
 
@@ -334,7 +340,7 @@ export const purchasesV2Router = router({
     }),
 
   /** 전표 헤더 수정 + 수정이력 기록 */
-  updateOrder: protectedProcedure
+  updateOrder: storeWriteProcedure
     .input(
       z.object({
         id: z.number(),
@@ -347,16 +353,18 @@ export const purchasesV2Router = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { id, ...rest } = input;
+      const { id, restaurantId, ...rest } = input;
 
-      // 기존 전표 조회
+      // 기존 전표 조회 — restaurantId 일치 검증 (cross-store 누수 차단)
       const [existing] = await db
         .select()
         .from(purchaseOrdersV2)
-        .where(eq(purchaseOrdersV2.id, id))
+        .where(and(
+          eq(purchaseOrdersV2.id, id),
+          eq(purchaseOrdersV2.restaurantId, restaurantId),
+        ))
         .limit(1);
       if (!existing) {
-        const { TRPCError } = await import("@trpc/server");
         throw new TRPCError({ code: "NOT_FOUND", message: "전표를 찾을 수 없습니다" });
       }
 
@@ -405,10 +413,22 @@ export const purchasesV2Router = router({
       return { ok: true };
     }),
 
-  /** 전표 삭제 (항목 + 헤더) — manager 이상 */
-  deleteOrder: managerProcedure
+  /** 전표 삭제 (항목 + 헤더) */
+  deleteOrder: storeWriteProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
+      // restaurantId 일치 검증
+      const [existing] = await db
+        .select({ id: purchaseOrdersV2.id })
+        .from(purchaseOrdersV2)
+        .where(and(
+          eq(purchaseOrdersV2.id, input.id),
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+        ))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "전표를 찾을 수 없습니다" });
+      }
       await db
         .delete(purchaseOrderItemsV2)
         .where(eq(purchaseOrderItemsV2.purchaseOrderId, input.id));
@@ -421,8 +441,7 @@ export const purchasesV2Router = router({
   // ═══════════════════════════════════════════════════════════════════════
 
   /** 품목별 거래처 가격비교: 동일 품목을 납품하는 거래처들의 최근 단가 비교 */
-  itemPriceComparison: protectedProcedure
-    .input(z.object({ restaurantId: z.number() }))
+  itemPriceComparison: storeReadProcedure
     .query(async ({ input }) => {
       const rows = await db.execute(sql`
         SELECT
@@ -489,9 +508,8 @@ export const purchasesV2Router = router({
     }),
 
   /** 시기별 품목 단가 추이: 특정 기간 내 품목의 단가 변화 */
-  itemPriceTrend: protectedProcedure
+  itemPriceTrend: storeReadProcedure
     .input(z.object({
-      restaurantId: z.number(),
       months: z.number().default(6),
     }))
     .query(async ({ input }) => {
@@ -537,9 +555,8 @@ export const purchasesV2Router = router({
     }),
 
   /** 거래처별 매입/발주 금액 분석 */
-  counterpartyAmountAnalysis: protectedProcedure
+  counterpartyAmountAnalysis: storeReadProcedure
     .input(z.object({
-      restaurantId: z.number(),
       months: z.number().default(3),
     }))
     .query(async ({ input }) => {
@@ -594,8 +611,7 @@ export const purchasesV2Router = router({
     }),
 
   /** 미입고 발주 전표 목록 (품목 수 포함) */
-  pendingOrders: protectedProcedure
-    .input(z.object({ restaurantId: z.number() }))
+  pendingOrders: storeReadProcedure
     .query(async ({ input }) => {
       const orders = await db
         .select({
@@ -633,9 +649,8 @@ export const purchasesV2Router = router({
     }),
 
   /** 중복 입고/발주 감지 (동일 날짜 + 동일 거래처 + 동일 금액) */
-  findDuplicates: managerProcedure
+  findDuplicates: storeWriteProcedure
     .input(z.object({
-      restaurantId: z.number(),
       month: z.string(), // "YYYY-MM"
     }))
     .query(async ({ input }) => {
@@ -686,9 +701,21 @@ export const purchasesV2Router = router({
     }),
 
   /** 중복 전표 삭제 (지정된 ID 삭제) */
-  deleteDuplicate: managerProcedure
+  deleteDuplicate: storeWriteProcedure
     .input(z.object({ orderId: z.number() }))
     .mutation(async ({ input }) => {
+      // restaurantId 일치 검증
+      const [existing] = await db
+        .select({ id: purchaseOrdersV2.id })
+        .from(purchaseOrdersV2)
+        .where(and(
+          eq(purchaseOrdersV2.id, input.orderId),
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+        ))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "전표를 찾을 수 없습니다" });
+      }
       // 항목 먼저 삭제
       await db.delete(purchaseOrderItemsV2)
         .where(eq(purchaseOrderItemsV2.purchaseOrderId, input.orderId));
@@ -699,8 +726,8 @@ export const purchasesV2Router = router({
     }),
 
   /** 월별 거래처별 매입 요약 (거래처별 합산 + 전표 목록 + 품목 상세) */
-  monthlySummaryByCounterparty: protectedProcedure
-    .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
+  monthlySummaryByCounterparty: storeReadProcedure
+    .input(z.object({ year: z.number(), month: z.number() }))
     .query(async ({ input }) => {
       const mm = String(input.month).padStart(2, "0");
       const startDate = `${input.year}-${mm}-01`;
@@ -809,9 +836,8 @@ export const purchasesV2Router = router({
   // ═══════════════════════════════════════════════════════════════════════════
 
   /** 발주 메모 생성 */
-  createMemo: protectedProcedure
+  createMemo: storeWriteProcedure
     .input(z.object({
-      restaurantId: z.number(),
       counterpartyId: z.number().optional(),
       counterpartyName: z.string().optional(),
       content: z.string().min(1),
@@ -839,8 +865,8 @@ export const purchasesV2Router = router({
     }),
 
   /** 날짜별 발주 메모 조회 */
-  listMemosByDate: protectedProcedure
-    .input(z.object({ restaurantId: z.number(), date: z.string() }))
+  listMemosByDate: storeReadProcedure
+    .input(z.object({ date: z.string() }))
     .query(async ({ input }) => {
       const rows = await db
         .select({
@@ -881,9 +907,21 @@ export const purchasesV2Router = router({
     }),
 
   /** 입고 확인 토글 */
-  toggleReceived: protectedProcedure
+  toggleReceived: storeWriteProcedure
     .input(z.object({ id: z.number(), isReceived: z.boolean() }))
     .mutation(async ({ input }) => {
+      // restaurantId 일치 검증
+      const [existing] = await db
+        .select({ id: purchaseOrdersV2.id })
+        .from(purchaseOrdersV2)
+        .where(and(
+          eq(purchaseOrdersV2.id, input.id),
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+        ))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "발주 메모를 찾을 수 없습니다" });
+      }
       await db.update(purchaseOrdersV2)
         .set({
           isReceived: input.isReceived,
@@ -894,8 +932,7 @@ export const purchasesV2Router = router({
     }),
 
   /** 미입고 발주 메모 조회 (리마인더용) */
-  listUnreceived: protectedProcedure
-    .input(z.object({ restaurantId: z.number() }))
+  listUnreceived: storeReadProcedure
     .query(async ({ input }) => {
       const kstToday = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
       const rows = await db
