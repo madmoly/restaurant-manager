@@ -5,10 +5,21 @@ import sharp from "sharp";
 import { Request, Response, Router } from "express";
 
 // ─── 업로드 디렉토리 ──────────────────────────────────────────────────────────
-
-const UPLOAD_ROOT = path.resolve(process.cwd(), "uploads");
+//
+// PR4-D: Railway Volume mount 대응.
+// 환경변수 UPLOAD_ROOT 설정 시 해당 경로 사용 (영속 저장),
+// 미설정 시 process.cwd()/uploads 폴백 (임시 디스크).
+//
+// Railway 운영 권장 설정:
+//   - Volume mount path: /data/uploads
+//   - 환경변수: UPLOAD_ROOT=/data/uploads
+const UPLOAD_ROOT = process.env.UPLOAD_ROOT
+  ? path.resolve(process.env.UPLOAD_ROOT)
+  : path.resolve(process.cwd(), "uploads");
 const CHECKLIST_DIR = path.join(UPLOAD_ROOT, "checklists");
 const ORDERS_DIR = path.join(UPLOAD_ROOT, "orders");
+
+console.log(`[upload] UPLOAD_ROOT = ${UPLOAD_ROOT}${process.env.UPLOAD_ROOT ? " (env)" : " (cwd fallback)"}`);
 
 // 디렉토리 자동 생성
 [UPLOAD_ROOT, CHECKLIST_DIR, ORDERS_DIR].forEach((dir) => {
