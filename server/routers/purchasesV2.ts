@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
-import { router, storeReadProcedure, storeWriteProcedure } from "../trpc";
+import { router, storeReadProcedure, storeWriteProcedure, storeManagerProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { db } from "../db";
 import {
@@ -413,8 +413,8 @@ export const purchasesV2Router = router({
       return { ok: true };
     }),
 
-  /** 전표 삭제 (항목 + 헤더) */
-  deleteOrder: storeWriteProcedure
+  /** 전표 삭제 (항목 + 헤더) — 매니저 이상 */
+  deleteOrder: storeManagerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       // restaurantId 일치 검증
@@ -648,8 +648,8 @@ export const purchasesV2Router = router({
       return withItemCount;
     }),
 
-  /** 중복 입고/발주 감지 (동일 날짜 + 동일 거래처 + 동일 금액) */
-  findDuplicates: storeWriteProcedure
+  /** 중복 입고/발주 감지 (동일 날짜 + 동일 거래처 + 동일 금액) — 매니저 이상 */
+  findDuplicates: storeManagerProcedure
     .input(z.object({
       month: z.string(), // "YYYY-MM"
     }))
@@ -700,8 +700,8 @@ export const purchasesV2Router = router({
       }));
     }),
 
-  /** 중복 전표 삭제 (지정된 ID 삭제) */
-  deleteDuplicate: storeWriteProcedure
+  /** 중복 전표 삭제 (지정된 ID 삭제) — 매니저 이상 */
+  deleteDuplicate: storeManagerProcedure
     .input(z.object({ orderId: z.number() }))
     .mutation(async ({ input }) => {
       // restaurantId 일치 검증
