@@ -1,10 +1,17 @@
 /**
- * 글로벌 에러 수집기
+ * 글로벌 에러 수집기 (클라이언트)
  * - window.onerror (일반 JS 에러)
  * - window.onunhandledrejection (Promise 에러)
  * - React Error Boundary 연동
- * 
- * REST /api/error-report 로 직접 전송 (tRPC 의존 없음)
+ * - tRPC 에러 수동 보고 (reportApiError)
+ *
+ * 전송 경로: REST POST /api/error-report (tRPC 의존 없음 — 앱 크래시 중에도 동작)
+ *
+ * 보호 장치:
+ * - PII 마스킹 (email/phone/주민번호/token/password 키)
+ * - fingerprint 기반 로컬 dedupe (5분, localStorage)
+ * - 루프 가드 (reporter 내부에서 throw 나도 재귀 금지)
+ * - flush 실패 시 무시 (무한 재시도 방지)
  */
 
 type ErrorEntry = {
@@ -17,23 +24,90 @@ type ErrorEntry = {
 
 const QUEUE: ErrorEntry[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
-const SEEN = new Set<string>(); // 중복 방지
 const MAX_QUEUE = 20;
-const FLUSH_DELAY = 2000; // 2초 배치
+const FLUSH_DELAY = 2000;
+const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
+const DEDUPE_KEY = "__err_dedupe_v2";
 
+// 루프 가드: reporter 내부에서 새 에러가 나면 수집 중단
+let INSIDE_REPORTER = false;
+
+// ─── PII 마스킹 ──────────────────────────────────────────────────────────────
+function maskPii(s: string | undefined): string | undefined {
+  if (!s) return s;
+  return s
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "<email>")
+    .replace(/\b01[016789]-?\d{3,4}-?\d{4}\b/g, "<phone>")
+    .replace(/\b\d{6}-?[1-4]\d{6}\b/g, "<rrn>")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer <token>")
+    .replace(/"password"\s*:\s*"[^"]*"/g, '"password":"<masked>"')
+    .replace(/"passwordHash"\s*:\s*"[^"]*"/g, '"passwordHash":"<masked>"');
+}
+
+function maskMetadata(obj: any): any {
+  if (!obj || typeof obj !== "object") return obj;
+  try {
+    const json = JSON.stringify(obj);
+    const masked = maskPii(json);
+    return masked ? JSON.parse(masked) : obj;
+  } catch {
+    return obj;
+  }
+}
+
+// ─── Fingerprint (클라 dedupe용) ─────────────────────────────────────────────
+function fingerprintKey(e: ErrorEntry): string {
+  const msg = (e.message || "").slice(0, 120)
+    .replace(/\d+/g, "#").replace(/\s+/g, " ").toLowerCase();
+  const frame = (e.stack || "").split("\n")[1]?.slice(0, 80) || "";
+  return `${e.errorType}|${msg}|${frame}`;
+}
+
+function shouldSkipDedupe(key: string): boolean {
+  try {
+    const raw = localStorage.getItem(DEDUPE_KEY);
+    const map: Record<string, number> = raw ? JSON.parse(raw) : {};
+    const now = Date.now();
+    // 만료 청소
+    for (const k of Object.keys(map)) {
+      if (now - map[k] > DEDUPE_WINDOW_MS) delete map[k];
+    }
+    if (map[key] && now - map[key] < DEDUPE_WINDOW_MS) {
+      return true;
+    }
+    map[key] = now;
+    localStorage.setItem(DEDUPE_KEY, JSON.stringify(map));
+    return false;
+  } catch {
+    return false; // localStorage 실패 시 dedupe 포기
+  }
+}
+
+// ─── 큐 관리 ─────────────────────────────────────────────────────────────────
 function enqueue(entry: ErrorEntry) {
-  // 동일 메시지 중복 방지
-  const key = entry.errorType + ":" + entry.message.slice(0, 100);
-  if (SEEN.has(key)) return;
-  SEEN.add(key);
-  // 5분 후 중복 키 삭제 (같은 에러 다시 수집 가능)
-  setTimeout(() => SEEN.delete(key), 5 * 60 * 1000);
+  if (INSIDE_REPORTER) return; // 루프 가드
+  INSIDE_REPORTER = true;
+  try {
+    const sanitized: ErrorEntry = {
+      errorType: entry.errorType,
+      message: maskPii(entry.message) || "unknown",
+      stack: maskPii(entry.stack),
+      url: entry.url,
+      metadata: maskMetadata(entry.metadata),
+    };
+    const key = fingerprintKey(sanitized);
+    if (shouldSkipDedupe(key)) return;
 
-  if (QUEUE.length >= MAX_QUEUE) return; // 큐 넘침 방지
-  QUEUE.push(entry);
+    if (QUEUE.length >= MAX_QUEUE) return;
+    QUEUE.push(sanitized);
 
-  if (!flushTimer) {
-    flushTimer = setTimeout(flush, FLUSH_DELAY);
+    if (!flushTimer) {
+      flushTimer = setTimeout(flush, FLUSH_DELAY);
+    }
+  } catch {
+    // 수집 실패는 조용히 무시
+  } finally {
+    INSIDE_REPORTER = false;
   }
 }
 
@@ -46,12 +120,14 @@ async function flush() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ errors: batch }),
+      credentials: "include",
     });
   } catch {
     // 전송 실패 시 무시 (무한 재시도 방지)
   }
 }
 
+// ─── 공개 API ────────────────────────────────────────────────────────────────
 /** React Error Boundary에서 호출 */
 export function reportRenderError(error: Error, componentStack?: string) {
   enqueue({
@@ -97,6 +173,4 @@ export function initErrorReporter() {
       metadata: { type: "unhandledrejection" },
     });
   };
-
-  // 네트워크 에러 감지 (fetch 래핑은 하지 않고 tRPC 레벨에서 처리)
 }

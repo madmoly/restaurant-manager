@@ -28,6 +28,26 @@ const SEVERITY_COLORS: Record<string, string> = {
   warning: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
   info: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
 };
+const P_COLORS: Record<string, string> = {
+  P0: "bg-red-600 text-white",
+  P1: "bg-orange-500 text-white",
+  P2: "bg-amber-400 text-amber-950",
+  P3: "bg-slate-300 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
+};
+const STATUS_LABELS: Record<string, string> = {
+  new: "신규",
+  acknowledged: "확인됨",
+  auto_mitigated: "자동대응",
+  resolved: "해결됨",
+  ignored: "무시",
+};
+const STATUS_COLORS: Record<string, string> = {
+  new: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  acknowledged: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  auto_mitigated: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  resolved: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  ignored: "bg-muted text-muted-foreground",
+};
 const fmtShort = (n: number) => {
   if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}억`;
   if (n >= 10_000) return `${(n / 10_000).toFixed(0)}만`;
@@ -51,7 +71,7 @@ const fmtBytes = (b: number) => {
 // 메인: 시스템 관리 (7탭)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type Tab = "status" | "announce" | "audit" | "session" | "settings" | "api" | "integrity" | "backup" | "errors" | "errorList" | "ocr" | "phoneAudit";
+type Tab = "status" | "announce" | "audit" | "session" | "settings" | "api" | "integrity" | "backup" | "errors" | "errorGroups" | "errorList" | "ocr" | "phoneAudit";
 
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: "status", label: "현황", icon: <Activity size={12} /> },
@@ -63,7 +83,8 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: "integrity", label: "정합성", icon: <CheckCircle2 size={12} /> },
   { key: "backup", label: "백업", icon: <HardDrive size={12} /> },
   { key: "errors", label: "에러개요", icon: <AlertTriangle size={12} /> },
-  { key: "errorList", label: "에러목록", icon: <AlertOctagon size={12} /> },
+  { key: "errorGroups", label: "에러그룹", icon: <AlertOctagon size={12} /> },
+  { key: "errorList", label: "원본로그", icon: <FileWarning size={12} /> },
   { key: "ocr", label: "OCR트래킹", icon: <BarChart3 size={12} /> },
   { key: "phoneAudit", label: "[임시]전화감사", icon: <FileWarning size={12} /> },
 ];
@@ -103,6 +124,7 @@ export default function SystemPage() {
       {tab === "integrity" && <IntegrityTab />}
       {tab === "backup" && <BackupTab />}
       {tab === "errors" && <ErrorOverviewTab />}
+      {tab === "errorGroups" && <ErrorGroupsTab />}
       {tab === "errorList" && <ErrorListTab />}
       {tab === "ocr" && <OcrStatsTab />}
       {tab === "phoneAudit" && <PhoneAuditTab />}
@@ -843,6 +865,187 @@ function ErrorListTab() {
         {errorList.data?.rows.length === 0 && <p className="text-xs text-muted-foreground text-center py-8">에러 로그가 없습니다</p>}
       </div>
     </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 탭: 에러그룹 (fingerprint 기반)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ErrorGroupsTab() {
+  const [status, setStatus] = useState<"active" | "new" | "acknowledged" | "resolved" | "ignored" | "all">("active");
+  const [severity, setSeverity] = useState<"all" | "P0" | "P1" | "P2" | "P3">("all");
+  const [days, setDays] = useState(7);
+  const [expandedFp, setExpandedFp] = useState<string | null>(null);
+  const LIMIT = 30;
+  const [offset, setOffset] = useState(0);
+
+  const summary = trpc.errorLogs.severitySummary.useQuery();
+  const groups = trpc.errorLogs.groupList.useQuery({
+    status, severity, days, limit: LIMIT, offset,
+  });
+  const utils = trpc.useUtils();
+  const setStatusMut = trpc.errorLogs.setStatus.useMutation({
+    onSuccess: () => {
+      toast.success("상태 변경 완료");
+      utils.errorLogs.groupList.invalidate();
+      utils.errorLogs.severitySummary.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const detailQuery = trpc.errorLogs.groupDetail.useQuery(
+    { fingerprint: expandedFp ?? "", limit: 10 },
+    { enabled: !!expandedFp },
+  );
+
+  return (
+    <>
+      {/* severity 상단 카운터 */}
+      <div className="grid grid-cols-4 gap-2">
+        {(["P0", "P1", "P2", "P3"] as const).map(p => (
+          <Card key={p} className="p-3 text-center">
+            <div className={`inline-block text-[10px] px-1.5 py-0.5 rounded font-bold ${P_COLORS[p]}`}>{p}</div>
+            <p className="text-xl font-bold text-foreground tabular-nums mt-1">{summary.data?.[p] ?? 0}</p>
+            <p className="text-[10px] text-muted-foreground">누적 {summary.data?.[`total${p}` as keyof typeof summary.data] ?? 0}건</p>
+          </Card>
+        ))}
+      </div>
+
+      {/* 필터 */}
+      <Card className="p-3 space-y-2">
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-xs text-muted-foreground mr-1">상태:</span>
+          {(["active", "new", "acknowledged", "resolved", "ignored", "all"] as const).map(s => (
+            <Button key={s} variant={status === s ? "default" : "outline"} size="sm" className="h-6 text-[10px] px-2"
+              onClick={() => { setStatus(s); setOffset(0); }}>
+              {s === "active" ? "활성" : s === "all" ? "전체" : STATUS_LABELS[s]}
+            </Button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-xs text-muted-foreground mr-1">심각도:</span>
+          {(["all", "P0", "P1", "P2", "P3"] as const).map(s => (
+            <Button key={s} variant={severity === s ? "default" : "outline"} size="sm" className="h-6 text-[10px] px-2"
+              onClick={() => { setSeverity(s); setOffset(0); }}>
+              {s === "all" ? "전체" : s}
+            </Button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-xs text-muted-foreground mr-1">기간:</span>
+          {[1, 7, 14, 30].map(d => (
+            <Button key={d} variant={days === d ? "default" : "outline"} size="sm" className="h-6 text-[10px] px-2"
+              onClick={() => { setDays(d); setOffset(0); }}>{d}일</Button>
+          ))}
+        </div>
+      </Card>
+
+      {/* 그룹 리스트 */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-foreground">에러 그룹 ({groups.data?.total ?? 0}종)</h3>
+          <div className="flex gap-1">
+            <Button variant="outline" size="sm" className="h-7 text-xs" disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - LIMIT))}>이전</Button>
+            <Button variant="outline" size="sm" className="h-7 text-xs"
+              disabled={(groups.data?.rows.length ?? 0) < LIMIT}
+              onClick={() => setOffset(offset + LIMIT)}>다음</Button>
+          </div>
+        </div>
+
+        {groups.isLoading && <p className="text-xs text-muted-foreground text-center py-6">로딩 중...</p>}
+        {!groups.isLoading && (groups.data?.rows.length ?? 0) === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-8">해당 조건의 에러 그룹이 없습니다</p>
+        )}
+
+        <div className="space-y-2">
+          {groups.data?.rows.map((g: any) => {
+            const isOpen = expandedFp === g.fingerprint;
+            return (
+              <div key={g.fingerprint} className="border border-border/50 rounded-lg overflow-hidden">
+                <button
+                  className="w-full text-left px-3 py-2 hover:bg-muted/30 transition-colors"
+                  onClick={() => setExpandedFp(isOpen ? null : g.fingerprint)}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0 ${P_COLORS[g.severity ?? "P3"]}`}>{g.severity ?? "P3"}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${STATUS_COLORS[g.status] ?? ""}`}>{STATUS_LABELS[g.status] ?? g.status}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">{g.category ?? "?"}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">{g.errorType}</span>
+                    <span className="text-sm font-bold text-red-500 tabular-nums ml-auto shrink-0">×{g.occurrenceCount}</span>
+                    {isOpen ? <ChevronUp className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
+                  </div>
+                  <p className="text-xs text-foreground line-clamp-2 break-all">{g.message}</p>
+                  <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground">
+                    <span>사용자 {g.affectedUserCount}</span>
+                    <span>매장 {g.affectedRestaurantCount}</span>
+                    <span>첫 발생: {fmtDateTime(g.firstSeenAt)}</span>
+                    <span>최근: {fmtDateTime(g.lastSeenAt)}</span>
+                    {g.notifiedAt && <span className="text-amber-600">알림 {fmtDateTime(g.notifiedAt)}</span>}
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div className="border-t border-border/30 bg-muted/20 p-3 space-y-2">
+                    {/* 상태 변경 버튼 */}
+                    <div className="flex gap-1 flex-wrap">
+                      {g.status !== "acknowledged" && (
+                        <Button size="sm" variant="outline" className="h-6 text-[10px]"
+                          disabled={setStatusMut.isPending}
+                          onClick={() => setStatusMut.mutate({ fingerprint: g.fingerprint, status: "acknowledged" })}>
+                          확인
+                        </Button>
+                      )}
+                      {g.status !== "resolved" && (
+                        <Button size="sm" variant="outline" className="h-6 text-[10px]"
+                          disabled={setStatusMut.isPending}
+                          onClick={() => setStatusMut.mutate({ fingerprint: g.fingerprint, status: "resolved" })}>
+                          해결
+                        </Button>
+                      )}
+                      {g.status !== "ignored" && (
+                        <Button size="sm" variant="outline" className="h-6 text-[10px]"
+                          disabled={setStatusMut.isPending}
+                          onClick={() => setStatusMut.mutate({ fingerprint: g.fingerprint, status: "ignored" })}>
+                          무시
+                        </Button>
+                      )}
+                      {g.status !== "new" && (
+                        <Button size="sm" variant="outline" className="h-6 text-[10px]"
+                          disabled={setStatusMut.isPending}
+                          onClick={() => setStatusMut.mutate({ fingerprint: g.fingerprint, status: "new" })}>
+                          신규로 되돌림
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground font-mono break-all">fp: {g.fingerprint}</p>
+                    {g.url && <p className="text-[10px] text-muted-foreground truncate">URL: {g.url}</p>}
+
+                    {/* 최근 발생 이력 */}
+                    <div className="text-[10px] text-muted-foreground">최근 발생 이력</div>
+                    {detailQuery.isLoading && <p className="text-[10px] text-muted-foreground">로딩...</p>}
+                    {detailQuery.data?.map((d: any) => (
+                      <div key={d.id} className="border-t border-border/20 pt-1.5">
+                        <div className="flex gap-3 text-[10px] text-muted-foreground">
+                          <span>#{d.id}</span>
+                          <span>{fmtDateTime(d.createdAt)}</span>
+                          <span>user {d.userId ?? "-"}</span>
+                          <span>매장 {d.restaurantId ?? "-"}</span>
+                        </div>
+                        {d.stack && (
+                          <pre className="text-[10px] text-muted-foreground bg-muted/40 p-2 mt-1 rounded overflow-x-auto max-h-32 whitespace-pre-wrap break-all">{d.stack}</pre>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </>
   );
 }
 

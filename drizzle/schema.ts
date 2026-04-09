@@ -53,6 +53,8 @@ export const businessGroups = mysqlTable("business_groups", {
   // 대표(admin) userId — 그룹의 소유자
   adminId: int("adminId").notNull(),
   description: varchar("description", { length: 500 }),
+  // 사업군 식별 컬러 (#RRGGBB). null이면 프론트에서 이름 해시 fallback.
+  color: varchar("color", { length: 7 }),
   isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -829,6 +831,20 @@ export const errorLogs = mysqlTable("error_logs", {
   userAgent: varchar("userAgent", { length: 500 }),
   metadata: json("metadata"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // ─── 분류 · 집계 · 상태 (2026-04-09 추가) ────────────────────────────────
+  fingerprint: varchar("fingerprint", { length: 64 }),       // sha1(errorType+normalize(message)+topFrame)
+  severity: varchar("severity", { length: 4 }),              // P0|P1|P2|P3
+  category: varchar("category", { length: 32 }),             // auth|db|ocr|trpc|ui|network|permission|unknown
+  occurrenceCount: int("occurrenceCount").default(1).notNull(),
+  firstSeenAt: timestamp("firstSeenAt").defaultNow(),
+  lastSeenAt: timestamp("lastSeenAt").defaultNow(),
+  affectedUserCount: int("affectedUserCount").default(1).notNull(),
+  affectedRestaurantCount: int("affectedRestaurantCount").default(0).notNull(),
+  status: varchar("status", { length: 16 }).default("new").notNull(), // new|acknowledged|auto_mitigated|resolved|ignored
+  autoAction: varchar("autoAction", { length: 32 }),
+  notifiedAt: timestamp("notifiedAt"),
+  resolvedAt: timestamp("resolvedAt"),
+  resolvedBy: int("resolvedBy"),
 });
 export type ErrorLog = typeof errorLogs.$inferSelect;
 

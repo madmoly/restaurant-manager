@@ -814,6 +814,38 @@ app.use(express.json());
       `ALTER TABLE employment_electronic_contracts MODIFY COLUMN status ENUM('draft','sent','signed','expired','cancelled','superseded') NOT NULL DEFAULT 'draft'`
     ).catch(() => {});
 
+    // ─── 에러 로그 분류/집계 컬럼 (2026-04-09 추가) ─────────────────────────
+    await addColumnIfNotExists("error_logs", "fingerprint", "VARCHAR(64) DEFAULT NULL");
+    await addColumnIfNotExists("error_logs", "severity", "VARCHAR(4) DEFAULT NULL");
+    await addColumnIfNotExists("error_logs", "category", "VARCHAR(32) DEFAULT NULL");
+    await addColumnIfNotExists("error_logs", "occurrenceCount", "INT NOT NULL DEFAULT 1");
+    await addColumnIfNotExists("error_logs", "firstSeenAt", "TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfNotExists("error_logs", "lastSeenAt", "TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfNotExists("error_logs", "affectedUserCount", "INT NOT NULL DEFAULT 1");
+    await addColumnIfNotExists("error_logs", "affectedRestaurantCount", "INT NOT NULL DEFAULT 0");
+    await addColumnIfNotExists("error_logs", "status", "VARCHAR(16) NOT NULL DEFAULT 'new'");
+    await addColumnIfNotExists("error_logs", "autoAction", "VARCHAR(32) DEFAULT NULL");
+    await addColumnIfNotExists("error_logs", "notifiedAt", "TIMESTAMP NULL DEFAULT NULL");
+    await addColumnIfNotExists("error_logs", "resolvedAt", "TIMESTAMP NULL DEFAULT NULL");
+    await addColumnIfNotExists("error_logs", "resolvedBy", "INT DEFAULT NULL");
+    // fingerprint 인덱스 (그룹 조회 + upsert 속도)
+    try {
+      await conn.query(`CREATE INDEX idx_error_fingerprint ON error_logs (fingerprint)`);
+    } catch (e: any) {
+      if (!e.message.includes("Duplicate")) console.log("[migrate] idx_error_fingerprint:", e.message);
+    }
+    try {
+      await conn.query(`CREATE INDEX idx_error_status_severity ON error_logs (status, severity)`);
+    } catch (e: any) {
+      if (!e.message.includes("Duplicate")) console.log("[migrate] idx_error_status_severity:", e.message);
+    }
+    // notifications.type ENUM에 'error_alert' 추가
+    try {
+      await conn.query(`ALTER TABLE notifications MODIFY COLUMN type ENUM('schedule_change','cost_exceeded','target_achieved','general','schedule_assigned','schedule_updated','schedule_deleted','health_cert_expiry','system_announcement','error_alert') NOT NULL`);
+    } catch (e: any) {
+      if (!e.message.includes("Duplicate")) console.log("[migrate] notifications.type error_alert:", e.message);
+    }
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {
@@ -822,12 +854,54 @@ app.use(express.json());
 })();
 
 // ─── 에러 수집 REST 엔드포인트 (tRPC 의존 없음) ──────────────────────────────
+// 분류 · fingerprint upsert · 임계치 평가 · master 알림 파이프라인
+import {
+  computeFingerprint, detectCategory, detectSeverity,
+  escalateIfNeeded, shouldNotify,
+} from "./errorClassifier";
+
+// 메모리 rate limit (IP+fingerprint 기준, 1분 버킷)
+const RATE_BUCKET = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_PER_MIN = 30;
+function rateLimitCheck(key: string): boolean {
+  const now = Date.now();
+  const entry = RATE_BUCKET.get(key);
+  if (!entry || now > entry.resetAt) {
+    RATE_BUCKET.set(key, { count: 1, resetAt: now + 60_000 });
+    return true;
+  }
+  entry.count += 1;
+  if (entry.count > RATE_LIMIT_PER_MIN) return false;
+  return true;
+}
+// 주기적 청소 (10분마다)
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of RATE_BUCKET.entries()) {
+    if (now > v.resetAt) RATE_BUCKET.delete(k);
+  }
+}, 10 * 60 * 1000).unref?.();
+
+// PII 마스킹 (서버 2차 방어선, 클라에서 1차 수행)
+function maskPii(s: string | null | undefined): string | null {
+  if (!s) return s ?? null;
+  return s
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "<email>")
+    .replace(/\b01[016789]-?\d{3,4}-?\d{4}\b/g, "<phone>")
+    .replace(/\b\d{6}-?[1-4]\d{6}\b/g, "<rrn>")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer <token>")
+    .replace(/"password"\s*:\s*"[^"]*"/g, '"password":"<masked>"');
+}
+
 app.post("/api/error-report", async (req, res) => {
   try {
     const { errors } = req.body as { errors: Array<{
       errorType?: string; message: string; stack?: string; url?: string; metadata?: any;
     }> };
     if (!Array.isArray(errors) || errors.length === 0) return res.json({ ok: true });
+
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
+               || req.socket.remoteAddress || "unknown";
 
     const mysql2 = await import("mysql2/promise");
     const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
@@ -847,20 +921,133 @@ app.post("/api/error-report", async (req, res) => {
       } catch {}
 
       const userAgent = req.headers["user-agent"]?.slice(0, 500);
+      // master user ids (알림 수신자) - 1회 조회
+      let masterIds: number[] = [];
+      try {
+        const [mrows] = await conn.query(`SELECT id FROM users WHERE role = 'master'`) as any[];
+        masterIds = (mrows as any[]).map((r) => r.id);
+      } catch {}
 
       for (const err of errors.slice(0, 20)) {
-        await conn.query(
-          `INSERT INTO error_logs (userId, errorType, message, stack, url, userAgent, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            userId,
-            (err.errorType || "client").slice(0, 50),
-            (err.message || "unknown").slice(0, 2000),
-            err.stack?.slice(0, 5000) || null,
-            err.url?.slice(0, 500) || null,
-            userAgent || null,
-            err.metadata ? JSON.stringify(err.metadata) : null,
-          ]
-        );
+        const errorType = (err.errorType || "client").slice(0, 50);
+        const message = maskPii((err.message || "unknown").slice(0, 2000)) || "unknown";
+        const stack = maskPii(err.stack?.slice(0, 5000) || null);
+        const url = err.url?.slice(0, 500) || null;
+
+        // rate limit per (ip + fingerprint)
+        const fingerprint = computeFingerprint({ errorType, message, stack });
+        const rateKey = `${ip}:${fingerprint}`;
+        if (!rateLimitCheck(rateKey)) {
+          // 차단 시 기존 row의 count만 증가 (본문 저장 안 함)
+          await conn.query(
+            `UPDATE error_logs SET occurrenceCount = occurrenceCount + 1, lastSeenAt = NOW() WHERE fingerprint = ? ORDER BY id DESC LIMIT 1`,
+            [fingerprint]
+          );
+          continue;
+        }
+
+        const category = detectCategory({ errorType, message, url });
+        let severity = detectSeverity({ category, message, url });
+
+        // 기존 fingerprint row 조회 (status='ignored'면 skip)
+        const [existRows] = await conn.query(
+          `SELECT id, status, severity, firstSeenAt FROM error_logs WHERE fingerprint = ? ORDER BY id DESC LIMIT 1`,
+          [fingerprint]
+        ) as any[];
+        const existing = (existRows as any[])[0];
+
+        if (existing?.status === "ignored" || existing?.status === "resolved") {
+          // 무시/해결된 에러는 카운트만 올리고 끝
+          await conn.query(
+            `UPDATE error_logs SET occurrenceCount = occurrenceCount + 1, lastSeenAt = NOW() WHERE id = ?`,
+            [existing.id]
+          );
+          continue;
+        }
+
+        // 집계: 최근 5분/1시간 동일 fingerprint 건수 + 영향 매장 수
+        const [aggRows] = await conn.query(
+          `SELECT
+             SUM(CASE WHEN createdAt >= NOW() - INTERVAL 5 MINUTE THEN 1 ELSE 0 END) AS c5,
+             SUM(CASE WHEN createdAt >= NOW() - INTERVAL 60 MINUTE THEN 1 ELSE 0 END) AS c60,
+             COUNT(DISTINCT restaurantId) AS rcnt,
+             COUNT(DISTINCT userId) AS ucnt
+           FROM error_logs WHERE fingerprint = ?`,
+          [fingerprint]
+        ) as any[];
+        const agg = (aggRows as any[])[0] || {};
+        severity = escalateIfNeeded(severity, {
+          count5m: Number(agg.c5) || 0,
+          count1h: Number(agg.c60) || 0,
+          affectedRestaurants: Number(agg.rcnt) || 0,
+        });
+
+        if (existing) {
+          // 업서트 (같은 fingerprint 그룹 row 갱신)
+          await conn.query(
+            `UPDATE error_logs
+               SET occurrenceCount = occurrenceCount + 1,
+                   lastSeenAt = NOW(),
+                   severity = ?,
+                   category = ?,
+                   message = ?,
+                   stack = ?,
+                   url = ?,
+                   userAgent = ?,
+                   userId = COALESCE(userId, ?),
+                   affectedUserCount = GREATEST(affectedUserCount, ?),
+                   affectedRestaurantCount = GREATEST(affectedRestaurantCount, ?)
+             WHERE id = ?`,
+            [
+              severity, category, message, stack, url, userAgent || null,
+              userId, Number(agg.ucnt) || 1, Number(agg.rcnt) || 0,
+              existing.id,
+            ]
+          );
+        } else {
+          // 신규 row
+          await conn.query(
+            `INSERT INTO error_logs
+               (userId, errorType, message, stack, url, userAgent, metadata,
+                fingerprint, severity, category, occurrenceCount, firstSeenAt, lastSeenAt,
+                affectedUserCount, affectedRestaurantCount, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), 1, 0, 'new')`,
+            [
+              userId, errorType, message, stack, url, userAgent || null,
+              err.metadata ? JSON.stringify(err.metadata) : null,
+              fingerprint, severity, category,
+            ]
+          );
+        }
+
+        // 마스터 알림 (P0/P1만, 그룹당 30분 throttle)
+        if (shouldNotify(severity, !existing) && masterIds.length > 0) {
+          const [throttleRows] = await conn.query(
+            `SELECT notifiedAt FROM error_logs WHERE fingerprint = ? ORDER BY id DESC LIMIT 1`,
+            [fingerprint]
+          ) as any[];
+          const lastNotified = (throttleRows as any[])[0]?.notifiedAt as Date | null;
+          const THROTTLE_MS = 30 * 60 * 1000;
+          if (!lastNotified || Date.now() - new Date(lastNotified).getTime() > THROTTLE_MS) {
+            const title = `[${severity}] ${category} 에러 발생`;
+            const content = `${message.slice(0, 180)}${message.length > 180 ? "…" : ""}\n발생: ${Number(agg.c60) || 1}건/1시간, 영향매장 ${Number(agg.rcnt) || 0}`;
+            try {
+              for (const mid of masterIds) {
+                await conn.query(
+                  `INSERT INTO notifications (recipientId, type, title, content, isRead, createdAt)
+                   VALUES (?, 'error_alert', ?, ?, FALSE, NOW())`,
+                  [mid, title.slice(0, 200), content]
+                );
+              }
+              await conn.query(
+                `UPDATE error_logs SET notifiedAt = NOW() WHERE fingerprint = ? ORDER BY id DESC LIMIT 1`,
+                [fingerprint]
+              );
+            } catch (e: any) {
+              console.error("[error-report notify]", e.message);
+            }
+          }
+        }
       }
       res.json({ ok: true });
     } finally {
