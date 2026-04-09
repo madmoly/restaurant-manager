@@ -258,6 +258,19 @@ function ChecklistSection({
   const photoRef = useRef(photoValues);
   photoRef.current = photoValues;
 
+  // 초기화 가드: (restaurantId, date, targetTab) 조합이 바뀔 때만 서버값으로 재초기화
+  // — 그렇지 않으면 매 save→refetch마다 로컬 state가 덮어쓰여 체크박스가 점멸함
+  const initKeyRef = useRef<string>('');
+  const initKey = `${restaurantId}|${date}|${targetTab}`;
+
+  // 저장 쓰로틀: 빠른 연타 시 마지막 요청만 전송
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<{
+    ids: number[];
+    txt: Record<number, string>;
+    pht: Record<number, string>;
+  } | null>(null);
+
   const templatesQuery = trpc.storeChecklists.listTemplates.useQuery({
     restaurantId,
     targetTab,
@@ -272,47 +285,95 @@ function ChecklistSection({
 
   const checklistUtils = trpc.useUtils();
   const saveLogMutation = trpc.storeChecklists.saveLog.useMutation({
-    onSuccess: () => {
-      // 마감탭 체크리스트 완료 상태 실시간 갱신
-      checklistUtils.storeChecklists.getLog.invalidate({ restaurantId, logDate: date });
+    onSuccess: (_data, variables) => {
+      // 캐시를 로컬 낙관값으로 직접 갱신 — refetch 대신 직접 주입하여 useEffect 재트리거 방지
+      checklistUtils.storeChecklists.getLog.setData(
+        { restaurantId, logDate: date, targetTab },
+        (old: any) => ({
+          ...(old ?? {
+            id: 0,
+            restaurantId,
+            logDate: date,
+            targetTab,
+            checkType: null,
+            noOrderToday: false,
+          }),
+          checkedItemIds: variables.checkedItemIds,
+          checkedItems: variables.checkedItems ?? [],
+          completedAt: new Date(),
+        }),
+      );
     },
     onError: (error: any) => {
       toast.error(`저장 실패: ${error.message}`);
+      // 실패 시에만 서버 값으로 복구
+      checklistUtils.storeChecklists.getLog.invalidate({ restaurantId, logDate: date, targetTab });
     },
   });
 
-  // Initialize from log data
+  // Initialize from log data — 키 조합이 바뀔 때만 최초 1회
   useEffect(() => {
+    if (initKeyRef.current === initKey) return;
+    if (logQuery.isLoading) return;
+
+    initKeyRef.current = initKey;
+
     if (logQuery.data?.checkedItemIds) {
       setCheckedItemIds(logQuery.data.checkedItemIds);
       const newTextValues: Record<number, string> = {};
       const newPhotoValues: Record<number, string> = {};
-
       logQuery.data.checkedItems?.forEach((item: any) => {
-        if (item.textValue) newTextValues[item.itemId] = item.textValue;
+        if (item.textValue || item.answer) {
+          newTextValues[item.itemId] = item.textValue ?? item.answer;
+        }
         if (item.photoUrl) newPhotoValues[item.itemId] = item.photoUrl;
       });
-
       setTextValues(newTextValues);
       setPhotoValues(newPhotoValues);
+    } else {
+      setCheckedItemIds([]);
+      setTextValues({});
+      setPhotoValues({});
     }
-  }, [logQuery.data]);
+  }, [initKey, logQuery.data, logQuery.isLoading]);
 
-  const doSave = (ids: number[], txtOverride?: Record<number, string>, photoOverride?: Record<number, string>) => {
-    const txt = txtOverride ?? textRef.current;
-    const pht = photoOverride ?? photoRef.current;
-    const updatedCheckedItems = templatesQuery.data
-      ?.filter((item) => ids.includes(item.id))
+  const flushSave = () => {
+    const payload = pendingSaveRef.current;
+    if (!payload) return;
+    pendingSaveRef.current = null;
+    const updatedCheckedItems = (templatesQuery.data ?? [])
+      .filter((item) => payload.ids.includes(item.id))
       .map((item) => ({
         itemId: item.id,
-        answer: txt[item.id] || undefined,
-        photoUrl: pht[item.id] || undefined,
-      })) || [];
+        answer: payload.txt[item.id] || undefined,
+        photoUrl: payload.pht[item.id] || undefined,
+      }));
     saveLogMutation.mutate({
       restaurantId, logDate: date, targetTab,
-      checkedItemIds: ids, checkedItems: updatedCheckedItems,
+      checkedItemIds: payload.ids, checkedItems: updatedCheckedItems,
     });
   };
+
+  const doSave = (ids: number[], txtOverride?: Record<number, string>, photoOverride?: Record<number, string>) => {
+    pendingSaveRef.current = {
+      ids,
+      txt: txtOverride ?? textRef.current,
+      pht: photoOverride ?? photoRef.current,
+    };
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(flushSave, 250); // 250ms trailing debounce
+  };
+
+  // 언마운트 시 보류 중 저장 flush
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        flushSave();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleToggleItem = (itemId: number) => {
     setCheckedItemIds((prev) => {

@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { eq, and, sql, count } from "drizzle-orm";
+import { eq, and, sql, count, inArray } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProcedure, masterProcedure } from "../trpc";
-import { db } from "../db";
-import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets, auditLogs, employeeContracts, employmentElectronicContracts } from "../../drizzle/schema";
+import { db, rawPool } from "../db";
+import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets, auditLogs, employeeContracts, employmentElectronicContracts, businessGroups } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { activeRealStoreCondition, getOwnedRestaurants } from "../helpers/restaurantScope";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+import { seedDefaultChecklistsForRestaurant } from "../seedChecklists";
 
 /** 주소 → 좌표 자동 변환 (Nominatim / OpenStreetMap) + API 사용량 로깅 */
 async function geocodeAddress(address: string, userId?: number, restaurantId?: number): Promise<{ latitude: string; longitude: string } | null> {
@@ -123,11 +124,43 @@ export const restaurantsRouter = router({
     const staffMap = new Map(staffCounts.map(s => [s.restaurantId, Number(s.staffCount)]));
     const salesMap = new Map(monthlySales.map(s => [s.restaurantId, Number(s.total)]));
 
-    return allRestaurants.map(r => ({
-      ...r,
-      staffCount: staffMap.get(r.id) ?? 0,
-      monthlySales: salesMap.get(r.id) ?? 0,
-    }));
+    // 사업군(business_groups) 조인: restaurants.ownerAdminId → business_groups.adminId
+    // 운영상 1 admin ↔ 1 group이지만 DB 레벨 unique 제약 없음 → 중복 시 id ASC 기준 첫 번째 선택
+    const adminIdSet = new Set<number>();
+    for (const r of allRestaurants) {
+      if (r.ownerAdminId != null) adminIdSet.add(r.ownerAdminId);
+    }
+    const adminIds = [...adminIdSet];
+    const groupRows = adminIds.length > 0
+      ? await db
+          .select({
+            id: businessGroups.id,
+            name: businessGroups.name,
+            color: businessGroups.color,
+            adminId: businessGroups.adminId,
+          })
+          .from(businessGroups)
+          .where(inArray(businessGroups.adminId, adminIds))
+          .orderBy(businessGroups.id)
+      : [];
+    const groupByAdmin = new Map<number, { id: number; name: string; color: string | null }>();
+    for (const g of groupRows) {
+      if (!groupByAdmin.has(g.adminId)) {
+        groupByAdmin.set(g.adminId, { id: g.id, name: g.name, color: g.color ?? null });
+      }
+    }
+
+    return allRestaurants.map(r => {
+      const bg = r.ownerAdminId != null ? groupByAdmin.get(r.ownerAdminId) : undefined;
+      return {
+        ...r,
+        staffCount: staffMap.get(r.id) ?? 0,
+        monthlySales: salesMap.get(r.id) ?? 0,
+        businessGroupId: bg?.id ?? null,
+        businessGroupName: bg?.name ?? null,
+        businessGroupColor: bg?.color ?? null,
+      };
+    });
   }),
 
   /** 내 매장 + 역할 — tutorial 사용자는 tutorial 매장, 실사용자는 실매장 */
@@ -188,6 +221,16 @@ export const restaurantsRouter = router({
         insertData.ownerAdminId = me?.parentId ?? ctx.user.userId;
       }
       const [result] = await db.insert(restaurants).values(insertData).$returningId();
+
+      // 신규 매장: 기본 체크리스트 24항목 즉시 시드 (effectiveFrom=생성일)
+      // 실패해도 매장 생성 자체는 성공 처리 — 사용자 차단 방지
+      try {
+        const added = await seedDefaultChecklistsForRestaurant(rawPool, result.id);
+        console.log(`[restaurants.create] seeded ${added} default checklists for restaurant ${result.id}`);
+      } catch (e: any) {
+        console.error(`[restaurants.create] checklist seed failed for restaurant ${result.id}:`, e.message);
+      }
+
       return { id: result.id };
     }),
 

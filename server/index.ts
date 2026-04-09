@@ -163,6 +163,38 @@ app.use(express.json());
       console.log("[migrate] targetTab backfill:", e.message);
     }
 
+    // daily_checklist_logs: 중복 로그 정리 + UNIQUE(restaurantId, logDate, targetTab)
+    //   - 경쟁 조건으로 같은 (매장, 날짜, 탭)에 여러 로그가 생기는 것을 차단
+    //   - 운영캘린더 total이 중복 누적되어 영원히 "미완료"로 보이는 2차 버그 방지
+    try {
+      // (a) 중복 행 정리 — 가장 최근 업데이트된 행만 남김
+      await conn.query(`
+        DELETE d1 FROM daily_checklist_logs d1
+        INNER JOIN daily_checklist_logs d2
+          ON d1.restaurantId = d2.restaurantId
+         AND d1.logDate = d2.logDate
+         AND d1.targetTab <=> d2.targetTab
+         AND (d1.updatedAt < d2.updatedAt OR (d1.updatedAt = d2.updatedAt AND d1.id < d2.id))
+      `);
+      // (b) targetTab NULL 보정 (UNIQUE가 NULL 복수행을 허용하는 MySQL 특성 감안, 방어적 default)
+      await conn.query(`UPDATE daily_checklist_logs SET targetTab = 'open' WHERE targetTab IS NULL`);
+      // (c) UNIQUE 인덱스 추가 (이미 존재하면 무시)
+      const [idxRows] = await conn.query(
+        `SELECT COUNT(*) as cnt FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_checklist_logs'
+           AND INDEX_NAME = 'uniq_daily_checklist_logs_rest_date_tab'`
+      ) as any[];
+      if (idxRows[0].cnt === 0) {
+        await conn.query(`
+          ALTER TABLE daily_checklist_logs
+          ADD UNIQUE INDEX uniq_daily_checklist_logs_rest_date_tab (restaurantId, logDate, targetTab)
+        `);
+        console.log("[migrate] daily_checklist_logs UNIQUE index added");
+      }
+    } catch (e: any) {
+      console.log("[migrate] daily_checklist_logs UNIQUE:", e.message);
+    }
+
     // notifications type ENUM 확장 (health_cert_expiry 추가)
     try {
       await conn.query(`ALTER TABLE notifications MODIFY COLUMN type ENUM('schedule_change','cost_exceeded','target_achieved','general','schedule_assigned','schedule_updated','schedule_deleted','health_cert_expiry') NOT NULL`);
@@ -427,6 +459,10 @@ app.use(express.json());
         INDEX idx_bg_admin (adminId)
       )
     `);
+    // 사업군 식별 컬러 (#RRGGBB) — 없으면 프론트에서 이름 해시 fallback
+    await conn.query(`
+      ALTER TABLE business_groups ADD COLUMN IF NOT EXISTS color VARCHAR(7) DEFAULT NULL
+    `).catch(() => {});
     // 기존 admin 중 business_groups 미등록 → 자동 백필 (이름 = admin.name + " 사업그룹")
     await conn.query(`
       INSERT INTO business_groups (name, adminId)
@@ -526,56 +562,28 @@ app.use(express.json());
       ALTER TABLE schedules ADD COLUMN breakMinutes INT DEFAULT 0
     `).catch(() => {}); // 이미 존재하면 Duplicate column → 무시
 
-    // 5) 기본 체크리스트 시드 — 매장별로 체크리스트가 없으면 기본 항목 등록
+    // 5) 기본 체크리스트 시드 — 최초 1회만 기존 매장 전체에 시드
+    //    이후 신규 매장은 restaurants.create 에서 직접 시드
+    //    (system_settings의 플래그로 가드하여 매 부팅마다 풀스캔 발생 방지)
     try {
-      const [restaurants] = await conn.query(`SELECT id FROM restaurants`) as any[];
-      const defaultTemplates: { targetTab: string; checkType: string; itemText: string; sortOrder: number }[] = [
-        // 오픈 체크리스트
-        { targetTab: 'open', checkType: 'open', itemText: '매장 조명 및 간판 점등', sortOrder: 1 },
-        { targetTab: 'open', checkType: 'open', itemText: '에어컨/난방 및 환기 시스템 가동', sortOrder: 2 },
-        { targetTab: 'open', checkType: 'open', itemText: '홀 테이블/의자 정리 및 세팅', sortOrder: 3 },
-        { targetTab: 'open', checkType: 'open', itemText: '화장실 청소 및 비품(휴지/비누) 확인', sortOrder: 4 },
-        { targetTab: 'open', checkType: 'open', itemText: '식재료 유통기한 및 상태 확인', sortOrder: 5 },
-        { targetTab: 'open', checkType: 'open', itemText: 'POS 시스템 정상 작동 확인', sortOrder: 6 },
-        { targetTab: 'open', checkType: 'open', itemText: '전일 마감 사항 인수인계 확인', sortOrder: 7 },
-        // 매입 체크리스트
-        { targetTab: 'purchase', checkType: 'order', itemText: '금일 발주서/입고 예정 확인', sortOrder: 1 },
-        { targetTab: 'purchase', checkType: 'order', itemText: '입고 식재료 수량 검수', sortOrder: 2 },
-        { targetTab: 'purchase', checkType: 'order', itemText: '유통기한 및 신선도 확인', sortOrder: 3 },
-        { targetTab: 'purchase', checkType: 'order', itemText: '냉장/냉동 보관 온도 확인', sortOrder: 4 },
-        { targetTab: 'purchase', checkType: 'order', itemText: '전표/명세서 대조 및 보관', sortOrder: 5 },
-        // 일간보고 체크리스트
-        { targetTab: 'midday', checkType: 'other', itemText: '중간 매출 현황 기록', sortOrder: 1 },
-        { targetTab: 'midday', checkType: 'other', itemText: '주요 식재료 재고 현황 확인', sortOrder: 2 },
-        { targetTab: 'midday', checkType: 'other', itemText: '피크타임 인원 배치 확인', sortOrder: 3 },
-        { targetTab: 'midday', checkType: 'other', itemText: '고객 클레임/특이사항 기록', sortOrder: 4 },
-        // 마감 체크리스트
-        { targetTab: 'close', checkType: 'cleaning', itemText: '당일 매출 정산 (현금/카드/이체 확인)', sortOrder: 1 },
-        { targetTab: 'close', checkType: 'cleaning', itemText: '냉장/냉동고 온도 기록 확인', sortOrder: 2 },
-        { targetTab: 'close', checkType: 'cleaning', itemText: '주방 청소 및 정리 완료', sortOrder: 3 },
-        { targetTab: 'close', checkType: 'cleaning', itemText: '홀 청소 및 테이블 정리', sortOrder: 4 },
-        { targetTab: 'close', checkType: 'cleaning', itemText: '쓰레기 분리수거 및 반출', sortOrder: 5 },
-        { targetTab: 'close', checkType: 'cleaning', itemText: '가스 밸브 차단 확인', sortOrder: 6 },
-        { targetTab: 'close', checkType: 'cleaning', itemText: '전기 점검 (불필요 기기 OFF)', sortOrder: 7 },
-        { targetTab: 'close', checkType: 'cleaning', itemText: '문단속 및 보안 확인', sortOrder: 8 },
-      ];
+      const [flagRows] = await conn.query(
+        `SELECT settingValue FROM system_settings WHERE settingKey = 'initial_checklist_seed_done' LIMIT 1`
+      ) as any[];
+      const done = flagRows[0]?.settingValue === "true";
 
-      for (const store of restaurants) {
-        let added = 0;
-        for (const t of defaultTemplates) {
-          // 탭+항목명 기준 중복 체크 — isActive 무관, 존재하면 재생성 안 함
-          const [dup] = await conn.query(
-            `SELECT COUNT(*) as cnt FROM store_checklist_templates WHERE restaurantId = ? AND targetTab = ? AND itemText = ?`,
-            [store.id, t.targetTab, t.itemText]
-          ) as any[];
-          if (dup[0].cnt > 0) continue;
-          await conn.query(
-            `INSERT INTO store_checklist_templates (restaurantId, targetTab, checkType, itemText, requirementType, sortOrder, repeatType, isActive) VALUES (?, ?, ?, ?, 'none', ?, 'daily', 1)`,
-            [store.id, t.targetTab, t.checkType, t.itemText, t.sortOrder]
-          );
-          added++;
+      if (!done) {
+        const { seedDefaultChecklistsForRestaurant } = await import("./seedChecklists");
+        const [restaurants] = await conn.query(`SELECT id FROM restaurants`) as any[];
+        for (const store of restaurants) {
+          const added = await seedDefaultChecklistsForRestaurant(conn as any, store.id);
+          if (added > 0) console.log(`[migrate] seeded ${added} default checklists for restaurant ${store.id}`);
         }
-        if (added > 0) console.log(`[migrate] seeded ${added} default checklists for restaurant ${store.id}`);
+        await conn.query(
+          `INSERT INTO system_settings (settingKey, settingValue, description)
+           VALUES ('initial_checklist_seed_done', 'true', '기존 매장 기본 체크리스트 초기 시드 완료 플래그')
+           ON DUPLICATE KEY UPDATE settingValue = 'true'`
+        );
+        console.log("[migrate] initial checklist seed completed, flag set");
       }
     } catch (e: any) {
       console.log("[migrate] checklist seed skipped:", e.message);

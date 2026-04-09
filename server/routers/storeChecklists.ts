@@ -19,8 +19,10 @@ const targetTabEnum = z.enum(["open", "purchase", "midday", "close"]);
  * - repeatType = "daily" (또는 "none"/null) → 항상 표시
  * - repeatType = "weekly" + repeatDays(0~6 요일) → 해당 요일만 표시
  * - repeatType = "monthly" + repeatDays(1~31 일자) → 해당 날짜만 표시
+ *
+ * export — dailyOps.getMonth 등 다른 라우터에서 동일 필터 재사용
  */
-function shouldShowOnDate(
+export function shouldShowOnDate(
   template: {
     repeatType: string | null;
     repeatDays: number[] | null;
@@ -260,7 +262,10 @@ export const storeChecklistsRouter = router({
       return row ?? null;
     }),
 
-  /** 체크리스트 완료 저장 (upsert) — targetTab 기준 */
+  /** 체크리스트 완료 저장 (upsert) — targetTab 기준
+   *  UNIQUE(restaurantId, logDate, targetTab) 인덱스를 활용한 원자적 upsert.
+   *  이전: select → insert/update 2단계 → 경쟁 조건으로 중복 행 생성 가능.
+   */
   saveLog: protectedProcedure
     .input(
       z.object({
@@ -285,44 +290,31 @@ export const storeChecklistsRouter = router({
       };
       const checkType = checkTypeMap[input.targetTab] ?? "other";
 
-      // targetTab 기준으로 기존 로그 검색
-      const [existing] = await db
-        .select()
-        .from(dailyChecklistLogs)
-        .where(
-          and(
-            eq(dailyChecklistLogs.restaurantId, input.restaurantId),
-            sql`${dailyChecklistLogs.logDate} = ${input.logDate}`,
-            eq(dailyChecklistLogs.targetTab, input.targetTab),
-          )
-        )
-        .limit(1);
-
-      if (existing) {
-        await db
-          .update(dailyChecklistLogs)
-          .set({
+      // 원자적 upsert — ON DUPLICATE KEY UPDATE
+      // Drizzle MySQL: .onDuplicateKeyUpdate 사용
+      await db
+        .insert(dailyChecklistLogs)
+        .values({
+          restaurantId: input.restaurantId,
+          logDate: input.logDate,
+          checkType: checkType as any,
+          targetTab: input.targetTab,
+          checkedItemIds: input.checkedItemIds,
+          checkedItems,
+          noOrderToday: input.noOrderToday ?? false,
+          completedBy: ctx.user.userId,
+        } as any)
+        .onDuplicateKeyUpdate({
+          set: {
             checkedItemIds: input.checkedItemIds,
             checkedItems,
             noOrderToday: input.noOrderToday ?? false,
             completedBy: ctx.user.userId,
             completedAt: new Date(),
-          })
-          .where(eq(dailyChecklistLogs.id, existing.id));
-        return { id: existing.id };
-      }
+          } as any,
+        });
 
-      const [result] = await db.insert(dailyChecklistLogs).values({
-        restaurantId: input.restaurantId,
-        logDate: input.logDate,
-        checkType: checkType as any,
-        targetTab: input.targetTab,
-        checkedItemIds: input.checkedItemIds,
-        checkedItems,
-        noOrderToday: input.noOrderToday ?? false,
-        completedBy: ctx.user.userId,
-      } as any);
-      return { id: (result as any).insertId };
+      return { ok: true };
     }),
 
   /** 날짜 범위별 체크 기록 조회 */

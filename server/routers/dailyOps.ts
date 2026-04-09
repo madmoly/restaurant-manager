@@ -20,6 +20,15 @@ import {
   counterparties,
   restaurants,
 } from "../../drizzle/schema";
+import { shouldShowOnDate } from "./storeChecklists";
+
+// 레거시 checkType → 신규 targetTab 매핑 (getMonth 집계용)
+const CHECK_TYPE_TO_TAB: Record<string, string> = {
+  open: "open",
+  order: "purchase",
+  other: "midday",
+  cleaning: "close",
+};
 
 export const dailyOpsRouter = router({
   /** 오늘 운영 현황 조회 */
@@ -588,37 +597,78 @@ export const dailyOpsRouter = router({
           )
         );
 
-      // 체크리스트 템플릿 수 (targetTab 기준)
-      const templates = await db
-        .select({ targetTab: storeChecklistTemplates.targetTab, cnt: count() })
+      // 체크리스트 템플릿 — 월 범위의 모든 활성 템플릿 조회 후
+      // 날짜별×탭별로 shouldShowOnDate 필터를 적용해 "그 날 실제로 보여야 할 개수" 계산
+      // (이전 구현: isActive=true 전체 합산 → weekly/monthly/effectiveFrom 미반영으로
+      //  일일운영 UI 개수와 캘린더 total 불일치 발생)
+      const activeTemplates = await db
+        .select({
+          id: storeChecklistTemplates.id,
+          targetTab: storeChecklistTemplates.targetTab,
+          repeatType: storeChecklistTemplates.repeatType,
+          repeatDays: storeChecklistTemplates.repeatDays,
+          specificDate: storeChecklistTemplates.specificDate,
+          effectiveFrom: storeChecklistTemplates.effectiveFrom,
+          effectiveTo: storeChecklistTemplates.effectiveTo,
+          createdAt: storeChecklistTemplates.createdAt,
+        })
         .from(storeChecklistTemplates)
         .where(
           and(
             eq(storeChecklistTemplates.restaurantId, input.restaurantId),
             eq(storeChecklistTemplates.isActive, true),
           )
-        )
-        .groupBy(storeChecklistTemplates.targetTab);
-      const templateCounts: Record<string, number> = {};
-      for (const t of templates) {
-        if (t.targetTab) templateCounts[t.targetTab] = Number(t.cnt);
-      }
+        );
+
+      /**
+       * 주어진 날짜에 보여야 할 템플릿 개수를 탭별로 반환.
+       * shouldShowOnDate와 동일한 로직을 사용하여 일일운영과 캘린더 집계의 진실을 통일.
+       */
+      const templateCountsForDate = (dateStr: string): Record<string, number> => {
+        const counts: Record<string, number> = {};
+        for (const t of activeTemplates) {
+          if (!t.targetTab) continue;
+          if (!shouldShowOnDate(t as any, dateStr)) continue;
+          counts[t.targetTab] = (counts[t.targetTab] ?? 0) + 1;
+        }
+        return counts;
+      };
 
       // 날짜별 체크리스트 완료율 맵
       const TAB_LABELS: Record<string, string> = { open: "오픈", purchase: "매입", midday: "일간보고", close: "마감" };
+      // (date → tab → totalForThatDate) 캐시 — 같은 날짜의 여러 로그가 같은 total을 공유해야 함
+      const dateTemplateCache: Record<string, Record<string, number>> = {};
+      // (date → tab → 이미 total에 반영되었는지) — 중복 로그/duplicate row에서 total 누적 방지
+      const dateTabCounted: Record<string, Set<string>> = {};
+
       const checklistByDate: Record<string, { checked: number; total: number; types: string[] }> = {};
       for (const log of checklistLogs) {
         const dateStr = typeof log.logDate === "string"
           ? log.logDate
           : (log.logDate as Date).toISOString().slice(0, 10);
+
+        // 탭 결정: targetTab 우선, 없으면 레거시 checkType 매핑
+        const rawTab = (log as any).targetTab ?? log.checkType;
+        const tab = (CHECK_TYPE_TO_TAB[rawTab] ?? rawTab) as string;
+        if (!tab) continue;
+
         if (!checklistByDate[dateStr]) {
           checklistByDate[dateStr] = { checked: 0, total: 0, types: [] };
+          dateTabCounted[dateStr] = new Set();
         }
-        const tab = (log as any).targetTab ?? log.checkType; // legacy fallback
+        if (!dateTemplateCache[dateStr]) {
+          dateTemplateCache[dateStr] = templateCountsForDate(dateStr);
+        }
+
         const checkedCount = (log.checkedItemIds as number[] || []).length;
-        const totalForTab = templateCounts[tab] ?? 0;
+        const totalForTab = dateTemplateCache[dateStr][tab] ?? 0;
+
         checklistByDate[dateStr].checked += checkedCount;
-        checklistByDate[dateStr].total += totalForTab;
+        // 같은 (date, tab)은 total에 한 번만 반영 — 중복 로그 방어
+        if (!dateTabCounted[dateStr].has(tab)) {
+          checklistByDate[dateStr].total += totalForTab;
+          dateTabCounted[dateStr].add(tab);
+        }
         if (checkedCount >= totalForTab && totalForTab > 0) {
           checklistByDate[dateStr].types.push(TAB_LABELS[tab] ?? tab);
         }
