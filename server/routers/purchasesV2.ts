@@ -98,11 +98,23 @@ export const purchasesV2Router = router({
         .orderBy(desc(purchaseOrdersV2.createdAt));
     }),
 
-  /** 전표 상세 항목 — order의 restaurantId 검증 (cross-store 누수 차단) */
+  /** 전표 상세 항목 — order의 restaurantId 일치 검증 (cross-store 누수 차단) */
   getOrderItems: storeReadProcedure
     .input(z.object({ orderId: z.number() }))
     .query(async ({ input }) => {
-      // order가 input.restaurantId 소속인지 검증 (innerJoin + restaurantId 필터)
+      // 1) order 존재 + restaurantId 일치 검증 (NOT_FOUND throw 패턴 통일)
+      const [orderExists] = await db
+        .select({ id: purchaseOrdersV2.id })
+        .from(purchaseOrdersV2)
+        .where(and(
+          eq(purchaseOrdersV2.id, input.orderId),
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+        ))
+        .limit(1);
+      if (!orderExists) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "전표를 찾을 수 없습니다" });
+      }
+      // 2) 항목 조회
       return db
         .select({
           id: purchaseOrderItemsV2.id,
@@ -120,12 +132,8 @@ export const purchasesV2Router = router({
           note: purchaseOrderItemsV2.note,
         })
         .from(purchaseOrderItemsV2)
-        .innerJoin(purchaseOrdersV2, eq(purchaseOrderItemsV2.purchaseOrderId, purchaseOrdersV2.id))
         .leftJoin(items, eq(purchaseOrderItemsV2.itemId, items.id))
-        .where(and(
-          eq(purchaseOrderItemsV2.purchaseOrderId, input.orderId),
-          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
-        ));
+        .where(eq(purchaseOrderItemsV2.purchaseOrderId, input.orderId));
     }),
 
   /** 거래처별 최근 전표 */
