@@ -205,7 +205,10 @@ export const restaurantsRouter = router({
       salesInputStartTime: z.string().nullable().optional(),
       salesInputEndTime: z.string().nullable().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // PR4-C: 매장 접근 검증 추가 (managerProcedure 단독으로는 cross-store 누수 가능)
+      // 겸임 점장(매장 A의 owner)이 매장 B의 정보를 임의 수정 가능했던 경로 차단.
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.id, true);
       const { id, ...data } = input;
       // 주소가 변경되었으면 좌표 자동 갱신
       let updateData: any = { ...data };
