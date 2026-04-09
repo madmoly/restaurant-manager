@@ -336,11 +336,23 @@ function SingleRestaurantView() {
   const [editName, setEditName] = useState("");
   const [editAddress, setEditAddress] = useState("");
   const [editPhone, setEditPhone] = useState("");
+  const [editOpenTime, setEditOpenTime] = useState("");
+  const [editCloseTime, setEditCloseTime] = useState("");
 
-  const canEdit = current?.storeRole === "owner" || current?.storeRole === "store_manager";
+  // 점장/매니져(현행 owner/supervisor) + legacy 호환(store_manager/manager)
+  const canEdit =
+    current?.storeRole === "owner" ||
+    current?.storeRole === "supervisor" ||
+    current?.storeRole === "store_manager" ||
+    current?.storeRole === "manager";
 
   const updateMut = trpc.restaurants.update.useMutation({
-    onSuccess() { toast.success("매장 정보가 수정되었습니다"); utils.restaurants.list.invalidate(); setEditing(false); },
+    onSuccess() {
+      toast.success("매장 정보가 수정되었습니다");
+      utils.restaurants.list.invalidate();
+      utils.restaurants.listMine.invalidate();
+      setEditing(false);
+    },
     onError(err) { toast.error(err.message); },
   });
 
@@ -349,12 +361,21 @@ function SingleRestaurantView() {
     setEditName(current.name);
     setEditAddress(current.address || "");
     setEditPhone(current.phone || "");
+    setEditOpenTime(current.openTime || "09:00");
+    setEditCloseTime(current.closeTime || "22:00");
     setEditing(true);
   };
 
   const handleUpdate = () => {
     if (!current || !editName.trim()) return;
-    updateMut.mutate({ id: current.id, name: editName.trim(), address: editAddress.trim(), phone: editPhone.trim() });
+    updateMut.mutate({
+      id: current.id,
+      name: editName.trim(),
+      address: editAddress.trim(),
+      phone: editPhone.trim(),
+      openTime: editOpenTime.trim() || undefined,
+      closeTime: editCloseTime.trim() || undefined,
+    });
   };
 
   if (!current) {
@@ -402,6 +423,25 @@ function SingleRestaurantView() {
               <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="전화번호"
                 className="flex-1 px-2.5 py-1.5 border border-border rounded text-sm bg-background text-foreground" />
             </div>
+            <div className="flex items-center gap-2">
+              <Clock size={14} className="text-muted-foreground/70 shrink-0" />
+              <input
+                type="time"
+                step="600"
+                value={editOpenTime}
+                onChange={(e) => setEditOpenTime(e.target.value)}
+                className="w-[110px] px-2.5 py-1.5 border border-border rounded text-sm bg-background text-foreground"
+              />
+              <span className="text-xs text-muted-foreground">~</span>
+              <input
+                type="time"
+                step="600"
+                value={editCloseTime}
+                onChange={(e) => setEditCloseTime(e.target.value)}
+                className="w-[110px] px-2.5 py-1.5 border border-border rounded text-sm bg-background text-foreground"
+              />
+              <span className="text-[11px] text-muted-foreground">운영시간</span>
+            </div>
             <div className="flex gap-2 pt-1">
               <button onClick={handleUpdate} disabled={!editName.trim() || updateMut.isPending}
                 className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded-lg hover:bg-primary/90 disabled:opacity-50">
@@ -421,6 +461,12 @@ function SingleRestaurantView() {
             <div className="flex items-center gap-2 text-muted-foreground">
               <Phone size={14} className="text-muted-foreground/70 shrink-0" />
               <span>{current.phone || "전화번호 미등록"}</span>
+            </div>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Clock size={14} className="text-muted-foreground/70 shrink-0" />
+              <span>
+                운영 {current.openTime ?? "09:00"} ~ {current.closeTime ?? "22:00"}
+              </span>
             </div>
           </div>
         )}
