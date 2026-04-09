@@ -93,7 +93,7 @@ const STORE_NAV_GROUPS: NavGroup[] = [
     label: "운영",
     items: [
       {
-        label: "대시보드", href: "/",
+        label: "매장 대시보드", href: "/",
         icon: <LayoutGrid className="h-4 w-4" />,
         mobileIcon: <LayoutGrid className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "staff"],

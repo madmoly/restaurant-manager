@@ -83,11 +83,21 @@ export default function ManagerDashboard() {
   if (storesLoading) return <DashboardSkeleton />;
 
   if (!current) {
+    // 매장 자체가 없는 경우 vs 매장은 있지만 미선택인 경우 분기
+    if ((stores ?? []).length === 0) {
+      return (
+        <EmptyState
+          icon={<Store size={40} />}
+          title="배정된 매장이 없습니다"
+          description="관리자에게 매장 배정을 요청하세요"
+        />
+      );
+    }
     return (
       <EmptyState
         icon={<Store size={40} />}
-        title="배정된 매장이 없습니다"
-        description="관리자에게 매장 배정을 요청하세요"
+        title="매장을 먼저 선택하세요"
+        description="상단 헤더 또는 사이드바의 매장 선택기에서 매장을 선택하면 대시보드가 표시됩니다"
       />
     );
   }

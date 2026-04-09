@@ -91,10 +91,10 @@ function RoleRouter() {
           </>
         )}
 
-        {/* 대표(admin): 사업 대시보드 + 사업 관련 접근 */}
+        {/* 대표(admin): 매장 대시보드(/) + 사업 대시보드(/business) */}
         {effectiveRole === "admin" && (
           <>
-            <Route path="/" component={AdminDashboard} />
+            <Route path="/" component={ManagerDashboard} />
             <Route path="/business" component={AdminDashboard} />
             <Route path="/users" component={UsersPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
