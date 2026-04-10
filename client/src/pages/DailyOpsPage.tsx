@@ -2444,7 +2444,7 @@ function PurchaseTab({
                           className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs hover:bg-amber-500/20 transition-colors"
                         >
                           {c.itemName}
-                          <span className="ml-1 text-[9px] opacity-70">{c.score}%</span>
+                          {c.score > 0 && <span className="ml-1 text-[9px] opacity-70">{c.score}%</span>}
                         </button>
                       ))}
                     </div>

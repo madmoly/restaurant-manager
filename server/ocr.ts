@@ -485,7 +485,6 @@ async function findItemCandidates(
 
     return ocrItems.map((item) => {
       const ocrNorm = normalizeKorean(item.shortName);
-      if (!ocrNorm) return item;
 
       // 1) 거래처 품목에서 매칭
       let bestMatch: { itemId: number; itemName: string; score: number; source: "counterparty" | "master" } | null = null;
@@ -494,16 +493,16 @@ async function findItemCandidates(
       for (const ci of cpItems) {
         const displayName = ci.name || ci.itemName;
         if (!displayName) continue;
-        const score = fuzzyScore(ocrNorm, normalizeKorean(displayName));
-        if (score >= 0.3 && ci.itemId) {
+        const score = ocrNorm ? fuzzyScore(ocrNorm, normalizeKorean(displayName)) : 0;
+        if (ci.itemId) {
           candidates.push({ itemId: ci.itemId, itemName: displayName, score, source: "counterparty" });
         }
       }
 
-      // 2) 거래처 품목에서 좋은 매칭 없으면 전체 마스터에서 검색
-      if (candidates.length === 0 || (candidates[0] && candidates[0].score < 0.7)) {
+      // 2) 거래처 품목에서 score ≥ 0.5인 후보가 하나도 없으면 전체 마스터에서 검색
+      if (candidates.filter(c => c.score >= 0.5).length === 0) {
         for (const mi of allItems) {
-          const score = fuzzyScore(ocrNorm, normalizeKorean(mi.name));
+          const score = ocrNorm ? fuzzyScore(ocrNorm, normalizeKorean(mi.name)) : 0;
           if (score >= 0.3) {
             candidates.push({ itemId: mi.id, itemName: mi.name, score, source: "master" });
           }
@@ -517,7 +516,7 @@ async function findItemCandidates(
         ...item,
         matchedItemId: bestMatch?.score && bestMatch.score >= 0.7 ? bestMatch.itemId : undefined,
         matchedItemName: bestMatch?.score && bestMatch.score >= 0.7 ? bestMatch.itemName : undefined,
-        itemCandidates: candidates.slice(0, 3).map((c) => ({
+        itemCandidates: candidates.slice(0, 5).map((c) => ({
           itemId: c.itemId,
           itemName: c.itemName,
           score: Math.round(c.score * 100),
