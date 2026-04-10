@@ -204,6 +204,7 @@ export const electronicContractsRouter = router({
           payDay: employmentElectronicContracts.payDay,
           payMethod: employmentElectronicContracts.payMethod,
           socialInsurance: employmentElectronicContracts.socialInsurance,
+          noWeeklyHolidayPay: employmentElectronicContracts.noWeeklyHolidayPay,
           over5Employees: employmentElectronicContracts.over5Employees,
           hasProbation: employmentElectronicContracts.hasProbation,
           probationMonths: employmentElectronicContracts.probationMonths,
@@ -255,6 +256,7 @@ export const electronicContractsRouter = router({
         weeklyHoliday: z.string().default("일요일"),
         payDay: z.number().default(25),
         socialInsurance: z.boolean().default(true),
+        noWeeklyHolidayPay: z.boolean().default(false),
         over5Employees: z.boolean().default(false),
         hasProbation: z.boolean().default(false),
         probationMonths: z.number().default(0),
@@ -320,6 +322,7 @@ export const electronicContractsRouter = router({
           weeklyHoliday: input.weeklyHoliday,
           payDay: input.payDay,
           socialInsurance: input.socialInsurance,
+          noWeeklyHolidayPay: input.noWeeklyHolidayPay,
           over5Employees: input.over5Employees,
           hasProbation: input.hasProbation,
           probationMonths: input.probationMonths,
@@ -369,6 +372,7 @@ export const electronicContractsRouter = router({
             weeklyHours: input.weeklyHours ?? null,
             weeklyOffDays: 1,
             socialInsurance: input.socialInsurance ?? true,
+            noWeeklyHolidayPay: input.noWeeklyHolidayPay ?? false,
             isActive: false, // 초안 상태 → 서명 완료 시 active로 전환
           } as any);
           console.log(`[createContract] draft employee_contracts created for userId=${input.employeeId}`);
@@ -400,6 +404,7 @@ export const electronicContractsRouter = router({
         weeklyHoliday: z.string().optional(),
         payDay: z.number().optional(),
         socialInsurance: z.boolean().optional(),
+        noWeeklyHolidayPay: z.boolean().optional(),
         over5Employees: z.boolean().optional(),
         mealProvided: z.boolean().optional(),
         payMethod: z.enum(["bank_transfer", "cash"]).optional(),
@@ -647,6 +652,7 @@ export const electronicContractsRouter = router({
               weeklyHours: contract.weeklyHours ?? null,
               weeklyOffDays: contract.weeklyOffDays ?? 1,
               socialInsurance: contract.socialInsurance ?? true,
+              noWeeklyHolidayPay: contract.noWeeklyHolidayPay ?? false,
               bankAccount: finalBankAccount,
               residentNumber: finalResidentNumber,
               isActive: true,

@@ -179,6 +179,7 @@ export const schedulesRouter = router({
         workDate: z.string(), // YYYY-MM-DD
         startTime: z.string(), // HH:MM
         endTime: z.string(),
+        breakMinutes: z.number().optional(),
         note: z.string().optional(),
       })
     )
@@ -200,11 +201,18 @@ export const schedulesRouter = router({
       if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { userId: input.userId })) {
         throw new TRPCError({ code: "CONFLICT", message: "해당 직원은 이 날짜에 이미 스케줄이 등록되어 있습니다." });
       }
+      // breakMinutes 기본값: 명시적 입력 없으면 근무 6시간 이상 시 60분, 미만 시 0분
+      const start = new Date(`${input.workDate}T${input.startTime}:00+09:00`);
+      const end = new Date(`${input.workDate}T${input.endTime}:00+09:00`);
+      const grossHours = (end.getTime() - start.getTime()) / 3600000;
+      const breakMin = input.breakMinutes ?? (grossHours >= 6 ? 60 : 0);
+
       const [result] = await db.insert(schedules).values({
         userId: input.userId,
         restaurantId: input.restaurantId,
-        startTime: new Date(`${input.workDate}T${input.startTime}:00+09:00`),
-        endTime: new Date(`${input.workDate}T${input.endTime}:00+09:00`),
+        startTime: start,
+        endTime: end,
+        breakMinutes: breakMin,
         note: input.note,
         createdBy: ctx.user.userId,
         status: "draft",
@@ -813,6 +821,7 @@ export const schedulesRouter = router({
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
           contractIsActive: employeeContracts.isActive,
+          noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
         })
         .from(schedules)
@@ -830,7 +839,7 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             sql`${schedules.startTime} >= ${fromStr}`,
             sql`${schedules.startTime} < ${toStr}`,
-            sql`${schedules.status} IN ('draft','confirmed','completed','scheduled','published')`
+            sql`${schedules.status} = 'completed'`
           )
         )
         .orderBy(schedules.startTime);
@@ -909,7 +918,9 @@ export const schedulesRouter = router({
       for (const r of rows) {
         const company = (r.affiliatedCompany ?? "미지정").trim() || "미지정";
         const name = r.userName ?? r.tempWorkerName ?? "미지정";
-        const empKey = r.userId ? String(r.userId) : `temp_${name}`;
+        // 주휴수당 미제공 정규직원 → 임시근로자 취급 (empKey에 temp_ 접두사)
+        const treatAsTemp = !!(r.userId && r.noWeeklyHolidayPay);
+        const empKey = (!r.userId || treatAsTemp) ? `temp_${r.userId ?? name}` : String(r.userId);
 
         if (!companyMap[company]) {
           companyMap[company] = { company, operatingDays, employees: {}, totalHours: 0, totalWage: 0 };
@@ -924,12 +935,12 @@ export const schedulesRouter = router({
             contractStart: r.contractStart ? String(r.contractStart) : null,
             contractEnd: r.contractEnd ? String(r.contractEnd) : null,
             daysOff: 0, // 아래에서 최종 계산
-            contractDaysOff: Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
+            contractDaysOff: treatAsTemp ? 0 : Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
             recheckRequired: false,
-            // 미지정(소속회사 없음) 또는 임시근로자 → 3.3% 공제 고정
-            socialInsurance: (r.userId && r.socialInsurance != null) ? r.socialInsurance : false,
+            // 미지정(소속회사 없음) 또는 임시근로자 또는 주휴미제공 → 3.3% 공제 고정
+            socialInsurance: (r.userId && !treatAsTemp && r.socialInsurance != null) ? r.socialInsurance : false,
             bankAccount: r.bankAccount ?? r.tempBankAccount ?? null,
             residentNumber: r.residentNumber ?? null,
             phone: r.tempPhone ?? null,
@@ -943,16 +954,23 @@ export const schedulesRouter = router({
         const hours = netMin / 60; // 분 단위 정밀 계산
 
         // ── 시급 결정 ──
+        // 주휴수당 미제공(noWeeklyHolidayPay) → 임시근로자 경로: 시급×실근무시간만
         let baseHourlyRate = 0;
         let isDailyTemp = false;
         if (r.tempWageType === "daily" && r.tempWageAmount) {
           isDailyTemp = true;
         } else if (r.tempWageType === "hourly" && r.tempWageAmount) {
           baseHourlyRate = Number(r.tempWageAmount);
+        } else if (treatAsTemp && r.wageType === "hourly" && r.wageAmount) {
+          // 주휴미제공 정규직: 시급제 → 시급 그대로 (주휴수당 제외)
+          baseHourlyRate = Number(r.wageAmount);
+        } else if (treatAsTemp && r.wageType === "monthly" && r.wageAmount) {
+          // 주휴미제공 정규직: 월급제 → 주휴 제외 환산 (월급 ÷ 174, 주40h×365/12/7)
+          baseHourlyRate = Number(r.wageAmount) / 174;
         } else if (r.wageType === "hourly" && r.wageAmount) {
           baseHourlyRate = Number(r.wageAmount);
         } else if (r.wageType === "monthly" && r.wageAmount) {
-          // 월급제: 월급 ÷ 209 (월소정근로시간, 주40h 기준)
+          // 월급제: 월급 ÷ 209 (월소정근로시간, 주40h+주휴8h 기준)
           const monthlyContractH = r.weeklyOffDays != null
             ? Math.round((40 + 8) * (365 / 12 / 7)) // 표준 209h
             : 209;
@@ -1033,9 +1051,13 @@ export const schedulesRouter = router({
             }
           }
 
+          // 주휴수당 미제공 정규직 → isTemp이지만 userId 보유 (temp_{userId} 키)
+          const isNoHolidayPayWorker = isTemp && emp.userId != null;
+
           return {
             ...emp,
             isTemp,
+            isNoHolidayPayWorker,
             zeroWageReason,
             daysOff: Math.max(0, operatingDays - emp.shifts),
             substituteLeave: lb ? { earned: lb.substitute.earned, used: lb.substitute.used, remaining: lb.substitute.earned - lb.substitute.used } : null,
@@ -1044,6 +1066,38 @@ export const schedulesRouter = router({
           };
         }),
       }));
+    }),
+
+  /** 인건비 재확인 경고 해소 — 해당 월의 특정 직원 또는 전체 */
+  clearPayrollRecheck: ownerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      year: z.number(),
+      month: z.number(),
+      userId: z.number().optional(), // 미지정 시 해당 월 전체
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      const monthStr = String(input.month).padStart(2, "0");
+      const kstFrom = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
+      const nm = input.month === 12 ? 1 : input.month + 1;
+      const ny = input.month === 12 ? input.year + 1 : input.year;
+      const kstTo = new Date(`${ny}-${String(nm).padStart(2, "0")}-01T00:00:00+09:00`);
+      const fromStr = kstFrom.toISOString().slice(0, 19).replace("T", " ");
+      const toStr = kstTo.toISOString().slice(0, 19).replace("T", " ");
+
+      const conditions = [
+        eq(schedules.restaurantId, input.restaurantId),
+        sql`${schedules.startTime} >= ${fromStr}`,
+        sql`${schedules.startTime} < ${toStr}`,
+        eq(schedules.payrollRecheckRequired, true),
+      ];
+      if (input.userId) conditions.push(eq(schedules.userId, input.userId));
+
+      await db.update(schedules)
+        .set({ payrollRecheckRequired: false })
+        .where(and(...conditions));
+      return { ok: true };
     }),
 
   /** 기존 스케줄을 프리셋 시간 기준으로 일괄 업데이트 */

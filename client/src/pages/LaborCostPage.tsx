@@ -41,10 +41,14 @@ export default function LaborCostPage() {
   const prevMonth = () => { if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1); };
 
+  const utils = trpc.useUtils();
   const { data, isLoading } = trpc.schedules.laborCostByCompany.useQuery(
     { restaurantId, year, month },
     { enabled: restaurantId > 0 },
   );
+  const clearRecheck = trpc.schedules.clearPayrollRecheck.useMutation({
+    onSuccess() { utils.schedules.laborCostByCompany.invalidate(); },
+  });
 
   const grandTotalHours = data?.reduce((s, c) => s + c.totalHours, 0) ?? 0;
   const grandTotalWage = data?.reduce((s, c) => s + c.totalWage, 0) ?? 0;
@@ -76,10 +80,11 @@ export default function LaborCostPage() {
         const deduction = !emp.socialInsurance && wage > 0 ? Math.round(wage * 0.033) : 0;
         const subRemain = emp.substituteLeave ? emp.substituteLeave.remaining : "-";
         const annRemain = emp.annualLeave ? emp.annualLeave.remaining : "-";
+        const nameLabel = emp.isNoHolidayPayWorker ? `${emp.name} (주휴미제공)` : emp.isTemp ? `${emp.name} (임시)` : emp.name;
         if (withSettlement) {
           rows.push([
             company.company,
-            emp.name,
+            nameLabel,
             emp.position ?? "-",
             emp.wageType === "hourly" ? "시급" : emp.wageType === "monthly" ? "월급" : emp.wageType === "daily" ? "일급" : "-",
             emp.wageAmount ? Number(emp.wageAmount) : 0,
@@ -100,7 +105,7 @@ export default function LaborCostPage() {
         } else {
           rows.push([
             company.company,
-            emp.name,
+            nameLabel,
             emp.position ?? "-",
             emp.shifts,
             Math.floor(emp.totalHours),
@@ -246,7 +251,17 @@ export default function LaborCostPage() {
       {data && data.some(c => c.employees.some((e: any) => e.recheckRequired)) && (
         <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span>완료된 스케줄이 수정된 직원이 있습니다. 인건비 정산을 재확인해주세요.</span>
+          <span className="flex-1">완료된 스케줄이 수정된 직원이 있습니다. 인건비 정산을 재확인해주세요.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 h-6 px-2 text-[11px] border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+            disabled={clearRecheck.isPending}
+            onClick={() => clearRecheck.mutate({ restaurantId, year, month })}
+          >
+            <Check className="w-3 h-3 mr-1" />
+            {clearRecheck.isPending ? "처리중..." : "확인 완료"}
+          </Button>
         </div>
       )}
 
@@ -317,12 +332,12 @@ export default function LaborCostPage() {
                           <EmployeeRow key={`r-${i}`} emp={emp} restaurantId={restaurantId} />
                         ))}
                       </div>
-                      {/* 임시근로자 */}
+                      {/* 임시근로자 + 주휴미제공 */}
                       {tempEmps.length > 0 && (
                         <div>
                           <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/40 border-t border-border">
                             <UserX className="w-3.5 h-3.5 text-muted-foreground" />
-                            <span className="text-[11px] font-semibold text-muted-foreground">임시근로자 ({tempEmps.length}명)</span>
+                            <span className="text-[11px] font-semibold text-muted-foreground">임시/주휴미제공 ({tempEmps.length}명)</span>
                           </div>
                           <div className="divide-y divide-border/50">
                             {tempEmps.map((emp, i) => (
@@ -372,7 +387,7 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
         <div>
           <div className="text-sm font-semibold text-foreground flex items-center gap-1">
             {emp.name}
-            {emp.isTemp && <span className="text-[9px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded font-medium">임시</span>}
+            {emp.isTemp && <span className="text-[9px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded font-medium">{emp.isNoHolidayPayWorker ? "주휴미제공" : "임시"}</span>}
             {emp.position && <span className="text-[10px] text-muted-foreground font-normal">({emp.position})</span>}
             {emp.recheckRequired && <AlertTriangle className="w-3 h-3 text-amber-500" />}
           </div>

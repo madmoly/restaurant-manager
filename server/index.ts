@@ -463,6 +463,13 @@ app.use(express.json());
     await conn.query(`
       ALTER TABLE business_groups ADD COLUMN IF NOT EXISTS color VARCHAR(7) DEFAULT NULL
     `).catch(() => {});
+    // 주휴수당 미제공 플래그 — true이면 인건비 정산에서 임시근로자 경로로 처리
+    await conn.query(`
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
+    await conn.query(`
+      ALTER TABLE employment_electronic_contracts ADD COLUMN IF NOT EXISTS noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
     // 기존 admin 중 business_groups 미등록 → 자동 백필 (이름 = admin.name + " 사업그룹")
     await conn.query(`
       INSERT INTO business_groups (name, adminId)

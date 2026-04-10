@@ -682,6 +682,46 @@ export default function StaffPage() {
                       )}
                     </div>
 
+                    {/* 계약 급여 정보 (읽기 전용) */}
+                    {(() => {
+                      const activeContract = contracts?.find((c: any) => c.employeeId === s.userId && c.status === "signed");
+                      const draftContract = contracts?.find((c: any) => c.employeeId === s.userId && (c.status === "draft" || c.status === "sent"));
+                      const contract = activeContract || draftContract;
+                      if (!contract && !isOwnerOrAdmin) return null;
+                      return (
+                        <div className="flex items-start gap-3">
+                          <label className="text-xs font-medium text-muted-foreground w-16 pt-0.5 flex items-center gap-1">
+                            <Wallet className="w-3 h-3" /> 급여
+                          </label>
+                          {contract ? (
+                            <div className="flex-1 space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-medium text-foreground">
+                                  {contract.wageType === "hourly" ? "시급" : "월급"} ₩{Number(contract.wageAmount).toLocaleString()}
+                                </span>
+                                {contract.socialInsurance ? (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">4대보험</span>
+                                ) : (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">3.3%</span>
+                                )}
+                                {contract.noWeeklyHolidayPay && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">주휴미제공</span>
+                                )}
+                                {!activeContract && draftContract && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300">초안</span>
+                                )}
+                              </div>
+                              {isOwnerOrAdmin && (
+                                <p className="text-[10px] text-muted-foreground">수정은 계약서 갱신이 필요합니다</p>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">(계약서 미작성)</span>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* ID/비밀번호 수정 */}
                     <div className="flex items-center gap-3">
                       <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
@@ -1178,6 +1218,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     payMethod: (ec?.payMethod ?? "bank_transfer") as "bank_transfer" | "cash",
     over5Employees: ec?.over5Employees ?? false,
     socialInsurance: ec?.socialInsurance ?? true,
+    noWeeklyHolidayPay: ec?.noWeeklyHolidayPay ?? false,
     hasProbation: false,
     probationMonths: 0,
     mealProvided: ec?.mealProvided ?? false,
@@ -1212,6 +1253,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         payMethod: (latestTemplate.payMethod as any) || prev.payMethod,
         over5Employees: latestTemplate.over5Employees ?? prev.over5Employees,
         socialInsurance: latestTemplate.socialInsurance ?? prev.socialInsurance,
+        noWeeklyHolidayPay: (latestTemplate as any).noWeeklyHolidayPay ?? prev.noWeeklyHolidayPay,
         hasProbation: latestTemplate.hasProbation ?? prev.hasProbation,
         probationMonths: latestTemplate.probationMonths ?? prev.probationMonths,
         mealProvided: latestTemplate.mealProvided ?? prev.mealProvided,
@@ -1651,6 +1693,12 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 <span className="text-sm text-foreground">4대보험 가입</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.noWeeklyHolidayPay}
+                  onChange={(e) => setForm({ ...form, noWeeklyHolidayPay: e.target.checked })}
+                  className="rounded border-input" />
+                <span className="text-sm text-foreground">주휴수당 미제공</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={form.mealProvided}
                   onChange={(e) => setForm({ ...form, mealProvided: e.target.checked })}
                   className="rounded border-input" />
@@ -1713,6 +1761,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 payMethod: form.payMethod,
                 over5Employees: form.over5Employees,
                 socialInsurance: form.socialInsurance,
+                noWeeklyHolidayPay: form.noWeeklyHolidayPay,
                 mealProvided: form.mealProvided,
                 workPlace: form.workPlace || undefined,
                 jobDescription: form.jobDescription || undefined,
