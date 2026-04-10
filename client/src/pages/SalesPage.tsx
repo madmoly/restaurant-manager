@@ -43,6 +43,8 @@ export default function SalesPage() {
   const restaurantId = params.restaurantId ? Number(params.restaurantId) : (current?.id ?? 0);
 
   const today = new Date();
+  const _biz = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  const todayStr = `${_biz.getFullYear()}-${String(_biz.getMonth() + 1).padStart(2, "0")}-${String(_biz.getDate()).padStart(2, "0")}`;
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [showAdd, setShowAdd] = useState(false);
@@ -188,8 +190,13 @@ export default function SalesPage() {
               </thead>
               <tbody>
                 {salesList.map((s: any) => (
-                  <tr key={s.id} className="border-b border-border/50 hover:bg-accent/50">
-                    <td className="px-4 py-3 text-foreground tabular-nums">{String(s.saleDate).slice(5)}</td>
+                  <tr key={s.id} className={`border-b border-border/50 hover:bg-accent/50 ${String(s.saleDate).slice(0, 10) === todayStr ? "bg-primary/5" : ""}`}>
+                    <td className="px-4 py-3 tabular-nums">
+                      <span className={String(s.saleDate).slice(0, 10) === todayStr ? "text-primary font-semibold" : "text-foreground"}>
+                        {String(s.saleDate).slice(5)}
+                      </span>
+                      {String(s.saleDate).slice(0, 10) === todayStr && <span className="ml-1.5 text-[10px] text-primary font-medium">오늘</span>}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold text-foreground tabular-nums">{Number(s.amount).toLocaleString()}원</td>
                     <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell truncate max-w-[200px]">{s.note || "—"}</td>
                     <td className="px-2">

@@ -524,14 +524,20 @@ function ChecklistSection({
 function DateInfoCard({ date }: { date: string }) {
   const holiday = getHolidayName(date);
   const dateInfo = formatDateWithHoliday(date);
+  const _biz = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  const todayStr = `${_biz.getFullYear()}-${String(_biz.getMonth() + 1).padStart(2, "0")}-${String(_biz.getDate()).padStart(2, "0")}`;
+  const isToday = date === todayStr;
 
   return (
-    <Card className="bg-card border-border p-4">
+    <Card className={`p-4 ${isToday ? "bg-primary/5 border-primary/30" : "bg-card border-border"}`}>
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-lg font-semibold text-foreground">
+        <div className="flex items-center gap-2">
+          <p className={`text-lg font-semibold ${isToday ? "text-primary" : "text-foreground"}`}>
             {dateInfo.display}
           </p>
+          {isToday && (
+            <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-medium">오늘</span>
+          )}
         </div>
         {holiday && (
           <Badge variant="danger">

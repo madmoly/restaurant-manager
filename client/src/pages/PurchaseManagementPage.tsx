@@ -597,6 +597,7 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [expandedCp, setExpandedCp] = useState<string | null>(null);
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
+  const isCurrentMonth = year === now.getFullYear() && month === (now.getMonth() + 1);
 
   const { data, isLoading } = trpc.purchasesV2.monthlySummaryByCounterparty.useQuery(
     { restaurantId, year, month },
@@ -627,8 +628,9 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={prevMonth}>
           <ChevronLeft size={16} />
         </Button>
-        <span className="text-sm font-semibold min-w-[120px] text-center">
+        <span className={`text-sm font-semibold min-w-[120px] text-center ${isCurrentMonth ? "text-primary" : ""}`}>
           {year}년 {month}월
+          {isCurrentMonth && <span className="ml-1 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full align-middle font-medium">이번달</span>}
         </span>
         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={nextMonth}>
           <ChevronRight size={16} />

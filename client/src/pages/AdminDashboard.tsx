@@ -145,7 +145,7 @@ export default function AdminDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <PageHeader
           title="사업 현황"
-          description={`${storeCount}개 매장 · ${allUsers?.length ?? 0}명 사용자`}
+          description={`${storeCount}개 매장 · ${allUsers?.length ?? 0}명 사용자 · 오늘 ${todayStr.slice(5).replace("-", "/")}`}
         />
         <div className="flex items-center gap-2">
           <button onClick={goPrev} className="px-2 py-1 rounded hover:bg-accent text-muted-foreground">◀</button>
@@ -188,11 +188,14 @@ export default function AdminDashboard() {
 
       {/* 전체 매장 금일 현황 */}
       {filteredTodayStatuses && filteredTodayStatuses.length > 0 && (
-        <Card className="p-5">
+        <Card className="p-5 ring-1 ring-primary/20 bg-primary/[0.02]">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
             <ClipboardCheck size={14} className="text-primary" />
             {selectedGroup === "전체" ? "전체 매장" : selectedGroup} 금일 현황
-            <span className="text-xs font-normal text-muted-foreground ml-1">{todayStr}</span>
+            <span className="inline-flex items-center gap-1 ml-1">
+              <span className="text-xs font-medium text-primary">{todayStr.slice(5).replace("-", "/")}</span>
+              <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-medium">오늘</span>
+            </span>
           </h3>
           <div className="space-y-2">
             {filteredTodayStatuses.map((s: any) => (
