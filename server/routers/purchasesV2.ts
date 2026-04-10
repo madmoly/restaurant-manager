@@ -158,6 +158,34 @@ export const purchasesV2Router = router({
         .limit(input.limit);
     }),
 
+  /** P1-3: 중복 전표 감지 (동일 날짜+거래처+유사금액 ±5%) */
+  checkDuplicate: storeReadProcedure
+    .input(z.object({
+      counterpartyId: z.number(),
+      purchaseDate: z.string(),
+      totalAmount: z.number(),
+    }))
+    .query(async ({ input }) => {
+      const lower = input.totalAmount * 0.95;
+      const upper = input.totalAmount * 1.05;
+      const rows = await db.execute(sql`
+        SELECT id, totalAmount, status, createdAt
+        FROM purchase_orders_v2
+        WHERE restaurantId = ${input.restaurantId}
+          AND counterpartyId = ${input.counterpartyId}
+          AND purchaseDate = ${input.purchaseDate}
+          AND CAST(totalAmount AS DECIMAL(14,2)) BETWEEN ${lower} AND ${upper}
+        LIMIT 3
+      `);
+      const duplicates = (rows[0] as unknown as any[]).map(r => ({
+        id: r.id,
+        totalAmount: Number(r.totalAmount),
+        status: r.status,
+        createdAt: r.createdAt,
+      }));
+      return { hasDuplicate: duplicates.length > 0, duplicates };
+    }),
+
   /** 매입 전표 생성 (헤더 + 항목 + lastPrice 갱신)
    *  발주(ordered): items 없어도 가능 (거래처/사진만으로 등록)
    *  입고(received): 기존과 동일
@@ -235,6 +263,29 @@ export const purchasesV2Router = router({
                 .update(counterpartyItems)
                 .set({ lastPrice: item.unitPrice })
                 .where(eq(counterpartyItems.id, item.counterpartyItemId));
+            }
+
+            // P1-2: itemId 있고 counterpartyItemId 없으면 → counterpartyItem 자동 생성
+            if (item.itemId && !item.counterpartyItemId && input.counterpartyId) {
+              const existing = await db
+                .select({ id: counterpartyItems.id })
+                .from(counterpartyItems)
+                .where(and(
+                  eq(counterpartyItems.restaurantId, input.restaurantId),
+                  eq(counterpartyItems.counterpartyId, input.counterpartyId),
+                  eq(counterpartyItems.itemId, item.itemId),
+                ))
+                .limit(1);
+              if (existing.length === 0) {
+                await db.insert(counterpartyItems).values({
+                  restaurantId: input.restaurantId,
+                  counterpartyId: input.counterpartyId,
+                  itemId: item.itemId,
+                  supplierItemName: item.rawItemName || null,
+                  purchaseUnit: item.unitName || null,
+                  lastPrice: item.unitPrice || null,
+                });
+              }
             }
           }
           triggerDatasetExport();
@@ -448,74 +499,79 @@ export const purchasesV2Router = router({
   // 매입 분석 API
   // ═══════════════════════════════════════════════════════════════════════
 
-  /** 품목별 거래처 가격비교: 동일 품목을 납품하는 거래처들의 최근 단가 비교 */
+  /** 품목별 거래처 가격비교: 동일 품목(itemId)의 기준단위가 기준 비교 */
   itemPriceComparison: storeReadProcedure
     .query(async ({ input }) => {
       const rows = await db.execute(sql`
         SELECT
-          oi.rawItemName,
+          i.id AS itemId,
+          i.name AS itemName,
+          i.baseUnit,
           c.id AS counterpartyId,
           c.name AS counterpartyName,
+          ci.purchaseUnit,
+          ci.conversionToBase,
           oi.unitPrice,
           oi.unitName,
+          CASE WHEN ci.conversionToBase IS NOT NULL AND CAST(ci.conversionToBase AS DECIMAL(10,4)) > 0
+            THEN CAST(oi.unitPrice AS DECIMAL(14,4)) / CAST(ci.conversionToBase AS DECIMAL(10,4))
+            ELSE CAST(oi.unitPrice AS DECIMAL(14,4))
+          END AS basePricePerUnit,
           o.purchaseDate,
           oi.quantity
         FROM purchase_order_items_v2 oi
         JOIN purchase_orders_v2 o ON oi.purchaseOrderId = o.id
+        JOIN items i ON oi.itemId = i.id
         LEFT JOIN counterparties c ON o.counterpartyId = c.id
+        LEFT JOIN counterparty_items ci ON oi.counterpartyItemId = ci.id
         WHERE o.restaurantId = ${input.restaurantId}
-          AND oi.rawItemName IS NOT NULL
-          AND oi.rawItemName != ''
+          AND oi.itemId IS NOT NULL
           AND oi.unitPrice IS NOT NULL
           AND oi.unitPrice != '0'
-        ORDER BY oi.rawItemName, o.purchaseDate DESC
+          AND o.status = 'received'
+        ORDER BY i.name, o.purchaseDate DESC
       `);
-      // Group by item name → list of supplier prices
-      const map = new Map<string, any[]>();
+      // Group by itemId → list of supplier prices
+      const map = new Map<number, { itemName: string; baseUnit: string | null; entries: any[] }>();
       for (const row of (rows[0] as unknown as any[])) {
-        const key = row.rawItemName;
-        if (!map.has(key)) map.set(key, []);
-        map.get(key)!.push({
+        const key = row.itemId as number;
+        if (!map.has(key)) map.set(key, { itemName: row.itemName, baseUnit: row.baseUnit, entries: [] });
+        const convBase = Number(row.conversionToBase || 0);
+        map.get(key)!.entries.push({
           counterpartyId: row.counterpartyId,
           counterpartyName: row.counterpartyName || '미지정',
           unitPrice: row.unitPrice,
-          unitName: row.unitName,
+          unitName: row.purchaseUnit || row.unitName,
+          basePricePerUnit: Number(row.basePricePerUnit),
+          conversionNote: convBase > 0 && convBase !== 1 ? null : '(환산계수 미설정)',
           purchaseDate: row.purchaseDate,
           quantity: row.quantity,
         });
       }
-      // Only items with 2+ suppliers
+      // Sort: multi-supplier first, then single-supplier
       const result: any[] = [];
-      for (const [itemName, entries] of map) {
+      for (const [, { itemName, baseUnit, entries }] of map) {
         const uniqueSuppliers = new Set(entries.map((e: any) => e.counterpartyId));
         if (uniqueSuppliers.size >= 2) {
-          // Latest price per supplier
           const latestBySupplier = new Map<number, any>();
           for (const e of entries) {
             if (!latestBySupplier.has(e.counterpartyId)) {
               latestBySupplier.set(e.counterpartyId, e);
             }
           }
-          result.push({
-            itemName,
-            suppliers: Array.from(latestBySupplier.values()),
-          });
+          result.push({ itemName, baseUnit, suppliers: Array.from(latestBySupplier.values()) });
         }
       }
-      // Also include single-supplier items for reference
-      for (const [itemName, entries] of map) {
+      for (const [, { itemName, baseUnit, entries }] of map) {
         const uniqueSuppliers = new Set(entries.map((e: any) => e.counterpartyId));
         if (uniqueSuppliers.size === 1) {
-          result.push({
-            itemName,
-            suppliers: [entries[0]],
-          });
+          result.push({ itemName, baseUnit, suppliers: [entries[0]] });
         }
       }
       return result;
     }),
 
-  /** 시기별 품목 단가 추이: 특정 기간 내 품목의 단가 변화 */
+  /** 시기별 품목 단가 추이: itemId 기준 기준단위가 변화 */
   itemPriceTrend: storeReadProcedure
     .input(z.object({
       months: z.number().default(6),
@@ -523,38 +579,48 @@ export const purchasesV2Router = router({
     .query(async ({ input }) => {
       const rows = await db.execute(sql`
         SELECT
-          oi.rawItemName,
+          i.id AS itemId,
+          i.name AS itemName,
+          i.baseUnit,
           c.name AS counterpartyName,
           oi.unitPrice,
-          oi.unitName,
+          ci.purchaseUnit,
+          ci.conversionToBase,
+          CASE WHEN ci.conversionToBase IS NOT NULL AND CAST(ci.conversionToBase AS DECIMAL(10,4)) > 0
+            THEN CAST(oi.unitPrice AS DECIMAL(14,4)) / CAST(ci.conversionToBase AS DECIMAL(10,4))
+            ELSE CAST(oi.unitPrice AS DECIMAL(14,4))
+          END AS basePricePerUnit,
           DATE_FORMAT(o.purchaseDate, '%Y-%m') AS yearMonth,
           o.purchaseDate
         FROM purchase_order_items_v2 oi
         JOIN purchase_orders_v2 o ON oi.purchaseOrderId = o.id
+        JOIN items i ON oi.itemId = i.id
         LEFT JOIN counterparties c ON o.counterpartyId = c.id
+        LEFT JOIN counterparty_items ci ON oi.counterpartyItemId = ci.id
         WHERE o.restaurantId = ${input.restaurantId}
-          AND oi.rawItemName IS NOT NULL
-          AND oi.rawItemName != ''
+          AND oi.itemId IS NOT NULL
           AND oi.unitPrice IS NOT NULL
           AND oi.unitPrice != '0'
           AND o.purchaseDate >= DATE_SUB(CURDATE(), INTERVAL ${input.months} MONTH)
-        ORDER BY oi.rawItemName, o.purchaseDate ASC
+        ORDER BY i.name, o.purchaseDate ASC
       `);
-      // Group by item → chronological price points
-      const map = new Map<string, any[]>();
+      // Group by itemId → chronological price points
+      const map = new Map<number, { itemName: string; baseUnit: string | null; points: any[] }>();
       for (const row of (rows[0] as unknown as any[])) {
-        const key = row.rawItemName;
-        if (!map.has(key)) map.set(key, []);
-        map.get(key)!.push({
+        const key = row.itemId as number;
+        if (!map.has(key)) map.set(key, { itemName: row.itemName, baseUnit: row.baseUnit, points: [] });
+        const basePrice = Number(row.basePricePerUnit);
+        map.get(key)!.points.push({
           counterpartyName: row.counterpartyName || '미지정',
-          unitPrice: Number(row.unitPrice),
-          unitName: row.unitName,
+          unitPrice: basePrice,
+          unitName: row.baseUnit || row.purchaseUnit,
           yearMonth: row.yearMonth,
           purchaseDate: row.purchaseDate,
         });
       }
-      return Array.from(map.entries()).map(([itemName, points]) => ({
+      return Array.from(map.values()).map(({ itemName, baseUnit, points }) => ({
         itemName,
+        baseUnit,
         points,
         minPrice: Math.min(...points.map((p: any) => p.unitPrice)),
         maxPrice: Math.max(...points.map((p: any) => p.unitPrice)),

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { eq, and, like, sql } from "drizzle-orm";
-import { router, protectedProcedure, managerProcedure } from "../trpc";
+import { router, protectedProcedure, managerProcedure, storeReadProcedure } from "../trpc";
 import { db } from "../db";
-import { items, counterpartyItems, purchaseOrderItemsV2 } from "../../drizzle/schema";
+import { items, counterpartyItems, counterparties, purchaseOrderItemsV2 } from "../../drizzle/schema";
 
 export const itemsRouter = router({
   /** 매장 품목 목록 */
@@ -152,6 +152,88 @@ export const itemsRouter = router({
           purchaseCount: poCounts[item.id] || 0,
         })),
       };
+    }),
+
+  /** 품목마스터 + 거래처 매핑 + 기준단위가 통합 조회 */
+  listWithMappings: storeReadProcedure
+    .query(async ({ input }) => {
+      const rows = await db.execute(sql`
+        SELECT
+          i.id AS itemId,
+          i.name AS itemName,
+          i.baseUnit,
+          i.itemType,
+          ci.id AS ciId,
+          ci.counterpartyId,
+          c.name AS counterpartyName,
+          ci.supplierItemName,
+          ci.purchaseUnit,
+          ci.conversionToBase,
+          ci.lastPrice,
+          ci.isPreferred,
+          CASE WHEN ci.conversionToBase IS NOT NULL AND CAST(ci.conversionToBase AS DECIMAL(10,4)) > 0
+            THEN CAST(ci.lastPrice AS DECIMAL(14,4)) / CAST(ci.conversionToBase AS DECIMAL(10,4))
+            ELSE ci.lastPrice
+          END AS basePricePerUnit,
+          (
+            SELECT MAX(o.purchaseDate)
+            FROM purchase_order_items_v2 oi2
+            JOIN purchase_orders_v2 o ON oi2.purchaseOrderId = o.id
+            WHERE oi2.counterpartyItemId = ci.id AND o.status = 'received'
+          ) AS lastReceivedDate
+        FROM items i
+        LEFT JOIN counterparty_items ci ON ci.itemId = i.id AND ci.restaurantId = i.restaurantId AND ci.isActive = 1
+        LEFT JOIN counterparties c ON ci.counterpartyId = c.id
+        WHERE i.restaurantId = ${input.restaurantId}
+          AND i.isActive = 1
+        ORDER BY i.name ASC
+      `);
+
+      // Group by item → mappings
+      const map = new Map<number, {
+        itemId: number; itemName: string; baseUnit: string | null; itemType: string;
+        mappings: any[]; counterpartyCount: number; minBasePrice: number | null;
+      }>();
+
+      for (const row of (rows[0] as unknown as any[])) {
+        const key = row.itemId as number;
+        if (!map.has(key)) {
+          map.set(key, {
+            itemId: key,
+            itemName: row.itemName,
+            baseUnit: row.baseUnit,
+            itemType: row.itemType,
+            mappings: [],
+            counterpartyCount: 0,
+            minBasePrice: null,
+          });
+        }
+        const entry = map.get(key)!;
+        if (row.ciId) {
+          const basePrice = row.basePricePerUnit ? Number(row.basePricePerUnit) : null;
+          entry.mappings.push({
+            ciId: row.ciId,
+            counterpartyId: row.counterpartyId,
+            counterpartyName: row.counterpartyName || '미지정',
+            supplierItemName: row.supplierItemName,
+            purchaseUnit: row.purchaseUnit,
+            conversionToBase: row.conversionToBase ? Number(row.conversionToBase) : null,
+            lastPrice: row.lastPrice ? Number(row.lastPrice) : null,
+            basePricePerUnit: basePrice,
+            isPreferred: !!row.isPreferred,
+            lastReceivedDate: row.lastReceivedDate,
+          });
+          entry.counterpartyCount++;
+          if (basePrice !== null && (entry.minBasePrice === null || basePrice < entry.minBasePrice)) {
+            entry.minBasePrice = basePrice;
+          }
+        }
+      }
+
+      // Sort: counterpartyCount DESC, itemName ASC
+      return Array.from(map.values()).sort((a, b) =>
+        b.counterpartyCount - a.counterpartyCount || a.itemName.localeCompare(b.itemName),
+      );
     }),
 
   /** 품목 합치기 (sourceIds → targetId로 병합) */

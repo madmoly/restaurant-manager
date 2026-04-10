@@ -1448,6 +1448,15 @@ function PurchaseTab({
       return;
     }
 
+    // P1-1: 미매칭 품목 경고
+    const unmatchedCount = validItems.filter(i => !i.matchedItemId).length;
+    if (unmatchedCount > 0) {
+      const proceed = window.confirm(
+        `${unmatchedCount}개 품목이 마스터에 미매칭 상태입니다.\n가격분석에서 제외됩니다. 저장하시겠습니까?`
+      );
+      if (!proceed) return;
+    }
+
     createOrder.mutate({
       restaurantId,
       purchaseDate: date,
@@ -1457,6 +1466,7 @@ function PurchaseTab({
       attachmentUrl,
       items: validItems.map(i => ({
         rawItemName: i.rawItemName,
+        itemId: i.matchedItemId,
         counterpartyItemId: i.counterpartyItemId,
         quantity: i.quantity || undefined,
         unitName: i.unitName || undefined,
