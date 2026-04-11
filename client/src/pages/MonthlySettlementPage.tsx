@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/hooks/useAuth";
@@ -6,11 +6,12 @@ import {
   CheckCircle2, Circle, AlertTriangle, TrendingUp, TrendingDown,
   ChevronDown, ChevronUp, Lock, Loader2, ArrowUpRight, ArrowDownRight,
   Calendar, CreditCard, Banknote, Gift, ArrowRightLeft, MoreHorizontal,
-  Camera, X, Info,
+  Camera, X, Info, Download, FileText,
 } from "lucide-react";
 import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { loadKoreanFont } from "@/lib/pdfKoreanFont";
 
 type IncomeExpand = "sales" | "purchases" | "labor" | "fixed" | "expenses" | null;
 
@@ -27,6 +28,17 @@ export default function MonthlySettlementPage() {
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [incomeExpand, setIncomeExpand] = useState<IncomeExpand>(null);
   const [collectionOpen, setCollectionOpen] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showExportMenu]);
 
   const prevMonth = () => {
     if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1);
@@ -91,6 +103,162 @@ export default function MonthlySettlementPage() {
     closeMutation.mutate({ restaurantId, year, month });
   };
 
+  // ── 내보내기 핸들러 ──
+  const closing = data?.closing;
+  const exportFileName = `월정산_${current?.name ?? ""}_${year}년${month}월${closing?.isClosed ? "" : "(미확정)"}`;
+
+  const handleExportExcel = async () => {
+    setShowExportMenu(false);
+    if (!data) return;
+    const { income, metrics, collection } = data;
+    const XLSX = await import("xlsx");
+
+    const summaryHeaders = ["항목", "금액(원)", "비율(%)"];
+    const summaryRows = [
+      ["매출", income.salesTotal, "100.0"],
+      ["매입 (식재료비)", income.purchasesTotal, metrics.costRatio],
+      ["인건비", income.laborCost, metrics.laborRatio],
+      ["고정비", income.fixedCostsTotal, income.salesTotal > 0 ? (income.fixedCostsTotal / income.salesTotal * 100).toFixed(1) : "0.0"],
+      ["즉시 지출", income.expensesTotal, income.salesTotal > 0 ? (income.expensesTotal / income.salesTotal * 100).toFixed(1) : "0.0"],
+      ["순이익", income.profit, metrics.profitRatio],
+    ];
+
+    const purchHeaders = ["거래처", "건수", "금액(원)"];
+    const purchRows = income.purchasesByCounterparty.map((cp: any) => [cp.name, cp.count, cp.amount]);
+
+    const laborHeaders = ["소속회사", "인원", "시간(h)", "금액(원)"];
+    const laborRows = income.laborByCompany.map((co: any) => [co.company, co.headcount, co.hours, co.amount]);
+
+    const fixedHeaders = ["항목", "유형", "금액(원)"];
+    const fixedRows = income.fixedBreakdown.map((f: any) => [
+      f.name,
+      f.type === "monthly" ? "월납" : f.type === "yearly" ? "연납÷12" : f.type === "quarterly" ? "분기÷3" : f.type === "sales_ratio" ? "매출비례" : "일시",
+      f.amount,
+    ]);
+
+    const statusLabel = closing?.isClosed ? "확정" : "미확정";
+    const ws = XLSX.utils.aoa_to_sheet([
+      [`${year}년 ${month}월 월정산 (${statusLabel}) — 마감 ${collection.closedDays}/${collection.operatingDays}일`],
+      [],
+      summaryHeaders, ...summaryRows,
+      [],
+      ["거래처별 매입"],
+      purchHeaders, ...purchRows,
+      [],
+      ["소속회사별 인건비"],
+      laborHeaders, ...laborRows,
+      [],
+      ["고정비 내역"],
+      fixedHeaders, ...fixedRows,
+    ]);
+    ws["!cols"] = [{ wch: 20 }, { wch: 14 }, { wch: 12 }, { wch: 12 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "월정산");
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${exportFileName}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportPDF = async () => {
+    setShowExportMenu(false);
+    if (!data) return;
+    const { income, metrics, collection } = data;
+    try {
+      const { jsPDF } = await import("jspdf");
+      const atModule = await import("jspdf-autotable");
+      const autoTable = atModule.default || atModule.autoTable;
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      await loadKoreanFont(doc);
+
+      const statusLabel = closing?.isClosed ? "확정" : "미확정";
+      doc.setFontSize(14);
+      doc.text(`${year}년 ${month}월 월정산 (${statusLabel})`, 14, 15);
+      doc.setFontSize(9);
+      doc.text(`마감 ${collection.closedDays}/${collection.operatingDays}일 | ${current?.name ?? ""}`, 14, 22);
+
+      const summaryHeaders = ["항목", "금액(원)", "비율(%)"];
+      const summaryRows = [
+        ["매출", income.salesTotal, "100.0"],
+        ["매입 (식재료비)", income.purchasesTotal, metrics.costRatio],
+        ["인건비", income.laborCost, metrics.laborRatio],
+        ["고정비", income.fixedCostsTotal, income.salesTotal > 0 ? (income.fixedCostsTotal / income.salesTotal * 100).toFixed(1) : "0.0"],
+        ["즉시 지출", income.expensesTotal, income.salesTotal > 0 ? (income.expensesTotal / income.salesTotal * 100).toFixed(1) : "0.0"],
+        ["순이익", income.profit, metrics.profitRatio],
+      ];
+
+      autoTable(doc, {
+        startY: 27,
+        head: [summaryHeaders],
+        body: summaryRows.map(r => r.map(c => typeof c === "number" ? Math.round(c).toLocaleString() : String(c))),
+        styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
+        headStyles: { fillColor: [59, 130, 246], textColor: 255, font: "NanumGothic", fontStyle: "normal" },
+        columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+      });
+
+      let finalY = (doc as any).lastAutoTable?.finalY ?? 70;
+
+      // 거래처별 매입
+      if (income.purchasesByCounterparty.length > 0) {
+        doc.setFontSize(11);
+        doc.text("거래처별 매입", 14, finalY + 10);
+        autoTable(doc, {
+          startY: finalY + 14,
+          head: [["거래처", "건수", "금액(원)"]],
+          body: income.purchasesByCounterparty.map((cp: any) => [cp.name, cp.count, Math.round(cp.amount).toLocaleString()]),
+          styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
+          headStyles: { fillColor: [100, 116, 139], textColor: 255, font: "NanumGothic", fontStyle: "normal" },
+          columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+        });
+        finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 30;
+      }
+
+      // 소속회사별 인건비
+      if (income.laborByCompany.length > 0) {
+        doc.setFontSize(11);
+        doc.text("소속회사별 인건비", 14, finalY + 10);
+        autoTable(doc, {
+          startY: finalY + 14,
+          head: [["소속회사", "인원", "시간(h)", "금액(원)"]],
+          body: income.laborByCompany.map((co: any) => [co.company, co.headcount, co.hours, Math.round(co.amount).toLocaleString()]),
+          styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
+          headStyles: { fillColor: [100, 116, 139], textColor: 255, font: "NanumGothic", fontStyle: "normal" },
+          columnStyles: { 2: { halign: "right" }, 3: { halign: "right" } },
+        });
+        finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 30;
+      }
+
+      // 고정비 내역
+      if (income.fixedBreakdown.length > 0) {
+        doc.setFontSize(11);
+        doc.text("고정비 내역", 14, finalY + 10);
+        autoTable(doc, {
+          startY: finalY + 14,
+          head: [["항목", "유형", "금액(원)"]],
+          body: income.fixedBreakdown.map((f: any) => [
+            f.name,
+            f.type === "monthly" ? "월납" : f.type === "yearly" ? "연납÷12" : f.type === "quarterly" ? "분기÷3" : f.type === "sales_ratio" ? "매출비례" : "일시",
+            Math.round(f.amount).toLocaleString(),
+          ]),
+          styles: { fontSize: 9, cellPadding: 3, font: "NanumGothic" },
+          headStyles: { fillColor: [100, 116, 139], textColor: 255, font: "NanumGothic", fontStyle: "normal" },
+          columnStyles: { 2: { halign: "right" } },
+        });
+      }
+
+      const pdfBlob = doc.output("blob");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      window.open(pdfUrl, "_blank");
+    } catch (err: any) {
+      console.error("PDF export error:", err);
+      toast.error(`PDF 내보내기 실패: ${err.message || "알 수 없는 오류"}`);
+    }
+  };
+
   if (!restaurantId) return <EmptyState icon={<Calendar size={40} />} title="매장을 선택해주세요" />;
   if (isLoading || !data) {
     return (
@@ -100,7 +268,7 @@ export default function MonthlySettlementPage() {
     );
   }
 
-  const { collection, income, unconfirmed, metrics, prevMonth: prevData, closing } = data;
+  const { collection, income, unconfirmed, metrics, prevMonth: prevData } = data;
   const profit = income.profit;
   const hasUnconfirmed = unconfirmed.unclosedDays > 0;
   const totalUnconfirmed = unconfirmed.salesTotal + unconfirmed.purchasesTotal + unconfirmed.laborCost;
@@ -123,17 +291,43 @@ export default function MonthlySettlementPage() {
         title="월정산"
         description={current?.name}
         action={
-          closing.isClosed ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-xs font-medium">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              확정완료
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-xs font-medium">
-              <Circle className="h-3.5 w-3.5" />
-              미확정
-            </span>
-          )
+          <div className="flex items-center gap-2">
+            {closing?.isClosed ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-xs font-medium">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                확정완료
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-xs font-medium">
+                <Circle className="h-3.5 w-3.5" />
+                미확정
+              </span>
+            )}
+            {isPrivileged && (
+              <div className="relative" ref={exportRef}>
+                <Button variant="outline" size="sm" onClick={() => setShowExportMenu(!showExportMenu)} className="gap-1">
+                  <Download className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">내보내기</span>
+                </Button>
+                {showExportMenu && (
+                  <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-lg shadow-lg z-50 min-w-[140px] py-1">
+                    <button
+                      onClick={handleExportExcel}
+                      className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors flex items-center gap-2"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-green-600" /> Excel (.xlsx)
+                    </button>
+                    <button
+                      onClick={handleExportPDF}
+                      className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors flex items-center gap-2"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         }
       />
 
@@ -564,15 +758,15 @@ export default function MonthlySettlementPage() {
 
       {/* ── 월정산 확정 ─── */}
       <Card className="p-4 mb-6">
-        {closing.isClosed ? (
+        {closing?.isClosed ? (
           <div className="text-center">
             <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
             <p className="text-sm font-semibold text-foreground">
               {year}년 {month}월 월정산 확정 완료
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {closing.closedByName && `${closing.closedByName} · `}
-              {closing.closedAt && new Date(closing.closedAt).toLocaleDateString("ko-KR")}
+              {closing?.closedByName && `${closing.closedByName} · `}
+              {closing?.closedAt && new Date(closing.closedAt).toLocaleDateString("ko-KR")}
             </p>
             {isPrivileged && (
               <Button
