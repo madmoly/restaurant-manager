@@ -839,7 +839,7 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             sql`${schedules.startTime} >= ${fromStr}`,
             sql`${schedules.startTime} < ${toStr}`,
-            sql`${schedules.status} = 'completed'`
+            sql`${schedules.status} IN ('confirmed','completed')`
           )
         )
         .orderBy(schedules.startTime);
