@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import {
   Plus, X, Edit3, Trash2, Pin, Megaphone, DoorOpen, Phone, BookOpen,
-  MoreHorizontal, Info,
+  MoreHorizontal, Info, ImagePlus, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -112,6 +112,14 @@ export default function StoreInfoPage() {
                       {c.isPinned && <Pin className="w-3 h-3 text-current opacity-60" />}
                       <span className="text-[10px] opacity-60">{ct.label}</span>
                     </div>
+                    {c.imageUrl && (
+                      <img
+                        src={c.imageUrl}
+                        alt=""
+                        className="mt-2 rounded-md max-h-48 object-contain cursor-pointer"
+                        onClick={() => window.open(c.imageUrl!, "_blank")}
+                      />
+                    )}
                     {c.content && (
                       <div className="mt-1.5 text-sm whitespace-pre-wrap leading-relaxed opacity-90">
                         {c.content}
@@ -173,8 +181,10 @@ function InfoCardFormModal({ restaurantId, editId, cards, onClose }: {
     cardType: existing?.cardType ?? "notice",
     title: existing?.title ?? "",
     content: existing?.content ?? "",
+    imageUrl: existing?.imageUrl ?? "",
     isPinned: existing?.isPinned ?? false,
   });
+  const [uploading, setUploading] = useState(false);
 
   const create = trpc.storeInfo.create.useMutation({
     onSuccess() { toast.success("등록됨"); utils.storeInfo.list.invalidate(); onClose(); },
@@ -187,10 +197,40 @@ function InfoCardFormModal({ restaurantId, editId, cards, onClose }: {
 
   const handleSubmit = () => {
     if (!form.title.trim()) { toast.error("제목을 입력해주세요"); return; }
+    const payload = {
+      cardType: form.cardType as any,
+      title: form.title,
+      content: form.content || undefined,
+      imageUrl: form.imageUrl || undefined,
+      isPinned: form.isPinned,
+    };
     if (editId) {
-      update.mutate({ id: editId, ...form });
+      update.mutate({ id: editId, ...payload });
     } else {
-      create.mutate({ restaurantId, ...form, cardType: form.cardType as any });
+      create.mutate({ restaurantId, ...payload });
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("이미지 파일만 가능합니다"); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error("5MB 이하만 가능합니다"); return; }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("photo", file);
+      const res = await fetch("/api/upload/store-info-image", { method: "POST", body: fd });
+      const data = await res.json();
+      if (data.url) {
+        setForm((prev) => ({ ...prev, imageUrl: data.url }));
+      } else {
+        toast.error(data.error || "업로드 실패");
+      }
+    } catch {
+      toast.error("업로드 중 오류 발생");
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -239,6 +279,26 @@ function InfoCardFormModal({ restaurantId, editId, cards, onClose }: {
                   : "내용을 입력하세요"
               }
             />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium">사진</label>
+            {form.imageUrl ? (
+              <div className="mt-1 relative inline-block">
+                <img src={form.imageUrl} alt="" className="rounded-md max-h-40 object-contain" />
+                <button
+                  type="button"
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs"
+                  onClick={() => setForm({ ...form, imageUrl: "" })}
+                ><X className="w-3 h-3" /></button>
+              </div>
+            ) : (
+              <label className={`mt-1 flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:bg-accent/50 transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}>
+                {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImagePlus className="w-5 h-5 text-muted-foreground" />}
+                <span className="text-sm text-muted-foreground">{uploading ? "업로드 중..." : "사진 추가"}</span>
+                <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploading} />
+              </label>
+            )}
           </div>
 
           <label className="flex items-center gap-2 cursor-pointer">

@@ -41,7 +41,7 @@ export const storeInfoRouter = router({
         content: input.content ?? null,
         imageUrl: input.imageUrl ?? null,
         isPinned: input.isPinned ?? false,
-        createdBy: ctx.user.id,
+        createdBy: ctx.user.userId,
       });
       return { id: result.insertId };
     }),

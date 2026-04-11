@@ -45,7 +45,7 @@ export const recipesRouter = router({
         category: input.category ?? null,
         imageUrl: input.imageUrl ?? null,
         content: input.content ?? null,
-        createdBy: ctx.user.id,
+        createdBy: ctx.user.userId,
       });
       return { id: result.insertId };
     }),

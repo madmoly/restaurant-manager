@@ -281,6 +281,57 @@ uploadRouter.post("/order-image-replace", orderUpload.single("photo"), (req: Req
   }
 });
 
+/**
+ * POST /api/upload/store-info-image
+ * multipart/form-data: field name = "photo"
+ * 업무정보 카드 이미지 (5MB, 이미지만)
+ */
+const STORE_INFO_DIR = path.join(UPLOAD_ROOT, "store-info");
+if (!fs.existsSync(STORE_INFO_DIR)) fs.mkdirSync(STORE_INFO_DIR, { recursive: true });
+
+const storeInfoStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, STORE_INFO_DIR);
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname) || ".jpg";
+    const unique = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+    cb(null, unique);
+  },
+});
+
+const storeInfoUpload = multer({
+  storage: storeInfoStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter(_req, file, cb) {
+    if (!file.mimetype.startsWith("image/")) {
+      cb(new Error("이미지 파일만 업로드 가능합니다"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+uploadRouter.post("/store-info-image", storeInfoUpload.single("photo"), async (req: Request, res: Response) => {
+  if (!req.file) {
+    res.status(400).json({ error: "파일이 없습니다" });
+    return;
+  }
+  try {
+    const processed = await sharp(req.file.path)
+      .rotate()
+      .resize(1280, 1280, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    fs.writeFileSync(req.file.path, processed);
+  } catch (err) {
+    console.warn(`[upload] store-info 이미지 처리 실패 (원본 유지):`, err);
+  }
+  const relativePath = path.relative(UPLOAD_ROOT, req.file.path).replace(/\\/g, "/");
+  const url = `/uploads/${relativePath}`;
+  res.json({ url });
+});
+
 // ─── 2주 지난 체크리스트 사진 자동삭제 ────────────────────────────────────────
 
 const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
