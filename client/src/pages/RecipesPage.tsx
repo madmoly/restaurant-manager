@@ -233,7 +233,7 @@ function RecipeFormModal({ restaurantId, editId, onClose }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-lg mx-4 p-5 max-h-[90vh] overflow-y-auto">
+      <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-lg mx-4 p-5 max-h-[90vh] overflow-y-auto pb-20 lg:pb-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">{editId ? "레시피 수정" : "레시피 등록"}</h2>
           <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-5 h-5" /></button>
