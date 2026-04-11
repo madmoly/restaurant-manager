@@ -470,9 +470,12 @@ app.use(express.json());
     await conn.query(`
       ALTER TABLE employment_electronic_contracts ADD COLUMN IF NOT EXISTS noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
-    // 월마감에 즉시지출 합계 컬럼
+    // 월마감에 즉시지출·고정비 합계 컬럼
     await conn.query(`
       ALTER TABLE monthly_closings ADD COLUMN IF NOT EXISTS expensesTotal DECIMAL(14,2) NOT NULL DEFAULT 0
+    `).catch(() => {});
+    await conn.query(`
+      ALTER TABLE monthly_closings ADD COLUMN IF NOT EXISTS fixedCostsTotal DECIMAL(14,2) NOT NULL DEFAULT 0
     `).catch(() => {});
     // 기존 admin 중 business_groups 미등록 → 자동 백필 (이름 = admin.name + " 사업그룹")
     await conn.query(`
