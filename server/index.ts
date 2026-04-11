@@ -470,9 +470,9 @@ app.use(express.json());
     await conn.query(`
       ALTER TABLE employment_electronic_contracts ADD COLUMN IF NOT EXISTS noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
-    // 월마감에 즉시지출·고정비 합계 컬럼
+    // 월마감에 즉시지출 합계 컬럼
     await conn.query(`
-      ALTER TABLE monthly_closings ADD COLUMN IF NOT EXISTS expensesTotal DECIMAL(14,2) NOT NULL DEFAULT 0
+      ALTER TABLE monthly_closings ADD COLUMN expensesTotal DECIMAL(14,2) NOT NULL DEFAULT 0
     `).catch(() => {});
     await conn.query(`
       ALTER TABLE monthly_closings ADD COLUMN IF NOT EXISTS fixedCostsTotal DECIMAL(14,2) NOT NULL DEFAULT 0
