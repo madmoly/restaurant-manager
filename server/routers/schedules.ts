@@ -341,6 +341,98 @@ export const schedulesRouter = router({
       return { id: (result as any).insertId };
     }),
 
+  /** 다중 직원 일괄 빠른 배정 */
+  batchQuickAssign: managerProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        userIds: z.array(z.number()).min(1).max(30),
+        workDate: z.string(),
+        preset: z.string().min(1),
+        note: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      if (await isClosedDay(input.restaurantId, input.workDate)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
+      }
+
+      // 프리셋 시간 계산 (전원 동일하므로 1회만)
+      const presetKey = input.preset === "fullday" ? "full" : input.preset;
+      const workDate = new Date(input.workDate + "T00:00:00+09:00");
+      const dow = workDate.getDay();
+      const dayType = (dow === 0 || dow === 6) ? "weekend" : "weekday";
+
+      const customPresets = await db.select()
+        .from(restaurantShiftPresets)
+        .where(and(
+          eq(restaurantShiftPresets.restaurantId, input.restaurantId),
+          eq(restaurantShiftPresets.presetType, presetKey),
+          eq(restaurantShiftPresets.dayType, dayType),
+          eq(restaurantShiftPresets.isActive, true),
+        ))
+        .limit(1);
+
+      let p: { start: string; end: string };
+      let breakMinutes: number;
+
+      if (customPresets.length > 0) {
+        p = { start: customPresets[0].startTime, end: customPresets[0].endTime };
+        breakMinutes = customPresets[0].breakMinutes;
+      } else {
+        const [rest] = await db
+          .select({ openTime: restaurants.openTime, closeTime: restaurants.closeTime })
+          .from(restaurants)
+          .where(eq(restaurants.id, input.restaurantId))
+          .limit(1);
+        const openTime = rest?.openTime ?? "09:00";
+        const closeTime = rest?.closeTime ?? "22:00";
+
+        const [oh, om] = openTime.split(":").map(Number);
+        const [ch, cm] = closeTime.split(":").map(Number);
+        const midMins = Math.round((oh * 60 + om + ch * 60 + cm) / 2);
+        const midTime = `${String(Math.floor(midMins / 60)).padStart(2, "0")}:${String(midMins % 60).padStart(2, "0")}`;
+
+        const fallbackPresets: Record<string, { start: string; end: string }> = {
+          open: { start: openTime, end: midTime },
+          full: { start: openTime, end: closeTime },
+          close: { start: midTime, end: closeTime },
+        };
+        const fallback = fallbackPresets[presetKey];
+        if (!fallback) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `프리셋 "${input.preset}"에 대한 시간 설정이 없습니다.` });
+        }
+        p = fallback;
+        breakMinutes = presetKey === "full" ? 60 : 0;
+      }
+
+      // 각 직원별 중복 체크 + INSERT
+      const results: { userId: number; id: number }[] = [];
+      const skipped: { userId: number; reason: string }[] = [];
+
+      for (const userId of input.userIds) {
+        if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { userId })) {
+          skipped.push({ userId, reason: "이미 배정됨" });
+          continue;
+        }
+        const [result] = await db.insert(schedules).values({
+          userId,
+          restaurantId: input.restaurantId,
+          startTime: new Date(`${input.workDate}T${p.start}:00+09:00`),
+          endTime: new Date(`${input.workDate}T${p.end}:00+09:00`),
+          breakMinutes,
+          note: input.note,
+          createdBy: ctx.user.userId,
+          status: "draft",
+          shiftPreset: presetKey,
+        });
+        results.push({ userId, id: (result as any).insertId });
+      }
+
+      return { created: results, skipped };
+    }),
+
   /** 스케줄 수정 — 상태별 정책 적용 */
   update: managerProcedure
     .input(

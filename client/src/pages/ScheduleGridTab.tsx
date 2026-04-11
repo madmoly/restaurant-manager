@@ -17,6 +17,8 @@ import {
   Pencil,
   AlertTriangle,
   Zap,
+  Check,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getHolidayName } from "@shared/holidays";
@@ -184,8 +186,11 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   type AssignStep = "employee" | "preset" | "custom-time" | "temp-worker";
   const [assignDate, setAssignDate] = useState<string | null>(null);
   const [assignStep, setAssignStep] = useState<AssignStep>("employee");
-  const [assignUserId, setAssignUserId] = useState<number>(0);
-  const [assignUserName, setAssignUserName] = useState<string>("");
+  const [assignUserIds, setAssignUserIds] = useState<Set<number>>(new Set());
+  const [assignUserNames, setAssignUserNames] = useState<Map<number, string>>(new Map());
+  // 하위 호환: 단일 선택이 필요한 곳용
+  const assignUserId = assignUserIds.size === 1 ? [...assignUserIds][0] : 0;
+  const assignUserName = assignUserIds.size === 1 ? (assignUserNames.get([...assignUserIds][0]) ?? "") : `${assignUserIds.size}명 선택`;
   const [customTime, setCustomTime] = useState({ startTime: "09:00", endTime: "18:00", note: "" });
   const [tempForm, setTempForm] = useState({
     name: "",
@@ -215,6 +220,18 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   const quickAssignMut = trpc.schedules.quickAssign.useMutation({
     onSuccess() {
       toast.success("스케줄 등록됨");
+      closeAssignModal();
+      invalidate();
+    },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const batchQuickAssignMut = trpc.schedules.batchQuickAssign.useMutation({
+    onSuccess(data) {
+      const msg = data.skipped.length > 0
+        ? `${data.created.length}명 배정 완료 (${data.skipped.length}명 이미 배정됨)`
+        : `${data.created.length}명 배정 완료`;
+      toast.success(msg);
       closeAssignModal();
       invalidate();
     },
@@ -427,22 +444,40 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   const openAssignModal = (dateStr: string) => {
     setAssignDate(dateStr);
     setAssignStep("employee");
-    setAssignUserId(0);
-    setAssignUserName("");
+    setAssignUserIds(new Set());
+    setAssignUserNames(new Map());
     setCustomTime({ startTime: "09:00", endTime: "18:00", note: "" });
     setTempForm({ name: "", wageType: "hourly", wageAmount: "", startTime: "09:00", endTime: "18:00", note: "" });
   };
   const closeAssignModal = () => { setAssignDate(null); setAssignStep("employee"); };
 
-  const selectEmployee = (userId: number, name: string) => {
-    setAssignUserId(userId);
-    setAssignUserName(name);
+  const toggleEmployee = (userId: number, name: string) => {
+    setAssignUserIds(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) { next.delete(userId); } else { next.add(userId); }
+      return next;
+    });
+    setAssignUserNames(prev => {
+      const next = new Map(prev);
+      if (next.has(userId)) { next.delete(userId); } else { next.set(userId, name); }
+      return next;
+    });
+  };
+
+  const confirmEmployeeSelection = () => {
+    if (assignUserIds.size === 0) return;
     setAssignStep("preset");
   };
 
   const handleQuickAssign = (preset: string) => {
-    if (!assignDate || !assignUserId) return;
-    quickAssignMut.mutate({ restaurantId, userId: assignUserId, workDate: assignDate, preset });
+    if (!assignDate || assignUserIds.size === 0) return;
+    if (assignUserIds.size === 1) {
+      // 단일 선택: 기존 API 사용
+      quickAssignMut.mutate({ restaurantId, userId: [...assignUserIds][0], workDate: assignDate, preset });
+    } else {
+      // 다중 선택: batch API 사용
+      batchQuickAssignMut.mutate({ restaurantId, userIds: [...assignUserIds], workDate: assignDate, preset });
+    }
   };
 
   const handleCustomTimeAssign = () => {
@@ -766,7 +801,11 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               <div>
                 <h2 className="text-base font-semibold text-foreground">
                   {assignStep === "employee" && "직원 선택"}
-                  {assignStep === "preset" && `${assignUserName} — 근무유형`}
+                  {assignStep === "preset" && (
+                    assignUserIds.size <= 2
+                      ? `${[...assignUserNames.values()].join(", ")} — 근무유형`
+                      : `${[...assignUserNames.values()].slice(0, 2).join(", ")} 외 ${assignUserIds.size - 2}명 — 근무유형`
+                  )}
                   {assignStep === "custom-time" && `${assignUserName} — 시간 직접입력`}
                   {assignStep === "temp-worker" && "임시근로자 등록"}
                 </h2>
@@ -777,46 +816,84 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               </button>
             </div>
 
-            {/* Step 1: 직원 목록 */}
+            {/* Step 1: 직원 목록 (다중 체크박스 선택) */}
             {assignStep === "employee" && (
-              <div className="overflow-y-auto flex-1 px-4 pb-4">
+              <div className="overflow-y-auto flex-1 px-4 pb-4 flex flex-col">
                 {staffList.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">등록된 직원이 없습니다</p>
                 ) : (
-                  <div className="space-y-1">
-                    {(staffList as StaffItem[]).map((staff) => {
-                      const isAssigned = assignedUserIds.has(staff.userId);
-                      const roleLabel =
-                        staff.storeRole === "owner" || staff.storeRole === "store_manager" ? "점장"
-                          : staff.storeRole === "supervisor" || staff.storeRole === "manager" ? "매니져"
-                          : "직원";
-                      return (
+                  <>
+                    {/* 전체 선택 / 해제 */}
+                    {(() => {
+                      const availableStaff = (staffList as StaffItem[]).filter(s => !assignedUserIds.has(s.userId));
+                      const allSelected = availableStaff.length > 0 && availableStaff.every(s => assignUserIds.has(s.userId));
+                      return availableStaff.length > 1 ? (
                         <button
-                          key={staff.userId}
-                          disabled={isAssigned}
-                          onClick={() => selectEmployee(staff.userId, staff.name)}
-                          className={`w-full flex items-center justify-between p-3 rounded-lg text-sm transition-colors ${
-                            isAssigned
-                              ? "opacity-40 cursor-not-allowed bg-muted/30"
-                              : "hover:bg-accent active:bg-accent/70"
-                          }`}
+                          onClick={() => {
+                            if (allSelected) {
+                              setAssignUserIds(new Set());
+                              setAssignUserNames(new Map());
+                            } else {
+                              setAssignUserIds(new Set(availableStaff.map(s => s.userId)));
+                              setAssignUserNames(new Map(availableStaff.map(s => [s.userId, s.name])));
+                            }
+                          }}
+                          className="flex items-center gap-2 px-3 py-2 mb-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                         >
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
-                              {staff.name.charAt(0)}
-                            </div>
-                            <div className="text-left">
-                              <span className="font-medium text-foreground">{staff.name}</span>
-                              <span className="text-xs text-muted-foreground ml-2">{roleLabel}</span>
-                            </div>
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                            allSelected ? "bg-primary border-primary" : "border-muted-foreground/40"
+                          }`}>
+                            {allSelected && <Check className="w-3 h-3 text-primary-foreground" />}
                           </div>
-                          {isAssigned && (
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-muted text-muted-foreground">배정됨</span>
-                          )}
+                          {allSelected ? "전체 해제" : `전체 선택 (${availableStaff.length}명)`}
                         </button>
-                      );
-                    })}
-                  </div>
+                      ) : null;
+                    })()}
+                    <div className="space-y-1">
+                      {(staffList as StaffItem[]).map((staff) => {
+                        const isAssigned = assignedUserIds.has(staff.userId);
+                        const isChecked = assignUserIds.has(staff.userId);
+                        const roleLabel =
+                          staff.storeRole === "owner" || staff.storeRole === "store_manager" ? "점장"
+                            : staff.storeRole === "supervisor" || staff.storeRole === "manager" ? "매니져"
+                            : "직원";
+                        return (
+                          <button
+                            key={staff.userId}
+                            disabled={isAssigned}
+                            onClick={() => toggleEmployee(staff.userId, staff.name)}
+                            className={`w-full flex items-center justify-between p-3 rounded-lg text-sm transition-colors ${
+                              isAssigned
+                                ? "opacity-40 cursor-not-allowed bg-muted/30"
+                                : isChecked
+                                ? "bg-primary/5 ring-1 ring-primary/30"
+                                : "hover:bg-accent active:bg-accent/70"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              {/* 체크박스 */}
+                              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
+                                isAssigned ? "border-muted bg-muted/30"
+                                  : isChecked ? "border-primary bg-primary" : "border-muted-foreground/40"
+                              }`}>
+                                {isChecked && <Check className="w-3.5 h-3.5 text-primary-foreground" />}
+                              </div>
+                              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
+                                {staff.name.charAt(0)}
+                              </div>
+                              <div className="text-left">
+                                <span className="font-medium text-foreground">{staff.name}</span>
+                                <span className="text-xs text-muted-foreground ml-2">{roleLabel}</span>
+                              </div>
+                            </div>
+                            {isAssigned && (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-muted text-muted-foreground">배정됨</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
                 )}
 
                 <div className="mt-3 pt-3 border-t border-border">
@@ -833,6 +910,19 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                     </div>
                   </button>
                 </div>
+
+                {/* 선택 확정 버튼 (하단 고정) */}
+                {assignUserIds.size > 0 && (
+                  <div className="mt-3 pt-3 border-t border-border">
+                    <button
+                      onClick={confirmEmployeeSelection}
+                      className="w-full flex items-center justify-center gap-2 p-3 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80 transition-colors"
+                    >
+                      <Users className="w-4 h-4" />
+                      {assignUserIds.size}명 선택 — 근무유형 선택
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -885,7 +975,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                           <button
                             key={key}
                             onClick={() => handleQuickAssign(apiKey)}
-                            disabled={quickAssignMut.isPending}
+                            disabled={quickAssignMut.isPending || batchQuickAssignMut.isPending}
                             className="w-full flex items-center gap-3 p-4 rounded-lg border border-border hover:bg-accent active:bg-accent/70 transition-colors"
                           >
                             <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -908,7 +998,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                         <button
                           key={cp.presetType}
                           onClick={() => handleQuickAssign(cp.presetType)}
-                          disabled={quickAssignMut.isPending}
+                          disabled={quickAssignMut.isPending || batchQuickAssignMut.isPending}
                           className="w-full flex items-center gap-3 p-4 rounded-lg border border-border hover:bg-accent active:bg-accent/70 transition-colors"
                         >
                           <div className="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
@@ -930,18 +1020,21 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   );
                 })()}
 
-                <button
-                  onClick={() => setAssignStep("custom-time")}
-                  className="w-full flex items-center gap-3 p-4 rounded-lg border border-dashed border-border hover:bg-accent active:bg-accent/70 transition-colors"
-                >
-                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                    <Pencil className="w-5 h-5 text-muted-foreground" />
-                  </div>
-                  <div className="text-left">
-                    <div className="font-medium text-foreground text-sm">시간 직접입력</div>
-                    <div className="text-xs text-muted-foreground">출퇴근 시간 수동 설정</div>
-                  </div>
-                </button>
+                {/* 시간 직접입력: 단일 선택 시에만 표시 */}
+                {assignUserIds.size === 1 && (
+                  <button
+                    onClick={() => setAssignStep("custom-time")}
+                    className="w-full flex items-center gap-3 p-4 rounded-lg border border-dashed border-border hover:bg-accent active:bg-accent/70 transition-colors"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                      <Pencil className="w-5 h-5 text-muted-foreground" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-medium text-foreground text-sm">시간 직접입력</div>
+                      <div className="text-xs text-muted-foreground">출퇴근 시간 수동 설정</div>
+                    </div>
+                  </button>
+                )}
               </div>
             )}
 
