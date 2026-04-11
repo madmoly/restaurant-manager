@@ -68,6 +68,157 @@ export default function PurchaseManagementPage() {
 // ═══════════════════════════════════════════════════════════════════════
 // 품목마스터 탭: 품목-거래처 매핑 + 기준단위가 표시
 // ═══════════════════════════════════════════════════════════════════════
+// 병합 확인 패널에 전달할 품목 타입
+type MergeCandidate = { id: number; name: string; counterpartyCount?: number; purchaseCount?: number };
+
+function MergeConfirmPanel({
+  items: candidates,
+  isPending,
+  onConfirm,
+  onCancel,
+}: {
+  items: MergeCandidate[];
+  isPending: boolean;
+  onConfirm: (targetId: number, sourceIds: number[], targetName?: string) => void;
+  onCancel: () => void;
+}) {
+  const [selectedId, setSelectedId] = useState(() => {
+    // 기본: 거래처 많은 순 → 이름순
+    const sorted = [...candidates].sort((a, b) =>
+      (b.counterpartyCount ?? 0) - (a.counterpartyCount ?? 0) || a.name.localeCompare(b.name)
+    );
+    return sorted[0].id;
+  });
+  const [customName, setCustomName] = useState("");
+  const [useCustom, setUseCustom] = useState(false);
+
+  const finalName = useCustom ? customName.trim() : candidates.find(c => c.id === selectedId)?.name || "";
+  const canConfirm = finalName.length > 0 && candidates.length >= 2;
+
+  const handleConfirm = () => {
+    const sourceIds = candidates.filter(c => c.id !== selectedId).map(c => c.id);
+    const selectedItem = candidates.find(c => c.id === selectedId);
+    // targetName은 기존 이름과 다를 때만 전달
+    const targetName = useCustom && customName.trim() !== selectedItem?.name
+      ? customName.trim()
+      : !useCustom ? undefined : undefined;
+    onConfirm(selectedId, sourceIds, targetName);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={onCancel}>
+          <ChevronLeft className="w-3.5 h-3.5 mr-1" /> 돌아가기
+        </Button>
+        <h2 className="text-sm font-bold text-foreground">품목 병합</h2>
+      </div>
+
+      <Card className="p-4 space-y-3">
+        <p className="text-xs text-muted-foreground">
+          대표 품목을 선택하세요. 나머지 품목의 매입 이력과 거래처 매핑이 대표 품목으로 통합됩니다.
+        </p>
+
+        <div className="space-y-1.5">
+          {candidates.map(item => (
+            <button
+              key={item.id}
+              onClick={() => { setSelectedId(item.id); setUseCustom(false); }}
+              className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-colors ${
+                !useCustom && selectedId === item.id
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:bg-muted/30"
+              }`}
+            >
+              <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                !useCustom && selectedId === item.id ? "border-primary" : "border-muted-foreground/40"
+              }`}>
+                {!useCustom && selectedId === item.id && (
+                  <div className="w-2 h-2 rounded-full bg-primary" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="font-medium text-foreground text-sm">{item.name}</span>
+                <span className="text-xs text-muted-foreground ml-2">
+                  {item.counterpartyCount != null && `거래처 ${item.counterpartyCount}곳`}
+                  {item.purchaseCount != null && ` · ${item.purchaseCount}건`}
+                </span>
+              </div>
+            </button>
+          ))}
+
+          {/* 직접 입력 옵션 */}
+          <button
+            onClick={() => {
+              setUseCustom(true);
+              if (!customName) setCustomName(candidates.find(c => c.id === selectedId)?.name || "");
+            }}
+            className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-colors ${
+              useCustom ? "border-primary bg-primary/5" : "border-border hover:bg-muted/30"
+            }`}
+          >
+            <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+              useCustom ? "border-primary" : "border-muted-foreground/40"
+            }`}>
+              {useCustom && <div className="w-2 h-2 rounded-full bg-primary" />}
+            </div>
+            <span className="text-sm text-muted-foreground">직접 입력</span>
+          </button>
+          {useCustom && (
+            <Input
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              placeholder="병합 후 품목명 입력..."
+              className="h-9 text-sm ml-7"
+              autoFocus
+            />
+          )}
+        </div>
+      </Card>
+
+      {/* 미리보기 */}
+      {canConfirm && (
+        <Card className="p-3 bg-muted/30">
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">"{finalName}"</span>으로 병합됩니다.
+            {candidates.length - 1}개 품목이 비활성화되고 매입 이력이 통합됩니다.
+          </p>
+        </Card>
+      )}
+
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" className="flex-1 h-10" onClick={onCancel}>
+          취소
+        </Button>
+        <Button
+          size="sm"
+          className="flex-1 h-10"
+          onClick={handleConfirm}
+          disabled={!canConfirm || isPending}
+        >
+          <Merge className="w-3.5 h-3.5 mr-1" />
+          {isPending ? "처리 중..." : "병합 확정"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// 배너 무시 저장 키
+const DISMISSED_KEY = "purchase_dismissed_similar_groups";
+function getDismissed(restaurantId: number): Set<string> {
+  try {
+    const raw = localStorage.getItem(`${DISMISSED_KEY}_${restaurantId}`);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch { return new Set(); }
+}
+function setDismissed(restaurantId: number, keys: Set<string>) {
+  localStorage.setItem(`${DISMISSED_KEY}_${restaurantId}`, JSON.stringify([...keys]));
+}
+function groupKey(items: { id: number }[]) {
+  return items.map(i => i.id).sort((a, b) => a - b).join(",");
+}
+
 function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
   const [search, setSearch] = useState("");
   const [expandedItem, setExpandedItem] = useState<number | null>(null);
@@ -75,6 +226,9 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
   const [showSimilar, setShowSimilar] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [dismissed, setDismissedState] = useState(() => getDismissed(restaurantId));
+  // 병합 확인 패널
+  const [mergeItems, setMergeItems] = useState<MergeCandidate[] | null>(null);
 
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.items.listWithMappings.useQuery(
@@ -87,11 +241,14 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
     { restaurantId },
     { enabled: restaurantId > 0 },
   );
-  const similarGroups = similarData?.groups || [];
+  const similarGroups = (similarData?.groups || []).filter(
+    g => !dismissed.has(groupKey(g.items))
+  );
 
   const mergeMutation = trpc.items.merge.useMutation({
     onSuccess() {
       toast.success("품목이 병합되었습니다");
+      setMergeItems(null);
       setSelected(new Set());
       setSelectMode(false);
       utils.items.listWithMappings.invalidate();
@@ -100,26 +257,30 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
     onError(err: any) { toast.error(err.message || "병합 실패"); },
   });
 
-  const handleMerge = (group: typeof similarGroups[0]) => {
-    const sorted = [...group.items].sort((a, b) => b.purchaseCount - a.purchaseCount);
-    const target = sorted[0];
-    const sources = sorted.slice(1).map(i => i.id);
-    if (!confirm(`"${target.name}"으로 ${sources.length}개 품목을 병합합니다.\n이 작업은 되돌릴 수 없습니다.`)) return;
-    mergeMutation.mutate({ targetId: target.id, sourceIds: sources });
+  // 배너 그룹 → 병합 확인 패널
+  const openBannerMerge = (group: typeof similarGroups[0]) => {
+    setMergeItems(group.items.map(i => ({
+      id: i.id, name: i.name,
+      counterpartyCount: i.counterpartyCount, purchaseCount: i.purchaseCount,
+    })));
   };
 
-  const handleManualMerge = () => {
+  // 배너 그룹 무시
+  const dismissGroup = (group: typeof similarGroups[0]) => {
+    const key = groupKey(group.items);
+    const next = new Set(dismissed);
+    next.add(key);
+    setDismissedState(next);
+    setDismissed(restaurantId, next);
+  };
+
+  // 수동 선택 → 병합 확인 패널
+  const openManualMerge = () => {
     const selectedItems = (data || []).filter((i: any) => selected.has(i.itemId));
     if (selectedItems.length < 2) return;
-    // 거래처 많은 순 → 매입 건수 순 → 이름 순으로 대표 품목 자동 선택
-    const sorted = [...selectedItems].sort((a: any, b: any) =>
-      b.counterpartyCount - a.counterpartyCount || a.itemName.localeCompare(b.itemName)
-    );
-    const target = sorted[0];
-    const sources = sorted.slice(1).map((i: any) => i.itemId);
-    const names = selectedItems.map((i: any) => `"${i.itemName}"`).join(", ");
-    if (!confirm(`${names} → "${target.itemName}"으로 병합합니다.\n이 작업은 되돌릴 수 없습니다.`)) return;
-    mergeMutation.mutate({ targetId: target.itemId, sourceIds: sources });
+    setMergeItems(selectedItems.map((i: any) => ({
+      id: i.itemId, name: i.itemName, counterpartyCount: i.counterpartyCount,
+    })));
   };
 
   const toggleSelect = (itemId: number) => {
@@ -135,6 +296,20 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
   const items = (data || []).filter((item: any) =>
     !search || item.itemName.toLowerCase().includes(search.toLowerCase())
   );
+
+  // 병합 확인 패널 표시 중
+  if (mergeItems) {
+    return (
+      <MergeConfirmPanel
+        items={mergeItems}
+        isPending={mergeMutation.isPending}
+        onConfirm={(targetId, sourceIds, targetName) => {
+          mergeMutation.mutate({ targetId, sourceIds, targetName });
+        }}
+        onCancel={() => setMergeItems(null)}
+      />
+    );
+  }
 
   if (showSuppliers) {
     return (
@@ -201,15 +376,14 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
                         </span>
                       ))}
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs shrink-0 ml-2"
-                      onClick={() => handleMerge(group)}
-                      disabled={mergeMutation.isPending}
-                    >
-                      <Merge className="w-3 h-3 mr-1" /> 병합
-                    </Button>
+                    <div className="flex gap-1 shrink-0 ml-2">
+                      <Button size="sm" variant="ghost" className="h-7 text-xs px-2 text-muted-foreground" onClick={() => dismissGroup(group)}>
+                        무시
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openBannerMerge(group)}>
+                        <Merge className="w-3 h-3 mr-1" /> 병합
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -293,7 +467,7 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
             <span className="text-sm font-medium text-foreground">
               {selected.size}개 품목 선택됨
             </span>
-            <Button size="sm" className="h-8 text-xs" onClick={handleManualMerge} disabled={mergeMutation.isPending}>
+            <Button size="sm" className="h-8 text-xs" onClick={openManualMerge} disabled={mergeMutation.isPending}>
               <Merge className="w-3.5 h-3.5 mr-1" /> 병합
             </Button>
           </Card>

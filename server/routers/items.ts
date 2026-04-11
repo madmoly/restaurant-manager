@@ -258,14 +258,15 @@ export const itemsRouter = router({
       );
     }),
 
-  /** 품목 합치기 (sourceIds → targetId로 병합) */
+  /** 품목 합치기 (sourceIds → targetId로 병합, 선택적 이름 변경) */
   merge: managerProcedure
     .input(z.object({
       targetId: z.number(),
       sourceIds: z.array(z.number()).min(1),
+      targetName: z.string().min(1).optional(),
     }))
     .mutation(async ({ input }) => {
-      const { targetId, sourceIds } = input;
+      const { targetId, sourceIds, targetName } = input;
 
       // sourceIds에 targetId가 포함되면 제거
       const mergeIds = sourceIds.filter(id => id !== targetId);
@@ -290,6 +291,13 @@ export const itemsRouter = router({
         await db.update(items)
           .set({ isActive: false })
           .where(eq(items.id, srcId));
+      }
+
+      // 4) 대표 품목명 변경 (지정된 경우)
+      if (targetName) {
+        await db.update(items)
+          .set({ name: targetName })
+          .where(eq(items.id, targetId));
       }
 
       return { merged: mergeIds.length };
