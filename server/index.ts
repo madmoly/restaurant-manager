@@ -475,7 +475,7 @@ app.use(express.json());
       ALTER TABLE monthly_closings ADD COLUMN expensesTotal DECIMAL(14,2) NOT NULL DEFAULT 0
     `).catch(() => {});
     await conn.query(`
-      ALTER TABLE monthly_closings ADD COLUMN IF NOT EXISTS fixedCostsTotal DECIMAL(14,2) NOT NULL DEFAULT 0
+      ALTER TABLE monthly_closings ADD COLUMN fixedCostsTotal DECIMAL(14,2) NOT NULL DEFAULT 0
     `).catch(() => {});
     // 기존 admin 중 business_groups 미등록 → 자동 백필 (이름 = admin.name + " 사업그룹")
     await conn.query(`
