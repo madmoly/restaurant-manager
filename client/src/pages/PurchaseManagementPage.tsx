@@ -7,7 +7,7 @@ import {
   Package, Wallet,
   ChevronDown, ChevronUp, Pencil, X, Save,
   ChevronLeft, ChevronRight,
-  CalendarRange,
+  CalendarRange, AlertTriangle, Merge,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -72,11 +72,38 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
   const [search, setSearch] = useState("");
   const [expandedItem, setExpandedItem] = useState<number | null>(null);
   const [showSuppliers, setShowSuppliers] = useState(false);
+  const [showSimilar, setShowSimilar] = useState(false);
 
+  const utils = trpc.useUtils();
   const { data, isLoading } = trpc.items.listWithMappings.useQuery(
     { restaurantId },
     { enabled: restaurantId > 0 },
   );
+
+  // 유사품목 감지
+  const { data: similarData } = trpc.items.findSimilarGroups.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const similarGroups = similarData?.groups || [];
+
+  const mergeMutation = trpc.items.merge.useMutation({
+    onSuccess() {
+      toast.success("품목이 병합되었습니다");
+      utils.items.listWithMappings.invalidate();
+      utils.items.findSimilarGroups.invalidate();
+    },
+    onError(err: any) { toast.error(err.message || "병합 실패"); },
+  });
+
+  const handleMerge = (group: typeof similarGroups[0]) => {
+    // purchaseCount가 가장 많은 항목을 target으로
+    const sorted = [...group.items].sort((a, b) => b.purchaseCount - a.purchaseCount);
+    const target = sorted[0];
+    const sources = sorted.slice(1).map(i => i.id);
+    if (!confirm(`"${target.name}"으로 ${sources.length}개 품목을 병합합니다.\n이 작업은 되돌릴 수 없습니다.`)) return;
+    mergeMutation.mutate({ targetId: target.id, sourceIds: sources });
+  };
 
   const items = (data || []).filter((item: any) =>
     !search || item.itemName.toLowerCase().includes(search.toLowerCase())
@@ -106,6 +133,52 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
           <Wallet className="w-3.5 h-3.5 mr-1" /> 거래처 관리
         </Button>
       </div>
+
+      {/* 유사품목 경고 배너 */}
+      {similarGroups.length > 0 && (
+        <Card className="border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/20">
+          <button
+            onClick={() => setShowSimilar(!showSimilar)}
+            className="w-full flex items-center justify-between p-3 text-left"
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                유사한 이름의 품목 {similarGroups.length}건 감지
+              </span>
+            </div>
+            {showSimilar ? <ChevronUp className="w-4 h-4 text-amber-600" /> : <ChevronDown className="w-4 h-4 text-amber-600" />}
+          </button>
+          {showSimilar && (
+            <div className="px-3 pb-3 space-y-2">
+              {similarGroups.map((group, gi) => (
+                <div key={gi} className="bg-white dark:bg-background rounded-md border border-border p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap gap-1 items-center text-xs">
+                      {group.items.map((item, ii) => (
+                        <span key={item.id}>
+                          {ii > 0 && <span className="text-muted-foreground mx-0.5">↔</span>}
+                          <span className="font-medium text-foreground">"{item.name}"</span>
+                          <span className="text-muted-foreground ml-0.5">({item.purchaseCount}건)</span>
+                        </span>
+                      ))}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs shrink-0 ml-2"
+                      onClick={() => handleMerge(group)}
+                      disabled={mergeMutation.isPending}
+                    >
+                      <Merge className="w-3 h-3 mr-1" /> 병합
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground text-center py-8">로딩 중...</p>
