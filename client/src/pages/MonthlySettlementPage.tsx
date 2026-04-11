@@ -769,11 +769,19 @@ function ExpensesRow({ amount, expanded, onToggle, locked, restaurantId, year, m
       locked={locked}
     >
       {data && data.breakdown.length > 0 ? (
-        <div className="space-y-1.5">
+        <div className="space-y-3">
           {data.breakdown.map((b, i) => (
-            <div key={i} className="flex items-center justify-between text-xs">
-              <span className="text-foreground">{b.categoryName}</span>
-              <span className="font-medium text-foreground tabular-nums">{b.amount.toLocaleString()}원</span>
+            <div key={i} className="rounded-lg border border-border/50 p-2.5 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-foreground">{b.categoryName}</span>
+                <span className="text-xs font-medium text-foreground tabular-nums">{b.amount.toLocaleString()}원</span>
+              </div>
+              {b.items.map((it: { date: string; title: string; amount: number }, j: number) => (
+                <div key={j} className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>{it.date.slice(5).replace("-", "/")} {it.title}</span>
+                  <span className="tabular-nums">{it.amount.toLocaleString()}원</span>
+                </div>
+              ))}
             </div>
           ))}
         </div>

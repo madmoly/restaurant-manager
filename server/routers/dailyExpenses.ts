@@ -199,11 +199,15 @@ export const dailyExpensesRouter = router({
       const ny = input.month === 12 ? input.year + 1 : input.year;
       const endDate = `${ny}-${String(nm).padStart(2, "0")}-01`;
 
-      const rows = await db
+      // 개별 항목 조회
+      const items = await db
         .select({
+          id: dailyExpenses.id,
+          date: dailyExpenses.date,
           categoryId: dailyExpenses.categoryId,
           categoryName: sql<string>`COALESCE(${expenseCategories.name}, ${dailyExpenses.category}, '미분류')`,
-          amount: sql<string>`SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2)))`,
+          title: dailyExpenses.title,
+          amount: dailyExpenses.amount,
         })
         .from(dailyExpenses)
         .leftJoin(expenseCategories, eq(dailyExpenses.categoryId, expenseCategories.id))
@@ -214,13 +218,22 @@ export const dailyExpensesRouter = router({
             sql`${dailyExpenses.date} < ${endDate}`,
           ),
         )
-        .groupBy(dailyExpenses.categoryId, expenseCategories.name, dailyExpenses.category);
+        .orderBy(dailyExpenses.date, dailyExpenses.id);
 
-      const breakdown = rows.map(r => ({
-        categoryId: r.categoryId,
-        categoryName: r.categoryName,
-        amount: Math.round(Number(r.amount ?? 0)),
-      }));
+      // 카테고리별 그룹핑
+      const catMap = new Map<string, { categoryId: number | null; categoryName: string; amount: number; items: { date: string; title: string; amount: number }[] }>();
+      for (const it of items) {
+        const key = String(it.categoryId ?? it.categoryName);
+        if (!catMap.has(key)) {
+          catMap.set(key, { categoryId: it.categoryId, categoryName: it.categoryName, amount: 0, items: [] });
+        }
+        const cat = catMap.get(key)!;
+        const amt = Math.round(Number(it.amount ?? 0));
+        cat.amount += amt;
+        cat.items.push({ date: String(it.date).slice(0, 10), title: it.title, amount: amt });
+      }
+
+      const breakdown = Array.from(catMap.values()).sort((a, b) => b.amount - a.amount);
       const total = breakdown.reduce((s, b) => s + b.amount, 0);
       return { total, breakdown };
     }),
