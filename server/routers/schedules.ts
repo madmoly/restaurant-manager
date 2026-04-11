@@ -792,6 +792,17 @@ export const schedulesRouter = router({
 
       console.log(`[laborCost] restaurantId=${input.restaurantId} year=${input.year} month=${input.month} fromUTC="${fromStr}" toUTC="${toStr}"`);
 
+      // 디버그: 해당 기간 스케줄 상태 분포 확인
+      const statusCheck = await db.select({ status: schedules.status, cnt: sql<number>`COUNT(*)` })
+        .from(schedules)
+        .where(and(
+          eq(schedules.restaurantId, input.restaurantId),
+          sql`${schedules.startTime} >= ${fromStr}`,
+          sql`${schedules.startTime} < ${toStr}`,
+        ))
+        .groupBy(schedules.status);
+      console.log(`[laborCost] status distribution:`, JSON.stringify(statusCheck));
+
       // 전체 스케줄 (draft 포함) + 직원 정보 + 소속회사 + 시급 조인
       // 계약서 isActive 필터 제거 → 초안(비활성) 계약도 급여 반영
       // 복수 계약 존재 시 중복 방지를 위해 scheduleId로 dedup
