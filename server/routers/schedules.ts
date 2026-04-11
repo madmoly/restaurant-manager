@@ -858,6 +858,8 @@ export const schedulesRouter = router({
         .orderBy(schedules.startTime);
       } catch (queryErr: any) {
         console.error(`[laborCost] QUERY ERROR:`, queryErr?.message ?? queryErr);
+        console.error(`[laborCost] QUERY CAUSE:`, queryErr?.cause?.message ?? queryErr?.cause ?? 'no cause');
+        console.error(`[laborCost] QUERY CODE:`, queryErr?.code ?? queryErr?.errno ?? 'no code');
         throw queryErr;
       }
 
