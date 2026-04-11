@@ -834,7 +834,6 @@ export const schedulesRouter = router({
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
           contractIsActive: employeeContracts.isActive,
-          noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
         })
         .from(schedules)
@@ -875,6 +874,20 @@ export const schedulesRouter = router({
         }
       }
       const rows = Array.from(seenSchedules.values());
+
+      // noWeeklyHolidayPay 별도 조회 (컬럼 미존재 시 안전 fallback)
+      let noHolidayPayMap = new Map<number, boolean>();
+      try {
+        const nhpRows = await db.select({
+          userId: employeeContracts.userId,
+          noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
+        }).from(employeeContracts).where(eq(employeeContracts.restaurantId, input.restaurantId));
+        for (const r of nhpRows) {
+          if (r.userId) noHolidayPayMap.set(r.userId, !!r.noWeeklyHolidayPay);
+        }
+      } catch {
+        console.log(`[laborCost] noWeeklyHolidayPay column not available, defaulting to false`);
+      }
 
       console.log(`[laborCost] rows found: ${rows.length} (raw: ${rawRows.length})`);
 
@@ -938,7 +951,7 @@ export const schedulesRouter = router({
         const company = (r.affiliatedCompany ?? "미지정").trim() || "미지정";
         const name = r.userName ?? r.tempWorkerName ?? "미지정";
         // 주휴수당 미제공 정규직원 → 임시근로자 취급 (empKey에 temp_ 접두사)
-        const treatAsTemp = !!(r.userId && r.noWeeklyHolidayPay);
+        const treatAsTemp = !!(r.userId && noHolidayPayMap.get(r.userId));
         const empKey = (!r.userId || treatAsTemp) ? `temp_${r.userId ?? name}` : String(r.userId);
 
         if (!companyMap[company]) {
