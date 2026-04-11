@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/hooks/useAuth";
@@ -6,13 +6,12 @@ import {
   CheckCircle2, Circle, AlertTriangle, TrendingUp, TrendingDown,
   ChevronDown, ChevronUp, Lock, Loader2, ArrowUpRight, ArrowDownRight,
   Calendar, CreditCard, Banknote, Gift, ArrowRightLeft, MoreHorizontal,
-  Camera, X, Image as ImageIcon, Trash2,
+  Camera, X, Info,
 } from "lucide-react";
 import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-type Section = "collection" | "income" | "metrics" | "comparison" | null;
 type IncomeExpand = "sales" | "purchases" | "labor" | "fixed" | null;
 
 export default function MonthlySettlementPage() {
@@ -26,16 +25,16 @@ export default function MonthlySettlementPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
-  const [expandedSection, setExpandedSection] = useState<Section>(null);
   const [incomeExpand, setIncomeExpand] = useState<IncomeExpand>(null);
+  const [collectionOpen, setCollectionOpen] = useState(false);
 
   const prevMonth = () => {
     if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1);
-    setExpandedSection(null); setIncomeExpand(null);
+    setIncomeExpand(null); setCollectionOpen(false);
   };
   const nextMonth = () => {
     if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1);
-    setExpandedSection(null); setIncomeExpand(null);
+    setIncomeExpand(null); setCollectionOpen(false);
   };
 
   const { data, isLoading, refetch } = trpc.monthlyClosings.settlementData.useQuery(
@@ -84,7 +83,11 @@ export default function MonthlySettlementPage() {
   };
 
   const handleClose = () => {
-    if (!confirm(`${year}년 ${month}월 월정산을 확정하시겠습니까?\n\n확정 후에도 재확정이 가능합니다.`)) return;
+    const unclosed = data?.collection.unclosedDates.length ?? 0;
+    const msg = unclosed > 0
+      ? `${year}년 ${month}월 월정산을 확정하시겠습니까?\n\n⚠️ ${unclosed}일 미마감 — 해당 날짜의 매출·매입·인건비는 반영되지 않습니다.\n\n확정 후에도 재확정이 가능합니다.`
+      : `${year}년 ${month}월 월정산을 확정하시겠습니까?\n\n모든 영업일이 마감되었습니다.\n확정 후에도 재확정이 가능합니다.`;
+    if (!confirm(msg)) return;
     closeMutation.mutate({ restaurantId, year, month });
   };
 
@@ -97,8 +100,10 @@ export default function MonthlySettlementPage() {
     );
   }
 
-  const { collection, income, metrics, prevMonth: prevData, closing } = data;
+  const { collection, income, unconfirmed, metrics, prevMonth: prevData, closing } = data;
   const profit = income.profit;
+  const hasUnconfirmed = unconfirmed.unclosedDays > 0;
+  const totalUnconfirmed = unconfirmed.salesTotal + unconfirmed.purchasesTotal + unconfirmed.laborCost;
 
   // 수집 완료율
   const checks = [
@@ -113,7 +118,7 @@ export default function MonthlySettlementPage() {
 
   return (
     <div>
-      {/* ── Section 0: 헤더 ─────────────────────────────────────── */}
+      {/* ── 헤더 ─── */}
       <PageHeader
         title="월정산"
         description={current?.name}
@@ -142,11 +147,24 @@ export default function MonthlySettlementPage() {
         }
       />
 
-      {/* ── Section 1: 데이터 수집 현황 ──────────────────────────── */}
+      {/* ── 일마감 기준 안내 배너 ─── */}
+      {hasUnconfirmed && (
+        <div className="flex items-start gap-2 px-3 py-2.5 mb-4 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+          <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+          <div className="text-xs text-amber-700 dark:text-amber-300">
+            <span className="font-medium">일마감 기준 집계</span>
+            <span className="text-amber-600 dark:text-amber-400">
+              {" "}— {unconfirmed.unclosedDays}일 미마감 데이터는 월정산에 미반영됩니다
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ── 데이터 수집 현황 ─── */}
       <Card className="p-4 mb-4">
         <button
           className="w-full flex items-center justify-between"
-          onClick={() => setExpandedSection(expandedSection === "collection" ? null : "collection")}
+          onClick={() => setCollectionOpen(!collectionOpen)}
         >
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${
@@ -163,12 +181,11 @@ export default function MonthlySettlementPage() {
               </div>
             </div>
           </div>
-          {expandedSection === "collection" ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          {collectionOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
         </button>
 
-        {expandedSection === "collection" && (
+        {collectionOpen && (
           <div className="mt-4 pt-3 border-t border-border space-y-3">
-            {/* 일마감 */}
             <CheckItem
               done={collection.unclosedDates.length === 0}
               label="일마감"
@@ -178,7 +195,6 @@ export default function MonthlySettlementPage() {
                   : `${collection.closedDays}일 전체 마감 완료`
               }
             />
-            {/* 매출 */}
             <CheckItem
               done={collection.salesMissingDates.length === 0}
               label="매출 입력"
@@ -188,7 +204,6 @@ export default function MonthlySettlementPage() {
                   : `${collection.salesInputDays}일 입력 완료`
               }
             />
-            {/* 매입 */}
             <CheckItem
               done={collection.purchaseCount > 0 && collection.purchasePendingCount === 0}
               label="매입 데이터"
@@ -200,7 +215,6 @@ export default function MonthlySettlementPage() {
                     : `${collection.purchaseCount}건 전체 확정(입고)`
               }
             />
-            {/* 인건비 */}
             <CheckItem
               done={collection.draftScheduleCount === 0}
               label="인건비 (스케줄)"
@@ -210,7 +224,6 @@ export default function MonthlySettlementPage() {
                   : "전체 스케줄 확정 완료"
               }
             />
-            {/* 고정비 */}
             <CheckItem
               done={collection.fixedCostCount > 0}
               label="고정비"
@@ -220,11 +233,14 @@ export default function MonthlySettlementPage() {
         )}
       </Card>
 
-      {/* ── Section 2: 손익 요약 ──────────────────────────────────── */}
+      {/* ── 손익 요약 ─── */}
       <Card className={`p-4 mb-4 ${profit >= 0 ? "border-emerald-200 dark:border-emerald-800" : "border-red-200 dark:border-red-800"}`}>
         <div className="flex items-center gap-2 mb-1">
           {profit >= 0 ? <TrendingUp size={16} className="text-emerald-600" /> : <TrendingDown size={16} className="text-red-500" />}
-          <span className="text-xs text-muted-foreground font-medium">월 순이익</span>
+          <span className="text-xs text-muted-foreground font-medium">
+            월 순이익
+            {hasUnconfirmed && <span className="text-amber-500 ml-1">(마감분)</span>}
+          </span>
         </div>
         <p className={`text-2xl font-bold tabular-nums ${profit >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
           {profit >= 0 ? "+" : ""}{profit.toLocaleString()}
@@ -233,21 +249,32 @@ export default function MonthlySettlementPage() {
         {income.salesTotal > 0 && (
           <p className="text-xs text-muted-foreground mt-0.5">수익률 {metrics.profitRatio}%</p>
         )}
+        {/* 미반영 참고 */}
+        {hasUnconfirmed && totalUnconfirmed > 0 && (
+          <div className="mt-2 pt-2 border-t border-dashed border-amber-200 dark:border-amber-800">
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+              미반영 {unconfirmed.unclosedDays}일 — 매출 {unconfirmed.salesTotal.toLocaleString()}, 매입 {unconfirmed.purchasesTotal.toLocaleString()}, 인건비 {unconfirmed.laborCost.toLocaleString()}
+            </p>
+          </div>
+        )}
       </Card>
 
-      {/* 손익 항목별 상세 */}
+      {/* ── 손익 항목별 상세 ─── */}
       <div className="space-y-2 mb-4">
         {/* 매출 */}
         <IncomeRow
           label="매출"
           amount={income.salesTotal}
+          unconfirmedAmount={hasUnconfirmed ? unconfirmed.salesTotal : undefined}
           positive
           expanded={incomeExpand === "sales"}
           onToggle={() => setIncomeExpand(incomeExpand === "sales" ? null : "sales")}
           locked={!isPrivileged}
+          closedDays={collection.closedDays}
+          operatingDays={collection.operatingDays}
         >
           <div className="space-y-2">
-            <div className="text-xs font-medium text-muted-foreground mb-2">결제수단별</div>
+            <div className="text-xs font-medium text-muted-foreground mb-2">결제수단별 (마감분)</div>
             <div className="grid grid-cols-2 gap-2">
               <MethodChip icon={<CreditCard className="h-3 w-3" />} label="카드" amount={income.salesByMethod.card} />
               <MethodChip icon={<Banknote className="h-3 w-3" />} label="현금" amount={income.salesByMethod.cash} />
@@ -264,17 +291,19 @@ export default function MonthlySettlementPage() {
         <IncomeRow
           label="매입 (식재료비)"
           amount={income.purchasesTotal}
+          unconfirmedAmount={hasUnconfirmed ? unconfirmed.purchasesTotal : undefined}
           ratio={metrics.costRatio}
           expanded={incomeExpand === "purchases"}
           onToggle={() => setIncomeExpand(incomeExpand === "purchases" ? null : "purchases")}
           locked={!isPrivileged}
+          closedDays={collection.closedDays}
+          operatingDays={collection.operatingDays}
         >
           {income.purchasesByCounterparty.length > 0 ? (
             <div className="space-y-3">
-              <div className="text-xs font-medium text-muted-foreground mb-2">거래처별 (입고 합계 vs 정산서)</div>
+              <div className="text-xs font-medium text-muted-foreground mb-2">거래처별 (마감분 입고 합계 vs 정산서)</div>
               {income.purchasesByCounterparty.map((cp) => {
                 const cpImages = (imagesQuery.data ?? []).filter((img: any) => img.counterpartyId === cp.id);
-                // 정산서 금액: 해당 거래처 이미지 중 claimedAmount가 있는 것들의 합
                 const claimedTotal = cpImages.reduce((s: number, img: any) => s + (img.claimedAmount ?? 0), 0);
                 const hasClaimedAmount = cpImages.some((img: any) => img.claimedAmount != null && img.claimedAmount > 0);
                 const diff = hasClaimedAmount ? cp.amount - claimedTotal : null;
@@ -282,7 +311,6 @@ export default function MonthlySettlementPage() {
 
                 return (
                   <div key={cp.id} className="rounded-lg border border-border/50 p-2.5 space-y-1.5">
-                    {/* 거래처명 + 업로드 버튼 */}
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-foreground">{cp.name} <span className="text-muted-foreground">({cp.count}건)</span></span>
                       {isPrivileged && (
@@ -301,8 +329,6 @@ export default function MonthlySettlementPage() {
                         </label>
                       )}
                     </div>
-
-                    {/* 금액 비교 */}
                     <div className="grid grid-cols-2 gap-1 text-[11px]">
                       <div>
                         <span className="text-muted-foreground">입고 합계</span>
@@ -319,8 +345,6 @@ export default function MonthlySettlementPage() {
                         )}
                       </div>
                     </div>
-
-                    {/* 차이 경고 */}
                     {hasMismatch && (
                       <div className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded ${
                         diff! > 0 ? "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400" : "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
@@ -334,8 +358,6 @@ export default function MonthlySettlementPage() {
                         </span>
                       </div>
                     )}
-
-                    {/* 이미지 썸네일 + 정산서 금액 입력 */}
                     {cpImages.length > 0 && (
                       <div className="flex gap-1.5 overflow-x-auto pb-1">
                         {cpImages.map((img: any) => (
@@ -358,7 +380,6 @@ export default function MonthlySettlementPage() {
                                 <X className="w-2.5 h-2.5" />
                               </button>
                             )}
-                            {/* 금액 표시/입력 */}
                             {editingAmountId === img.id ? (
                               <input
                                 type="number"
@@ -405,14 +426,17 @@ export default function MonthlySettlementPage() {
         <IncomeRow
           label="인건비"
           amount={income.laborCost}
+          unconfirmedAmount={hasUnconfirmed ? unconfirmed.laborCost : undefined}
           ratio={metrics.laborRatio}
           expanded={incomeExpand === "labor"}
           onToggle={() => setIncomeExpand(incomeExpand === "labor" ? null : "labor")}
           locked={!isPrivileged}
+          closedDays={collection.closedDays}
+          operatingDays={collection.operatingDays}
         >
           {income.laborByCompany.length > 0 ? (
             <div className="space-y-1.5">
-              <div className="text-xs font-medium text-muted-foreground mb-2">소속회사별</div>
+              <div className="text-xs font-medium text-muted-foreground mb-2">소속회사별 (마감분)</div>
               {income.laborByCompany.map((co) => (
                 <div key={co.company} className="flex items-center justify-between text-xs">
                   <span className="text-foreground">
@@ -456,10 +480,13 @@ export default function MonthlySettlementPage() {
         </IncomeRow>
       </div>
 
-      {/* ── Section 3: 운영 지표 ──────────────────────────────────── */}
+      {/* ── 운영 지표 ─── */}
       {income.salesTotal > 0 && (
         <Card className="p-4 mb-4">
-          <h3 className="text-sm font-semibold text-foreground mb-3">운영 지표</h3>
+          <h3 className="text-sm font-semibold text-foreground mb-3">
+            운영 지표
+            {hasUnconfirmed && <span className="text-[11px] text-amber-500 font-normal ml-1">(마감 {collection.closedDays}일 기준)</span>}
+          </h3>
           <div className="space-y-3">
             <MetricRow
               label="일평균 매출"
@@ -498,7 +525,7 @@ export default function MonthlySettlementPage() {
                   />
                 </div>
                 <div className="flex justify-between mt-1">
-                  <span className="text-[11px] text-muted-foreground tabular-nums">{income.salesTotal.toLocaleString()}원</span>
+                  <span className="text-[11px] text-muted-foreground tabular-nums">{income.salesTotal.toLocaleString()}원 (마감분)</span>
                   <span className="text-[11px] text-muted-foreground tabular-nums">목표 {metrics.targetSales.toLocaleString()}원</span>
                 </div>
               </div>
@@ -507,7 +534,7 @@ export default function MonthlySettlementPage() {
         </Card>
       )}
 
-      {/* ── Section 4: 전월 비교 ──────────────────────────────────── */}
+      {/* ── 전월 비교 ─── */}
       {prevData && (
         <Card className="p-4 mb-4">
           <h3 className="text-sm font-semibold text-foreground mb-3">전월 비교</h3>
@@ -523,7 +550,7 @@ export default function MonthlySettlementPage() {
         </Card>
       )}
 
-      {/* ── Section 5: 월정산 확정 ────────────────────────────────── */}
+      {/* ── 월정산 확정 ─── */}
       <Card className="p-4 mb-6">
         {closing.isClosed ? (
           <div className="text-center">
@@ -550,19 +577,36 @@ export default function MonthlySettlementPage() {
           </div>
         ) : (
           <div className="text-center">
-            {completionPct < 100 && (
+            {hasUnconfirmed && (
+              <div className="flex flex-col items-center gap-1.5 mb-3">
+                <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 text-xs">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  <span className="font-medium">{unconfirmed.unclosedDays}일 미마감</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  미마감일의 매출·매입·인건비는 확정 금액에 포함되지 않습니다
+                </p>
+              </div>
+            )}
+            {!hasUnconfirmed && completionPct < 100 && (
               <div className="flex items-center justify-center gap-1.5 text-amber-600 dark:text-amber-400 text-xs mb-3">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 <span>미완료 항목이 있습니다 (수집 {completionPct}%)</span>
               </div>
             )}
             <p className="text-sm text-muted-foreground mb-3">
-              {year}년 {month}월 데이터를 확인하고 월정산을 확정하세요
+              {hasUnconfirmed
+                ? `마감 완료된 ${collection.closedDays}일 기준으로 월정산을 확정합니다`
+                : `${year}년 ${month}월 데이터를 확인하고 월정산을 확정하세요`
+              }
             </p>
             {isPrivileged ? (
               <Button onClick={handleClose} disabled={closeMutation.isPending}>
                 {closeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-                월정산 확정
+                {hasUnconfirmed
+                  ? `마감분 기준 월정산 확정 (${collection.closedDays}/${collection.operatingDays}일)`
+                  : "월정산 확정"
+                }
               </Button>
             ) : (
               <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
@@ -615,18 +659,27 @@ function CheckItem({ done, label, detail }: { done: boolean; label: string; deta
   );
 }
 
-function IncomeRow({ label, amount, ratio, positive, expanded, onToggle, locked, children }: {
-  label: string; amount: number; ratio?: number; positive?: boolean;
-  expanded: boolean; onToggle: () => void; locked?: boolean; children: React.ReactNode;
+function IncomeRow({ label, amount, unconfirmedAmount, ratio, positive, expanded, onToggle, locked, closedDays, operatingDays, children }: {
+  label: string; amount: number; unconfirmedAmount?: number; ratio?: number; positive?: boolean;
+  expanded: boolean; onToggle: () => void; locked?: boolean;
+  closedDays?: number; operatingDays?: number;
+  children: React.ReactNode;
 }) {
+  const hasUnconf = unconfirmedAmount !== undefined && unconfirmedAmount > 0;
+
   return (
     <Card className="overflow-hidden">
       <button
-        className="w-full flex items-center justify-between p-3 hover:bg-accent/50 transition-colors"
+        className={`w-full flex items-center justify-between p-3 transition-colors ${locked ? "" : "hover:bg-accent/50"}`}
         onClick={() => { if (!locked) onToggle(); }}
       >
-        <div className="text-left">
-          <div className="text-xs text-muted-foreground">{label}</div>
+        <div className="text-left flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">{label}</span>
+            {closedDays !== undefined && operatingDays !== undefined && closedDays < operatingDays && (
+              <span className="text-[10px] text-amber-500">({closedDays}일 마감분)</span>
+            )}
+          </div>
           <div className="text-base font-bold text-foreground tabular-nums mt-0.5">
             {positive ? "" : "-"}{amount.toLocaleString()}
             <span className="text-xs text-muted-foreground ml-1">원</span>
@@ -634,6 +687,11 @@ function IncomeRow({ label, amount, ratio, positive, expanded, onToggle, locked,
               <span className="text-xs text-muted-foreground ml-2">{ratio}%</span>
             )}
           </div>
+          {hasUnconf && (
+            <div className="text-[11px] text-amber-500 tabular-nums mt-0.5">
+              + 미반영 {positive ? "" : "-"}{unconfirmedAmount!.toLocaleString()}원
+            </div>
+          )}
         </div>
         {locked ? (
           <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -685,7 +743,6 @@ function CompRow({ label, current, prev, reverse, bold }: {
   label: string; current: number; prev: number; reverse?: boolean; bold?: boolean;
 }) {
   const diff = current - prev;
-  // reverse: 비용 항목은 감소가 긍정적
   const isGood = reverse ? diff <= 0 : diff >= 0;
   const pct = prev !== 0 ? Math.round(diff / prev * 100) : diff !== 0 ? 100 : 0;
 
@@ -702,7 +759,7 @@ function CompRow({ label, current, prev, reverse, bold }: {
         </span>
         {diff !== 0 && (
           <span className={`flex items-center gap-0.5 ${isGood ? "text-emerald-500" : "text-red-500"}`}>
-            {isGood
+            {diff > 0
               ? <ArrowUpRight className="h-3 w-3" />
               : <ArrowDownRight className="h-3 w-3" />
             }
