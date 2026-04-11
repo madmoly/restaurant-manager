@@ -245,8 +245,6 @@ export const restaurantsRouter = router({
       targetCostRatio: z.string().optional(),
       openTime: z.string().optional(),
       closeTime: z.string().optional(),
-      salesInputStartTime: z.string().nullable().optional(),
-      salesInputEndTime: z.string().nullable().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       // PR4-C: 매장 접근 검증 추가 (managerProcedure 단독으로는 cross-store 누수 가능)

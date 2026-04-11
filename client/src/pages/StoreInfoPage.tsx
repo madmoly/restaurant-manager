@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import {
   Plus, X, Edit3, Trash2, Pin, Megaphone, DoorOpen, Phone, BookOpen,
-  MoreHorizontal, Info, Clock,
+  MoreHorizontal, Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -19,78 +19,6 @@ const CARD_TYPES = [
 
 function getCardType(val: string) {
   return CARD_TYPES.find((t) => t.value === val) ?? CARD_TYPES[4];
-}
-
-// ─── 매출입력 시간 제한 설정 (운영 설정) ──────────────────────────────────────
-function SalesTimeSettings({ restaurantId, isManager }: { restaurantId: number; isManager: boolean }) {
-  const { selectedRestaurant: current } = useRestaurant();
-  const utils = trpc.useUtils();
-  const [editing, setEditing] = useState(false);
-  const [salesStartTime, setSalesStartTime] = useState(current?.salesInputStartTime ?? "");
-  const [salesEndTime, setSalesEndTime] = useState(current?.salesInputEndTime ?? "");
-
-  const updateMut = trpc.restaurants.update.useMutation({
-    onSuccess() {
-      toast.success("설정이 변경되었습니다");
-      utils.restaurants.list.invalidate();
-      utils.restaurants.listMine.invalidate();
-      setEditing(false);
-    },
-    onError(e) { toast.error(e.message); },
-  });
-
-  const handleSave = () => {
-    if (!restaurantId) return;
-    updateMut.mutate({
-      id: restaurantId,
-      salesInputStartTime: salesStartTime || null,
-      salesInputEndTime: salesEndTime || null,
-    });
-  };
-
-  if (!current || !isManager) return null;
-
-  return (
-    <div className="border border-border rounded-lg bg-card overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 bg-muted/30 border-b border-border">
-        <Clock className="w-4 h-4 text-primary" />
-        <span className="font-semibold text-sm text-foreground">운영 설정</span>
-      </div>
-      <div className="p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">매출입력 허용 시간</span>
-          {!editing ? (
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-foreground">
-                {current.salesInputStartTime && current.salesInputEndTime
-                  ? `${current.salesInputStartTime} ~ ${current.salesInputEndTime}`
-                  : "제한 없음"}
-              </span>
-              <button
-                onClick={() => {
-                  setSalesStartTime(current.salesInputStartTime ?? "");
-                  setSalesEndTime(current.salesInputEndTime ?? "");
-                  setEditing(true);
-                }}
-                className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5">
-              <input type="time" step="600" value={salesStartTime} onChange={(e) => setSalesStartTime(e.target.value)} className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm" />
-              <span className="text-muted-foreground text-xs">~</span>
-              <input type="time" step="600" value={salesEndTime} onChange={(e) => setSalesEndTime(e.target.value)} className="w-[100px] rounded border border-input bg-background px-2 py-1 text-sm" />
-              <Button size="sm" variant="default" onClick={handleSave} disabled={updateMut.isPending} className="h-7 px-2 text-xs">저장</Button>
-              <button onClick={() => { setSalesStartTime(""); setSalesEndTime(""); handleSave(); }} className="p-1 rounded hover:bg-accent text-muted-foreground text-xs" title="제한 해제">해제</button>
-              <button onClick={() => setEditing(false)} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ─── 메인 페이지 ────────────────────────────────────────────────────────────
@@ -129,9 +57,6 @@ export default function StoreInfoPage() {
 
   return (
     <div className="max-w-2xl mx-auto py-6 px-4 space-y-4">
-      {/* 운영 설정 (매출입력 시간) */}
-      <SalesTimeSettings restaurantId={restaurantId} isManager={isManager} />
-
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
