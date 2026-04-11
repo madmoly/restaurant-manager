@@ -767,6 +767,7 @@ export const monthlyClosings = mysqlTable("monthly_closings", {
   purchasesTotal: decimal("purchasesTotal", { precision: 14, scale: 2 }).default("0").notNull(),
   laborCost: decimal("laborCost", { precision: 14, scale: 2 }).default("0").notNull(),
   fixedCostsTotal: decimal("fixedCostsTotal", { precision: 14, scale: 2 }).default("0").notNull(),
+  expensesTotal: decimal("expensesTotal", { precision: 14, scale: 2 }).default("0").notNull(),
   profit: decimal("profit", { precision: 14, scale: 2 }).default("0").notNull(),
   note: text("note"),
   closedBy: int("closedBy"),

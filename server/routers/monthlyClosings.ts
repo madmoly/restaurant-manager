@@ -17,6 +17,7 @@ import {
   storeClosedDays,
   storeWeeklyClosures,
   settlementImages,
+  dailyExpenses,
 } from "../../drizzle/schema";
 import { calcMonthlyFixedCosts } from "../helpers/fixedCostCalc";
 
@@ -390,8 +391,19 @@ export const monthlyClosingsRouter = router({
       const allLabor = await sumLaborByCompany(restaurantId, year, month);
       const unconfirmedLaborCost = allLabor.totalCost - confirmedLabor.totalCost;
 
+      // ── 즉시 지출 (날짜 기반, 일마감 무관) ──
+      const [expRow] = await db
+        .select({ total: sql<string>`COALESCE(SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2))), 0)` })
+        .from(dailyExpenses)
+        .where(and(
+          eq(dailyExpenses.restaurantId, restaurantId),
+          sql`${dailyExpenses.date} >= ${startDate}`,
+          sql`${dailyExpenses.date} <= ${endDate}`,
+        ));
+      const expensesTotal = Math.round(Number(expRow?.total ?? 0));
+
       // ── 손익 (확정분 기준) ──
-      const profit = confirmedSales.salesTotal - confirmedPurchases.total - confirmedLabor.totalCost - fixedCostsTotal;
+      const profit = confirmedSales.salesTotal - confirmedPurchases.total - confirmedLabor.totalCost - fixedCostsTotal - expensesTotal;
 
       // ── 운영 지표 (확정분 기준) ──
       const closedOperatingDays = closedDaysCount; // 일마감 완료 영업일
@@ -413,6 +425,7 @@ export const monthlyClosingsRouter = router({
         purchasesTotal: Number(prevClosing.purchasesTotal),
         laborCost: Number(prevClosing.laborCost),
         fixedCostsTotal: Number(prevClosing.fixedCostsTotal),
+        expensesTotal: Number((prevClosing as any).expensesTotal ?? 0),
         profit: Number(prevClosing.profit),
       } : null;
 
@@ -448,6 +461,7 @@ export const monthlyClosingsRouter = router({
           purchasesTotal: confirmedPurchases.total,
           laborCost: confirmedLabor.totalCost,
           fixedCostsTotal,
+          expensesTotal,
           profit,
           salesByMethod: {
             card: confirmedSales.card,
@@ -616,7 +630,18 @@ export const monthlyClosingsRouter = router({
       const laborResult = await sumLaborByCompany(input.restaurantId, input.year, input.month, closedDateStrs);
       const laborCost = laborResult.totalCost;
 
-      const profit = salesTotal - purchasesTotal - laborCost - fixedCostsTotal;
+      // 5. 즉시 지출
+      const [expRow] = await db
+        .select({ total: sql<string>`COALESCE(SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2))), 0)` })
+        .from(dailyExpenses)
+        .where(and(
+          eq(dailyExpenses.restaurantId, input.restaurantId),
+          sql`${dailyExpenses.date} >= ${startDate}`,
+          sql`${dailyExpenses.date} <= ${endDate}`,
+        ));
+      const expensesTotalClose = Math.round(Number(expRow?.total ?? 0));
+
+      const profit = salesTotal - purchasesTotal - laborCost - fixedCostsTotal - expensesTotalClose;
 
       // upsert
       const [existing] = await db
@@ -639,6 +664,7 @@ export const monthlyClosingsRouter = router({
             purchasesTotal: String(purchasesTotal),
             laborCost: String(laborCost),
             fixedCostsTotal: String(fixedCostsTotal),
+            expensesTotal: String(expensesTotalClose),
             profit: String(profit),
             note: input.note,
             closedBy: ctx.user.userId,
@@ -654,12 +680,13 @@ export const monthlyClosingsRouter = router({
           purchasesTotal: String(purchasesTotal),
           laborCost: String(laborCost),
           fixedCostsTotal: String(fixedCostsTotal),
+          expensesTotal: String(expensesTotalClose),
           profit: String(profit),
           note: input.note,
           closedBy: ctx.user.userId,
         });
       }
 
-      return { salesTotal, purchasesTotal, laborCost, fixedCostsTotal, profit, closedDays: closedDateStrs.length };
+      return { salesTotal, purchasesTotal, laborCost, fixedCostsTotal, expensesTotal: expensesTotalClose, profit, closedDays: closedDateStrs.length };
     }),
 });

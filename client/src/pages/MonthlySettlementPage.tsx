@@ -12,7 +12,7 @@ import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-type IncomeExpand = "sales" | "purchases" | "labor" | "fixed" | null;
+type IncomeExpand = "sales" | "purchases" | "labor" | "fixed" | "expenses" | null;
 
 export default function MonthlySettlementPage() {
   const { user } = useAuth();
@@ -478,6 +478,17 @@ export default function MonthlySettlementPage() {
             <p className="text-xs text-muted-foreground">고정비 미등록</p>
           )}
         </IncomeRow>
+
+        {/* 즉시 지출 */}
+        <ExpensesRow
+          amount={income.expensesTotal}
+          expanded={incomeExpand === "expenses"}
+          onToggle={() => setIncomeExpand(incomeExpand === "expenses" ? null : "expenses")}
+          locked={!isPrivileged}
+          restaurantId={restaurantId}
+          year={year}
+          month={month}
+        />
       </div>
 
       {/* ── 운영 지표 ─── */}
@@ -543,6 +554,7 @@ export default function MonthlySettlementPage() {
             <CompRow label="매입" current={income.purchasesTotal} prev={prevData.purchasesTotal} reverse />
             <CompRow label="인건비" current={income.laborCost} prev={prevData.laborCost} reverse />
             <CompRow label="고정비" current={income.fixedCostsTotal} prev={prevData.fixedCostsTotal} reverse />
+            <CompRow label="즉시 지출" current={income.expensesTotal} prev={prevData.expensesTotal} reverse />
             <div className="pt-2 border-t border-border">
               <CompRow label="순이익" current={income.profit} prev={prevData.profit} bold />
             </div>
@@ -736,6 +748,39 @@ function MetricRow({ label, value, target, warning, good }: {
         {target && <span className="text-[11px] text-muted-foreground ml-2">{target}</span>}
       </div>
     </div>
+  );
+}
+
+function ExpensesRow({ amount, expanded, onToggle, locked, restaurantId, year, month }: {
+  amount: number; expanded: boolean; onToggle: () => void; locked?: boolean;
+  restaurantId: number; year: number; month: number;
+}) {
+  const { data } = trpc.dailyExpenses.monthlySummary.useQuery(
+    { restaurantId, year, month },
+    { enabled: expanded && restaurantId > 0 },
+  );
+
+  return (
+    <IncomeRow
+      label="즉시 지출"
+      amount={amount}
+      expanded={expanded}
+      onToggle={onToggle}
+      locked={locked}
+    >
+      {data && data.breakdown.length > 0 ? (
+        <div className="space-y-1.5">
+          {data.breakdown.map((b, i) => (
+            <div key={i} className="flex items-center justify-between text-xs">
+              <span className="text-foreground">{b.categoryName}</span>
+              <span className="font-medium text-foreground tabular-nums">{b.amount.toLocaleString()}원</span>
+            </div>
+          ))}
+        </div>
+      ) : expanded ? (
+        <p className="text-xs text-muted-foreground">즉시 지출 내역 없음</p>
+      ) : null}
+    </IncomeRow>
   );
 }
 

@@ -187,4 +187,41 @@ export const dailyExpensesRouter = router({
         );
       return { total: row?.total ?? "0" };
     }),
+
+  /** 월별 즉시지출 카테고리별 집계 */
+  monthlySummary: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const mm = String(input.month).padStart(2, "0");
+      const startDate = `${input.year}-${mm}-01`;
+      const nm = input.month === 12 ? 1 : input.month + 1;
+      const ny = input.month === 12 ? input.year + 1 : input.year;
+      const endDate = `${ny}-${String(nm).padStart(2, "0")}-01`;
+
+      const rows = await db
+        .select({
+          categoryId: dailyExpenses.categoryId,
+          categoryName: sql<string>`COALESCE(${expenseCategories.name}, ${dailyExpenses.category}, '미분류')`,
+          amount: sql<string>`SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2)))`,
+        })
+        .from(dailyExpenses)
+        .leftJoin(expenseCategories, eq(dailyExpenses.categoryId, expenseCategories.id))
+        .where(
+          and(
+            eq(dailyExpenses.restaurantId, input.restaurantId),
+            sql`${dailyExpenses.date} >= ${startDate}`,
+            sql`${dailyExpenses.date} < ${endDate}`,
+          ),
+        )
+        .groupBy(dailyExpenses.categoryId, expenseCategories.name, dailyExpenses.category);
+
+      const breakdown = rows.map(r => ({
+        categoryId: r.categoryId,
+        categoryName: r.categoryName,
+        amount: Math.round(Number(r.amount ?? 0)),
+      }));
+      const total = breakdown.reduce((s, b) => s + b.amount, 0);
+      return { total, breakdown };
+    }),
 });
