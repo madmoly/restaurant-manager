@@ -111,7 +111,23 @@ export const itemsRouter = router({
         poCounts = Object.fromEntries(poRows.map(r => [r.itemId!, Number(r.cnt)]));
       }
 
-      // 유사 품목 그룹핑 (한글 초성/공백/특수문자 제거 후 비교)
+      // Levenshtein 거리 계산
+      const levenshtein = (a: string, b: string): number => {
+        const m = a.length, n = b.length;
+        const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+        for (let i = 0; i <= m; i++) dp[i][0] = i;
+        for (let j = 0; j <= n; j++) dp[0][j] = j;
+        for (let i = 1; i <= m; i++) {
+          for (let j = 1; j <= n; j++) {
+            dp[i][j] = a[i - 1] === b[j - 1]
+              ? dp[i - 1][j - 1]
+              : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+          }
+        }
+        return dp[m][n];
+      };
+
+      // 유사 품목 그룹핑 (정규화 + 포함관계 + Levenshtein)
       const normalize = (s: string) => s.replace(/[\s\-_()（）\/\\·.,·]/g, "").toLowerCase();
       const groups: { key: string; items: typeof allItems }[] = [];
       const used = new Set<number>();
@@ -125,8 +141,14 @@ export const itemsRouter = router({
         for (let j = i + 1; j < allItems.length; j++) {
           if (used.has(allItems[j].id)) continue;
           const norm2 = normalize(allItems[j].name);
-          // 같은 정규화 결과 OR 하나가 다른 하나를 포함 (길이 3 이상)
-          if (norm === norm2 || (norm.length >= 3 && norm2.includes(norm)) || (norm2.length >= 3 && norm.includes(norm2))) {
+          const isSimilar =
+            norm === norm2 ||
+            (norm.length >= 3 && norm2.includes(norm)) ||
+            (norm2.length >= 3 && norm.includes(norm2)) ||
+            // Levenshtein: 짧은 이름(≤5자)은 거리 1 허용, 긴 이름은 거리 2 허용
+            (norm.length >= 2 && norm2.length >= 2 &&
+              levenshtein(norm, norm2) <= (Math.min(norm.length, norm2.length) <= 5 ? 1 : 2));
+          if (isSimilar) {
             group.push(allItems[j]);
             used.add(allItems[j].id);
           }

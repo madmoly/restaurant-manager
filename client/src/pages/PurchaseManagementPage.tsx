@@ -7,7 +7,7 @@ import {
   Package, Wallet,
   ChevronDown, ChevronUp, Pencil, X, Save,
   ChevronLeft, ChevronRight,
-  CalendarRange, AlertTriangle, Merge,
+  CalendarRange, AlertTriangle, Merge, CheckSquare, Square,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,6 +73,8 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
   const [expandedItem, setExpandedItem] = useState<number | null>(null);
   const [showSuppliers, setShowSuppliers] = useState(false);
   const [showSimilar, setShowSimilar] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.items.listWithMappings.useQuery(
@@ -90,6 +92,8 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
   const mergeMutation = trpc.items.merge.useMutation({
     onSuccess() {
       toast.success("품목이 병합되었습니다");
+      setSelected(new Set());
+      setSelectMode(false);
       utils.items.listWithMappings.invalidate();
       utils.items.findSimilarGroups.invalidate();
     },
@@ -97,13 +101,36 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
   });
 
   const handleMerge = (group: typeof similarGroups[0]) => {
-    // purchaseCount가 가장 많은 항목을 target으로
     const sorted = [...group.items].sort((a, b) => b.purchaseCount - a.purchaseCount);
     const target = sorted[0];
     const sources = sorted.slice(1).map(i => i.id);
     if (!confirm(`"${target.name}"으로 ${sources.length}개 품목을 병합합니다.\n이 작업은 되돌릴 수 없습니다.`)) return;
     mergeMutation.mutate({ targetId: target.id, sourceIds: sources });
   };
+
+  const handleManualMerge = () => {
+    const selectedItems = (data || []).filter((i: any) => selected.has(i.itemId));
+    if (selectedItems.length < 2) return;
+    // 거래처 많은 순 → 매입 건수 순 → 이름 순으로 대표 품목 자동 선택
+    const sorted = [...selectedItems].sort((a: any, b: any) =>
+      b.counterpartyCount - a.counterpartyCount || a.itemName.localeCompare(b.itemName)
+    );
+    const target = sorted[0];
+    const sources = sorted.slice(1).map((i: any) => i.itemId);
+    const names = selectedItems.map((i: any) => `"${i.itemName}"`).join(", ");
+    if (!confirm(`${names} → "${target.itemName}"으로 병합합니다.\n이 작업은 되돌릴 수 없습니다.`)) return;
+    mergeMutation.mutate({ targetId: target.itemId, sourceIds: sources });
+  };
+
+  const toggleSelect = (itemId: number) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(itemId) ? next.delete(itemId) : next.add(itemId);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => { setSelectMode(false); setSelected(new Set()); };
 
   const items = (data || []).filter((item: any) =>
     !search || item.itemName.toLowerCase().includes(search.toLowerCase())
@@ -129,9 +156,20 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 h-9 text-sm"
         />
-        <Button variant="outline" size="sm" className="h-9 text-xs shrink-0" onClick={() => setShowSuppliers(true)}>
-          <Wallet className="w-3.5 h-3.5 mr-1" /> 거래처 관리
-        </Button>
+        {selectMode ? (
+          <Button variant="ghost" size="sm" className="h-9 text-xs shrink-0" onClick={exitSelectMode}>
+            <X className="w-3.5 h-3.5 mr-1" /> 취소
+          </Button>
+        ) : (
+          <>
+            <Button variant="outline" size="sm" className="h-9 text-xs shrink-0" onClick={() => setSelectMode(true)}>
+              <Merge className="w-3.5 h-3.5 mr-1" /> 병합
+            </Button>
+            <Button variant="outline" size="sm" className="h-9 text-xs shrink-0" onClick={() => setShowSuppliers(true)}>
+              <Wallet className="w-3.5 h-3.5 mr-1" /> 거래처
+            </Button>
+          </>
+        )}
       </div>
 
       {/* 유사품목 경고 배너 */}
@@ -187,24 +225,32 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
       ) : (
         <div className="space-y-1.5">
           {items.map((item: any) => {
-            const expanded = expandedItem === item.itemId;
+            const expanded = !selectMode && expandedItem === item.itemId;
+            const isSelected = selected.has(item.itemId);
             return (
-              <Card key={item.itemId} className="overflow-hidden">
+              <Card key={item.itemId} className={`overflow-hidden ${selectMode && isSelected ? "ring-2 ring-primary" : ""}`}>
                 <button
-                  onClick={() => setExpandedItem(expanded ? null : item.itemId)}
+                  onClick={() => selectMode ? toggleSelect(item.itemId) : setExpandedItem(expanded ? null : item.itemId)}
                   className="w-full flex items-center justify-between p-3 text-left hover:bg-muted/30 transition-colors"
                 >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-medium text-foreground text-sm truncate">{item.itemName}</span>
-                      {item.baseUnit && <span className="text-[10px] text-muted-foreground">({item.baseUnit})</span>}
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      거래처 {item.counterpartyCount}곳
+                  <div className="flex items-center gap-2 min-w-0">
+                    {selectMode && (
+                      isSelected
+                        ? <CheckSquare className="w-4.5 h-4.5 text-primary shrink-0" />
+                        : <Square className="w-4.5 h-4.5 text-muted-foreground shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-foreground text-sm truncate">{item.itemName}</span>
+                        {item.baseUnit && <span className="text-[10px] text-muted-foreground">({item.baseUnit})</span>}
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        거래처 {item.counterpartyCount}곳
                       {item.minBasePrice != null && <> · 최저 ₩{item.minBasePrice.toLocaleString()}/{item.baseUnit || '개'}</>}
                     </span>
+                    </div>
                   </div>
-                  {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
+                  {!selectMode && (expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />)}
                 </button>
                 {expanded && item.mappings.length > 0 && (
                   <div className="border-t border-border px-3 pb-3 pt-2 space-y-1">
@@ -237,6 +283,20 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {/* 수동 병합 플로팅 바 */}
+      {selectMode && selected.size >= 2 && (
+        <div className="sticky bottom-4 z-20">
+          <Card className="flex items-center justify-between p-3 shadow-lg border-primary/30 bg-background">
+            <span className="text-sm font-medium text-foreground">
+              {selected.size}개 품목 선택됨
+            </span>
+            <Button size="sm" className="h-8 text-xs" onClick={handleManualMerge} disabled={mergeMutation.isPending}>
+              <Merge className="w-3.5 h-3.5 mr-1" /> 병합
+            </Button>
+          </Card>
         </div>
       )}
     </div>
