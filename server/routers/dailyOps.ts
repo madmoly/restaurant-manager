@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and, sql, sum, between, count } from "drizzle-orm";
-import { router, protectedProcedure, managerProcedure } from "../trpc";
+import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 import {
@@ -49,8 +49,8 @@ export const dailyOpsRouter = router({
       return row ?? null;
     }),
 
-  /** 오픈 체크 */
-  checkOpen: managerProcedure
+  /** 오픈 체크 — 직원도 입력 가능 (verifyStoreAccess로 매장 소속 검증) */
+  checkOpen: protectedProcedure
     .input(
       z.object({
         restaurantId: z.number(),
@@ -96,8 +96,8 @@ export const dailyOpsRouter = router({
       return { id: (result as any).insertId };
     }),
 
-  /** 마감 체크 */
-  checkClose: managerProcedure
+  /** 마감 체크 — 직원도 입력 가능 */
+  checkClose: protectedProcedure
     .input(
       z.object({
         restaurantId: z.number(),
@@ -291,7 +291,7 @@ export const dailyOpsRouter = router({
       return rows;
     }),
 
-  saveMidSales: managerProcedure
+  saveMidSales: protectedProcedure
     .input(
       z.object({
         restaurantId: z.number(),
@@ -314,7 +314,7 @@ export const dailyOpsRouter = router({
       return { id: (result as any).insertId };
     }),
 
-  deleteMidSales: managerProcedure
+  deleteMidSales: protectedProcedure
     .input(z.object({ id: z.number(), restaurantId: z.number() }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
@@ -340,7 +340,7 @@ export const dailyOpsRouter = router({
         );
     }),
 
-  saveOrderImage: managerProcedure
+  saveOrderImage: protectedProcedure
     .input(
       z.object({
         restaurantId: z.number(),
@@ -361,7 +361,7 @@ export const dailyOpsRouter = router({
       return { id: (result as any).insertId };
     }),
 
-  deleteOrderImage: managerProcedure
+  deleteOrderImage: protectedProcedure
     .input(z.object({ id: z.number(), restaurantId: z.number() }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
@@ -419,7 +419,7 @@ export const dailyOpsRouter = router({
       return { cumulative: row?.total ?? "0" };
     }),
 
-  saveDailySales: managerProcedure
+  saveDailySales: protectedProcedure
     .input(
       z.object({
         restaurantId: z.number(),

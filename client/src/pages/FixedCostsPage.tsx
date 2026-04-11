@@ -349,7 +349,7 @@ function FixedCostForm({
   const isPending = create.isPending || update.isPending;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-20 lg:pb-0">
       <Input
         label="항목명"
         value={costName}

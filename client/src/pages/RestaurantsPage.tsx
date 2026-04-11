@@ -591,8 +591,8 @@ function ClosedDaysManager({ restaurantId, canEdit }: { restaurantId: number; ca
 
         {/* 날짜 추가 입력 */}
         {canEdit && (
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="w-full sm:flex-1 sm:w-auto">
               <input
                 type="date"
                 value={addDate}
@@ -601,12 +601,14 @@ function ClosedDaysManager({ restaurantId, canEdit }: { restaurantId: number; ca
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
               />
             </div>
-            <input
-              value={addReason}
-              onChange={(e) => setAddReason(e.target.value)}
-              placeholder="사유 (선택)"
-              className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm"
-            />
+            <div className="flex-1 min-w-0">
+              <input
+                value={addReason}
+                onChange={(e) => setAddReason(e.target.value)}
+                placeholder="사유 (선택)"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              />
+            </div>
             <button
               onClick={handleAdd}
               disabled={!addDate || addClosed.isPending}
