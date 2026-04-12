@@ -39,3 +39,4 @@ backups/
 todo.md
 analyze_schema.py
 .claude/settings.local.json
+.claude/worktrees/

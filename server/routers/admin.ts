@@ -23,7 +23,16 @@ export const adminRouter = router({
       const end = new Date(input.year, input.month, 0);
 
       // 소유 매장 목록
-      const allRestaurants = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
+      const realStores = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
+
+      // master: Tutorial 매장도 별도 그룹으로 포함
+      let tutorialStores: typeof realStores = [];
+      if (ctx.user.role === "master") {
+        tutorialStores = await db.select().from(restaurants).where(
+          and(isNull(restaurants.deletedAt), eq(restaurants.isTutorial, true))
+        );
+      }
+      const allRestaurants = [...realStores, ...tutorialStores];
 
       // 사업그룹명 매핑 (master용)
       const groupMap = new Map<number, string>();
@@ -69,7 +78,7 @@ export const adminRouter = router({
             address: r.address,
             isActive: r.isActive,
             ownerAdminId: r.ownerAdminId,
-            groupName: r.ownerAdminId ? (groupMap.get(r.ownerAdminId) ?? null) : null,
+            groupName: r.isTutorial ? "Tutorial" : (r.ownerAdminId ? (groupMap.get(r.ownerAdminId) ?? null) : null),
             salesTotal,
             purchasesTotal,
             laborCost,
@@ -109,7 +118,16 @@ export const adminRouter = router({
   allStoresTodayStatus: adminProcedure
     .input(z.object({ date: z.string() }))
     .query(async ({ input, ctx }) => {
-      const allRestaurants = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
+      const realStores = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
+
+      // master: Tutorial 매장도 별도 그룹으로 포함
+      let tutorialStores: typeof realStores = [];
+      if (ctx.user.role === "master") {
+        tutorialStores = await db.select().from(restaurants).where(
+          and(isNull(restaurants.deletedAt), eq(restaurants.isTutorial, true))
+        );
+      }
+      const allRestaurants = [...realStores, ...tutorialStores];
 
       // 사업그룹명 매핑 (master용)
       const groupMap = new Map<number, string>();
@@ -148,7 +166,7 @@ export const adminRouter = router({
           return {
             restaurantId: r.id,
             name: r.name,
-            groupName: r.ownerAdminId ? (groupMap.get(r.ownerAdminId) ?? null) : null,
+            groupName: r.isTutorial ? "Tutorial" : (r.ownerAdminId ? (groupMap.get(r.ownerAdminId) ?? null) : null),
             isOpenChecked: !!ops?.openCheckedAt,
             isCloseDone: !!closing,
             closingTotal: closing ? Number(closing.totalAmount) : null,

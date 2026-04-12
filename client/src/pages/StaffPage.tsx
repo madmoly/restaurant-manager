@@ -7,7 +7,7 @@ import {
   Users, Plus, ChevronDown, ChevronUp, FileText, Trash2, X, UserCog,
   Copy, ExternalLink, Send, Eye, KeyRound, Camera, ShieldCheck,
   AlertTriangle, Loader2, Building2, Edit3, Check, UserPlus, Link,
-  Phone, Clock, CalendarDays, Briefcase, Info, Download, RefreshCw, Wallet,
+  Phone, CalendarDays, Briefcase, Info, Download, RefreshCw, Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
