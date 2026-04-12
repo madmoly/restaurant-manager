@@ -461,14 +461,14 @@ app.use(express.json());
     `);
     // 사업군 식별 컬러 (#RRGGBB) — 없으면 프론트에서 이름 해시 fallback
     await conn.query(`
-      ALTER TABLE business_groups ADD COLUMN IF NOT EXISTS color VARCHAR(7) DEFAULT NULL
+      ALTER TABLE business_groups ADD COLUMN color VARCHAR(7) DEFAULT NULL
     `).catch(() => {});
     // 주휴수당 미제공 플래그 — true이면 인건비 정산에서 임시근로자 경로로 처리
     await conn.query(`
-      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
+      ALTER TABLE employee_contracts ADD COLUMN noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
     await conn.query(`
-      ALTER TABLE employment_electronic_contracts ADD COLUMN IF NOT EXISTS noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
+      ALTER TABLE employment_electronic_contracts ADD COLUMN noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
     // 월마감에 즉시지출 합계 컬럼
     await conn.query(`
