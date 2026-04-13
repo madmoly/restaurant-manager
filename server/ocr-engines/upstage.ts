@@ -1,0 +1,204 @@
+/**
+ * Upstage Document Parse 어댑터 (DRAFT — 2026-04-14)
+ *
+ * 위치 예정: server/ocr-engines/upstage.ts
+ * 용도: Upstage Document Parse API 호출 → 정규화된 구조화 텍스트 반환
+ *
+ * 환경변수: UPSTAGE_API_KEY
+ * 공식 문서: https://console.upstage.ai/api/document-digitization/document-parse
+ *
+ * ─── 주의 ───
+ * 이 파일은 아직 server/ocr.ts와 연결되어 있지 않음. 독립 draft.
+ * 통합 단계: server/ocr-engines/ 폴더로 이동 + hybrid.ts에서 호출.
+ */
+
+import fs from "fs";
+import path from "path";
+
+// ────────────────────────────────────────────────────────────────────────────
+// 타입
+// ────────────────────────────────────────────────────────────────────────────
+
+export type UpstageCategory =
+  | "paragraph"
+  | "table"
+  | "figure"
+  | "heading1"
+  | "list"
+  | "footer"
+  | "header";
+
+export interface UpstageCoordinate {
+  x: number; // 0~1 정규화
+  y: number;
+}
+
+export interface UpstageElement {
+  id: number;
+  category: UpstageCategory;
+  content: {
+    text?: string;
+    html?: string;
+    markdown?: string;
+  };
+  coordinates?: UpstageCoordinate[];
+  page?: number;
+}
+
+export interface UpstageResponse {
+  api: string;
+  model: string;
+  usage: { pages: number; standard?: number[] };
+  content: {
+    text?: string;
+    html?: string;
+    markdown?: string;
+  };
+  elements: UpstageElement[];
+  ocr?: Record<string, unknown>;
+}
+
+export interface UpstageParseResult {
+  ok: true;
+  raw: UpstageResponse;
+  markdown: string;                  // 전체 문서 markdown (Claude 입력용 메인)
+  tablesHtml: string[];              // 표 단위 HTML (구조 보존)
+  paragraphs: string[];              // 낙서/메모/본문 paragraph
+  pages: number;
+  elapsedMs: number;
+}
+
+export interface UpstageParseError {
+  ok: false;
+  status: number;
+  error: string;
+  elapsedMs: number;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 공개 함수
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Upstage Document Parse 호출
+ *
+ * @param filePath 로컬 이미지/PDF 절대경로
+ * @param opts 옵션
+ * @returns 파싱된 결과 or 에러
+ */
+export async function extractWithUpstage(
+  filePath: string,
+  opts: { ocrMode?: "auto" | "force"; timeoutMs?: number } = {}
+): Promise<UpstageParseResult | UpstageParseError> {
+  const apiKey = process.env.UPSTAGE_API_KEY;
+  const started = Date.now();
+
+  if (!apiKey) {
+    return { ok: false, status: 0, error: "UPSTAGE_API_KEY 미설정", elapsedMs: 0 };
+  }
+  if (!fs.existsSync(filePath)) {
+    return { ok: false, status: 0, error: `파일 없음: ${filePath}`, elapsedMs: 0 };
+  }
+
+  const ocrMode = opts.ocrMode ?? "auto"; // auto가 비용 효율 (인쇄 텍스트는 OCR 스킵)
+  const timeoutMs = opts.timeoutMs ?? 30_000;
+
+  // FormData 구성
+  const form = new FormData();
+  const fileBuf = fs.readFileSync(filePath);
+  const blob = new Blob([fileBuf]);
+  form.append("document", blob, path.basename(filePath));
+  form.append("model", "document-parse");
+  form.append("output_formats", JSON.stringify(["markdown", "html", "text"]));
+  form.append("ocr", ocrMode);
+  form.append("coordinates", "true");
+  form.append("base64_encoding", "[]"); // 이미지 base64 반환 안 받음 (페이로드 축소)
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch("https://api.upstage.ai/v1/document-digitization", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: controller.signal,
+    });
+
+    const elapsedMs = Date.now() - started;
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      return { ok: false, status: res.status, error: errText || res.statusText, elapsedMs };
+    }
+
+    const raw = (await res.json()) as UpstageResponse;
+
+    const markdown =
+      raw.content?.markdown ??
+      raw.content?.text ??
+      raw.elements
+        .map((e) => e.content?.markdown ?? e.content?.text ?? "")
+        .filter(Boolean)
+        .join("\n\n");
+
+    const tablesHtml = raw.elements
+      .filter((e) => e.category === "table")
+      .map((e) => e.content?.html ?? "")
+      .filter(Boolean);
+
+    const paragraphs = raw.elements
+      .filter((e) => e.category === "paragraph")
+      .map((e) => e.content?.text ?? "")
+      .filter(Boolean);
+
+    return {
+      ok: true,
+      raw,
+      markdown,
+      tablesHtml,
+      paragraphs,
+      pages: raw.usage?.pages ?? 1,
+      elapsedMs,
+    };
+  } catch (err: any) {
+    const elapsedMs = Date.now() - started;
+    return {
+      ok: false,
+      status: 0,
+      error: err?.name === "AbortError" ? "timeout" : String(err?.message ?? err),
+      elapsedMs,
+    };
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Claude 입력용 구성 함수
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Claude 해석 단계에 넣을 텍스트 컨텍스트를 구성.
+ * markdown은 전체 맥락, tablesHtml은 셀 경계 정확도 보강용으로 함께 제공.
+ */
+export function buildClaudeContext(parsed: UpstageParseResult): string {
+  const parts: string[] = [];
+
+  parts.push("## 문서 전체 (Upstage Document Parse markdown)");
+  parts.push(parsed.markdown);
+
+  if (parsed.tablesHtml.length > 0) {
+    parts.push("\n## 표 원본 HTML (셀 경계 기준)");
+    parsed.tablesHtml.forEach((html, i) => {
+      parts.push(`### Table ${i + 1}\n${html}`);
+    });
+  }
+
+  if (parsed.paragraphs.length > 0) {
+    parts.push("\n## 비표 텍스트 블록 (낙서/메모 가능성 있음 — 품목으로 오인 금지)");
+    parsed.paragraphs.forEach((p, i) => parts.push(`- [P${i}] ${p}`));
+  }
+
+  return parts.join("\n\n");
+}

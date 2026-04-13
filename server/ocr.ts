@@ -9,6 +9,8 @@ import { db } from "./db";
 import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs, apiUsageLogs, purchaseOrdersV2, purchaseOrderItemsV2, items, items as itemsTable, restaurants } from "../drizzle/schema";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { exportDatasetToGDrive, isGDriveConfigured, getLastExportResult } from "./gdrive";
+import { runHybridOcr } from "./ocr-engines/hybrid";
+import { promptV2, promptV1ImageFallback } from "./ocr-engines/prompts";
 
 // OCR 에러를 error_logs 테이블에 저장
 async function logOcrError(message: string, metadata?: Record<string, any>, restaurantId?: number) {
@@ -140,14 +142,14 @@ ocrRouter.post("/detect-orientation", async (req: Request, res: Response) => {
 });
 
 // ─── 헬퍼: Anthropic 클라이언트 생성 ─────────────────────────────────────────
-function getAnthropicClient(): Anthropic | null {
+export function getAnthropicClient(): Anthropic | null {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
   return new Anthropic({ apiKey });
 }
 
 // ─── 헬퍼: 이미지 → base64 + MIME ────────────────────────────────────────────
-function loadImageBase64Raw(filePath: string): { base64: string; mediaType: string } {
+export function loadImageBase64Raw(filePath: string): { base64: string; mediaType: string } {
   const ext = path.extname(filePath).toLowerCase();
   const mimeMap: Record<string, string> = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -176,7 +178,7 @@ async function fixExifOrientation(filePath: string): Promise<void> {
 }
 
 // ─── 헬퍼: 코드펜스 제거 + JSON 파싱 (잘린 JSON 복구 포함) ──────────────────
-function parseAIJson(raw: string): any {
+export function parseAIJson(raw: string): any {
   let jsonStr = raw.trim();
 
   // 마크다운 코드펜스 제거
@@ -209,7 +211,7 @@ function parseAIJson(raw: string): any {
 }
 
 // ─── 헬퍼: AI 텍스트 응답 추출 ──────────────────────────────────────────────
-function extractText(message: Anthropic.Message): string | null {
+export function extractText(message: Anthropic.Message): string | null {
   const tc = message.content.find((c) => c.type === "text");
   return tc && tc.type === "text" ? tc.text : null;
 }
@@ -227,7 +229,7 @@ interface OcrItem {
   confidence: "high" | "medium" | "low";
 }
 
-function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; grandTotal?: string } | null): OcrItem[] {
+export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; grandTotal?: string } | null): OcrItem[] {
   const enriched = items.map((item: any) => {
     const shortName = String(item.shortName || item.name || "");
     const spec = String(item.spec || "");
@@ -362,7 +364,7 @@ function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; 
 }
 
 // ─── 거래처 품목 매칭 (기존 DB 활용) ────────────────────────────────────────
-async function matchCounterpartyItems(
+export async function matchCounterpartyItems(
   counterpartyId: number | null,
   items: OcrItem[]
 ): Promise<OcrItem[]> {
@@ -606,7 +608,7 @@ async function updateCounterpartyInfo(
 }
 
 // ─── 거래처 OCR 프로파일 조회 ──────────────────────────────────────────────
-async function getOcrProfile(counterpartyId: number | null): Promise<{
+export async function getOcrProfile(counterpartyId: number | null): Promise<{
   documentType?: string;
   columnOrder?: string;
   frequentItems?: { name: string; avgPrice: number; unit: string }[];
@@ -696,7 +698,7 @@ async function updateOcrProfile(
 }
 
 // ─── 동적 프롬프트 생성: 거래처 프로파일 기반 힌트 ──────────────────────────
-function buildProfileHint(profile: {
+export function buildProfileHint(profile: {
   documentType?: string;
   columnOrder?: string;
   frequentItems?: { name: string; avgPrice: number; unit: string }[];
@@ -796,167 +798,30 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       console.warn(`[OCR] 이미지 전처리 실패 (원본 사용): ${enhErr.message}`);
     }
 
-    // ── 거래처 프로파일 조회 (동적 프롬프트 힌트용) ──────────────────────
-    const ocrProfile = await getOcrProfile(clientCpId ? Number(clientCpId) : null);
-    const profileHint = buildProfileHint(ocrProfile);
-
-    const { base64, mediaType } = loadImageBase64Raw(filePath);
-    const imageContent: Anthropic.ImageBlockParam = {
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: mediaType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
-        data: base64,
-      },
-    };
-
-    // ── 단일 Vision: 이미지 → 직접 구조화 JSON ───────────────────────────
+    // ── 하이브리드 OCR 파이프라인 (Upstage + Claude 텍스트 해석, fallback: Claude Vision) ──
     const ocrStartTime = Date.now();
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 8192,
-      messages: [{
-        role: "user",
-        content: [
-          imageContent,
-          {
-            type: "text",
-            text: `이 이미지는 한국 식당/매장의 매입 전표입니다.
-
-## 작업 순서 (반드시 이 순서대로 수행하세요)
-
-### STEP 1: 문서 구조 파악
-먼저 이미지 전체를 살펴보고 다음을 확인하세요:
-- 문서 유형 (거래명세표/거래명세서/영수증/수기전표/배달정산서/기타)
-- 표의 열 헤더 위치와 순서 (품목, 규격, 단위, 수량, 단가, 공급가액 등)
-- 공급자(판매자) 정보 위치
-
-### STEP 2: 거래처명/날짜 추출
-문서 상단에서:
-- 거래처명: **공급자(판매자)** 측 상호명 ("공급받는자"가 아님)
-- 거래일: YYYY-MM-DD 형식
-
-### STEP 3: 품목별 데이터 추출
-표의 **각 행**을 위에서 아래로 하나씩 읽으세요:
-- 열 위치를 혼동하지 마세요. STEP 1에서 확인한 열 순서를 따르세요.
-- **숫자는 자릿수까지 정확히 읽으세요.** 1과 7, 3과 8, 5와 6, 0과 8을 구분하세요.
-- 콤마가 포함된 숫자: "12,000"은 12000이지 12나 1200이 아닙니다.
-
-### STEP 4: 자기 검증
-추출 완료 후 각 행에 대해 검증하세요:
-- 수량 × 단가 ≈ 공급가액 인지 확인 (10% 이내)
-- 수량은 보통 0.5~50, 단가는 보통 500~200,000 범위
-- 수량이 단가보다 크면 열을 잘못 읽은 것 → 재확인
-- 합계행의 금액과 개별 lineTotal의 합이 비슷한지 확인
-
-## ⚠ 한글 인식 규칙
-
-**글자 단위로 정확히 읽으세요:**
-- 받침: "달" ≠ "닭", "곤" ≠ "콩", "갈" ≠ "감", "봉" ≠ "볶", "란" ≠ "단"
-- 모음: "대" ≠ "데", "래" ≠ "레", "파" ≠ "피", "무" ≠ "두", "배" ≠ "베"
-- 초성: "깨" ≠ "째", "감" ≠ "강", "돈" ≠ "론", "불" ≠ "볼"
-- 겹받침: "닭" ≠ "달", "삶" ≠ "살", "읽" ≠ "일"
-
-**식자재 참고 단어집:**
-채소: 양파, 감자, 대파, 쪽파, 당근, 양배추, 깻잎, 마늘, 생강, 고추, 청양고추, 오이, 배추, 시금치, 무, 부추, 미나리, 콩나물, 숙주, 브로콜리, 파프리카, 토마토, 호박, 애호박
-육류: 삼겹살, 목살, 안심, 등심, 갈비, 닭가슴살, 닭다리, 닭날개, 오리, 소고기, 돼지고기, 항정살, 차돌박이
-수산: 새우, 오징어, 고등어, 연어, 참치, 조개, 굴, 문어, 멸치, 꽃게, 전복, 갈치, 광어
-가공: 두부, 우유, 계란, 치즈, 버터, 참기름, 들기름, 식용유, 올리브유, 마요네즈, 케첩
-조미: 소금, 설탕, 간장, 된장, 고추장, 쌈장, 식초, 후추, 물엿, 맛술, 굴소스, 칠리소스
-곡물: 밀가루, 쌀, 면, 국수, 라면, 떡, 만두, 부침가루, 전분
-음료: 콜라, 사이다, 맥주, 소주, 생수, 주스, 탄산수, 에이드
-소모품: 일회용, 랩, 호일, 봉투, 장갑, 행주, 세제, 소독, 키친타올, 물티슈
-
-**숫자와 한글 분리:**
-- "양파10kg" → 품목: "양파", 규격: "10kg"
-- "대파1단" → 품목: "대파", 수량: "1", 단위: "단"
-
-**불확실한 글자:** 가장 가능성 높은 식자재명으로 추정 + uncertain: true
-
-## 문서 양식
-
-**[A] 거래명세표** — 가장 흔함. 열: 월일|품목/규격|단위|수량|단가|공급가액|부가세|비고. "공급가액"=수량×단가→lineTotal. 부가세/비고는 추출 불필요.
-**[B] 거래명세서** — 열: 품명|규격|수량|단가|공급가액. 수기 혼합 가능.
-**[C] 영수증** — 품명, 수량, 금액. 합계행 제외.
-**[D] 수기전표** — 손글씨. 열 구분 불명확 시 uncertain: true.
-**[기타]** — 열 헤더 먼저 읽고, 구조를 note에 기록.
-
-## 추출 필드
-
-각 품목:
-- shortName: 품목명만 (규격 제외). 예: "핫철리소스/CHOLIMEX/250g" → "핫철리소스"
-- spec: 규격 (용량/중량/사이즈). 없으면 ""
-- originalName: 이미지 원본 텍스트 그대로
-- quantity: 수량 (숫자, 콤마 제거, 소수점 유지. "6.000"→"6")
-- unit: 단위 (규격에서 유추 가능하면 반영)
-- unitPrice: 단가 (숫자, 콤마 제거)
-- lineTotal: 공급가액 (숫자, 콤마 제거)
-- uncertain: 불명확하면 true
-
-거래처/기타:
-- counterpartyName: 공급자 상호명
-- transactionDate: YYYY-MM-DD (없으면 null)
-- contactName/contactPhone: 담당자 정보 (없으면 null)
-- summary: totalSupply, totalTax, grandTotal
-- 합계/소계 행은 items에 넣지 말고 summary에
-
-## 출력 형식 (순수 JSON만, 코드블록 없이):
-{
-  "counterpartyName": "거래처명 또는 null",
-  "transactionDate": "거래일 YYYY-MM-DD 또는 null",
-  "counterpartyInfo": {
-    "contactName": "담당자명 또는 null",
-    "contactPhone": "연락처 또는 null"
-  },
-  "documentType": "거래명세표|거래명세서|영수증|간이영수증|수기전표|배달정산서|기타",
-  "items": [
-    {
-      "shortName": "품목명/규격 (규격 없으면 품목명만)",
-      "spec": "규격 (용량/중량/사이즈/포장단위, 없으면 빈 문자열)",
-      "originalName": "이미지 원본 텍스트",
-      "quantity": "수량(숫자)",
-      "unit": "단위 (규격에서 유추 가능하면 반영)",
-      "unitPrice": "단가(숫자)",
-      "lineTotal": "공급가액(숫자)",
-      "uncertain": false
-    }
-  ],
-  "summary": {
-    "totalSupply": "공급가액 합계(숫자) 또는 null",
-    "totalTax": "부가세 합계(숫자) 또는 null",
-    "grandTotal": "총합계(숫자) 또는 null"
-  },
-  "note": "비고 또는 null"
-}${profileHint}`,
-          },
-        ],
-      }],
-    });
+    const hybridOut = await runHybridOcr(
+      { filePath, restaurantId: Number(restaurantId) || undefined, counterpartyId: clientCpId ? Number(clientCpId) : undefined },
+      {
+        anthropic,
+        buildProfileHint,
+        getOcrProfile,
+        promptV2Template: promptV2,
+        promptV1ImageFallback,
+        loadImageBase64Raw,
+        extractText,
+        parseAIJson,
+      }
+    );
 
     const ocrElapsed = Date.now() - ocrStartTime;
-    const inputTokens = response.usage?.input_tokens || 0;
-    const outputTokens = response.usage?.output_tokens || 0;
+    const inputTokens = hybridOut.claude.inputTokens;
+    const outputTokens = hybridOut.claude.outputTokens;
 
-    const responseText = extractText(response);
-    if (!responseText) {
-      logOcrApiUsage({ endpoint: "extract-purchase", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "AI 응답 없음", inputTokens, outputTokens, model: "sonnet" });
-      res.status(500).json({ error: "AI 응답 없음" });
-      return;
-    }
-
-    let parsed: any;
-    try {
-      parsed = parseAIJson(responseText);
-    } catch {
-      // JSON 파싱 실패 → 에러 로그 저장 + 재시도 가능 에러 응답
-      await logOcrError("OCR JSON 파싱 실패", {
-        responsePreview: responseText.substring(0, 1000),
-        imageUrl,
-      }, restaurantId ? Number(restaurantId) : undefined);
-      res.status(500).json({
-        error: "AI 응답을 처리하지 못했습니다. 다시 시도해주세요.",
-        retryable: true,
-      });
+    const parsed = hybridOut.rawJson;
+    if (!parsed) {
+      logOcrApiUsage({ endpoint: "extract-purchase", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "AI 응답 파싱 실패", inputTokens, outputTokens, model: "sonnet" });
+      res.status(500).json({ error: "AI 응답을 처리하지 못했습니다. 다시 시도해주세요.", retryable: true });
       return;
     }
 
@@ -1024,14 +889,13 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
     // API 사용량 로깅 (성공)
     logOcrApiUsage({
-      endpoint: "extract-purchase",
+      endpoint: `extract-purchase:${hybridOut.engine}`,
       restaurantId: restaurantId ? Number(restaurantId) : undefined,
       responseTimeMs: ocrElapsed,
       success: true,
       inputTokens, outputTokens,
       model: "sonnet",
       itemCount: items.length,
-      requestPayloadSize: base64.length,
     });
 
     res.json(result);
