@@ -459,6 +459,18 @@ async function findCounterpartyCandidates(
   }
 }
 
+// ─── 품목 매칭 임계값 ─────────────────────────────────────────────────────
+// COUNTERPARTY: 거래처 품목 후보 인정 최소치 (미만이면 마스터 폴백)
+// MASTER_FALLBACK: 전체 마스터 폴백 시 최소 score
+// DISPLAY: 사용자에게 후보로 보여줄 최소치
+// AUTOPICK: 자동 매칭(matchedItemId 세팅) 최소치
+const ITEM_MATCH_THRESHOLD = {
+  COUNTERPARTY: 0.65,
+  MASTER_FALLBACK: 0.75,
+  DISPLAY: 0.5,
+  AUTOPICK: 0.8,
+};
+
 // ─── 품목 후보 매칭 (거래처 확정 후) ──────────────────────────────────────────
 async function findItemCandidates(
   restaurantId: number,
@@ -501,11 +513,11 @@ async function findItemCandidates(
         }
       }
 
-      // 2) 거래처 품목에서 score ≥ 0.5인 후보가 하나도 없으면 전체 마스터에서 검색
-      if (candidates.filter(c => c.score >= 0.5).length === 0) {
+      // 2) 거래처 품목에서 유효 후보가 하나도 없으면 전체 마스터에서 검색
+      if (candidates.filter(c => c.score >= ITEM_MATCH_THRESHOLD.COUNTERPARTY).length === 0) {
         for (const mi of allItems) {
           const score = ocrNorm ? fuzzyScore(ocrNorm, normalizeKorean(mi.name)) : 0;
-          if (score >= 0.3) {
+          if (score >= ITEM_MATCH_THRESHOLD.MASTER_FALLBACK) {
             candidates.push({ itemId: mi.id, itemName: mi.name, score, source: "master" });
           }
         }
@@ -514,11 +526,13 @@ async function findItemCandidates(
       candidates.sort((a, b) => b.score - a.score);
       bestMatch = candidates[0] || null;
 
+      const displayCandidates = candidates.filter((c) => c.score >= ITEM_MATCH_THRESHOLD.DISPLAY);
+
       return {
         ...item,
-        matchedItemId: bestMatch?.score && bestMatch.score >= 0.7 ? bestMatch.itemId : undefined,
-        matchedItemName: bestMatch?.score && bestMatch.score >= 0.7 ? bestMatch.itemName : undefined,
-        itemCandidates: candidates.slice(0, 5).map((c) => ({
+        matchedItemId: bestMatch?.score && bestMatch.score >= ITEM_MATCH_THRESHOLD.AUTOPICK ? bestMatch.itemId : undefined,
+        matchedItemName: bestMatch?.score && bestMatch.score >= ITEM_MATCH_THRESHOLD.AUTOPICK ? bestMatch.itemName : undefined,
+        itemCandidates: displayCandidates.slice(0, 5).map((c) => ({
           itemId: c.itemId,
           itemName: c.itemName,
           score: Math.round(c.score * 100),
@@ -544,11 +558,16 @@ function fuzzyScore(a: string, b: string): number {
   if (!a || !b) return 0;
   if (a === b) return 1;
 
-  // 포함 관계 체크
+  // 짧은 단어(≤2자)는 완전일치만 인정 — "양파"/"양배추" 같은 오매칭 방지
+  const minLen = Math.min(a.length, b.length);
+  if (minLen <= 2) return 0;
+
+  // 포함 관계 체크 — 길이 비율이 0.6 미만이면 0 (너무 짧은 쪽이 긴 쪽에 포함되는 우연 매칭 차단)
   if (a.includes(b) || b.includes(a)) {
-    const shorter = Math.min(a.length, b.length);
     const longer = Math.max(a.length, b.length);
-    return shorter / longer; // 길이 비율로 점수화 (짧은쪽/긴쪽)
+    const ratio = minLen / longer;
+    if (ratio < 0.6) return 0;
+    return ratio; // 길이 비율로 점수화 (짧은쪽/긴쪽)
   }
 
   // Levenshtein distance 기반 유사도
