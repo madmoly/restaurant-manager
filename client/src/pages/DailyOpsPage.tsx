@@ -2669,6 +2669,16 @@ function MiddayTab({
     date,
   });
 
+  // ── 중간정산 보고용 데이터 ──
+  const restaurantQuery = trpc.restaurants.get.useQuery(
+    { id: restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const daySchedulesQuery = trpc.schedules.getDaySchedules.useQuery(
+    { restaurantId, date },
+    { enabled: restaurantId > 0 },
+  );
+
   const saveMidSalesMutation = trpc.dailyOps.saveMidSales.useMutation({
     onSuccess: () => {
       toast.success('중간 매출이 저장되었습니다.');
@@ -2708,6 +2718,84 @@ function MiddayTab({
   };
 
   const midSales = midSalesQuery.data || [];
+
+  // 중간정산 보고 텍스트 생성 — snapshot(저장된 중간매출 1건)의 recordedAt을 체크시간으로 사용
+  const generateMidReportText = (snapshot: any): string => {
+    const rest = restaurantQuery.data;
+    const restName = rest?.name ?? '매장';
+
+    // 날짜: 2026년 4월 19일 일요일
+    const dt = new Date(date + 'T12:00:00');
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    const dateStr = `${dt.getFullYear()}년 ${dt.getMonth() + 1}월 ${dt.getDate()}일 ${dayNames[dt.getDay()]}요일`;
+
+    // 체크시간: snapshot.recordedAt
+    const recordedAt = new Date(snapshot.recordedAt);
+    const hh = String(recordedAt.getHours()).padStart(2, '0');
+    const mm = String(recordedAt.getMinutes()).padStart(2, '0');
+    const checkTime = `${hh}:${mm}`;
+    const checkpointMs = recordedAt.getTime();
+
+    // 체크매출/객수: 해당 스냅샷 시점까지의 누적
+    const upto = midSales.filter((m: any) => new Date(m.recordedAt).getTime() <= checkpointMs);
+    const checkAmount = upto.reduce((s: number, m: any) => s + Number(m.amount || 0), 0);
+    const checkReceipts = upto.reduce((s: number, m: any) => s + Number(m.receiptCount || 0), 0);
+
+    // 운영일지 특이사항: 해당 스냅샷 시점까지의 note 있는 행만
+    const noteLines = upto
+      .filter((m: any) => m.note && String(m.note).trim())
+      .map((m: any) => {
+        const t = m.recordedAt ? fmtTs(m.recordedAt) : '';
+        return ` -${t ? t + ' ' : ''}${m.note}`;
+      });
+
+    // 현재 근무자: 체크시간 기준 근무 중
+    const schedules = (daySchedulesQuery.data ?? []).filter((s: any) => s.status !== 'canceled');
+    const currentWorkers = schedules.filter((s: any) => {
+      const st = new Date(s.startTime).getTime();
+      const et = new Date(s.endTime).getTime();
+      return st <= checkpointMs && checkpointMs <= et;
+    });
+
+    const lines: string[] = [];
+    lines.push(`[${restName}] ${dateStr}`);
+    lines.push(`* 체크시간: ${checkTime}`);
+    lines.push(`* 체크매출: ${fmtNum(checkAmount)}원`);
+    lines.push(`* 객수: ${checkReceipts}건`);
+    lines.push('');
+    lines.push(`* 운영일지 특이사항`);
+    if (noteLines.length > 0) {
+      lines.push(...noteLines);
+    } else {
+      lines.push(' -없음');
+    }
+    lines.push('');
+    lines.push(`* 현재 근무자`);
+    if (currentWorkers.length > 0) {
+      for (const s of currentWorkers) {
+        const name = s.userName ?? s.tempWorkerName ?? '미배정';
+        const w = calcHeadcountWeight(
+          s.startTime,
+          s.endTime,
+          rest?.openTime,
+          rest?.closeTime,
+          rest?.halfShiftThreshold,
+        );
+        if (w === 0.5) {
+          const hours = ((new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 3600000)
+            .toFixed(1)
+            .replace(/\.0$/, '');
+          lines.push(`  ${name} ${hours}시간`);
+        } else {
+          lines.push(`  ${name} ${getRoleLabel(s)}`);
+        }
+      }
+    } else {
+      lines.push(`  없음`);
+    }
+    lines.push('===========');
+    return lines.join('\n');
+  };
 
   return (
     <div className="space-y-4 p-4">
@@ -2792,14 +2880,31 @@ function MiddayTab({
                       {fmtTs(sale.recordedAt)}
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => deleteMidSalesMutation.mutate({ id: sale.id, restaurantId })}
-                    disabled={deleteMidSalesMutation.isPending}
-                  >
-                    <Trash2 className="w-4 h-4 text-red-500" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      title="이 시점의 중간정산 보고 복사"
+                      onClick={() => {
+                        const text = generateMidReportText(sale);
+                        navigator.clipboard.writeText(text).then(() => {
+                          toast.success('중간정산 보고가 클립보드에 복사되었습니다');
+                        }).catch(() => {
+                          toast.error('복사 실패');
+                        });
+                      }}
+                    >
+                      <Copy className="w-4 h-4 text-blue-600" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => deleteMidSalesMutation.mutate({ id: sale.id, restaurantId })}
+                      disabled={deleteMidSalesMutation.isPending}
+                    >
+                      <Trash2 className="w-4 h-4 text-red-500" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -3049,13 +3154,6 @@ function CloseTab({
       specialItems,
       note: closeNote || undefined,
     });
-  };
-
-  const getRoleLabel = (s: any): string => {
-    const storeRole = s.storeRole;
-    if (storeRole === 'owner' || storeRole === 'store_manager') return '점장';
-    if (storeRole === 'supervisor' || storeRole === 'manager') return '매니져';
-    return '사원';
   };
 
   const generateReportText = (): string => {
@@ -3507,6 +3605,14 @@ function calcHeadcountWeight(
   const ratio = (workMinutes / storeMinutes) * 100;
   const threshold = halfShiftThreshold ?? 60;
   return ratio < threshold ? 0.5 : 1;
+}
+
+/** 스케줄 행의 매장 역할을 한국어 라벨로 변환 */
+function getRoleLabel(s: any): string {
+  const storeRole = s?.storeRole;
+  if (storeRole === 'owner' || storeRole === 'store_manager') return '점장';
+  if (storeRole === 'supervisor' || storeRole === 'manager') return '매니져';
+  return '사원';
 }
 
 function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; date: string }) {
