@@ -371,11 +371,12 @@ export const monthlyClosingsRouter = router({
       const fixedCostCount = fixedResult.breakdown.length + fixedResult.ratioItems.length;
       const fixedCostsTotal = fixedResult.totalWithRatio;
       const fixedBreakdown = [
-        ...fixedResult.breakdown.map(f => ({ name: f.name, type: f.type, amount: f.amount })),
+        ...fixedResult.breakdown.map(f => ({ name: f.name, type: f.type, amount: f.amount, ratio: null as number | null })),
         ...fixedResult.ratioItems.map(r => ({
           name: r.name,
-          type: "sales_ratio",
+          type: "sales_ratio" as const,
           amount: Math.round(confirmedSales.salesTotal * r.ratio / 100),
+          ratio: r.ratio,
         })),
       ];
 
