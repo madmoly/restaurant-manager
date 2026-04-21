@@ -35,7 +35,9 @@ export const purchasesV2Router = router({
     .query(async ({ input }) => {
       const mm = String(input.month).padStart(2, "0");
       const startDate = `${input.year}-${mm}-01`;
-      const endDate = `${input.year}-${mm}-31`;
+      const nextY = input.month === 12 ? input.year + 1 : input.year;
+      const nextM = input.month === 12 ? 1 : input.month + 1;
+      const nextMonthStart = `${nextY}-${String(nextM).padStart(2, "0")}-01`;
 
       return db
         .select({
@@ -60,7 +62,7 @@ export const purchasesV2Router = router({
           and(
             eq(purchaseOrdersV2.restaurantId, input.restaurantId),
             gte(purchaseOrdersV2.purchaseDate, new Date(startDate)),
-            sql`${purchaseOrdersV2.purchaseDate} <= ${endDate}`,
+            sql`${purchaseOrdersV2.purchaseDate} < ${nextMonthStart}`,
           ),
         )
         .orderBy(desc(purchaseOrdersV2.purchaseDate));
@@ -728,8 +730,13 @@ export const purchasesV2Router = router({
       month: z.string(), // "YYYY-MM"
     }))
     .query(async ({ input }) => {
+      const [yStr, mStr] = input.month.split("-");
+      const y = parseInt(yStr, 10);
+      const m = parseInt(mStr, 10);
       const startDate = `${input.month}-01`;
-      const endDate = `${input.month}-31`;
+      const nextY = m === 12 ? y + 1 : y;
+      const nextM = m === 12 ? 1 : m + 1;
+      const nextMonthStart = `${nextY}-${String(nextM).padStart(2, "0")}-01`;
 
       // 동일 날짜+거래처+금액+상태 조합으로 그룹핑, 2건 이상인 것만
       const dupes = await db.select({
@@ -743,7 +750,7 @@ export const purchasesV2Router = router({
         .where(and(
           eq(purchaseOrdersV2.restaurantId, input.restaurantId),
           gte(purchaseOrdersV2.purchaseDate, startDate),
-          lte(purchaseOrdersV2.purchaseDate, endDate),
+          sql`${purchaseOrdersV2.purchaseDate} < ${nextMonthStart}`,
         ))
         .groupBy(
           purchaseOrdersV2.purchaseDate,
@@ -805,7 +812,9 @@ export const purchasesV2Router = router({
     .query(async ({ input }) => {
       const mm = String(input.month).padStart(2, "0");
       const startDate = `${input.year}-${mm}-01`;
-      const endDate = `${input.year}-${mm}-31`;
+      const nextY = input.month === 12 ? input.year + 1 : input.year;
+      const nextM = input.month === 12 ? 1 : input.month + 1;
+      const nextMonthStart = `${nextY}-${String(nextM).padStart(2, "0")}-01`;
 
       // 1) 해당 월 전체 전표 + 품목 조인
       const rows = await db.execute(sql`
@@ -831,7 +840,7 @@ export const purchasesV2Router = router({
         LEFT JOIN items i ON oi.itemId = i.id
         WHERE o.restaurantId = ${input.restaurantId}
           AND o.purchaseDate >= ${startDate}
-          AND o.purchaseDate <= ${endDate}
+          AND o.purchaseDate < ${nextMonthStart}
         ORDER BY c.name, o.purchaseDate DESC, o.id, oi.id
       `);
 
