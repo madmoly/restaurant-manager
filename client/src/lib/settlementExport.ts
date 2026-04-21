@@ -13,6 +13,8 @@ const fixedTypeLabel = (t: string) => FIXED_TYPE_LABEL[t] ?? "일시";
 
 const fmtKRW = (n: number) => Math.round(n).toLocaleString("ko-KR");
 const fmtPct = (n: number | string) => (typeof n === "number" ? n.toFixed(1) : n);
+const pctOfSales = (amount: number, salesTotal: number) =>
+  salesTotal > 0 ? Number((amount / salesTotal * 100).toFixed(1)) : 0;
 const fmtDateTime = (s: string | Date | null) => {
   if (!s) return "";
   const d = new Date(s);
@@ -155,39 +157,52 @@ export async function exportSettlementExcel(ctx: ExportContext) {
   XLSX.utils.book_append_sheet(wb, ws2, "매출");
 
   // ── 시트 3: 매입 ──
-  const purchAoa: any[][] = [["거래처", "건수", "금액(원)"]];
-  for (const cp of income.purchasesByCounterparty) purchAoa.push([cp.name, cp.count, cp.amount]);
-  purchAoa.push(["합계", income.purchasesByCounterparty.reduce((s: number, c: any) => s + c.count, 0), income.purchasesTotal]);
+  const purchAoa: any[][] = [["거래처", "건수", "금액(원)", "매출대비(%)"]];
+  for (const cp of income.purchasesByCounterparty) {
+    purchAoa.push([cp.name, cp.count, cp.amount, pctOfSales(cp.amount, income.salesTotal)]);
+  }
+  purchAoa.push([
+    "합계",
+    income.purchasesByCounterparty.reduce((s: number, c: any) => s + c.count, 0),
+    income.purchasesTotal,
+    pctOfSales(income.purchasesTotal, income.salesTotal),
+  ]);
   const ws3 = XLSX.utils.aoa_to_sheet(purchAoa);
-  ws3["!cols"] = [{ wch: 24 }, { wch: 8 }, { wch: 16 }];
+  ws3["!cols"] = [{ wch: 24 }, { wch: 8 }, { wch: 16 }, { wch: 12 }];
   applyNumFmt(ws3, [2], "#,##0");
+  applyNumFmt(ws3, [3], "0.0");
   XLSX.utils.book_append_sheet(wb, ws3, "매입");
 
   // ── 시트 4: 인건비 ──
-  const laborAoa: any[][] = [["소속회사", "인원", "시간(h)", "금액(원)"]];
-  for (const co of income.laborByCompany) laborAoa.push([co.company, co.headcount, co.hours, co.amount]);
+  const laborAoa: any[][] = [["소속회사", "인원", "시간(h)", "금액(원)", "매출대비(%)"]];
+  for (const co of income.laborByCompany) {
+    laborAoa.push([co.company, co.headcount, co.hours, co.amount, pctOfSales(co.amount, income.salesTotal)]);
+  }
   laborAoa.push([
     "합계",
     income.laborByCompany.reduce((s: number, c: any) => s + c.headcount, 0),
     Number(income.laborByCompany.reduce((s: number, c: any) => s + c.hours, 0).toFixed(1)),
     income.laborCost,
+    pctOfSales(income.laborCost, income.salesTotal),
   ]);
   const ws4 = XLSX.utils.aoa_to_sheet(laborAoa);
-  ws4["!cols"] = [{ wch: 16 }, { wch: 8 }, { wch: 10 }, { wch: 16 }];
+  ws4["!cols"] = [{ wch: 16 }, { wch: 8 }, { wch: 10 }, { wch: 16 }, { wch: 12 }];
   applyNumFmt(ws4, [2], "0.0");
   applyNumFmt(ws4, [3], "#,##0");
+  applyNumFmt(ws4, [4], "0.0");
   XLSX.utils.book_append_sheet(wb, ws4, "인건비");
 
   // ── 시트 5: 고정비 ──
-  const fixedAoa: any[][] = [["항목", "유형", "원비율(%)", "금액(원)"]];
+  const fixedAoa: any[][] = [["항목", "유형", "원비율(%)", "금액(원)", "매출대비(%)"]];
   for (const f of income.fixedBreakdown) {
-    fixedAoa.push([f.name, fixedTypeLabel(f.type), f.ratio ?? "", f.amount]);
+    fixedAoa.push([f.name, fixedTypeLabel(f.type), f.ratio ?? "", f.amount, pctOfSales(f.amount, income.salesTotal)]);
   }
-  fixedAoa.push(["합계", "", "", income.fixedCostsTotal]);
+  fixedAoa.push(["합계", "", "", income.fixedCostsTotal, pctOfSales(income.fixedCostsTotal, income.salesTotal)]);
   const ws5 = XLSX.utils.aoa_to_sheet(fixedAoa);
-  ws5["!cols"] = [{ wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 16 }];
+  ws5["!cols"] = [{ wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
   applyNumFmt(ws5, [2], "0.0");
   applyNumFmt(ws5, [3], "#,##0");
+  applyNumFmt(ws5, [4], "0.0");
   XLSX.utils.book_append_sheet(wb, ws5, "고정비");
 
   const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
@@ -295,13 +310,26 @@ export async function exportSettlementPDF(ctx: ExportContext) {
   // 매입
   if (income.purchasesByCounterparty.length > 0) {
     section("거래처별 매입");
+    const purchCount = income.purchasesByCounterparty.reduce((s: number, c: any) => s + c.count, 0);
     autoTable(doc, {
       ...tableBase,
       startY: finalY + 11,
-      head: [["거래처", "건수", "금액(원)"]],
-      body: income.purchasesByCounterparty.map((cp: any) => [cp.name, cp.count, fmtKRW(cp.amount)]),
+      head: [["거래처", "건수", "금액(원)", "매출대비(%)"]],
+      body: income.purchasesByCounterparty.map((cp: any) => [
+        cp.name,
+        cp.count,
+        fmtKRW(cp.amount),
+        pctOfSales(cp.amount, income.salesTotal).toFixed(1),
+      ]),
+      foot: [[
+        "합계",
+        String(purchCount),
+        fmtKRW(income.purchasesTotal),
+        pctOfSales(income.purchasesTotal, income.salesTotal).toFixed(1),
+      ]],
       headStyles: headSub,
-      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+      footStyles: { fillColor: [226, 232, 240] as [number, number, number], textColor: 20, font: "NanumGothic", fontStyle: "normal" },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" } },
     });
     finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 30;
   }
@@ -309,13 +337,29 @@ export async function exportSettlementPDF(ctx: ExportContext) {
   // 인건비
   if (income.laborByCompany.length > 0) {
     section("소속회사별 인건비");
+    const laborHeadcount = income.laborByCompany.reduce((s: number, c: any) => s + c.headcount, 0);
+    const laborHours = income.laborByCompany.reduce((s: number, c: any) => s + c.hours, 0);
     autoTable(doc, {
       ...tableBase,
       startY: finalY + 11,
-      head: [["소속회사", "인원", "시간(h)", "금액(원)"]],
-      body: income.laborByCompany.map((co: any) => [co.company, co.headcount, co.hours.toFixed(1), fmtKRW(co.amount)]),
+      head: [["소속회사", "인원", "시간(h)", "금액(원)", "매출대비(%)"]],
+      body: income.laborByCompany.map((co: any) => [
+        co.company,
+        co.headcount,
+        co.hours.toFixed(1),
+        fmtKRW(co.amount),
+        pctOfSales(co.amount, income.salesTotal).toFixed(1),
+      ]),
+      foot: [[
+        "합계",
+        String(laborHeadcount),
+        laborHours.toFixed(1),
+        fmtKRW(income.laborCost),
+        pctOfSales(income.laborCost, income.salesTotal).toFixed(1),
+      ]],
       headStyles: headSub,
-      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" } },
+      footStyles: { fillColor: [226, 232, 240] as [number, number, number], textColor: 20, font: "NanumGothic", fontStyle: "normal" },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
     });
     finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 30;
   }
@@ -326,15 +370,24 @@ export async function exportSettlementPDF(ctx: ExportContext) {
     autoTable(doc, {
       ...tableBase,
       startY: finalY + 11,
-      head: [["항목", "유형", "원비율(%)", "금액(원)"]],
+      head: [["항목", "유형", "원비율(%)", "금액(원)", "매출대비(%)"]],
       body: income.fixedBreakdown.map((f: any) => [
         f.name,
         fixedTypeLabel(f.type),
         f.ratio != null ? f.ratio.toFixed(1) : "",
         fmtKRW(f.amount),
+        pctOfSales(f.amount, income.salesTotal).toFixed(1),
       ]),
+      foot: [[
+        "합계",
+        "",
+        "",
+        fmtKRW(income.fixedCostsTotal),
+        pctOfSales(income.fixedCostsTotal, income.salesTotal).toFixed(1),
+      ]],
       headStyles: headSub,
-      columnStyles: { 2: { halign: "right" }, 3: { halign: "right" } },
+      footStyles: { fillColor: [226, 232, 240] as [number, number, number], textColor: 20, font: "NanumGothic", fontStyle: "normal" },
+      columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
     });
     finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 30;
   }
