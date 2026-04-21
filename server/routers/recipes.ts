@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { eq, and, asc, desc } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { recipes } from "../../drizzle/schema";
@@ -39,6 +40,7 @@ export const recipesRouter = router({
       content: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const [result] = await db.insert(recipes).values({
         restaurantId: input.restaurantId,
         title: input.title,
@@ -60,7 +62,10 @@ export const recipesRouter = router({
       content: z.string().optional(),
       sortOrder: z.number().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const [current] = await db.select({ restaurantId: recipes.restaurantId }).from(recipes).where(eq(recipes.id, input.id)).limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "레시피를 찾을 수 없습니다" });
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, current.restaurantId, true);
       const { id, ...data } = input;
       await db.update(recipes).set(data).where(eq(recipes.id, id));
       return { ok: true };
@@ -69,7 +74,10 @@ export const recipesRouter = router({
   /** 레시피 삭제 (soft: isPublished=false) */
   delete: managerProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const [current] = await db.select({ restaurantId: recipes.restaurantId }).from(recipes).where(eq(recipes.id, input.id)).limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "레시피를 찾을 수 없습니다" });
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, current.restaurantId, true);
       await db.update(recipes).set({ isPublished: false }).where(eq(recipes.id, input.id));
       return { ok: true };
     }),

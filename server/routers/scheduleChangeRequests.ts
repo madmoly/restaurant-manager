@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import {
@@ -7,6 +8,7 @@ import {
   schedules,
   users,
 } from "../../drizzle/schema";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 
 export const scheduleChangeRequestsRouter = router({
   /** 변경 요청 목록 (점장/매니저용) */
@@ -17,7 +19,8 @@ export const scheduleChangeRequestsRouter = router({
         status: z.enum(["pending", "approved", "rejected"]).optional(),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const conditions = [eq(scheduleChangeRequests.restaurantId, input.restaurantId)];
       if (input.status) conditions.push(eq(scheduleChangeRequests.status, input.status) as any);
 
@@ -102,6 +105,15 @@ export const scheduleChangeRequestsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      // PR3: id-only fetch → restaurantId 기반 매장 검증
+      const [current] = await db
+        .select({ restaurantId: scheduleChangeRequests.restaurantId })
+        .from(scheduleChangeRequests)
+        .where(eq(scheduleChangeRequests.id, input.id))
+        .limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "변경요청을 찾을 수 없습니다" });
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, current.restaurantId, true);
+
       await db
         .update(scheduleChangeRequests)
         .set({

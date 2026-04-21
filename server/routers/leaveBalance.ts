@@ -11,6 +11,7 @@ import { z } from "zod";
 import { eq, and, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
+import { verifyStoreAccess } from "../middleware/storeAuth";
 import { db } from "../db";
 import {
   leaveTransactions,
@@ -34,7 +35,8 @@ export const leaveBalanceRouter = router({
       year: z.number(),
       month: z.number(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const { restaurantId, year, month } = input;
       // 해당 월의 공휴일 목록
       const holidays = getHolidaysForYear(year).filter((h) => {
@@ -138,7 +140,8 @@ export const leaveBalanceRouter = router({
       restaurantId: z.number(),
       holidayDate: z.string(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const [existing] = await db.select({ id: leaveTransactions.id })
         .from(leaveTransactions)
         .where(and(
@@ -174,6 +177,7 @@ export const leaveBalanceRouter = router({
       scheduleId: z.number().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const holidayName = getHolidayName(input.holidayDate);
       if (!holidayName) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `${input.holidayDate}는 공휴일이 아닙니다` });
@@ -233,6 +237,7 @@ export const leaveBalanceRouter = router({
       note: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       const year = parseInt(input.useDate.slice(0, 4));
 
       // 잔여일수 확인
@@ -308,7 +313,8 @@ export const leaveBalanceRouter = router({
       restaurantId: z.number(),
       year: z.number(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       // 매장 소속 직원 목록
       const staffRows = await db.select({
         userId: restaurantUsers.userId,
