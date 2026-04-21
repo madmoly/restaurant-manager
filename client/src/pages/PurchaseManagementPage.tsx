@@ -935,6 +935,7 @@ function ReceivedSection({
   setExpandedOrder,
   onDeleteOrder,
   isDeleting,
+  dateEdit,
 }: {
   cpList: MonthlyCpGroup[];
   sectionTotal: number;
@@ -944,6 +945,15 @@ function ReceivedSection({
   setExpandedOrder: (v: number | null) => void;
   onDeleteOrder: (order: MonthlyOrder, cpName: string) => void;
   isDeleting: boolean;
+  dateEdit: {
+    editingOrderId: number | null;
+    value: string;
+    setValue: (v: string) => void;
+    onStart: (order: MonthlyOrder) => void;
+    onSave: (order: MonthlyOrder) => void;
+    onCancel: () => void;
+    isSaving: boolean;
+  };
 }) {
   if (cpList.length === 0) return null;
   return (
@@ -985,13 +995,64 @@ function ReceivedSection({
                   const isOrderExpanded = expandedOrder === order.orderId;
                   return (
                     <div key={order.orderId}>
-                      <button
-                        onClick={() => setExpandedOrder(isOrderExpanded ? null : order.orderId)}
-                        className="w-full px-4 py-2.5 flex items-center justify-between text-sm hover:bg-muted/20 transition-colors"
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          if (dateEdit.editingOrderId === order.orderId) return;
+                          setExpandedOrder(isOrderExpanded ? null : order.orderId);
+                        }}
+                        onKeyDown={(e) => {
+                          if (dateEdit.editingOrderId === order.orderId) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setExpandedOrder(isOrderExpanded ? null : order.orderId);
+                          }
+                        }}
+                        className="w-full px-4 py-2.5 flex items-center justify-between text-sm hover:bg-muted/20 transition-colors cursor-pointer"
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-xs text-muted-foreground tabular-nums">{order.purchaseDate}</span>
-                          {order.note && <span className="text-xs text-muted-foreground truncate max-w-[140px]">{order.note}</span>}
+                          {dateEdit.editingOrderId === order.orderId ? (
+                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="date"
+                                value={dateEdit.value}
+                                onChange={(e) => dateEdit.setValue(e.target.value)}
+                                className="text-xs h-7 px-2 rounded border border-input bg-background"
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); dateEdit.onSave(order); }}
+                                disabled={dateEdit.isSaving}
+                                className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-muted/50 disabled:opacity-50"
+                                title="저장"
+                              >
+                                <Save size={12} className="text-primary" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); dateEdit.onCancel(); }}
+                                className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-muted/50"
+                                title="취소"
+                              >
+                                <X size={12} className="text-muted-foreground" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="text-xs text-muted-foreground tabular-nums">{order.purchaseDate}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); dateEdit.onStart(order); }}
+                                className="h-5 w-5 inline-flex items-center justify-center rounded hover:bg-muted/50 shrink-0"
+                                title="날짜 수정"
+                              >
+                                <Pencil size={10} className="text-muted-foreground" />
+                              </button>
+                              {order.note && <span className="text-xs text-muted-foreground truncate max-w-[140px]">{order.note}</span>}
+                            </>
+                          )}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span className="text-sm font-semibold tabular-nums text-foreground">
@@ -1003,7 +1064,7 @@ function ReceivedSection({
                               : <ChevronDown size={12} className="text-muted-foreground" />
                           )}
                         </div>
-                      </button>
+                      </div>
 
                       {isOrderExpanded && (
                         <div className="bg-muted/20 px-4 py-2 space-y-1">
@@ -1053,6 +1114,8 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
   const [expandedCp, setExpandedCp] = useState<string | null>(null);
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
+  const [editingDateOrderId, setEditingDateOrderId] = useState<number | null>(null);
+  const [editingDateValue, setEditingDateValue] = useState<string>("");
   const isCurrentMonth = year === now.getFullYear() && month === (now.getMonth() + 1);
 
   const { data, isLoading } = trpc.purchasesV2.monthlySummaryByCounterparty.useQuery(
@@ -1080,6 +1143,61 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
     if (confirm(`${order.purchaseDate} ${cpName} 전표(₩${order.totalAmount.toLocaleString()})를 삭제할까요?`)) {
       deleteOrder.mutate({ restaurantId, id: order.orderId });
     }
+  };
+
+  const updateOrder = trpc.purchasesV2.updateOrder.useMutation({
+    onSuccess() {
+      toast.success("날짜 변경됨");
+      utils.purchasesV2.monthlySummaryByCounterparty.invalidate({ restaurantId, year, month });
+      utils.purchasesV2.listOrdersByMonth.invalidate();
+      utils.monthlyClosings.settlementData.invalidate();
+      setEditingDateOrderId(null);
+      setEditingDateValue("");
+    },
+    onError(err: any) { toast.error(`변경 실패: ${err.message}`); },
+  });
+
+  const handleStartEditDate = (order: MonthlyOrder) => {
+    setEditingDateOrderId(order.orderId);
+    setEditingDateValue(order.purchaseDate);
+  };
+
+  const handleCancelEditDate = () => {
+    setEditingDateOrderId(null);
+    setEditingDateValue("");
+  };
+
+  const handleSaveEditDate = async (order: MonthlyOrder) => {
+    if (!editingDateValue || !/^\d{4}-\d{2}-\d{2}$/.test(editingDateValue)) {
+      toast.error("날짜 형식이 올바르지 않습니다");
+      return;
+    }
+    if (editingDateValue === order.purchaseDate) {
+      handleCancelEditDate();
+      return;
+    }
+    const [srcY, srcM] = order.purchaseDate.split("-").map(Number);
+    const [tgtY, tgtM] = editingDateValue.split("-").map(Number);
+    const warnings: string[] = [];
+    try {
+      const srcClosed = await utils.monthlyClosings.get.fetch({ restaurantId, year: srcY, month: srcM });
+      if (srcClosed) warnings.push(`${srcY}년 ${srcM}월`);
+      if (srcY !== tgtY || srcM !== tgtM) {
+        const tgtClosed = await utils.monthlyClosings.get.fetch({ restaurantId, year: tgtY, month: tgtM });
+        if (tgtClosed) warnings.push(`${tgtY}년 ${tgtM}월`);
+      }
+    } catch {
+      // 조회 실패는 무시하고 진행
+    }
+    if (warnings.length > 0) {
+      const msg = `${warnings.join(", ")}은 월마감이 확정된 달입니다.\n확정된 스냅샷은 자동으로 재계산되지 않고, 다음 월마감 재확정 시 반영됩니다.\n계속할까요?`;
+      if (!window.confirm(msg)) return;
+    }
+    updateOrder.mutate({
+      restaurantId,
+      id: order.orderId,
+      purchaseDate: editingDateValue,
+    });
   };
 
   const resetExpanded = () => {
@@ -1209,6 +1327,15 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
             setExpandedOrder={setExpandedOrder}
             onDeleteOrder={handleDeleteOrder}
             isDeleting={deleteOrder.isPending}
+            dateEdit={{
+              editingOrderId: editingDateOrderId,
+              value: editingDateValue,
+              setValue: setEditingDateValue,
+              onStart: handleStartEditDate,
+              onSave: handleSaveEditDate,
+              onCancel: handleCancelEditDate,
+              isSaving: updateOrder.isPending,
+            }}
           />
 
           {expBreakdown.length > 0 && (
