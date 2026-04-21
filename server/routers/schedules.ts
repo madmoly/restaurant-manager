@@ -11,6 +11,7 @@ import {
   storeWeeklyClosures,
   restaurantUsers,
   employeeContracts,
+  employeeWageHistory,
   restaurantShiftPresets,
   leaveTransactions,
   employmentElectronicContracts,
@@ -902,8 +903,8 @@ export const schedulesRouter = router({
           tempPhone: schedules.tempPhone,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
-          wageType: employeeContracts.wageType,
-          wageAmount: employeeContracts.wageAmount,
+          wageType: employeeWageHistory.wageType,
+          wageAmount: employeeWageHistory.wageAmount,
           position: employeeContracts.position,
           contractStart: employeeContracts.contractStart,
           contractEnd: employeeContracts.contractEnd,
@@ -923,6 +924,12 @@ export const schedulesRouter = router({
         .leftJoin(employeeContracts, and(
           eq(employeeContracts.userId, schedules.userId),
           eq(employeeContracts.restaurantId, input.restaurantId),
+        ))
+        .leftJoin(employeeWageHistory, and(
+          eq(employeeWageHistory.userId, schedules.userId),
+          eq(employeeWageHistory.restaurantId, input.restaurantId),
+          sql`DATE_FORMAT(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00'), '%Y-%m-01') >= ${employeeWageHistory.effectiveFrom}`,
+          sql`(${employeeWageHistory.effectiveTo} IS NULL OR DATE_FORMAT(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00'), '%Y-%m-01') < ${employeeWageHistory.effectiveTo})`,
         ))
         .where(
           and(

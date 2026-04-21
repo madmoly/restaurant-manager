@@ -11,6 +11,7 @@ import {
   users,
   restaurantUsers,
   employeeContracts,
+  employeeWageHistory,
   dailyClosings,
   dailySalesDetail,
   counterparties,
@@ -168,13 +169,19 @@ async function sumLaborByCompany(
     tempWorkerName: schedules.tempWorkerName,
     tempWageType: schedules.tempWageType,
     tempWageAmount: schedules.tempWageAmount,
-    wageType: employeeContracts.wageType,
-    wageAmount: employeeContracts.wageAmount,
+    wageType: employeeWageHistory.wageType,
+    wageAmount: employeeWageHistory.wageAmount,
     contractIsActive: employeeContracts.isActive,
   }).from(schedules)
     .leftJoin(employeeContracts, and(
       eq(employeeContracts.userId, schedules.userId),
       eq(employeeContracts.restaurantId, restaurantId),
+    ))
+    .leftJoin(employeeWageHistory, and(
+      eq(employeeWageHistory.userId, schedules.userId),
+      eq(employeeWageHistory.restaurantId, restaurantId),
+      sql`DATE_FORMAT(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00'), '%Y-%m-01') >= ${employeeWageHistory.effectiveFrom}`,
+      sql`(${employeeWageHistory.effectiveTo} IS NULL OR DATE_FORMAT(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00'), '%Y-%m-01') < ${employeeWageHistory.effectiveTo})`,
     ))
     .where(and(
       eq(schedules.restaurantId, restaurantId),

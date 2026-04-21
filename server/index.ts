@@ -873,6 +873,25 @@ app.use(express.json({ limit: "10mb" }));
       if (!e.message.includes("Duplicate")) console.log("[migrate] notifications.type error_alert:", e.message);
     }
 
+    // ─── Phase 1: 급여이력 (employee_wage_history) + restaurant_users.contractMigrated ───
+    // 시점별 급여 단가 저장. 월 1일 기준 [effectiveFrom, effectiveTo) 구간. effectiveTo=NULL이 현재 유효.
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS employee_wage_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        userId INT NOT NULL,
+        restaurantId INT NOT NULL,
+        wageType ENUM('hourly','monthly') NOT NULL,
+        wageAmount DECIMAL(12,2) NOT NULL,
+        effectiveFrom DATE NOT NULL,
+        effectiveTo DATE NULL,
+        sourceContractId INT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        UNIQUE KEY uniq_user_rest_from (userId, restaurantId, effectiveFrom),
+        INDEX idx_user_rest (userId, restaurantId)
+      )
+    `).catch(() => {});
+    await addColumnIfNotExists("restaurant_users", "contractMigrated", "BOOLEAN NOT NULL DEFAULT false");
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

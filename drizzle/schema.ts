@@ -11,6 +11,7 @@ import {
   boolean,
   json,
   uniqueIndex,
+  index,
 } from "drizzle-orm/mysql-core";
 
 // ─── Users ───────────────────────────────────────────────────────────────────
@@ -112,6 +113,8 @@ export const restaurantUsers = mysqlTable(
     resignReason: varchar("resignReason", { length: 200 }),
     roleChangedAt: timestamp("roleChangedAt"),
     roleChangedBy: int("roleChangedBy"),
+    // Phase 2 급여이력 전환 플래그: 전자계약서 서명으로 wage_history가 생성되면 true
+    contractMigrated: boolean("contractMigrated").default(false).notNull(),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (t) => [uniqueIndex("uniq_rest_user").on(t.restaurantId, t.userId)]
@@ -275,6 +278,32 @@ export const employeeContracts = mysqlTable("employee_contracts", {
 });
 
 export type EmployeeContract = typeof employeeContracts.$inferSelect;
+
+// ─── Employee Wage History (급여이력) ────────────────────────────────────────
+// 시점별 급여 단가. 월 1일 기준 [effectiveFrom, effectiveTo) 구간으로 유효.
+// effectiveTo = NULL 이면 현재 유효(open). 신 전자계약서 서명 시 open row를 닫고 신 row 생성.
+// 인건비 계산: schedule.startTime의 월 1일이 구간에 들어가는 row의 wageAmount 사용.
+// sourceContractId: 기원 전자계약서 id. 백필 row는 NULL.
+export const employeeWageHistory = mysqlTable(
+  "employee_wage_history",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    restaurantId: int("restaurantId").notNull(),
+    wageType: mysqlEnum("wageType", ["hourly", "monthly"]).notNull(),
+    wageAmount: decimal("wageAmount", { precision: 12, scale: 2 }).notNull(),
+    effectiveFrom: date("effectiveFrom").notNull(),
+    effectiveTo: date("effectiveTo"),
+    sourceContractId: int("sourceContractId"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uniq_user_rest_from").on(t.userId, t.restaurantId, t.effectiveFrom),
+    index("idx_user_rest").on(t.userId, t.restaurantId),
+  ],
+);
+
+export type EmployeeWageHistory = typeof employeeWageHistory.$inferSelect;
 
 // ─── Employee Leaves (연차/대체휴무) ─────────────────────────────────────────
 export const employeeLeaves = mysqlTable("employee_leaves", {
