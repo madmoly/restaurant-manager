@@ -10,7 +10,7 @@ import { ocrRouter } from "./ocr";
 import { exportDatasetToGDrive, isGDriveConfigured } from "./gdrive";
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 // ─── 자동 마이그레이션: 신규 테이블/컬럼 ──────────────────────────────────────
 (async () => {
