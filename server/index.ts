@@ -836,6 +836,11 @@ app.use(express.json({ limit: "10mb" }));
       `ALTER TABLE employment_electronic_contracts MODIFY COLUMN status ENUM('draft','sent','signed','expired','cancelled','superseded') NOT NULL DEFAULT 'draft'`
     ).catch(() => {});
 
+    // employeeSignature: TEXT(64KB) → MEDIUMTEXT(16MB) 확장 (서명 base64 PNG 저장용)
+    await conn.query(
+      `ALTER TABLE employment_electronic_contracts MODIFY COLUMN employeeSignature MEDIUMTEXT`
+    ).catch(() => {});
+
     // ─── 에러 로그 분류/집계 컬럼 (2026-04-09 추가) ─────────────────────────
     await addColumnIfNotExists("error_logs", "fingerprint", "VARCHAR(64) DEFAULT NULL");
     await addColumnIfNotExists("error_logs", "severity", "VARCHAR(4) DEFAULT NULL");

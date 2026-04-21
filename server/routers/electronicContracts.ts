@@ -566,7 +566,12 @@ export const electronicContractsRouter = router({
       const finalResidentNumber = input.residentNumber ?? null;
       const finalAffiliatedCompany = contract.affiliatedCompany ?? null;
 
-      // 기존 스케줄 조회 — C군 sync 후 검증용 (예: 기존 users.name과 다르면 mismatch 해소 목적)
+      // DATE 컬럼용 'YYYY-MM-DD' 문자열 변환 — select 결과가 Date 객체든 문자열이든 MySQL이 수용 가능한 포맷으로 정규화
+      const toDateString = (d: unknown): string | null => {
+        if (!d) return null;
+        const date = d instanceof Date ? d : new Date(d as string);
+        return Number.isNaN(date.getTime()) ? null : date.toISOString().substring(0, 10);
+      };
 
       try {
         await db.transaction(async (tx) => {
@@ -588,8 +593,8 @@ export const electronicContractsRouter = router({
               snapshotWageType: contract.wageType ?? null,
               snapshotWeeklyHours: contract.weeklyHours ?? null,
               snapshotWeeklyOffDays: contract.weeklyOffDays ?? 1,
-              snapshotContractStart: contract.contractStart ?? null,
-              snapshotContractEnd: contract.contractEnd ?? null,
+              snapshotContractStart: toDateString(contract.contractStart),
+              snapshotContractEnd: toDateString(contract.contractEnd),
               snapshotAffiliatedCompany: finalAffiliatedCompany,
             } as any)
             .where(eq(employmentElectronicContracts.id, contract.id));

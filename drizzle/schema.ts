@@ -3,6 +3,7 @@ import {
   mysqlEnum,
   mysqlTable,
   text,
+  mediumtext,
   timestamp,
   varchar,
   decimal,
@@ -713,7 +714,7 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   status: mysqlEnum("status", ["draft", "sent", "signed", "expired", "cancelled", "superseded"]).notNull().default("draft"),
   sentAt: timestamp("sentAt"),
   signedAt: timestamp("signedAt"),
-  employeeSignature: text("employeeSignature"),
+  employeeSignature: mediumtext("employeeSignature"),
   signedIp: varchar("signedIp", { length: 45 }),
   // ── 직원이 서명 시 입력 ──
   employeeBankAccount: varchar("employeeBankAccount", { length: 100 }), // 계좌번호 (은행명 포함)
