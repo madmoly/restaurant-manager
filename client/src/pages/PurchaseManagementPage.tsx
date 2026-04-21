@@ -8,6 +8,7 @@ import {
   ChevronDown, ChevronUp, Pencil, X, Save,
   ChevronLeft, ChevronRight,
   CalendarRange, AlertTriangle, Merge, CheckSquare, Square,
+  Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -918,6 +919,16 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
       { enabled: restaurantId > 0 },
     );
 
+  const utils = trpc.useUtils();
+  const deleteOrder = trpc.purchasesV2.deleteOrder.useMutation({
+    onSuccess() {
+      toast.success("삭제됨");
+      utils.purchasesV2.monthlySummaryByCounterparty.invalidate({ restaurantId, year, month });
+      setExpandedOrder(null);
+    },
+    onError(err: any) { toast.error(`삭제 실패: ${err.message}`); },
+  });
+
   const prevMonth = () => {
     if (month === 1) { setYear(y => y - 1); setMonth(12); }
     else setMonth(m => m - 1);
@@ -1078,6 +1089,22 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
                                 </div>
                               </div>
                             ))}
+                            <div className="flex justify-end pt-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2"
+                                disabled={deleteOrder.isPending}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (confirm(`${order.purchaseDate} ${cp.counterpartyName} 전표(₩${order.totalAmount.toLocaleString()})를 삭제할까요?`)) {
+                                    deleteOrder.mutate({ restaurantId, id: order.orderId });
+                                  }
+                                }}
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                              </Button>
+                            </div>
                           </div>
                         )}
                       </div>
