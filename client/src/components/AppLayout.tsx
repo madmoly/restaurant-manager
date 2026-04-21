@@ -24,7 +24,7 @@ import {
   // 새롭게 개편된 직관적인 프리미엄 아이콘 세트
   LayoutGrid, Activity, CalendarRange, ListChecks, Clock,
   UsersRound, Coins, BarChart3, Receipt, ShoppingCart, ShieldCheck,
-  Store, Bell, ChefHat, ClipboardList,
+  Store, Bell, ChefHat, ClipboardList, CalendarClock,
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -129,6 +129,12 @@ const STORE_NAV_GROUPS: NavGroup[] = [
         mobileIcon: <Clock className="h-5 w-5" />,
         roles: ["master", "admin", "manager", "staff"],
         mobileTabPriority: { manager: 3, staff: 3 },
+      },
+      {
+        label: "근무 현황", href: "/work-summary",
+        icon: <CalendarClock className="h-4 w-4" />,
+        mobileIcon: <CalendarClock className="h-5 w-5" />,
+        roles: ["master", "admin", "manager"],
       },
       {
         label: "직원 관리", href: "/staff",

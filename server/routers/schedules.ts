@@ -16,6 +16,7 @@ import {
   employmentElectronicContracts,
 } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+import { getHolidayName } from "@shared/holidays";
 
 // ─── 헬퍼 함수 ──────────────────────────────────────────────────────────────
 
@@ -1344,5 +1345,324 @@ export const schedulesRouter = router({
         headcount: Number(r.headcount) || 0,
         hasUnconfirmed: !!r.hasUnconfirmed,
       }));
+    }),
+
+  /**
+   * 소속회사별 근무 요약 — 매니져+점장 공통 (급여/계좌/주민번호 등 민감정보 제외)
+   * laborCostByCompany에서 급여 관련 필드/계산을 빼고 근무/휴무 집계만 반환.
+   */
+  workSummaryByEmployee: managerProcedure
+    .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+
+      const monthStr = String(input.month).padStart(2, "0");
+      const kstFrom = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
+      const nm = input.month === 12 ? 1 : input.month + 1;
+      const ny = input.month === 12 ? input.year + 1 : input.year;
+      const kstTo = new Date(`${ny}-${String(nm).padStart(2, "0")}-01T00:00:00+09:00`);
+      const fromStr = kstFrom.toISOString().slice(0, 19).replace("T", " ");
+      const toStr = kstTo.toISOString().slice(0, 19).replace("T", " ");
+
+      // 스케줄 + 직원 + 소속회사 (급여 필드 미조회)
+      const rawRows = await db
+        .select({
+          scheduleId: schedules.id,
+          userId: schedules.userId,
+          userName: users.name,
+          startTime: schedules.startTime,
+          endTime: schedules.endTime,
+          breakMinutes: schedules.breakMinutes,
+          status: schedules.status,
+          tempWorkerName: schedules.tempWorkerName,
+          affiliatedCompany: restaurantUsers.affiliatedCompany,
+          hireDate: restaurantUsers.hireDate,
+          position: employeeContracts.position,
+          weeklyOffDays: employeeContracts.weeklyOffDays,
+          contractIsActive: employeeContracts.isActive,
+          payrollRecheckRequired: schedules.payrollRecheckRequired,
+        })
+        .from(schedules)
+        .leftJoin(users, eq(schedules.userId, users.id))
+        .leftJoin(restaurantUsers, and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, schedules.userId),
+        ))
+        .leftJoin(employeeContracts, and(
+          eq(employeeContracts.userId, schedules.userId),
+          eq(employeeContracts.restaurantId, input.restaurantId),
+        ))
+        .where(
+          and(
+            eq(schedules.restaurantId, input.restaurantId),
+            sql`${schedules.startTime} >= ${fromStr}`,
+            sql`${schedules.startTime} < ${toStr}`,
+            sql`${schedules.status} IN ('confirmed','completed')`,
+          ),
+        )
+        .orderBy(schedules.startTime);
+
+      // scheduleId dedup — active 계약 우선
+      const seen = new Map<number, typeof rawRows[0]>();
+      for (const r of rawRows) {
+        const ex = seen.get(r.scheduleId);
+        if (!ex) seen.set(r.scheduleId, r);
+        else if (!ex.contractIsActive && r.contractIsActive) seen.set(r.scheduleId, r);
+      }
+      const rows = Array.from(seen.values());
+
+      // 주휴미제공 정규직 판별
+      let noHolidayPayMap = new Map<number, boolean>();
+      try {
+        const nhpRows = await db.select({
+          userId: employeeContracts.userId,
+          noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
+        }).from(employeeContracts).where(eq(employeeContracts.restaurantId, input.restaurantId));
+        for (const r of nhpRows) {
+          if (r.userId) noHolidayPayMap.set(r.userId, !!r.noWeeklyHolidayPay);
+        }
+      } catch {}
+
+      // 영업일수 계산
+      const weeklyClosureRows = await db.select().from(storeWeeklyClosures)
+        .where(and(
+          eq(storeWeeklyClosures.restaurantId, input.restaurantId),
+          eq(storeWeeklyClosures.isClosed, true),
+        ));
+      const closedWeekdays = new Set(weeklyClosureRows.map(r => r.weekday));
+      const closedDayRows = await db.select().from(storeClosedDays)
+        .where(and(
+          eq(storeClosedDays.restaurantId, input.restaurantId),
+          sql`${storeClosedDays.closedDate} >= ${`${input.year}-${monthStr}-01`}`,
+          sql`${storeClosedDays.closedDate} < ${`${ny}-${String(nm).padStart(2, "0")}-01`}`,
+        ));
+      const closedDateSet = new Set(closedDayRows.map(r => String(r.closedDate)));
+      const daysInMonth = new Date(input.year, input.month, 0).getDate();
+      let operatingDays = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dt = new Date(input.year, input.month - 1, d);
+        const jsDay = dt.getDay();
+        const dateStr = `${input.year}-${monthStr}-${String(d).padStart(2, "0")}`;
+        if (closedWeekdays.has(jsDay) || closedDateSet.has(dateStr)) continue;
+        operatingDays++;
+      }
+      const weeksInMonth = daysInMonth / 7;
+
+      // 소속회사별 그룹핑 (급여 없음)
+      const companyMap: Record<string, {
+        company: string;
+        operatingDays: number;
+        totalHours: number;
+        employees: Record<string, {
+          name: string;
+          position: string | null;
+          hireDate: string | null;
+          userId: number | null;
+          shifts: number;
+          totalHours: number;
+          daysOff: number;
+          contractDaysOff: number;
+          recheckRequired: boolean;
+          isNoHolidayPayWorker: boolean;
+        }>;
+      }> = {};
+
+      for (const r of rows) {
+        const company = (r.affiliatedCompany ?? "미지정").trim() || "미지정";
+        const name = r.userName ?? r.tempWorkerName ?? "미지정";
+        const treatAsTemp = !!(r.userId && noHolidayPayMap.get(r.userId));
+        const empKey = (!r.userId || treatAsTemp) ? `temp_${r.userId ?? name}` : String(r.userId);
+
+        if (!companyMap[company]) {
+          companyMap[company] = { company, operatingDays, totalHours: 0, employees: {} };
+        }
+        if (!companyMap[company].employees[empKey]) {
+          companyMap[company].employees[empKey] = {
+            name,
+            position: r.position ?? null,
+            hireDate: r.hireDate ? String(r.hireDate) : null,
+            userId: r.userId ? Number(r.userId) : null,
+            shifts: 0,
+            totalHours: 0,
+            daysOff: 0,
+            contractDaysOff: treatAsTemp ? 0 : Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
+            recheckRequired: false,
+            isNoHolidayPayWorker: treatAsTemp,
+          };
+        }
+
+        const startDt = new Date(r.startTime);
+        const endDt = new Date(r.endTime);
+        const grossMin = (endDt.getTime() - startDt.getTime()) / 60000;
+        const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
+        const hours = netMin / 60;
+
+        companyMap[company].employees[empKey].totalHours += hours;
+        companyMap[company].employees[empKey].shifts += 1;
+        if (r.payrollRecheckRequired) companyMap[company].employees[empKey].recheckRequired = true;
+        companyMap[company].totalHours += hours;
+      }
+
+      // 대체휴무/연차 잔여 (5인 이상 사업장)
+      const allUserIds = new Set<number>();
+      for (const c of Object.values(companyMap)) {
+        for (const emp of Object.values(c.employees)) {
+          if (emp.userId) allUserIds.add(emp.userId);
+        }
+      }
+      const leaveTxRows = allUserIds.size > 0
+        ? await db.select({
+            userId: leaveTransactions.userId,
+            leaveType: leaveTransactions.leaveType,
+            txType: leaveTransactions.txType,
+            days: leaveTransactions.days,
+          })
+          .from(leaveTransactions)
+          .where(and(
+            eq(leaveTransactions.restaurantId, input.restaurantId),
+            eq(leaveTransactions.year, input.year),
+          ))
+        : [];
+      const leaveMap: Record<number, { substitute: { earned: number; used: number }; annual: { earned: number; used: number } }> = {};
+      for (const tx of leaveTxRows) {
+        if (!tx.userId) continue;
+        if (!leaveMap[tx.userId]) leaveMap[tx.userId] = { substitute: { earned: 0, used: 0 }, annual: { earned: 0, used: 0 } };
+        const lt = tx.leaveType === "substitute" ? "substitute" : "annual";
+        const d = parseFloat(String(tx.days));
+        if (tx.txType === "earn") leaveMap[tx.userId][lt].earned += d;
+        else leaveMap[tx.userId][lt].used += d;
+      }
+
+      return Object.values(companyMap).map(c => ({
+        company: c.company,
+        operatingDays: c.operatingDays,
+        totalHours: c.totalHours,
+        totalShifts: Object.values(c.employees).reduce((s, e) => s + e.shifts, 0),
+        employees: Object.entries(c.employees).map(([empKey, emp]) => {
+          const uid = emp.userId;
+          const lb = uid ? leaveMap[uid] : null;
+          const isTemp = empKey.startsWith("temp_");
+          return {
+            name: emp.name,
+            position: emp.position,
+            hireDate: emp.hireDate,
+            userId: uid,
+            tempWorkerName: isTemp && !emp.isNoHolidayPayWorker ? emp.name : null,
+            shifts: emp.shifts,
+            totalHours: emp.totalHours,
+            daysOff: Math.max(0, operatingDays - emp.shifts),
+            contractDaysOff: emp.contractDaysOff,
+            isTemp,
+            isNoHolidayPayWorker: emp.isNoHolidayPayWorker,
+            recheckRequired: emp.recheckRequired,
+            substituteLeave: lb ? {
+              earned: lb.substitute.earned,
+              used: lb.substitute.used,
+              remaining: lb.substitute.earned - lb.substitute.used,
+            } : null,
+            annualLeave: lb ? {
+              earned: lb.annual.earned,
+              used: lb.annual.used,
+              remaining: lb.annual.earned - lb.annual.used,
+            } : null,
+          };
+        }),
+      }));
+    }),
+
+  /**
+   * 직원별 월 시프트 상세 (L2) — 일별 근무내역 드릴다운
+   * userId가 있으면 정규직원, 없으면 tempWorkerName으로 필터.
+   */
+  employeeMonthlyShifts: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      year: z.number(),
+      month: z.number(),
+      userId: z.number().nullable().optional(),
+      tempWorkerName: z.string().nullable().optional(),
+    }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      if (!input.userId && !input.tempWorkerName) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "userId 또는 tempWorkerName 필요" });
+      }
+
+      const monthStr = String(input.month).padStart(2, "0");
+      const kstFrom = new Date(`${input.year}-${monthStr}-01T00:00:00+09:00`);
+      const nm = input.month === 12 ? 1 : input.month + 1;
+      const ny = input.month === 12 ? input.year + 1 : input.year;
+      const kstTo = new Date(`${ny}-${String(nm).padStart(2, "0")}-01T00:00:00+09:00`);
+      const fromStr = kstFrom.toISOString().slice(0, 19).replace("T", " ");
+      const toStr = kstTo.toISOString().slice(0, 19).replace("T", " ");
+
+      const conds: any[] = [
+        eq(schedules.restaurantId, input.restaurantId),
+        sql`${schedules.startTime} >= ${fromStr}`,
+        sql`${schedules.startTime} < ${toStr}`,
+        sql`${schedules.status} != 'canceled'`,
+      ];
+      if (input.userId) {
+        conds.push(eq(schedules.userId, input.userId));
+      } else if (input.tempWorkerName) {
+        conds.push(sql`${schedules.userId} IS NULL`);
+        conds.push(sql`${schedules.tempWorkerName} = ${input.tempWorkerName}`);
+      }
+
+      const rows = await db.select({
+        id: schedules.id,
+        startTime: schedules.startTime,
+        endTime: schedules.endTime,
+        breakMinutes: schedules.breakMinutes,
+        status: schedules.status,
+        shiftPreset: schedules.shiftPreset,
+        payrollRecheckRequired: schedules.payrollRecheckRequired,
+      }).from(schedules).where(and(...conds)).orderBy(schedules.startTime);
+
+      // 매장 휴무일/정기휴무 정보
+      const weeklyClosureRows = await db.select().from(storeWeeklyClosures)
+        .where(and(
+          eq(storeWeeklyClosures.restaurantId, input.restaurantId),
+          eq(storeWeeklyClosures.isClosed, true),
+        ));
+      const closedWeekdays = new Set(weeklyClosureRows.map(r => r.weekday));
+      const closedDayRows = await db.select().from(storeClosedDays)
+        .where(and(
+          eq(storeClosedDays.restaurantId, input.restaurantId),
+          sql`${storeClosedDays.closedDate} >= ${`${input.year}-${monthStr}-01`}`,
+          sql`${storeClosedDays.closedDate} < ${`${ny}-${String(nm).padStart(2, "0")}-01`}`,
+        ));
+      const closedDateSet = new Set(closedDayRows.map(r => String(r.closedDate)));
+
+      const WEEKDAY_LABEL = ["일", "월", "화", "수", "목", "금", "토"];
+
+      return rows.map(r => {
+        const kstStart = new Date(r.startTime.getTime() + 9 * 60 * 60 * 1000);
+        const dateStr = kstStart.toISOString().slice(0, 10);
+        const weekday = kstStart.getUTCDay();
+        const grossMin = (r.endTime.getTime() - r.startTime.getTime()) / 60000;
+        const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
+
+        // KST HH:mm 포맷
+        const kstEnd = new Date(r.endTime.getTime() + 9 * 60 * 60 * 1000);
+        const fmtHM = (d: Date) => `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+
+        return {
+          id: r.id,
+          date: dateStr,
+          weekday,
+          weekdayLabel: WEEKDAY_LABEL[weekday],
+          startTime: fmtHM(kstStart),
+          endTime: fmtHM(kstEnd),
+          breakMinutes: r.breakMinutes ?? 0,
+          netHours: netMin / 60,
+          netMinutes: netMin,
+          shiftPreset: r.shiftPreset ?? "custom",
+          status: r.status,
+          payrollRecheckRequired: r.payrollRecheckRequired,
+          holidayName: getHolidayName(dateStr),
+          isStoreClosed: closedDateSet.has(dateStr) || closedWeekdays.has(weekday),
+        };
+      });
     }),
 });

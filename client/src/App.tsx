@@ -24,6 +24,7 @@ import StaffPage from "./pages/StaffPage";
 import OpsCalendarPage from "./pages/OpsCalendarPage";
 import TaskManagementPage from "./pages/TaskManagementPage";
 import LaborCostPage from "./pages/LaborCostPage";
+import WorkSummaryPage from "./pages/WorkSummaryPage";
 import ContractSignPage from "./pages/ContractSignPage";
 import JoinPage from "./pages/JoinPage";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
@@ -84,6 +85,7 @@ function RoleRouter() {
             <Route path="/schedule" component={SchedulePage} />
             <Route path="/daily-ops" component={DailyOpsPage} />
             <Route path="/ops-calendar" component={OpsCalendarPage} />
+            <Route path="/work-summary" component={WorkSummaryPage} />
             <Route path="/staff" component={StaffPage} />
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />
@@ -111,6 +113,7 @@ function RoleRouter() {
             <Route path="/ops-calendar" component={OpsCalendarPage} />
             <Route path="/task-management" component={TaskManagementPage} />
             <Route path="/labor-cost" component={LaborCostPage} />
+            <Route path="/work-summary" component={WorkSummaryPage} />
             <Route path="/staff" component={StaffPage} />
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />
@@ -134,6 +137,7 @@ function RoleRouter() {
             <Route path="/ops-calendar" component={OpsCalendarPage} />
             <Route path="/task-management" component={TaskManagementPage} />
             <Route path="/labor-cost" component={LaborCostPage} />
+            <Route path="/work-summary" component={WorkSummaryPage} />
             <Route path="/staff" component={StaffPage} />
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />
