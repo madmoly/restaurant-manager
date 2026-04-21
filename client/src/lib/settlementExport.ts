@@ -95,14 +95,6 @@ export async function exportSettlementExcel(ctx: ExportContext) {
   summaryAoa.push(["순이익", income.profit, Number(metrics.profitRatio) || 0]);
   summaryAoa.push([]);
 
-  summaryAoa.push(["[미반영분 — 일마감 미완료]"]);
-  summaryAoa.push(["항목", "금액(원)"]);
-  summaryAoa.push(["미반영 매출", unconfirmed.salesTotal]);
-  summaryAoa.push(["미반영 매입", unconfirmed.purchasesTotal]);
-  summaryAoa.push(["미반영 인건비", unconfirmed.laborCost]);
-  summaryAoa.push(["미마감일수", unconfirmed.unclosedDays]);
-  summaryAoa.push([]);
-
   if (prevMonth) {
     const delta = (curr: number, prev: number) => prev === 0 ? 0 : Number(((curr - prev) / prev * 100).toFixed(1));
     summaryAoa.push(["[전월 대비]"]);
@@ -134,6 +126,14 @@ export async function exportSettlementExcel(ctx: ExportContext) {
   summaryAoa.push(["매입 대기(ordered)", collection.purchasePendingCount]);
   summaryAoa.push(["스케줄 draft", collection.draftScheduleCount]);
   summaryAoa.push(["고정비 항목 수", collection.fixedCostCount]);
+  summaryAoa.push([]);
+
+  summaryAoa.push(["[미반영분 — 일마감 미완료]"]);
+  summaryAoa.push(["항목", "금액(원)"]);
+  summaryAoa.push(["미반영 매출", unconfirmed.salesTotal]);
+  summaryAoa.push(["미반영 매입", unconfirmed.purchasesTotal]);
+  summaryAoa.push(["미반영 인건비", unconfirmed.laborCost]);
+  summaryAoa.push(["미마감일수", unconfirmed.unclosedDays]);
 
   const ws1 = XLSX.utils.aoa_to_sheet(summaryAoa);
   ws1["!cols"] = [{ wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 12 }];
@@ -266,25 +266,6 @@ export async function exportSettlementPDF(ctx: ExportContext) {
     doc.setFontSize(11);
     doc.text(title, 14, finalY + 8);
   };
-
-  // 미반영분
-  if (!closing?.isClosed && (unconfirmed.salesTotal || unconfirmed.purchasesTotal || unconfirmed.laborCost)) {
-    section("미반영분 (일마감 미완료)");
-    autoTable(doc, {
-      ...tableBase,
-      startY: finalY + 11,
-      head: [["항목", "금액(원)"]],
-      body: [
-        ["미반영 매출", fmtKRW(unconfirmed.salesTotal)],
-        ["미반영 매입", fmtKRW(unconfirmed.purchasesTotal)],
-        ["미반영 인건비", fmtKRW(unconfirmed.laborCost)],
-        ["미마감일수", String(unconfirmed.unclosedDays)],
-      ],
-      headStyles: headSub,
-      columnStyles: { 1: { halign: "right" } },
-    });
-    finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 40;
-  }
 
   // 매출 구성
   const sbm = income.salesByMethod ?? {};
@@ -431,6 +412,25 @@ export async function exportSettlementPDF(ctx: ExportContext) {
     body: collRows,
     headStyles: headSub,
   });
+  finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 30;
+
+  // 미반영분 (문서 맨 아래)
+  if (!closing?.isClosed && (unconfirmed.salesTotal || unconfirmed.purchasesTotal || unconfirmed.laborCost)) {
+    section("미반영분 (일마감 미완료)");
+    autoTable(doc, {
+      ...tableBase,
+      startY: finalY + 11,
+      head: [["항목", "금액(원)"]],
+      body: [
+        ["미반영 매출", fmtKRW(unconfirmed.salesTotal)],
+        ["미반영 매입", fmtKRW(unconfirmed.purchasesTotal)],
+        ["미반영 인건비", fmtKRW(unconfirmed.laborCost)],
+        ["미마감일수", String(unconfirmed.unclosedDays)],
+      ],
+      headStyles: headSub,
+      columnStyles: { 1: { halign: "right" } },
+    });
+  }
 
   const blob = doc.output("blob");
   triggerDownload(blob, `${buildFileBase(ctx)}.pdf`);
