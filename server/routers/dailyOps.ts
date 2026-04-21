@@ -3,6 +3,7 @@ import { eq, and, sql, sum, between, count } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+import { verifyOperatingDay } from "../middleware/operatingDayGuard";
 import {
   dailyOperations,
   dailySalesDetail,
@@ -299,10 +300,18 @@ export const dailyOpsRouter = router({
         amount: z.number(),
         receiptCount: z.number().default(0),
         note: z.string().optional(),
+        override: z.object({ reason: z.string().min(1) }).optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      await verifyOperatingDay({
+        restaurantId: input.restaurantId,
+        dateStr: input.date,
+        override: input.override,
+        userId: ctx.user.userId,
+        userRole: ctx.user.role,
+      });
       const [result] = await db.insert(intermediateSales).values({
         restaurantId: input.restaurantId,
         saleDate: input.date,
@@ -432,10 +441,18 @@ export const dailyOpsRouter = router({
         otherItems: z.array(z.object({ itemName: z.string(), amount: z.number() })).default([]),
         specialItems: z.array(z.object({ typeName: z.string(), amount: z.number(), note: z.string().optional() })).default([]),
         note: z.string().optional(),
+        override: z.object({ reason: z.string().min(1) }).optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      await verifyOperatingDay({
+        restaurantId: input.restaurantId,
+        dateStr: input.date,
+        override: input.override,
+        userId: ctx.user.userId,
+        userRole: ctx.user.role,
+      });
       const otherTotal = input.otherItems.reduce((s, i) => s + i.amount, 0);
       const specialTotal = input.specialItems.reduce((s, i) => s + i.amount, 0);
       const totalAmount =

@@ -4,6 +4,7 @@ import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
 import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures, schedules, employeeContracts } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
+import { verifyOperatingDay } from "../middleware/operatingDayGuard";
 
 export const dailyClosingsRouter = router({
   // ─── Sales Types (매출 항목 유형 관리) ──────────────────────────────────────
@@ -164,9 +165,17 @@ export const dailyClosingsRouter = router({
       profit: z.string().default("0"),
       salesBreakdown: z.array(z.object({ typeName: z.string(), amount: z.number() })).optional(),
       note: z.string().optional(),
+      override: z.object({ reason: z.string().min(1) }).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
+      await verifyOperatingDay({
+        restaurantId: input.restaurantId,
+        dateStr: input.closingDate,
+        override: input.override,
+        userId: ctx.user.userId,
+        userRole: ctx.user.role,
+      });
 
       // profit 자동 계산
       const salesNum = Number(input.salesTotal);

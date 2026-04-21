@@ -4,6 +4,7 @@ import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { sales, dailySalesDetail, salesOtherItems } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+import { verifyOperatingDay } from "../middleware/operatingDayGuard";
 
 export const salesRouter = router({
   listByMonth: protectedProcedure
@@ -44,9 +45,17 @@ export const salesRouter = router({
       saleDate: z.string(),
       amount: z.string(),
       note: z.string().optional(),
+      override: z.object({ reason: z.string().min(1) }).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      await verifyOperatingDay({
+        restaurantId: input.restaurantId,
+        dateStr: input.saleDate,
+        override: input.override,
+        userId: ctx.user.userId,
+        userRole: ctx.user.role,
+      });
       const [result] = await db.insert(sales).values({
         restaurantId: input.restaurantId,
         saleDate: new Date(input.saleDate),
@@ -64,10 +73,20 @@ export const salesRouter = router({
       amount: z.string().optional(),
       note: z.string().optional(),
       saleDate: z.string().optional(),
+      override: z.object({ reason: z.string().min(1) }).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
-      const { id, restaurantId, saleDate, ...rest } = input;
+      const { id, restaurantId, saleDate, override, ...rest } = input;
+      if (saleDate) {
+        await verifyOperatingDay({
+          restaurantId,
+          dateStr: saleDate,
+          override,
+          userId: ctx.user.userId,
+          userRole: ctx.user.role,
+        });
+      }
       const data: Record<string, unknown> = { ...rest };
       if (saleDate) data.saleDate = new Date(saleDate);
       await db.update(sales).set(data).where(eq(sales.id, id));
@@ -116,9 +135,17 @@ export const salesRouter = router({
         itemName: z.string(),
         amount: z.string(),
       })).optional(),
+      override: z.object({ reason: z.string().min(1) }).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      await verifyOperatingDay({
+        restaurantId: input.restaurantId,
+        dateStr: input.saleDate,
+        override: input.override,
+        userId: ctx.user.userId,
+        userRole: ctx.user.role,
+      });
 
       const [existing] = await db.select().from(dailySalesDetail)
         .where(and(eq(dailySalesDetail.restaurantId, input.restaurantId), eq(dailySalesDetail.saleDate, new Date(input.saleDate))));

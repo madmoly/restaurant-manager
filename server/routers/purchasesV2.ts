@@ -12,6 +12,7 @@ import {
   users,
 } from "../../drizzle/schema";
 import { exportDatasetToGDrive, isGDriveConfigured } from "../gdrive";
+import { verifyOperatingDay } from "../middleware/operatingDayGuard";
 
 // 매입 확정 시 비동기로 Drive 업로드 (응답 지연 없음)
 function triggerDatasetExport() {
@@ -200,6 +201,7 @@ export const purchasesV2Router = router({
         status: z.enum(["received", "ordered"]).default("received"),
         note: z.string().optional(),
         attachmentUrl: z.string().optional(),
+        override: z.object({ reason: z.string().min(1) }).optional(),
         items: z.array(
           z.object({
             itemId: z.number().optional(),
@@ -217,6 +219,14 @@ export const purchasesV2Router = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyOperatingDay({
+        restaurantId: input.restaurantId,
+        dateStr: input.purchaseDate,
+        override: input.override,
+        userId: ctx.user.userId,
+        userRole: ctx.user.role,
+      });
+
       const totalAmount = input.items.reduce(
         (sum, item) => sum + parseFloat(item.lineTotal || "0"),
         0,
@@ -303,6 +313,7 @@ export const purchasesV2Router = router({
       z.object({
         id: z.number(),
         totalAmount: z.string().optional(),
+        override: z.object({ reason: z.string().min(1) }).optional(),
         items: z.array(
           z.object({
             itemId: z.number().optional(),
@@ -320,6 +331,17 @@ export const purchasesV2Router = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // 입고일 = 오늘(KST 기준) — 휴무일 가드 대상
+      const kstNow = new Date(Date.now() + 9 * 3600000);
+      const receivedDate = kstNow.toISOString().slice(0, 10);
+      await verifyOperatingDay({
+        restaurantId: input.restaurantId,
+        dateStr: receivedDate,
+        override: input.override,
+        userId: ctx.user.userId,
+        userRole: ctx.user.role,
+      });
+
       // 기존 발주 조회 — restaurantId 일치 검증 (cross-store 누수 차단)
       const [existing] = await db
         .select()
@@ -379,10 +401,6 @@ export const purchasesV2Router = router({
         summary: `입고 전환 (${Number(existing.totalAmount).toLocaleString()}원 → ${newTotal.toLocaleString()}원)`,
       };
 
-      // 입고일 = 오늘(KST 기준)
-      const kstNow = new Date(Date.now() + 9 * 3600000);
-      const receivedDate = kstNow.toISOString().slice(0, 10);
-
       await db
         .update(purchaseOrdersV2)
         .set({
@@ -411,10 +429,11 @@ export const purchasesV2Router = router({
         status: z.enum(["received", "ordered"]).optional(),
         attachmentUrl: z.string().nullable().optional(),
         totalAmount: z.string().optional(),
+        override: z.object({ reason: z.string().min(1) }).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { id, restaurantId, ...rest } = input;
+      const { id, restaurantId, override, ...rest } = input;
 
       // 기존 전표 조회 — restaurantId 일치 검증 (cross-store 누수 차단)
       const [existing] = await db
@@ -438,8 +457,16 @@ export const purchasesV2Router = router({
         existing.purchaseDate instanceof Date
           ? existing.purchaseDate.toISOString().split("T")[0]
           : String(existing.purchaseDate ?? "");
-      if (rest.purchaseDate && rest.purchaseDate !== existingDateStr)
+      if (rest.purchaseDate && rest.purchaseDate !== existingDateStr) {
         changes.push(`날짜: ${existingDateStr} → ${rest.purchaseDate}`);
+        await verifyOperatingDay({
+          restaurantId,
+          dateStr: rest.purchaseDate,
+          override,
+          userId: ctx.user.userId,
+          userRole: ctx.user.role,
+        });
+      }
       if (rest.note !== undefined && rest.note !== existing.note) changes.push("메모 수정");
       if (rest.totalAmount !== undefined && rest.totalAmount !== existing.totalAmount)
         changes.push(
