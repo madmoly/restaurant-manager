@@ -904,6 +904,7 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [expandedCp, setExpandedCp] = useState<string | null>(null);
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
   const isCurrentMonth = year === now.getFullYear() && month === (now.getMonth() + 1);
 
   const { data, isLoading } = trpc.purchasesV2.monthlySummaryByCounterparty.useQuery(
@@ -911,22 +912,37 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
     { enabled: restaurantId > 0 },
   );
 
+  const { data: expensesData, isLoading: isExpensesLoading } =
+    trpc.dailyExpenses.monthlySummary.useQuery(
+      { restaurantId, year, month },
+      { enabled: restaurantId > 0 },
+    );
+
   const prevMonth = () => {
     if (month === 1) { setYear(y => y - 1); setMonth(12); }
     else setMonth(m => m - 1);
     setExpandedCp(null);
     setExpandedOrder(null);
+    setExpandedCat(null);
   };
   const nextMonth = () => {
     if (month === 12) { setYear(y => y + 1); setMonth(1); }
     else setMonth(m => m + 1);
     setExpandedCp(null);
     setExpandedOrder(null);
+    setExpandedCat(null);
   };
 
   const cpList = data || [];
-  const grandTotal = cpList.reduce((s, c) => s + c.totalAmount, 0);
+  const purchaseTotal = cpList.reduce((s, c) => s + c.totalAmount, 0);
   const totalOrders = cpList.reduce((s, c) => s + c.orderCount, 0);
+
+  const expBreakdown = expensesData?.breakdown ?? [];
+  const expenseTotal = Number(expensesData?.total ?? 0);
+  const expItemCount = expBreakdown.reduce((s, b) => s + b.items.length, 0);
+  const combinedTotal = purchaseTotal + expenseTotal;
+  const loading = isLoading || isExpensesLoading;
+  const hasData = cpList.length > 0 || expBreakdown.length > 0;
 
   return (
     <div className="space-y-4">
@@ -944,32 +960,50 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
         </Button>
       </div>
 
-      {/* 월 합계 요약 */}
-      {!isLoading && cpList.length > 0 && (
-        <Card className="p-3">
+      {/* 월 합계 요약 — 매입 / 즉시지출 / 합계 */}
+      {!loading && hasData && (
+        <Card className="p-3 space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">
-              거래처 {cpList.length}곳 · 전표 {totalOrders}건
+              매입 · 거래처 {cpList.length}곳 · 전표 {totalOrders}건
             </span>
-            <span className="text-base font-bold text-foreground tabular-nums">
-              ₩{grandTotal.toLocaleString()}
+            <span className="text-sm font-semibold text-foreground tabular-nums">
+              ₩{purchaseTotal.toLocaleString()}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              즉시지출 · 카테고리 {expBreakdown.length}개 · 항목 {expItemCount}건
+            </span>
+            <span className="text-sm font-semibold text-foreground tabular-nums">
+              ₩{expenseTotal.toLocaleString()}
+            </span>
+          </div>
+          <div className="flex items-center justify-between border-t border-border pt-1.5">
+            <span className="text-sm font-medium text-foreground">합계</span>
+            <span className="text-base font-bold text-primary tabular-nums">
+              ₩{combinedTotal.toLocaleString()}
             </span>
           </div>
         </Card>
       )}
 
       {/* 거래처별 목록 */}
-      {isLoading ? (
+      {loading ? (
         <p className="text-sm text-muted-foreground text-center py-8">로딩 중...</p>
-      ) : cpList.length === 0 ? (
+      ) : !hasData ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">
           {year}년 {month}월 매입 데이터가 없습니다
         </Card>
       ) : (
-        cpList.map((cp) => {
+        <>
+          {cpList.length > 0 && (
+            <>
+              <div className="text-xs font-medium text-muted-foreground px-1 pt-1">매입 (거래처별)</div>
+              {cpList.map((cp) => {
           const cpKey = cp.counterpartyName;
           const isExpanded = expandedCp === cpKey;
-          const pct = grandTotal > 0 ? ((cp.totalAmount / grandTotal) * 100).toFixed(1) : "0";
+          const pct = purchaseTotal > 0 ? ((cp.totalAmount / purchaseTotal) * 100).toFixed(1) : "0";
 
           return (
             <Card key={cpKey} className="overflow-hidden">
@@ -1053,7 +1087,58 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
               )}
             </Card>
           );
-        })
+              })}
+            </>
+          )}
+
+          {expBreakdown.length > 0 && (
+            <>
+              <div className="text-xs font-medium text-muted-foreground px-1 pt-3">즉시지출 (카테고리별)</div>
+              {expBreakdown.map((cat) => {
+                const catKey = String(cat.categoryId ?? cat.categoryName);
+                const isExpanded = expandedCat === catKey;
+                const pct = expenseTotal > 0 ? ((cat.amount / expenseTotal) * 100).toFixed(1) : "0";
+                return (
+                  <Card key={catKey} className="overflow-hidden">
+                    <button
+                      onClick={() => setExpandedCat(isExpanded ? null : catKey)}
+                      className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-medium text-foreground text-sm truncate">{cat.categoryName}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">{cat.items.length}건</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="text-right">
+                          <span className="text-sm font-bold text-foreground tabular-nums">
+                            ₩{cat.amount.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground ml-1">({pct}%)</span>
+                        </div>
+                        {isExpanded ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
+                      </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t border-border divide-y divide-border">
+                        {cat.items.map((it, idx) => (
+                          <div key={idx} className="px-4 py-2 flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-xs text-muted-foreground tabular-nums">{it.date}</span>
+                              <span className="text-foreground truncate">{it.title}</span>
+                            </div>
+                            <span className="text-sm font-semibold tabular-nums text-foreground shrink-0">
+                              ₩{it.amount.toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </>
+          )}
+        </>
       )}
     </div>
   );
