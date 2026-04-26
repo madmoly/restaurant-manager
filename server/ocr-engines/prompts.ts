@@ -94,7 +94,7 @@ Upstage 한글 인식률은 높으므로 원본을 **임의로 수정하지 마�
       "quantity": "수량(숫자 문자열)",
       "unit": "단위",
       "unitPrice": "단가(숫자 문자열)",
-      "lineTotal": "공급가액(숫자 문자열)",
+      "lineTotal": "결제 합계금액(공급가+부가세, 숫자 문자열). 합계금액 컬럼이 별도면 그 값 사용. 부가세 컬럼만 있으면 공급가+부가세 합산. 부가세 표기 없으면 공급가액 그대로.",
       "uncertain": false,
       "mergedFrom": "H1 등 적용된 보정 규칙 (있을 때만)"
     }
@@ -136,7 +136,7 @@ export function promptV1ImageFallback(profileHint: string): string {
 
 ### STEP 4: 자기 검증
 추출 완료 후 각 행에 대해 검증하세요:
-- 수량 × 단가 ≈ 공급가액 인지 확인 (10% 이내)
+- 수량 × 단가 × (1 또는 1.1) ≈ lineTotal. 부가세 별도면 1.1배, 부가세포함이거나 면세면 1배.
 - 수량은 보통 0.5~50, 단가는 보통 500~200,000 범위
 - 수량이 단가보다 크면 열을 잘못 읽은 것 → 재확인
 - 합계행의 금액과 개별 lineTotal의 합이 비슷한지 확인
@@ -167,7 +167,7 @@ export function promptV1ImageFallback(profileHint: string): string {
 
 ## 문서 양식
 
-**[A] 거래명세표** — 가장 흔함. 열: 월일|품목/규격|단위|수량|단가|공급가액|부가세|비고. "공급가액"=수량×단가→lineTotal. 부가세/비고는 추출 불필요.
+**[A] 거래명세표** — 가장 흔함. 열: 월일|품목/규격|단위|수량|단가|공급가액|부가세|비고. 합계금액(공급가+세액)→lineTotal. 공급가/세액/합계금액 3컬럼 양식이면 합계금액 컬럼 우선.
 **[B] 거래명세서** — 열: 품명|규격|수량|단가|공급가액. 수기 혼합 가능.
 **[C] 영수증** — 품명, 수량, 금액. 합계행 제외.
 **[D] 수기전표** — 손글씨. 열 구분 불명확 시 uncertain: true.
@@ -182,7 +182,7 @@ export function promptV1ImageFallback(profileHint: string): string {
 - quantity: 수량 (숫자, 콤마 제거, 소수점 유지. "6.000"→"6")
 - unit: 단위 (규격에서 유추 가능하면 반영)
 - unitPrice: 단가 (숫자, 콤마 제거)
-- lineTotal: 공급가액 (숫자, 콤마 제거)
+- lineTotal: 합계금액 = 공급가 + 부가세 (숫자, 콤마 제거). 합계금액 컬럼이 따로 있으면 그것을 우선. 부가세가 별도 컬럼이면 합산. 부가세 표기 없으면 공급가액 그대로.
 - uncertain: 불명확하면 true
 
 거래처/기타:
@@ -209,7 +209,7 @@ export function promptV1ImageFallback(profileHint: string): string {
       "quantity": "수량(숫자)",
       "unit": "단위 (규격에서 유추 가능하면 반영)",
       "unitPrice": "단가(숫자)",
-      "lineTotal": "공급가액(숫자)",
+      "lineTotal": "합계금액 = 공급가 + 부가세 (숫자, 콤마 제거). 합계금액 컬럼이 따로 있으면 그것을 우선. 부가세가 별도 컬럼이면 합산. 부가세 표기 없으면 공급가액 그대로.",
       "uncertain": false
     }
   ],

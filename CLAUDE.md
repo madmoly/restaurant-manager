@@ -333,6 +333,7 @@ audit_logs · system_settings · api_usage_logs · db_backup_logs · restaurant_
 - 사용자 OCR 수정 데이터 축적 + 통계 API
 - 동적 프롬프트 주입 (거래처 프로파일 기반 품목/단가 힌트)
 - 서버 AI 자동 회전 (`detectAndFixOrientation`) — 클라이언트 수동 회전 UI 불필요
+- lineTotal 정책: 항목별 합계금액(공급가+부가세) 기준. 단가는 모델 추출값 그대로(면세/과세 혼합 시 부정확 가능). 월말 일괄정리 전제.
 
 ### 사용자 가이드 (촬영·확인)
 - **촬영**: 정방향, 전체 프레임, 그림자 회피, 배경 단순

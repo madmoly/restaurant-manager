@@ -262,25 +262,27 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
     let finalTotal = totalStr;
     let confidence: "high" | "medium" | "low" = "high";
 
-    // 합계 검증: 수량×단가 vs 문서 공급가액
+    // 합계 검증: 수량×단가 vs lineTotal (합계금액 = 공급가+부가세)
     if (qty > 0 && price > 0 && total > 0) {
       const calculated = Math.round(qty * price);
       const diff = Math.abs(total - calculated);
       if (diff > 1 && diff / Math.max(total, calculated) > 0.02) {
-        // VAT 패턴 감지: 단가가 세후(부가세포함), 공급가액이 세전 → 비율 ~1.1
         const vatRatio = calculated / total;
         if (vatRatio > 1.08 && vatRatio < 1.12) {
-          // 부가세 차이 → 수량×단가(세후) = 실제 지불금액으로 교정
+          // 단가 세후(부가세포함) / lineTotal 세전 (legacy) → 수량×단가(세후)로 교정
           finalTotal = String(calculated);
           confidence = "medium";
+        } else if (vatRatio > 0.88 && vatRatio < 0.92) {
+          // 단가 세전 / lineTotal 세후 (신규 정책: 부가세 별도 컬럼 양식) → lineTotal 그대로
+          // 보정/confidence 변경 없음
         } else {
-          // 기타 불일치 → 수량×단가를 우선 사용 (사용자가 직접 입력한 값 기준)
+          // 기타 불일치 → 수량×단가 우선
           finalTotal = String(calculated);
           confidence = "medium";
         }
       }
     } else if (qty > 0 && price > 0 && !total) {
-      // 합계 누락 시 계산
+      // 합계 누락 시 계산 (면세 가능성 → ×1.1 자동 적용 안 함)
       finalTotal = String(Math.round(qty * price));
     }
 
@@ -346,7 +348,7 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
 
   // ── summary 크로스체크: 아이템 합산 vs 문서 합계 ──────────────────────
   if (summary) {
-    const docTotal = parseFloat(String(summary.totalSupply || summary.grandTotal || "").replace(/,/g, "")) || 0;
+    const docTotal = parseFloat(String(summary.grandTotal || summary.totalSupply || "").replace(/,/g, "")) || 0;
     if (docTotal > 0 && enriched.length > 0) {
       const itemSum = enriched.reduce((sum, it) => sum + (parseFloat(it.lineTotal) || 0), 0);
       const totalDiff = Math.abs(itemSum - docTotal);
