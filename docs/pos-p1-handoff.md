@@ -634,16 +634,32 @@ export const appRouter = router({
 
 ## 6. 권한·로직 주의사항
 
-- 매장 격리: 모든 mutation/query는 `verifyStoreAccess` + `restaurantId` 명시
-- 메뉴 CRUD: `managerProcedure` 이상 (D14)
-- 주문 생성/상태 전이(ready/served): `protectedProcedure` (staff 포함)
-- 주문 강제 취소(`void`)·환불(`refund`): `managerProcedure` 이상
-- 디바이스/설정: `ownerProcedure` 이상 (D9·D14·D18)
+> **v0.5 갱신 (pos-plan v0.5 부록 A)**: master 활성화 게이트 신설로 권한 모델 변경.
+> Code 세션에서 적용한 표준 패턴(`storeRead/Write/Manager/Owner Procedure`) 위에
+> **POS 활성화 게이트 합성**(`posStoreRead/Write/Manager/Owner Procedure` 4종)이 추가된다.
+> 별도 패치 문서: `docs/pos-p1-settings-enable-patch.md` 참조.
+
+### 6.1 활성화 권한 (master 전용)
+- `pos.settings.enable` / `disable` — `masterProcedure`. 게이트 없음
+- `pos.settings.getStatus` — `storeReadProcedure`. 게이트 없음 (활성화 여부 자체 조회)
+- `pos.settings.applyPreset` / `override` — `posStoreOwnerProcedure`. 활성화된 매장만
+
+### 6.2 운영 권한 (활성화 게이트 적용)
+- 매장 격리: 모든 mutation/query는 `posStore*Procedure` 사용 (매장 격리 + `posEnabled=true` 검증 합성)
+- 메뉴 CRUD: `posStoreManagerProcedure` (D14)
+- 주문 생성/상태 전이(ready/served): `posStoreWriteProcedure` (staff 포함)
+- 주문 강제 취소(`void`)·환불(`refund`): `posStoreManagerProcedure`
+- 결제 기록: `posStoreWriteProcedure`. 결제 취소: `posStoreManagerProcedure`
+- 일일 대조 확정: `posStoreManagerProcedure`
+- 디바이스 등록·토큰 재발급·페어링: `posStoreOwnerProcedure`
+
+### 6.3 트랜잭션·멱등성·기타
 - 트랜잭션: `pos.order.create`, `pos.payment.record`, `pos.order.refund`, `pos.order.void`는 반드시 트랜잭션
 - 멱등성: `pos.order.create`에 `idempotencyKey` 옵션. 같은 UUID로 두 번 호출 시 1번째 결과 반환
 - 주문번호 채번: `pos_order_counters`를 `INSERT ... ON DUPLICATE KEY UPDATE lastSeq=lastSeq+1` 패턴으로 원자적 증분
 - 천호점 결제 흐름: `pos.order.create` 후 `pos.payment.record(providerType='external_dept_store')` 호출. `approvalNo` 선택 입력. `paid`로 자동 전이
 - 백화점 매장 일일 대조: `pos_daily_reconciliation` 단일행 per (restaurantId, date). 외부금액이 기준, POS는 참고
+- `disable` 정책: 미완료 주문(`status IN ('open','paid','ready')`) 있으면 거부. 사용자 메시지에 미완료 건수 포함
 
 ---
 

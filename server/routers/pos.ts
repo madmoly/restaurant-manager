@@ -19,20 +19,61 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   router,
   protectedProcedure,
+  masterProcedure,
   storeReadProcedure,
   storeWriteProcedure,
   storeManagerProcedure,
   storeOwnerProcedure,
+  posStoreOwnerProcedure,
 } from "../trpc";
+import { db } from "../db";
+import { restaurants, posOrders, auditLogs } from "../../drizzle/schema";
 
 const NOT_IMPLEMENTED = (where: string) =>
   new TRPCError({
     code: "INTERNAL_SERVER_ERROR",
     message: `POS Phase 1 미구현 본문: ${where}`,
   });
+
+// ─── 매장 스타일 프리셋 디폴트 (docs/pos-plan.md 부록 D) ──────────────────────
+type StylePreset =
+  | "DEPT_PICKUP"
+  | "SHOP_PICKUP"
+  | "SHOP_TABLE"
+  | "COURT_PICKUP"
+  | "KIOSK_PICKUP";
+
+const PRESET_DEFAULTS: Record<
+  StylePreset,
+  {
+    posDefaultOrderMode: "prepaid_pickup" | "prepaid_table" | "postpaid_table";
+    posPaymentProvider:
+      | "external_dept_store"
+      | "terminal_bridge"
+      | "van_direct"
+      | "manual";
+    posKitchenRouter: "kds" | "printer" | "none";
+    posReconcileTolerance: number;
+  }
+> = {
+  DEPT_PICKUP:  { posDefaultOrderMode: "prepaid_pickup", posPaymentProvider: "external_dept_store", posKitchenRouter: "kds",     posReconcileTolerance: 5000 },
+  SHOP_PICKUP:  { posDefaultOrderMode: "prepaid_pickup", posPaymentProvider: "terminal_bridge",     posKitchenRouter: "kds",     posReconcileTolerance: 2000 },
+  SHOP_TABLE:   { posDefaultOrderMode: "postpaid_table", posPaymentProvider: "terminal_bridge",     posKitchenRouter: "printer", posReconcileTolerance: 2000 },
+  COURT_PICKUP: { posDefaultOrderMode: "prepaid_table",  posPaymentProvider: "terminal_bridge",     posKitchenRouter: "kds",     posReconcileTolerance: 3000 },
+  KIOSK_PICKUP: { posDefaultOrderMode: "prepaid_pickup", posPaymentProvider: "terminal_bridge",     posKitchenRouter: "kds",     posReconcileTolerance: 2000 },
+};
+
+const stylePresetEnum = z.enum([
+  "DEPT_PICKUP",
+  "SHOP_PICKUP",
+  "SHOP_TABLE",
+  "COURT_PICKUP",
+  "KIOSK_PICKUP",
+]);
 
 // ─── 1) Health (스모크용) ─────────────────────────────────────────────────────
 const healthRouter = router({
@@ -267,41 +308,202 @@ const reconciliationRouter = router({
 });
 
 // ─── 7) Settings (POS 활성화/프리셋) ──────────────────────────────────────────
+// 권한 분리:
+//   - enable / disable      : master 전용 (시스템 차원에서 매장 POS 켜고 끔)
+//   - applyPreset / override: storeOwner + 활성화 게이트 (점장이 본인 매장 미세조정)
+//   - getStatus             : storeRead (활성화 여부 자체 확인용 — 게이트 없음)
 const settingsRouter = router({
-  enable: storeOwnerProcedure
+  // 1) 활성화 (master 전용)
+  enable: masterProcedure
     .input(
       z.object({
-        stylePreset: z.enum([
-          "DEPT_PICKUP",
-          "SHOP_PICKUP",
-          "SHOP_TABLE",
-          "COURT_PICKUP",
-          "KIOSK_PICKUP",
-        ]),
+        restaurantId: z.number().int().positive(),
+        stylePreset: stylePresetEnum.optional(),
       })
     )
-    .mutation(async () => {
-      // TODO: 부록 D 프리셋 매핑 적용 — orderMode/paymentProvider/kitchenRouter/reconcileTolerance 자동 주입,
-      //       restaurants.posEnabled=true
-      throw NOT_IMPLEMENTED("settings.enable");
+    .mutation(async ({ ctx, input }) => {
+      const [target] = await db
+        .select()
+        .from(restaurants)
+        .where(eq(restaurants.id, input.restaurantId))
+        .limit(1);
+      if (!target) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "매장을 찾을 수 없습니다." });
+      }
+      if (target.posEnabled) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "이미 POS가 활성화된 매장입니다. 변경하려면 applyPreset/override를 사용하세요.",
+        });
+      }
+      const patch: Record<string, unknown> = { posEnabled: true };
+      if (input.stylePreset) {
+        patch.posStylePreset = input.stylePreset;
+        Object.assign(patch, PRESET_DEFAULTS[input.stylePreset]);
+      }
+      await db
+        .update(restaurants)
+        .set(patch)
+        .where(eq(restaurants.id, input.restaurantId));
+
+      await db
+        .insert(auditLogs)
+        .values({
+          userId: ctx.user.userId,
+          restaurantId: input.restaurantId,
+          action: "pos.settings.enable",
+          target: "restaurant",
+          targetId: input.restaurantId,
+          details: { stylePreset: input.stylePreset ?? null },
+        })
+        .catch(() => {});
+
+      return {
+        ok: true,
+        restaurantId: input.restaurantId,
+        stylePreset: input.stylePreset ?? null,
+      };
     }),
-  override: storeOwnerProcedure
+
+  // 2) 비활성화 (master 전용, 미완료 주문 있으면 거부)
+  disable: masterProcedure
+    .input(z.object({ restaurantId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const [target] = await db
+        .select()
+        .from(restaurants)
+        .where(eq(restaurants.id, input.restaurantId))
+        .limit(1);
+      if (!target) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "매장을 찾을 수 없습니다." });
+      }
+      if (!target.posEnabled) {
+        return { ok: true, alreadyDisabled: true };
+      }
+
+      const openOrders = await db
+        .select({ id: posOrders.id })
+        .from(posOrders)
+        .where(
+          and(
+            eq(posOrders.restaurantId, input.restaurantId),
+            inArray(posOrders.status, ["open", "paid", "ready"])
+          )
+        );
+      if (openOrders.length > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `미완료 주문이 ${openOrders.length}건 있어 비활성화할 수 없습니다. 모든 주문을 마감(served) 또는 취소 후 다시 시도하세요.`,
+        });
+      }
+
+      await db
+        .update(restaurants)
+        .set({ posEnabled: false })
+        .where(eq(restaurants.id, input.restaurantId));
+
+      await db
+        .insert(auditLogs)
+        .values({
+          userId: ctx.user.userId,
+          restaurantId: input.restaurantId,
+          action: "pos.settings.disable",
+          target: "restaurant",
+          targetId: input.restaurantId,
+          details: null,
+        })
+        .catch(() => {});
+
+      return { ok: true };
+    }),
+
+  // 3) 프리셋 재적용 (storeOwner + 활성화 게이트)
+  applyPreset: posStoreOwnerProcedure
+    .input(z.object({ stylePreset: stylePresetEnum }))
+    .mutation(async ({ ctx, input }) => {
+      const defaults = PRESET_DEFAULTS[input.stylePreset];
+      await db
+        .update(restaurants)
+        .set({ posStylePreset: input.stylePreset, ...defaults })
+        .where(eq(restaurants.id, ctx.restaurantId));
+
+      await db
+        .insert(auditLogs)
+        .values({
+          userId: ctx.user.userId,
+          restaurantId: ctx.restaurantId,
+          action: "pos.settings.applyPreset",
+          target: "restaurant",
+          targetId: ctx.restaurantId,
+          details: { stylePreset: input.stylePreset, defaults },
+        })
+        .catch(() => {});
+
+      return { ok: true, stylePreset: input.stylePreset, ...defaults };
+    }),
+
+  // 4) 부분 미세조정 (storeOwner + 활성화 게이트)
+  override: posStoreOwnerProcedure
     .input(
       z.object({
-        orderMode: z
+        posDefaultOrderMode: z
           .enum(["prepaid_pickup", "prepaid_table", "postpaid_table"])
           .optional(),
-        paymentProvider: z
+        posPaymentProvider: z
           .enum(["external_dept_store", "terminal_bridge", "van_direct", "manual"])
           .optional(),
-        kitchenRouter: z.enum(["kds", "printer", "none"]).optional(),
-        reconcileTolerance: z.number().int().optional(),
+        posKitchenRouter: z.enum(["kds", "printer", "none"]).optional(),
+        posReconcileTolerance: z.number().int().min(0).optional(),
       })
     )
-    .mutation(async () => {
-      // TODO: 부분 업데이트
-      throw NOT_IMPLEMENTED("settings.override");
+    .mutation(async ({ ctx, input }) => {
+      const fields: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(input)) {
+        if (v !== undefined && k !== "restaurantId") fields[k] = v;
+      }
+      if (Object.keys(fields).length === 0) {
+        return { ok: true, noop: true };
+      }
+      await db
+        .update(restaurants)
+        .set(fields)
+        .where(eq(restaurants.id, ctx.restaurantId));
+
+      await db
+        .insert(auditLogs)
+        .values({
+          userId: ctx.user.userId,
+          restaurantId: ctx.restaurantId,
+          action: "pos.settings.override",
+          target: "restaurant",
+          targetId: ctx.restaurantId,
+          details: fields,
+        })
+        .catch(() => {});
+
+      return { ok: true, applied: fields };
     }),
+
+  // 5) 상태 조회 (storeRead, 게이트 없음 — 활성화 여부 자체 확인용)
+  getStatus: storeReadProcedure.query(async ({ ctx }) => {
+    const [r] = await db
+      .select({
+        posEnabled: restaurants.posEnabled,
+        posStylePreset: restaurants.posStylePreset,
+        posDefaultOrderMode: restaurants.posDefaultOrderMode,
+        posPaymentProvider: restaurants.posPaymentProvider,
+        posKitchenRouter: restaurants.posKitchenRouter,
+        posReconcileTolerance: restaurants.posReconcileTolerance,
+      })
+      .from(restaurants)
+      .where(eq(restaurants.id, ctx.restaurantId))
+      .limit(1);
+    if (!r) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "매장을 찾을 수 없습니다." });
+    }
+    return r;
+  }),
 });
 
 export const posRouter = router({

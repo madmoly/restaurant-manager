@@ -1,7 +1,17 @@
-# POS 시스템 기획·설계 (v0.4 초안)
+# POS 시스템 기획·설계 (v0.5 초안)
 
-> 작성: 2026-04-19 (v0.1) · 갱신: 2026-04-19 (v0.2, v0.3, v0.4)
-> 상태: **P1 도메인 구현 착수 가능**. 천호점 파일럿 기준 범위 확정. 로드샵/키오스크/VAN 연동은 향후 확장.
+> 작성: 2026-04-19 (v0.1) · 갱신: 2026-04-19 (v0.2, v0.3, v0.4, v0.5)
+> 상태: **P1 스키마+라우터 골격 push 완료(38969df)**. 본문 채우기 단계. 천호점 파일럿 기준 범위 확정.
+>
+> **v0.5 변경 요약 (2026-04-19)**
+> - **POS 활성화 권한 master 전용 게이트 신설** (사용자 결정)
+> - master만 `enable`/`disable` 가능. 점장은 활성화된 매장에 한해 `applyPreset`/`override`
+> - settings 라우터 액션 분리: `enable` / `disable` / `applyPreset` / `override` / `getStatus`
+> - `enable(restaurantId, stylePreset?)` — 프리셋 선택 입력. 마스터가 천호점처럼 알고 있는 매장은 즉시 프리셋 함께 지정 가능
+> - `disable` 정책: 미완료 주문(`open`/`paid`/`ready`) 있으면 거부
+> - 활성화 게이트는 **procedure 합성**(`posStoreReadProcedure / posStoreWriteProcedure / posStoreManagerProcedure / posStoreOwnerProcedure` 4종 신설)
+> - 부록 A 권한 매핑 갱신
+>
 > 관련: 매출부(sales/daily_closings/monthly_closings), 레시피(recipes), 계약(restaurant_contracts)
 >
 > **v0.4 변경 요약 (2026-04-19)**
@@ -376,17 +386,32 @@ interface KitchenRouter {
 
 ---
 
-## 부록 A. 권한 매핑 (제안)
+## 부록 A. 권한 매핑 (v0.5 갱신)
 
-| 기능 | 필요 레벨 |
-|---|---|
-| 메뉴 CRUD, 카테고리 관리 | `managerProcedure` (owner/supervisor) |
-| 주문 생성·수정·결제 | `protectedProcedure` + `verifyStoreAccess` (staff 포함) |
-| 주문 강제취소·환불 | `managerProcedure` |
-| 일일 대조 확정 | `managerProcedure` |
-| POS 설정(`payment_provider` 등) 변경 | `ownerProcedure` |
-| 기기 등록·토큰 재발급 | `ownerProcedure` |
-| POS 활성/비활성 전환 | `adminProcedure` |
+활성화 게이트가 적용된 라우터는 모두 `posStore*Procedure`(매장 격리 + `posEnabled=true` 검증).
+활성화 자체와 상태 조회는 게이트 적용 안 됨(역설 방지).
+
+| 기능 | 필요 레벨 | 활성화 게이트 |
+|---|---|---|
+| `pos.settings.enable` (POS 활성화 + 선택적 프리셋) | `masterProcedure` | 없음 |
+| `pos.settings.disable` (POS 비활성화) | `masterProcedure` | 없음 (단, 미완료 주문 있으면 거부) |
+| `pos.settings.getStatus` (활성화·프리셋 조회) | `storeReadProcedure` | 없음 |
+| `pos.settings.applyPreset` (프리셋 변경) | `posStoreOwnerProcedure` | 적용 |
+| `pos.settings.override` (4축 미세조정) | `posStoreOwnerProcedure` | 적용 |
+| 메뉴 CRUD, 카테고리 관리 | `posStoreManagerProcedure` | 적용 |
+| 주문 생성·수정 | `posStoreWriteProcedure` (staff 포함) | 적용 |
+| 주문 강제취소(`void`)·환불(`refund`) | `posStoreManagerProcedure` | 적용 |
+| 결제 기록·취소 | `posStoreWriteProcedure` (수정), `posStoreManagerProcedure` (취소) | 적용 |
+| 일일 대조 확정 | `posStoreManagerProcedure` | 적용 |
+| 기기 등록·토큰 재발급·페어링 | `posStoreOwnerProcedure` | 적용 |
+
+**활성화 흐름**
+1. master가 `pos.settings.enable(restaurantId, stylePreset?)` 호출
+   - stylePreset 함께 주면: `posEnabled=true` + 4축 디폴트 즉시 주입 → 점장은 운영만
+   - stylePreset 생략 시: `posEnabled=true`만. 점장이 이후 `applyPreset` 호출해야 운영 가능
+2. (선택) 점장이 `pos.settings.applyPreset(stylePreset)` 호출 → 4축 디폴트 주입
+3. (선택) 점장이 `pos.settings.override(...)` 호출 → 4축 부분 미세조정
+4. 매장 전체 POS 운영 시작
 
 ## 부록 B. 키오스크 디바이스 인증 (개요)
 

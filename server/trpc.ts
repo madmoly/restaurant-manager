@@ -6,7 +6,7 @@ import { z } from "zod";
 import { verifyToken, type TokenPayload } from "./auth";
 import { ROLE_LEVEL } from "@shared/permissions";
 import { db } from "./db";
-import { restaurantUsers } from "../drizzle/schema";
+import { restaurantUsers, restaurants } from "../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "./middleware/storeAuth";
 
 export type Context = {
@@ -196,3 +196,39 @@ export const storeOwnerProcedure = protectedProcedure
       ctx: { ...ctx, restaurantId: input.restaurantId, storeRole },
     });
   });
+
+/**
+ * ─── POS 활성화 게이트 (2026-04-19 P1 본문 #1) ─────────────────────────────
+ *
+ * 표준 storeXxxProcedure 통과 후 ctx.restaurantId가 머지된 상태에서 호출됨.
+ * 해당 매장의 restaurants.posEnabled가 false면 FORBIDDEN.
+ * 마스터만 매장별 POS를 켤 수 있다(`pos.settings.enable`). 각 도메인 라우터는
+ * `posStore*Procedure`로 합성해서 활성화된 매장에서만 동작하게 한다.
+ */
+const requirePosEnabled = t.middleware(async ({ ctx, next }) => {
+  const restaurantId = (ctx as { restaurantId?: number }).restaurantId;
+  if (!restaurantId) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message:
+        "posStore*Procedure는 storeXxxProcedure 위에서만 합성됩니다 (ctx.restaurantId 누락)",
+    });
+  }
+  const rows = await db
+    .select({ posEnabled: restaurants.posEnabled })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  if (!rows[0]?.posEnabled) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "POS가 이 매장에 활성화되지 않았습니다. 마스터 관리자에게 요청하세요.",
+    });
+  }
+  return next();
+});
+
+export const posStoreReadProcedure = storeReadProcedure.use(requirePosEnabled);
+export const posStoreWriteProcedure = storeWriteProcedure.use(requirePosEnabled);
+export const posStoreManagerProcedure = storeManagerProcedure.use(requirePosEnabled);
+export const posStoreOwnerProcedure = storeOwnerProcedure.use(requirePosEnabled);
