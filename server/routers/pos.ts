@@ -19,7 +19,7 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
   router,
   protectedProcedure,
@@ -28,10 +28,20 @@ import {
   storeWriteProcedure,
   storeManagerProcedure,
   storeOwnerProcedure,
+  posStoreReadProcedure,
+  posStoreManagerProcedure,
   posStoreOwnerProcedure,
 } from "../trpc";
 import { db } from "../db";
-import { restaurants, posOrders, auditLogs } from "../../drizzle/schema";
+import {
+  restaurants,
+  posOrders,
+  posMenuCategories,
+  posMenuItems,
+  posMenuOptionGroups,
+  posMenuOptions,
+  auditLogs,
+} from "../../drizzle/schema";
 
 const NOT_IMPLEMENTED = (where: string) =>
   new TRPCError({
@@ -85,48 +95,462 @@ const healthRouter = router({
 });
 
 // ─── 2) Menu (카테고리/메뉴/옵션) ──────────────────────────────────────────────
+// posStoreRead/ManagerProcedure 사용 → 매장 격리 + posEnabled 활성화 게이트.
+// 모든 mutation은 categoryId/menuItemId/optionGroupId의 매장 일치 검증.
 const menuRouter = router({
-  listCategories: storeReadProcedure.query(async () => {
-    throw NOT_IMPLEMENTED("menu.listCategories");
-  }),
-  upsertCategory: storeManagerProcedure
+  // ─── 카테고리 ────────────────────────────────────────────────────
+  listCategories: posStoreReadProcedure
     .input(
       z.object({
-        id: z.number().int().optional(),
+        includeInactive: z.boolean().default(false),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const conds = [
+        eq(posMenuCategories.restaurantId, ctx.restaurantId),
+        isNull(posMenuCategories.deletedAt),
+      ];
+      if (!input.includeInactive) {
+        conds.push(eq(posMenuCategories.isActive, true));
+      }
+      return db
+        .select()
+        .from(posMenuCategories)
+        .where(and(...conds))
+        .orderBy(posMenuCategories.displayOrder, posMenuCategories.id);
+    }),
+
+  upsertCategory: posStoreManagerProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive().optional(),
         name: z.string().min(1).max(100),
         displayOrder: z.number().int().default(0),
         isActive: z.boolean().default(true),
       })
     )
-    .mutation(async () => {
-      throw NOT_IMPLEMENTED("menu.upsertCategory");
+    .mutation(async ({ ctx, input }) => {
+      if (input.id) {
+        const [existing] = await db
+          .select()
+          .from(posMenuCategories)
+          .where(eq(posMenuCategories.id, input.id))
+          .limit(1);
+        if (
+          !existing ||
+          existing.restaurantId !== ctx.restaurantId ||
+          existing.deletedAt
+        ) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "카테고리를 찾을 수 없습니다.",
+          });
+        }
+        await db
+          .update(posMenuCategories)
+          .set({
+            name: input.name,
+            displayOrder: input.displayOrder,
+            isActive: input.isActive,
+          })
+          .where(eq(posMenuCategories.id, input.id));
+        return { ok: true, id: input.id, created: false };
+      }
+      const [result] = await db.insert(posMenuCategories).values({
+        restaurantId: ctx.restaurantId,
+        name: input.name,
+        displayOrder: input.displayOrder,
+        isActive: input.isActive,
+      });
+      return {
+        ok: true,
+        id: Number((result as { insertId: number }).insertId),
+        created: true,
+      };
     }),
-  listItems: storeReadProcedure
-    .input(z.object({ categoryId: z.number().int().optional() }))
-    .query(async () => {
-      throw NOT_IMPLEMENTED("menu.listItems");
+
+  deleteCategory: posStoreManagerProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const [existing] = await db
+        .select()
+        .from(posMenuCategories)
+        .where(eq(posMenuCategories.id, input.id))
+        .limit(1);
+      if (!existing || existing.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      const items = await db
+        .select({ id: posMenuItems.id })
+        .from(posMenuItems)
+        .where(
+          and(
+            eq(posMenuItems.categoryId, input.id),
+            isNull(posMenuItems.deletedAt)
+          )
+        )
+        .limit(1);
+      if (items.length > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "이 카테고리에 활성 메뉴가 있습니다. 먼저 메뉴를 삭제하거나 다른 카테고리로 옮기세요.",
+        });
+      }
+      await db
+        .update(posMenuCategories)
+        .set({ deletedAt: new Date() })
+        .where(eq(posMenuCategories.id, input.id));
+      return { ok: true };
     }),
-  upsertItem: storeManagerProcedure
+
+  // ─── 메뉴 항목 ────────────────────────────────────────────────────
+  listItems: posStoreReadProcedure
     .input(
       z.object({
-        id: z.number().int().optional(),
-        categoryId: z.number().int().nullable().optional(),
+        categoryId: z.number().int().positive().optional(),
+        includeInactive: z.boolean().default(false),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const conds = [
+        eq(posMenuItems.restaurantId, ctx.restaurantId),
+        isNull(posMenuItems.deletedAt),
+      ];
+      if (input.categoryId !== undefined) {
+        conds.push(eq(posMenuItems.categoryId, input.categoryId));
+      }
+      if (!input.includeInactive) {
+        conds.push(eq(posMenuItems.isActive, true));
+      }
+      return db
+        .select()
+        .from(posMenuItems)
+        .where(and(...conds))
+        .orderBy(posMenuItems.displayOrder, posMenuItems.id);
+    }),
+
+  upsertItem: posStoreManagerProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive().optional(),
+        categoryId: z.number().int().positive().optional(),
         name: z.string().min(1).max(150),
-        price: z.string(),
-        imageUrl: z.string().max(500).nullable().optional(),
-        recipeId: z.number().int().nullable().optional(),
+        price: z
+          .string()
+          .regex(/^\d+(\.\d{1,2})?$/, "가격은 숫자(소수점 둘째자리까지)"),
+        imageUrl: z.string().max(500).optional(),
+        recipeId: z.number().int().positive().optional(),
         taxType: z.enum(["taxable", "exempt", "zero"]).default("taxable"),
+        displayOrder: z.number().int().default(0),
         isActive: z.boolean().default(true),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (input.categoryId !== undefined) {
+        const [cat] = await db
+          .select()
+          .from(posMenuCategories)
+          .where(eq(posMenuCategories.id, input.categoryId))
+          .limit(1);
+        if (
+          !cat ||
+          cat.restaurantId !== ctx.restaurantId ||
+          cat.deletedAt
+        ) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "카테고리가 이 매장과 일치하지 않거나 삭제되었습니다.",
+          });
+        }
+      }
+
+      if (input.id) {
+        const [existing] = await db
+          .select()
+          .from(posMenuItems)
+          .where(eq(posMenuItems.id, input.id))
+          .limit(1);
+        if (
+          !existing ||
+          existing.restaurantId !== ctx.restaurantId ||
+          existing.deletedAt
+        ) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "메뉴를 찾을 수 없습니다.",
+          });
+        }
+        const { id, ...patch } = input;
+        await db.update(posMenuItems).set(patch).where(eq(posMenuItems.id, id));
+        return { ok: true, id, created: false };
+      }
+      const { id: _omit, ...rest } = input;
+      const [result] = await db.insert(posMenuItems).values({
+        restaurantId: ctx.restaurantId,
+        ...rest,
+      });
+      return {
+        ok: true,
+        id: Number((result as { insertId: number }).insertId),
+        created: true,
+      };
+    }),
+
+  setSoldOut: posStoreManagerProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        isSoldOut: z.boolean(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [existing] = await db
+        .select()
+        .from(posMenuItems)
+        .where(eq(posMenuItems.id, input.id))
+        .limit(1);
+      if (
+        !existing ||
+        existing.restaurantId !== ctx.restaurantId ||
+        existing.deletedAt
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      await db
+        .update(posMenuItems)
+        .set({ isSoldOut: input.isSoldOut })
+        .where(eq(posMenuItems.id, input.id));
+      return { ok: true, isSoldOut: input.isSoldOut };
+    }),
+
+  deleteItem: posStoreManagerProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const [existing] = await db
+        .select()
+        .from(posMenuItems)
+        .where(eq(posMenuItems.id, input.id))
+        .limit(1);
+      if (!existing || existing.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      await db
+        .update(posMenuItems)
+        .set({ deletedAt: new Date() })
+        .where(eq(posMenuItems.id, input.id));
+      return { ok: true };
+    }),
+
+  // ─── 옵션 그룹/옵션 (API만, UI는 2차 — Q-O11) ─────────────────────
+  listOptionGroups: posStoreReadProcedure
+    .input(z.object({ menuItemId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const [item] = await db
+        .select()
+        .from(posMenuItems)
+        .where(eq(posMenuItems.id, input.menuItemId))
+        .limit(1);
+      if (!item || item.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      const groups = await db
+        .select()
+        .from(posMenuOptionGroups)
+        .where(eq(posMenuOptionGroups.menuItemId, input.menuItemId))
+        .orderBy(posMenuOptionGroups.displayOrder, posMenuOptionGroups.id);
+      const groupIds = groups.map((g) => g.id);
+      const options =
+        groupIds.length === 0
+          ? []
+          : await db
+              .select()
+              .from(posMenuOptions)
+              .where(inArray(posMenuOptions.optionGroupId, groupIds))
+              .orderBy(posMenuOptions.displayOrder, posMenuOptions.id);
+      return groups.map((g) => ({
+        ...g,
+        options: options.filter((o) => o.optionGroupId === g.id),
+      }));
+    }),
+
+  upsertOptionGroup: posStoreManagerProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive().optional(),
+        menuItemId: z.number().int().positive(),
+        name: z.string().min(1).max(100),
+        minSelect: z.number().int().min(0).default(0),
+        maxSelect: z.number().int().min(1).default(1),
+        isRequired: z.boolean().default(false),
         displayOrder: z.number().int().default(0),
       })
     )
-    .mutation(async () => {
-      throw NOT_IMPLEMENTED("menu.upsertItem");
+    .mutation(async ({ ctx, input }) => {
+      const [item] = await db
+        .select()
+        .from(posMenuItems)
+        .where(eq(posMenuItems.id, input.menuItemId))
+        .limit(1);
+      if (!item || item.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "메뉴가 이 매장과 일치하지 않습니다.",
+        });
+      }
+      if (input.minSelect > input.maxSelect) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "minSelect > maxSelect",
+        });
+      }
+      if (input.id) {
+        const [existing] = await db
+          .select()
+          .from(posMenuOptionGroups)
+          .where(eq(posMenuOptionGroups.id, input.id))
+          .limit(1);
+        if (!existing || existing.menuItemId !== input.menuItemId) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        const { id, ...patch } = input;
+        await db
+          .update(posMenuOptionGroups)
+          .set(patch)
+          .where(eq(posMenuOptionGroups.id, id));
+        return { ok: true, id, created: false };
+      }
+      const { id: _omit, ...insertVals } = input;
+      const [result] = await db
+        .insert(posMenuOptionGroups)
+        .values(insertVals);
+      return {
+        ok: true,
+        id: Number((result as { insertId: number }).insertId),
+        created: true,
+      };
     }),
-  setSoldOut: storeManagerProcedure
-    .input(z.object({ itemId: z.number().int(), isSoldOut: z.boolean() }))
-    .mutation(async () => {
-      throw NOT_IMPLEMENTED("menu.setSoldOut");
+
+  deleteOptionGroup: posStoreManagerProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const [group] = await db
+        .select({
+          id: posMenuOptionGroups.id,
+          menuItemId: posMenuOptionGroups.menuItemId,
+        })
+        .from(posMenuOptionGroups)
+        .where(eq(posMenuOptionGroups.id, input.id))
+        .limit(1);
+      if (!group) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      const [item] = await db
+        .select({ restaurantId: posMenuItems.restaurantId })
+        .from(posMenuItems)
+        .where(eq(posMenuItems.id, group.menuItemId))
+        .limit(1);
+      if (!item || item.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      // 옵션 → 그룹 순 hard delete (옵션 스냅샷이 주문라인에 있어 무관)
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(posMenuOptions)
+          .where(eq(posMenuOptions.optionGroupId, input.id));
+        await tx
+          .delete(posMenuOptionGroups)
+          .where(eq(posMenuOptionGroups.id, input.id));
+      });
+      return { ok: true };
+    }),
+
+  upsertOption: posStoreManagerProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive().optional(),
+        optionGroupId: z.number().int().positive(),
+        name: z.string().min(1).max(100),
+        priceDelta: z
+          .string()
+          .regex(/^-?\d+(\.\d{1,2})?$/)
+          .default("0"),
+        displayOrder: z.number().int().default(0),
+        isActive: z.boolean().default(true),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // 옵션 그룹 → 메뉴 → 매장 일치 검증
+      const [group] = await db
+        .select({ menuItemId: posMenuOptionGroups.menuItemId })
+        .from(posMenuOptionGroups)
+        .where(eq(posMenuOptionGroups.id, input.optionGroupId))
+        .limit(1);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const [item] = await db
+        .select({ restaurantId: posMenuItems.restaurantId })
+        .from(posMenuItems)
+        .where(eq(posMenuItems.id, group.menuItemId))
+        .limit(1);
+      if (!item || item.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "옵션 그룹이 이 매장과 일치하지 않습니다.",
+        });
+      }
+      if (input.id) {
+        const [existing] = await db
+          .select()
+          .from(posMenuOptions)
+          .where(eq(posMenuOptions.id, input.id))
+          .limit(1);
+        if (!existing || existing.optionGroupId !== input.optionGroupId) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        const { id, ...patch } = input;
+        await db
+          .update(posMenuOptions)
+          .set(patch)
+          .where(eq(posMenuOptions.id, id));
+        return { ok: true, id, created: false };
+      }
+      const { id: _omit, ...insertVals } = input;
+      const [result] = await db.insert(posMenuOptions).values(insertVals);
+      return {
+        ok: true,
+        id: Number((result as { insertId: number }).insertId),
+        created: true,
+      };
+    }),
+
+  deleteOption: posStoreManagerProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const [opt] = await db
+        .select({
+          id: posMenuOptions.id,
+          optionGroupId: posMenuOptions.optionGroupId,
+        })
+        .from(posMenuOptions)
+        .where(eq(posMenuOptions.id, input.id))
+        .limit(1);
+      if (!opt) throw new TRPCError({ code: "NOT_FOUND" });
+      const [group] = await db
+        .select({ menuItemId: posMenuOptionGroups.menuItemId })
+        .from(posMenuOptionGroups)
+        .where(eq(posMenuOptionGroups.id, opt.optionGroupId))
+        .limit(1);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const [item] = await db
+        .select({ restaurantId: posMenuItems.restaurantId })
+        .from(posMenuItems)
+        .where(eq(posMenuItems.id, group.menuItemId))
+        .limit(1);
+      if (!item || item.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      await db.delete(posMenuOptions).where(eq(posMenuOptions.id, input.id));
+      return { ok: true };
     }),
 });
 
