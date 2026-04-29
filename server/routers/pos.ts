@@ -18,8 +18,9 @@
  */
 
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, desc, gte, lte, sql } from "drizzle-orm";
 import {
   router,
   protectedProcedure,
@@ -29,6 +30,7 @@ import {
   storeManagerProcedure,
   storeOwnerProcedure,
   posStoreReadProcedure,
+  posStoreWriteProcedure,
   posStoreManagerProcedure,
   posStoreOwnerProcedure,
 } from "../trpc";
@@ -36,6 +38,10 @@ import { db } from "../db";
 import {
   restaurants,
   posOrders,
+  posOrderItems,
+  posOrderItemOptions,
+  posPayments,
+  posOrderCounters,
   posMenuCategories,
   posMenuItems,
   posMenuOptionGroups,
@@ -84,6 +90,167 @@ const stylePresetEnum = z.enum([
   "COURT_PICKUP",
   "KIOSK_PICKUP",
 ]);
+
+// ─── Order 헬퍼 (Phase 1 본문 #3) ─────────────────────────────────────────────
+
+/** KST 기준 'YYYY-MM-DD' 반환. Railway는 UTC 시간대로 동작하므로 +9h 보정. */
+function kstDateString(d: Date = new Date()): string {
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10);
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * 매장별 일일 채번 (4자리 zero-pad). 트랜잭션 안에서만 호출.
+ * INSERT ... ON DUPLICATE KEY UPDATE lastSeq = lastSeq + 1 패턴으로 원자 증분.
+ */
+async function nextOrderNo(
+  tx: Tx,
+  restaurantId: number,
+  date: string
+): Promise<string> {
+  await tx.execute(sql`
+    INSERT INTO pos_order_counters (restaurantId, date, lastSeq)
+    VALUES (${restaurantId}, ${date}, 1)
+    ON DUPLICATE KEY UPDATE lastSeq = lastSeq + 1
+  `);
+  const [row] = await tx
+    .select({ lastSeq: posOrderCounters.lastSeq })
+    .from(posOrderCounters)
+    .where(
+      and(
+        eq(posOrderCounters.restaurantId, restaurantId),
+        eq(posOrderCounters.date, new Date(date))
+      )
+    )
+    .limit(1);
+  if (!row) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "주문번호 채번 실패",
+    });
+  }
+  return String(row.lastSeq).padStart(4, "0");
+}
+
+/**
+ * 가격 재계산: 클라이언트가 보낸 unitPrice는 무시. 서버가 메뉴 마스터 가격
+ * (`pos_menu_items.price` + `pos_menu_options.priceDelta`)으로 재계산.
+ * N+1 방지: 메뉴/옵션 일괄 조회.
+ */
+async function resolvePricedItems(
+  tx: Tx,
+  restaurantId: number,
+  items: Array<{
+    menuItemId: number;
+    qty: number;
+    optionIds?: number[];
+    note?: string;
+  }>
+) {
+  if (items.length === 0) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "주문 아이템이 비어있습니다.",
+    });
+  }
+  const menuIds = [...new Set(items.map((i) => i.menuItemId))];
+  const menus = await tx
+    .select()
+    .from(posMenuItems)
+    .where(
+      and(
+        inArray(posMenuItems.id, menuIds),
+        eq(posMenuItems.restaurantId, restaurantId),
+        isNull(posMenuItems.deletedAt)
+      )
+    );
+  const menuMap = new Map<number, (typeof menus)[number]>();
+  for (const m of menus) menuMap.set(m.id, m);
+
+  for (const i of items) {
+    const m = menuMap.get(i.menuItemId);
+    if (!m) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `메뉴 id=${i.menuItemId}가 본 매장에 없거나 삭제됨`,
+      });
+    }
+    if (m.isSoldOut) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `메뉴 '${m.name}' 품절`,
+      });
+    }
+  }
+
+  const allOptionIds = [
+    ...new Set(items.flatMap((i) => i.optionIds ?? [])),
+  ];
+  const options =
+    allOptionIds.length === 0
+      ? []
+      : await tx
+          .select({
+            id: posMenuOptions.id,
+            name: posMenuOptions.name,
+            priceDelta: posMenuOptions.priceDelta,
+            optionGroupId: posMenuOptions.optionGroupId,
+            menuItemId: posMenuOptionGroups.menuItemId,
+          })
+          .from(posMenuOptions)
+          .innerJoin(
+            posMenuOptionGroups,
+            eq(posMenuOptionGroups.id, posMenuOptions.optionGroupId)
+          )
+          .where(
+            and(
+              inArray(posMenuOptions.id, allOptionIds),
+              eq(posMenuOptions.isActive, true)
+            )
+          );
+  const optMap = new Map<number, (typeof options)[number]>();
+  for (const o of options) optMap.set(o.id, o);
+
+  const resolved = items.map((i) => {
+    const m = menuMap.get(i.menuItemId)!;
+    const unitPrice = Number(m.price);
+    const itemOptions = (i.optionIds ?? []).map((oid) => {
+      const o = optMap.get(oid);
+      if (!o) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `옵션 id=${oid} 없음 또는 비활성`,
+        });
+      }
+      if (o.menuItemId !== i.menuItemId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `옵션 id=${oid}이 메뉴 id=${i.menuItemId}와 매칭되지 않음`,
+        });
+      }
+      return { name: o.name, priceDelta: Number(o.priceDelta) };
+    });
+    const optionsTotal = itemOptions.reduce((s, o) => s + o.priceDelta, 0);
+    const lineTotal = (unitPrice + optionsTotal) * i.qty;
+    return {
+      menuItemId: i.menuItemId,
+      menuItemNameSnapshot: m.name,
+      unitPrice: unitPrice.toFixed(2),
+      qty: i.qty,
+      lineTotal: lineTotal.toFixed(2),
+      options: itemOptions.map((o) => ({
+        name: o.name,
+        priceDelta: o.priceDelta.toFixed(2),
+      })),
+      note: i.note,
+    };
+  });
+
+  const subtotal = resolved.reduce((s, r) => s + Number(r.lineTotal), 0);
+  return { resolved, subtotal };
+}
 
 // ─── 1) Health (스모크용) ─────────────────────────────────────────────────────
 const healthRouter = router({
@@ -286,10 +453,8 @@ const menuRouter = router({
         return { ok: true, id, created: false };
       }
       const { id: _omit, ...rest } = input;
-      const [result] = await db.insert(posMenuItems).values({
-        restaurantId: ctx.restaurantId,
-        ...rest,
-      });
+      // rest.restaurantId는 storeXxxProcedure가 머지한 값 = ctx.restaurantId. 그대로 사용.
+      const [result] = await db.insert(posMenuItems).values(rest);
       return {
         ok: true,
         id: Number((result as { insertId: number }).insertId),
@@ -555,78 +720,334 @@ const menuRouter = router({
 });
 
 // ─── 3) Order (주문 생성/조회/상태전이/취소/환불) ────────────────────────────
-const orderItemInput = z.object({
-  menuItemId: z.number().int(),
+// 결정값 (docs/pos-p1-order-patch.md §0):
+//   - 채번: 매장별 일일 리셋 4자리 zero-pad (KST 자정), 전역 UUID는 별도 보존
+//   - 가격: 서버가 마스터 가격 재계산 (클라 unitPrice는 받지도 않음)
+//   - 초기 상태: 항상 'open' (paid 전이는 payment.record에서)
+//   - 멱등성: idempotencyKey 옵션, 안 보내면 서버 randomUUID 생성
+const orderItemInputSchema = z.object({
+  menuItemId: z.number().int().positive(),
   qty: z.number().int().min(1),
-  unitPrice: z.string(),
+  optionIds: z.array(z.number().int().positive()).default([]),
   note: z.string().max(200).optional(),
-  options: z
-    .array(z.object({ name: z.string().max(100), priceDelta: z.string() }))
-    .default([]),
+});
+
+const orderInputSchema = z.object({
+  orderMode: z.enum(["prepaid_pickup", "prepaid_table", "postpaid_table"]),
+  tableNo: z.string().max(30).optional(),
+  pagerNo: z.string().max(30).optional(),
+  items: z.array(orderItemInputSchema).min(1),
+  discountTotal: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/, "할인은 숫자(소수점 둘째자리까지)")
+    .default("0"),
+  customerNote: z.string().max(500).optional(),
+  idempotencyKey: z.string().uuid().optional(),
 });
 
 const orderRouter = router({
-  create: storeWriteProcedure
-    .input(
-      z.object({
-        orderMode: z.enum(["prepaid_pickup", "prepaid_table", "postpaid_table"]),
-        tableNo: z.string().max(30).optional(),
-        pagerNo: z.string().max(30).optional(),
-        items: z.array(orderItemInput).min(1),
-        discountTotal: z.string().default("0"),
-        customerNote: z.string().max(500).optional(),
-        idempotencyKey: z.string().uuid().optional(),
-      })
-    )
-    .mutation(async () => {
-      // TODO: 트랜잭션
-      // 1. orderNo = pos_order_counters 매장별 일일 리셋
-      // 2. uuid = idempotencyKey ?? randomUUID()  (멱등성)
-      // 3. posOrders / posOrderItems / posOrderItemOptions insert
-      // 4. subtotal/grandTotal 계산
-      // 5. KitchenRouter dispatch (1차: KDS subscription publish는 P3에서)
-      throw NOT_IMPLEMENTED("order.create");
+  // ─── 생성 ────────────────────────────────────────────────────────
+  create: posStoreWriteProcedure
+    .input(orderInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const uuid = input.idempotencyKey ?? randomUUID();
+
+      // 멱등성 사전 체크 (race window는 후속 보강 가능 — UNIQUE(uuid) 제약 활용)
+      const [existing] = await db
+        .select()
+        .from(posOrders)
+        .where(eq(posOrders.uuid, uuid))
+        .limit(1);
+      if (existing) {
+        if (existing.restaurantId !== ctx.restaurantId) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "idempotencyKey가 다른 매장 주문에 이미 사용됨",
+          });
+        }
+        return {
+          ok: true,
+          id: existing.id,
+          orderNo: existing.orderNo,
+          uuid: existing.uuid,
+          grandTotal: existing.grandTotal,
+          idempotent: true,
+        };
+      }
+
+      return db.transaction(async (tx) => {
+        // 가격 재계산 (서버 마스터 가격) — 클라 unitPrice는 받지도 않음
+        const { resolved, subtotal } = await resolvePricedItems(
+          tx,
+          ctx.restaurantId,
+          input.items
+        );
+        const discountTotal = Number(input.discountTotal);
+        const grandTotal = Math.max(0, subtotal - discountTotal);
+
+        // 채번 (KST 자정 리셋, 4자리 zero-pad)
+        const date = kstDateString();
+        const orderNo = await nextOrderNo(tx, ctx.restaurantId, date);
+
+        // posOrders insert
+        const [orderResult] = await tx.insert(posOrders).values({
+          uuid,
+          restaurantId: ctx.restaurantId,
+          orderNo,
+          orderMode: input.orderMode,
+          tableNo: input.tableNo ?? null,
+          pagerNo: input.pagerNo ?? null,
+          status: "open",
+          subtotal: subtotal.toFixed(2),
+          discountTotal: discountTotal.toFixed(2),
+          taxTotal: "0", // 1차는 세금 분리 미적용 (P2)
+          grandTotal: grandTotal.toFixed(2),
+          customerNote: input.customerNote ?? null,
+          createdByUserId: ctx.user.userId,
+          deviceId: null,
+        });
+        const orderId = Number(
+          (orderResult as { insertId: number }).insertId
+        );
+
+        // posOrderItems + posOrderItemOptions insert
+        for (const r of resolved) {
+          const [itemResult] = await tx.insert(posOrderItems).values({
+            orderId,
+            menuItemId: r.menuItemId,
+            menuItemNameSnapshot: r.menuItemNameSnapshot,
+            unitPrice: r.unitPrice,
+            qty: r.qty,
+            lineDiscount: "0",
+            lineTotal: r.lineTotal,
+            status: "active",
+            note: r.note ?? null,
+          });
+          const orderItemId = Number(
+            (itemResult as { insertId: number }).insertId
+          );
+          for (const o of r.options) {
+            await tx.insert(posOrderItemOptions).values({
+              orderItemId,
+              optionName: o.name,
+              priceDelta: o.priceDelta,
+            });
+          }
+        }
+
+        return {
+          ok: true,
+          id: orderId,
+          orderNo,
+          uuid,
+          grandTotal: grandTotal.toFixed(2),
+          idempotent: false,
+        };
+      });
     }),
-  get: storeReadProcedure
-    .input(z.object({ id: z.number().int() }))
-    .query(async () => {
-      throw NOT_IMPLEMENTED("order.get");
+
+  // ─── 조회 ────────────────────────────────────────────────────────
+  get: posStoreReadProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const [order] = await db
+        .select()
+        .from(posOrders)
+        .where(eq(posOrders.id, input.id))
+        .limit(1);
+      if (!order || order.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      const items = await db
+        .select()
+        .from(posOrderItems)
+        .where(eq(posOrderItems.orderId, input.id))
+        .orderBy(posOrderItems.id);
+      const itemIds = items.map((i) => i.id);
+      const opts =
+        itemIds.length === 0
+          ? []
+          : await db
+              .select()
+              .from(posOrderItemOptions)
+              .where(inArray(posOrderItemOptions.orderItemId, itemIds));
+      const payments = await db
+        .select()
+        .from(posPayments)
+        .where(eq(posPayments.orderId, input.id))
+        .orderBy(posPayments.id);
+      return {
+        ...order,
+        items: items.map((it) => ({
+          ...it,
+          options: opts.filter((o) => o.orderItemId === it.id),
+        })),
+        payments,
+      };
     }),
-  list: storeReadProcedure
+
+  list: posStoreReadProcedure
     .input(
       z.object({
         from: z.string().optional(),
         to: z.string().optional(),
-        status: z.string().optional(),
-        limit: z.number().int().max(200).default(50),
+        status: z
+          .enum(["open", "paid", "ready", "served", "voided", "refunded"])
+          .optional(),
+        limit: z.number().int().min(1).max(200).default(50),
       })
     )
-    .query(async () => {
-      throw NOT_IMPLEMENTED("order.list");
+    .query(async ({ ctx, input }) => {
+      const conds = [eq(posOrders.restaurantId, ctx.restaurantId)];
+      if (input.from) conds.push(gte(posOrders.createdAt, new Date(input.from)));
+      if (input.to) conds.push(lte(posOrders.createdAt, new Date(input.to)));
+      if (input.status) conds.push(eq(posOrders.status, input.status));
+      return db
+        .select()
+        .from(posOrders)
+        .where(and(...conds))
+        .orderBy(desc(posOrders.createdAt))
+        .limit(input.limit);
     }),
-  markReady: storeWriteProcedure
-    .input(z.object({ id: z.number().int() }))
-    .mutation(async () => {
-      // TODO: status open|paid → ready (전이 검증)
-      throw NOT_IMPLEMENTED("order.markReady");
+
+  // ─── 상태 전이 (paid 진입은 payment.record가 담당) ────────────────
+  markReady: posStoreWriteProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const [o] = await db
+        .select()
+        .from(posOrders)
+        .where(eq(posOrders.id, input.id))
+        .limit(1);
+      if (!o || o.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (o.status !== "paid") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `현재 상태=${o.status}. paid 상태에서만 ready 전이 가능.`,
+        });
+      }
+      await db
+        .update(posOrders)
+        .set({ status: "ready", readyAt: new Date() })
+        .where(eq(posOrders.id, input.id));
+      return { ok: true, status: "ready" as const };
     }),
-  markServed: storeWriteProcedure
-    .input(z.object({ id: z.number().int() }))
-    .mutation(async () => {
-      // TODO: ready → served
-      throw NOT_IMPLEMENTED("order.markServed");
+
+  markServed: posStoreWriteProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const [o] = await db
+        .select()
+        .from(posOrders)
+        .where(eq(posOrders.id, input.id))
+        .limit(1);
+      if (!o || o.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (o.status !== "paid" && o.status !== "ready") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `현재 상태=${o.status}. paid 또는 ready에서만 served 전이 가능.`,
+        });
+      }
+      await db
+        .update(posOrders)
+        .set({ status: "served", servedAt: new Date() })
+        .where(eq(posOrders.id, input.id));
+      return { ok: true, status: "served" as const };
     }),
-  void: storeManagerProcedure
-    .input(z.object({ id: z.number().int(), reason: z.string().min(1).max(200) }))
-    .mutation(async () => {
-      // TODO: open → voided. 결제 있으면 거부, refund로 가야 함
-      throw NOT_IMPLEMENTED("order.void");
+
+  // ─── 취소 (결제 전만) ────────────────────────────────────────────
+  void: posStoreManagerProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        reason: z.string().min(1).max(200),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [o] = await db
+        .select()
+        .from(posOrders)
+        .where(eq(posOrders.id, input.id))
+        .limit(1);
+      if (!o || o.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (o.status !== "open") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `현재 상태=${o.status}. open 상태에서만 void 가능. 결제 후에는 refund 사용.`,
+        });
+      }
+      await db
+        .update(posOrders)
+        .set({
+          status: "voided",
+          voidedAt: new Date(),
+          voidReason: input.reason,
+        })
+        .where(eq(posOrders.id, input.id));
+      return { ok: true, status: "voided" as const };
     }),
-  refund: storeManagerProcedure
-    .input(z.object({ id: z.number().int(), reason: z.string().min(1).max(200) }))
-    .mutation(async () => {
-      // TODO: paid|ready|served → refunded. 음수 결제 레코드 추가
-      throw NOT_IMPLEMENTED("order.refund");
+
+  // ─── 환불 (결제 후) ──────────────────────────────────────────────
+  refund: posStoreManagerProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        reason: z.string().min(1).max(200),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [o] = await db
+        .select()
+        .from(posOrders)
+        .where(eq(posOrders.id, input.id))
+        .limit(1);
+      if (!o || o.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (!["paid", "ready", "served"].includes(o.status)) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `현재 상태=${o.status}. paid/ready/served에서만 refund 가능.`,
+        });
+      }
+      return db.transaction(async (tx) => {
+        // 기존 활성 결제 합계 조회
+        const payments = await tx
+          .select()
+          .from(posPayments)
+          .where(
+            and(eq(posPayments.orderId, input.id), isNull(posPayments.voidedAt))
+          );
+        const positiveSum = payments
+          .filter((p) => Number(p.amount) > 0)
+          .reduce((s, p) => s + Number(p.amount), 0);
+        // 음수 결제 레코드 추가 (전체 환불)
+        if (positiveSum > 0) {
+          await tx.insert(posPayments).values({
+            orderId: input.id,
+            method: "etc",
+            amount: (-positiveSum).toFixed(2),
+            providerType: "manual",
+            providerRef: `refund: ${input.reason}`,
+            createdByUserId: ctx.user.userId,
+          });
+        }
+        await tx
+          .update(posOrders)
+          .set({ status: "refunded", voidReason: input.reason })
+          .where(eq(posOrders.id, input.id));
+        return {
+          ok: true,
+          status: "refunded" as const,
+          refundedAmount: positiveSum.toFixed(2),
+        };
+      });
     }),
 });
 
