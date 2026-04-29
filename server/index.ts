@@ -892,6 +892,229 @@ app.use(express.json({ limit: "10mb" }));
     `).catch(() => {});
     await addColumnIfNotExists("restaurant_users", "contractMigrated", "BOOLEAN NOT NULL DEFAULT false");
 
+    // ─── POS Phase 1 (2026-04-19): restaurants 6컬럼 + 12개 테이블 ───────────
+    await addColumnIfNotExists("restaurants", "posEnabled", "BOOLEAN NOT NULL DEFAULT FALSE");
+    await addColumnIfNotExists(
+      "restaurants",
+      "posStylePreset",
+      "ENUM('DEPT_PICKUP','SHOP_PICKUP','SHOP_TABLE','COURT_PICKUP','KIOSK_PICKUP') NULL"
+    );
+    await addColumnIfNotExists(
+      "restaurants",
+      "posDefaultOrderMode",
+      "ENUM('prepaid_pickup','prepaid_table','postpaid_table') NULL"
+    );
+    await addColumnIfNotExists(
+      "restaurants",
+      "posPaymentProvider",
+      "ENUM('external_dept_store','terminal_bridge','van_direct','manual') NULL"
+    );
+    await addColumnIfNotExists(
+      "restaurants",
+      "posKitchenRouter",
+      "ENUM('kds','printer','none') NULL"
+    );
+    await addColumnIfNotExists("restaurants", "posReconcileTolerance", "INT NOT NULL DEFAULT 0");
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_menu_categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        displayOrder INT NOT NULL DEFAULT 0,
+        isActive BOOLEAN NOT NULL DEFAULT TRUE,
+        deletedAt TIMESTAMP NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_pos_menu_cat_rest (restaurantId, displayOrder)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_menu_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        categoryId INT NULL,
+        name VARCHAR(150) NOT NULL,
+        price DECIMAL(12,2) NOT NULL DEFAULT 0,
+        imageUrl VARCHAR(500) NULL,
+        recipeId INT NULL,
+        taxType ENUM('taxable','exempt','zero') NOT NULL DEFAULT 'taxable',
+        isSoldOut BOOLEAN NOT NULL DEFAULT FALSE,
+        isActive BOOLEAN NOT NULL DEFAULT TRUE,
+        displayOrder INT NOT NULL DEFAULT 0,
+        deletedAt TIMESTAMP NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_pos_menu_item_rest (restaurantId, categoryId, displayOrder),
+        INDEX idx_pos_menu_item_active (restaurantId, isActive, deletedAt)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_menu_option_groups (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        menuItemId INT NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        minSelect INT NOT NULL DEFAULT 0,
+        maxSelect INT NOT NULL DEFAULT 1,
+        isRequired BOOLEAN NOT NULL DEFAULT FALSE,
+        displayOrder INT NOT NULL DEFAULT 0,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pos_optgrp_item (menuItemId)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_menu_options (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        optionGroupId INT NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        priceDelta DECIMAL(10,2) NOT NULL DEFAULT 0,
+        displayOrder INT NOT NULL DEFAULT 0,
+        isActive BOOLEAN NOT NULL DEFAULT TRUE,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pos_opt_group (optionGroupId)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_orders (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        uuid VARCHAR(36) NOT NULL,
+        restaurantId INT NOT NULL,
+        orderNo VARCHAR(16) NOT NULL,
+        orderMode ENUM('prepaid_pickup','prepaid_table','postpaid_table') NOT NULL,
+        tableNo VARCHAR(30) NULL,
+        pagerNo VARCHAR(30) NULL,
+        status ENUM('open','paid','ready','served','voided','refunded') NOT NULL DEFAULT 'open',
+        subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+        discountTotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+        taxTotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+        grandTotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+        customerNote VARCHAR(500) NULL,
+        voidReason VARCHAR(200) NULL,
+        createdByUserId INT NOT NULL,
+        deviceId INT NULL,
+        openedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        paidAt TIMESTAMP NULL,
+        readyAt TIMESTAMP NULL,
+        servedAt TIMESTAMP NULL,
+        voidedAt TIMESTAMP NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_pos_order_uuid (uuid),
+        INDEX idx_pos_order_rest_status (restaurantId, status, openedAt),
+        INDEX idx_pos_order_rest_created (restaurantId, createdAt)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_order_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        orderId INT NOT NULL,
+        menuItemId INT NULL,
+        menuItemNameSnapshot VARCHAR(150) NOT NULL,
+        unitPrice DECIMAL(12,2) NOT NULL,
+        qty INT NOT NULL DEFAULT 1,
+        lineDiscount DECIMAL(10,2) NOT NULL DEFAULT 0,
+        lineTotal DECIMAL(12,2) NOT NULL,
+        status ENUM('active','voided') NOT NULL DEFAULT 'active',
+        note VARCHAR(200) NULL,
+        voidedAt TIMESTAMP NULL,
+        voidedByUserId INT NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pos_orderitem_order (orderId)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_order_item_options (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        orderItemId INT NOT NULL,
+        optionName VARCHAR(100) NOT NULL,
+        priceDelta DECIMAL(10,2) NOT NULL DEFAULT 0,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pos_orderitemopt_item (orderItemId)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_payments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        orderId INT NOT NULL,
+        method ENUM('card','cash','samsungpay','kakaopay','naverpay','gift','external','etc') NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        approvalNo VARCHAR(64) NULL,
+        cardBrand VARCHAR(30) NULL,
+        providerType ENUM('external_dept_store','terminal_bridge','van_direct','manual') NOT NULL DEFAULT 'manual',
+        providerRef VARCHAR(200) NULL,
+        createdByUserId INT NOT NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        voidedAt TIMESTAMP NULL,
+        INDEX idx_pos_payment_order (orderId)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_devices (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        deviceType ENUM('staff_counter','staff_table','kiosk','kds') NOT NULL,
+        deviceTokenHash VARCHAR(255) NULL,
+        isActive BOOLEAN NOT NULL DEFAULT TRUE,
+        lastSeenAt TIMESTAMP NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pos_device_rest (restaurantId, deviceType)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_print_jobs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        orderId INT NOT NULL,
+        printerType ENUM('kitchen','receipt') NOT NULL,
+        payload JSON NOT NULL,
+        status ENUM('pending','printed','failed') NOT NULL DEFAULT 'pending',
+        attempts INT NOT NULL DEFAULT 0,
+        errorMsg VARCHAR(500) NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        printedAt TIMESTAMP NULL,
+        failedAt TIMESTAMP NULL,
+        INDEX idx_pos_printjob_rest_status (restaurantId, status, createdAt)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_daily_reconciliation (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        date DATE NOT NULL,
+        posGross DECIMAL(14,2) NOT NULL DEFAULT 0,
+        externalGross DECIMAL(14,2) NOT NULL DEFAULT 0,
+        diff DECIMAL(14,2) NOT NULL DEFAULT 0,
+        note VARCHAR(500) NULL,
+        confirmedByUserId INT NULL,
+        confirmedAt TIMESTAMP NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_pos_recon_rest_date (restaurantId, date)
+      )
+    `).catch(() => {});
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS pos_order_counters (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        date DATE NOT NULL,
+        lastSeq INT NOT NULL DEFAULT 0,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_pos_ordercnt_rest_date (restaurantId, date)
+      )
+    `).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

@@ -170,3 +170,29 @@ export const storeManagerProcedure = protectedProcedure
       ctx: { ...ctx, restaurantId: input.restaurantId, storeRole },
     });
   });
+
+/**
+ * 매장 owner(점장) 전용 + 매장 격리.
+ * master/admin은 시스템 권한으로 통과(admin은 매장 배정 시 쓰기 가능 — verifyStoreAccess 정책 따름).
+ * supervisor(매니져)는 거부. POS 설정/디바이스 등록 등 점장 전용 영역에 사용.
+ */
+export const storeOwnerProcedure = protectedProcedure
+  .input(storeBaseInput)
+  .use(async ({ ctx, input, next }) => {
+    const { storeRole } = await verifyStoreAccess(
+      ctx.user.userId,
+      ctx.user.role,
+      input.restaurantId,
+      true,
+    );
+    const level = ROLE_LEVEL[ctx.user.role] ?? 0;
+    if (level < ROLE_LEVEL.admin) {
+      // user 레벨은 매장 owner만 통과 (레거시 store_manager 호환)
+      if (storeRole !== "owner" && storeRole !== "store_manager") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "점장 권한이 필요합니다" });
+      }
+    }
+    return next({
+      ctx: { ...ctx, restaurantId: input.restaurantId, storeRole },
+    });
+  });

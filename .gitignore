@@ -40,3 +40,6 @@ todo.md
 analyze_schema.py
 .claude/settings.local.json
 .claude/worktrees/
+
+# OCR 실험 산출물 (실제 전표 데이터 포함)
+test-ocr-results/

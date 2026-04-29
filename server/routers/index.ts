@@ -33,6 +33,8 @@ import { storeInfoRouter } from "./storeInfo";
 import { businessGroupsRouter } from "./businessGroups";
 import { dailyExpensesRouter } from "./dailyExpenses";
 import { staffRouter } from "./staff";
+// POS Phase 1
+import { posRouter } from "./pos";
 
 export const appRouter = router({
   auth: authRouter,
@@ -69,6 +71,8 @@ export const appRouter = router({
   businessGroups: businessGroupsRouter,
   dailyExpenses: dailyExpensesRouter,
   staff: staffRouter,
+  // POS Phase 1
+  pos: posRouter,
 });
 
 export type AppRouter = typeof appRouter;

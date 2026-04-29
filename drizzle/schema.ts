@@ -90,6 +90,28 @@ export const restaurants = mysqlTable("restaurants", {
   salesInputStartTime: varchar("salesInputStartTime", { length: 5 }),
   salesInputEndTime: varchar("salesInputEndTime", { length: 5 }),
   fixedCashRegister: int("fixedCashRegister").default(200000).notNull(),
+  // ─── POS 설정 (Phase 1, 2026-04-19) ─────────────────────────────────────────
+  posEnabled: boolean("posEnabled").default(false).notNull(),
+  posStylePreset: mysqlEnum("posStylePreset", [
+    "DEPT_PICKUP",
+    "SHOP_PICKUP",
+    "SHOP_TABLE",
+    "COURT_PICKUP",
+    "KIOSK_PICKUP",
+  ]),
+  posDefaultOrderMode: mysqlEnum("posDefaultOrderMode", [
+    "prepaid_pickup",
+    "prepaid_table",
+    "postpaid_table",
+  ]),
+  posPaymentProvider: mysqlEnum("posPaymentProvider", [
+    "external_dept_store",
+    "terminal_bridge",
+    "van_direct",
+    "manual",
+  ]),
+  posKitchenRouter: mysqlEnum("posKitchenRouter", ["kds", "printer", "none"]),
+  posReconcileTolerance: int("posReconcileTolerance").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -1076,3 +1098,279 @@ export const dailyExpenses = mysqlTable("daily_expenses", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type DailyExpense = typeof dailyExpenses.$inferSelect;
+
+// ─── POS: Menu (Phase 1, 2026-04-19) ─────────────────────────────────────────
+export const posMenuCategories = mysqlTable(
+  "pos_menu_categories",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    restaurantId: int("restaurantId").notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    displayOrder: int("displayOrder").default(0).notNull(),
+    isActive: boolean("isActive").default(true).notNull(),
+    deletedAt: timestamp("deletedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [index("idx_pos_menu_cat_rest").on(t.restaurantId, t.displayOrder)]
+);
+export type PosMenuCategory = typeof posMenuCategories.$inferSelect;
+export type InsertPosMenuCategory = typeof posMenuCategories.$inferInsert;
+
+export const posMenuItems = mysqlTable(
+  "pos_menu_items",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    restaurantId: int("restaurantId").notNull(),
+    categoryId: int("categoryId"),
+    name: varchar("name", { length: 150 }).notNull(),
+    price: decimal("price", { precision: 12, scale: 2 }).notNull().default("0"),
+    imageUrl: varchar("imageUrl", { length: 500 }),
+    recipeId: int("recipeId"),
+    taxType: mysqlEnum("taxType", ["taxable", "exempt", "zero"]).default("taxable").notNull(),
+    isSoldOut: boolean("isSoldOut").default(false).notNull(),
+    isActive: boolean("isActive").default(true).notNull(),
+    displayOrder: int("displayOrder").default(0).notNull(),
+    deletedAt: timestamp("deletedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [
+    index("idx_pos_menu_item_rest").on(t.restaurantId, t.categoryId, t.displayOrder),
+    index("idx_pos_menu_item_active").on(t.restaurantId, t.isActive, t.deletedAt),
+  ]
+);
+export type PosMenuItem = typeof posMenuItems.$inferSelect;
+export type InsertPosMenuItem = typeof posMenuItems.$inferInsert;
+
+export const posMenuOptionGroups = mysqlTable(
+  "pos_menu_option_groups",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    menuItemId: int("menuItemId").notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    minSelect: int("minSelect").default(0).notNull(),
+    maxSelect: int("maxSelect").default(1).notNull(),
+    isRequired: boolean("isRequired").default(false).notNull(),
+    displayOrder: int("displayOrder").default(0).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [index("idx_pos_optgrp_item").on(t.menuItemId)]
+);
+export type PosMenuOptionGroup = typeof posMenuOptionGroups.$inferSelect;
+export type InsertPosMenuOptionGroup = typeof posMenuOptionGroups.$inferInsert;
+
+export const posMenuOptions = mysqlTable(
+  "pos_menu_options",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    optionGroupId: int("optionGroupId").notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    priceDelta: decimal("priceDelta", { precision: 10, scale: 2 }).default("0").notNull(),
+    displayOrder: int("displayOrder").default(0).notNull(),
+    isActive: boolean("isActive").default(true).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [index("idx_pos_opt_group").on(t.optionGroupId)]
+);
+export type PosMenuOption = typeof posMenuOptions.$inferSelect;
+export type InsertPosMenuOption = typeof posMenuOptions.$inferInsert;
+
+// ─── POS: Orders ─────────────────────────────────────────────────────────────
+export const posOrders = mysqlTable(
+  "pos_orders",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    uuid: varchar("uuid", { length: 36 }).notNull(),
+    restaurantId: int("restaurantId").notNull(),
+    orderNo: varchar("orderNo", { length: 16 }).notNull(),
+    orderMode: mysqlEnum("orderMode", [
+      "prepaid_pickup",
+      "prepaid_table",
+      "postpaid_table",
+    ]).notNull(),
+    tableNo: varchar("tableNo", { length: 30 }),
+    pagerNo: varchar("pagerNo", { length: 30 }),
+    status: mysqlEnum("status", [
+      "open",
+      "paid",
+      "ready",
+      "served",
+      "voided",
+      "refunded",
+    ]).notNull().default("open"),
+    subtotal: decimal("subtotal", { precision: 12, scale: 2 }).default("0").notNull(),
+    discountTotal: decimal("discountTotal", { precision: 12, scale: 2 }).default("0").notNull(),
+    taxTotal: decimal("taxTotal", { precision: 12, scale: 2 }).default("0").notNull(),
+    grandTotal: decimal("grandTotal", { precision: 12, scale: 2 }).default("0").notNull(),
+    customerNote: varchar("customerNote", { length: 500 }),
+    voidReason: varchar("voidReason", { length: 200 }),
+    createdByUserId: int("createdByUserId").notNull(),
+    deviceId: int("deviceId"),
+    openedAt: timestamp("openedAt").defaultNow().notNull(),
+    paidAt: timestamp("paidAt"),
+    readyAt: timestamp("readyAt"),
+    servedAt: timestamp("servedAt"),
+    voidedAt: timestamp("voidedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uniq_pos_order_uuid").on(t.uuid),
+    index("idx_pos_order_rest_status").on(t.restaurantId, t.status, t.openedAt),
+    index("idx_pos_order_rest_created").on(t.restaurantId, t.createdAt),
+  ]
+);
+export type PosOrder = typeof posOrders.$inferSelect;
+export type InsertPosOrder = typeof posOrders.$inferInsert;
+
+export const posOrderItems = mysqlTable(
+  "pos_order_items",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    orderId: int("orderId").notNull(),
+    menuItemId: int("menuItemId"),
+    menuItemNameSnapshot: varchar("menuItemNameSnapshot", { length: 150 }).notNull(),
+    unitPrice: decimal("unitPrice", { precision: 12, scale: 2 }).notNull(),
+    qty: int("qty").notNull().default(1),
+    lineDiscount: decimal("lineDiscount", { precision: 10, scale: 2 }).default("0").notNull(),
+    lineTotal: decimal("lineTotal", { precision: 12, scale: 2 }).notNull(),
+    status: mysqlEnum("status", ["active", "voided"]).default("active").notNull(),
+    note: varchar("note", { length: 200 }),
+    voidedAt: timestamp("voidedAt"),
+    voidedByUserId: int("voidedByUserId"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [index("idx_pos_orderitem_order").on(t.orderId)]
+);
+export type PosOrderItem = typeof posOrderItems.$inferSelect;
+export type InsertPosOrderItem = typeof posOrderItems.$inferInsert;
+
+export const posOrderItemOptions = mysqlTable(
+  "pos_order_item_options",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    orderItemId: int("orderItemId").notNull(),
+    optionName: varchar("optionName", { length: 100 }).notNull(),
+    priceDelta: decimal("priceDelta", { precision: 10, scale: 2 }).default("0").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [index("idx_pos_orderitemopt_item").on(t.orderItemId)]
+);
+export type PosOrderItemOption = typeof posOrderItemOptions.$inferSelect;
+export type InsertPosOrderItemOption = typeof posOrderItemOptions.$inferInsert;
+
+// ─── POS: Payments ───────────────────────────────────────────────────────────
+export const posPayments = mysqlTable(
+  "pos_payments",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    orderId: int("orderId").notNull(),
+    method: mysqlEnum("method", [
+      "card",
+      "cash",
+      "samsungpay",
+      "kakaopay",
+      "naverpay",
+      "gift",
+      "external",
+      "etc",
+    ]).notNull(),
+    amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+    approvalNo: varchar("approvalNo", { length: 64 }),
+    cardBrand: varchar("cardBrand", { length: 30 }),
+    providerType: mysqlEnum("providerType", [
+      "external_dept_store",
+      "terminal_bridge",
+      "van_direct",
+      "manual",
+    ]).notNull().default("manual"),
+    providerRef: varchar("providerRef", { length: 200 }),
+    createdByUserId: int("createdByUserId").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    voidedAt: timestamp("voidedAt"),
+  },
+  (t) => [index("idx_pos_payment_order").on(t.orderId)]
+);
+export type PosPayment = typeof posPayments.$inferSelect;
+export type InsertPosPayment = typeof posPayments.$inferInsert;
+
+// ─── POS: Devices ────────────────────────────────────────────────────────────
+export const posDevices = mysqlTable(
+  "pos_devices",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    restaurantId: int("restaurantId").notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    deviceType: mysqlEnum("deviceType", [
+      "staff_counter",
+      "staff_table",
+      "kiosk",
+      "kds",
+    ]).notNull(),
+    deviceTokenHash: varchar("deviceTokenHash", { length: 255 }),
+    isActive: boolean("isActive").default(true).notNull(),
+    lastSeenAt: timestamp("lastSeenAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [index("idx_pos_device_rest").on(t.restaurantId, t.deviceType)]
+);
+export type PosDevice = typeof posDevices.$inferSelect;
+export type InsertPosDevice = typeof posDevices.$inferInsert;
+
+// ─── POS: Print Jobs (브릿지 에이전트 폴링용, 1차 미사용) ──────────────────────
+export const posPrintJobs = mysqlTable(
+  "pos_print_jobs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    restaurantId: int("restaurantId").notNull(),
+    orderId: int("orderId").notNull(),
+    printerType: mysqlEnum("printerType", ["kitchen", "receipt"]).notNull(),
+    payload: json("payload").notNull(),
+    status: mysqlEnum("status", ["pending", "printed", "failed"]).default("pending").notNull(),
+    attempts: int("attempts").default(0).notNull(),
+    errorMsg: varchar("errorMsg", { length: 500 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    printedAt: timestamp("printedAt"),
+    failedAt: timestamp("failedAt"),
+  },
+  (t) => [index("idx_pos_printjob_rest_status").on(t.restaurantId, t.status, t.createdAt)]
+);
+export type PosPrintJob = typeof posPrintJobs.$inferSelect;
+export type InsertPosPrintJob = typeof posPrintJobs.$inferInsert;
+
+// ─── POS: Daily Reconciliation (외부 결제 매장 일일 대조) ────────────────────
+export const posDailyReconciliation = mysqlTable(
+  "pos_daily_reconciliation",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    restaurantId: int("restaurantId").notNull(),
+    date: date("date").notNull(),
+    posGross: decimal("posGross", { precision: 14, scale: 2 }).default("0").notNull(),
+    externalGross: decimal("externalGross", { precision: 14, scale: 2 }).default("0").notNull(),
+    diff: decimal("diff", { precision: 14, scale: 2 }).default("0").notNull(),
+    note: varchar("note", { length: 500 }),
+    confirmedByUserId: int("confirmedByUserId"),
+    confirmedAt: timestamp("confirmedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [uniqueIndex("uniq_pos_recon_rest_date").on(t.restaurantId, t.date)]
+);
+export type PosDailyReconciliation = typeof posDailyReconciliation.$inferSelect;
+export type InsertPosDailyReconciliation = typeof posDailyReconciliation.$inferInsert;
+
+// ─── POS: Order No Counter (매장별 일일 리셋) ────────────────────────────────
+export const posOrderCounters = mysqlTable(
+  "pos_order_counters",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    restaurantId: int("restaurantId").notNull(),
+    date: date("date").notNull(),
+    lastSeq: int("lastSeq").default(0).notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [uniqueIndex("uniq_pos_ordercnt_rest_date").on(t.restaurantId, t.date)]
+);
+export type PosOrderCounter = typeof posOrderCounters.$inferSelect;
+export type InsertPosOrderCounter = typeof posOrderCounters.$inferInsert;
