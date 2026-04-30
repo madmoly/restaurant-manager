@@ -42,6 +42,7 @@ import {
   posOrderItemOptions,
   posPayments,
   posOrderCounters,
+  posDailyReconciliation,
   posMenuCategories,
   posMenuItems,
   posMenuOptionGroups,
@@ -97,6 +98,13 @@ const stylePresetEnum = z.enum([
 function kstDateString(d: Date = new Date()): string {
   const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
   return kst.toISOString().slice(0, 10);
+}
+
+/** KST 'YYYY-MM-DD'를 UTC date range [start, end)로 변환. 일일 집계용. */
+function kstDateRange(date: string): { start: Date; end: Date } {
+  const start = new Date(`${date}T00:00:00+09:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -1297,30 +1305,229 @@ const deviceRouter = router({
 });
 
 // ─── 6) Reconciliation (일일 대조) ────────────────────────────────────────────
+// 결정값 (docs/pos-p1-reconciliation-patch.md §0):
+//   - posGross: getOrCreate 호출 시 활성 결제(voidedAt IS NULL) KST 해당일 amount 합산
+//   - confirm: 임계치(restaurants.posReconcileTolerance) 초과는 경고만, 확정은 통과
+//   - confirmed 후 setExternal 거부, master만 unconfirm 가능
+const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
 const reconciliationRouter = router({
-  getOrCreate: storeReadProcedure
-    .input(z.object({ date: z.string() }))
-    .query(async () => {
-      // TODO: 해당 날짜 행 없으면 posGross 자동 집계해서 행 생성
-      throw NOT_IMPLEMENTED("reconciliation.getOrCreate");
+  // ─── 조회/자동생성 + 자동갱신 ───────────────────────────────────
+  getOrCreate: posStoreReadProcedure
+    .input(z.object({ date: z.string().regex(dateRegex, "YYYY-MM-DD 형식") }))
+    .query(async ({ ctx, input }) => {
+      // posGross 자동 집계 — 활성 결제 합산 (KST 해당일)
+      const range = kstDateRange(input.date);
+      const sums = await db
+        .select({ amount: posPayments.amount })
+        .from(posPayments)
+        .innerJoin(posOrders, eq(posOrders.id, posPayments.orderId))
+        .where(
+          and(
+            eq(posOrders.restaurantId, ctx.restaurantId),
+            isNull(posPayments.voidedAt),
+            gte(posPayments.createdAt, range.start),
+            lte(posPayments.createdAt, range.end)
+          )
+        );
+      const posGrossNum = sums.reduce((s, p) => s + Number(p.amount), 0);
+      const posGross = posGrossNum.toFixed(2);
+
+      const dateValue = new Date(input.date);
+      const [existing] = await db
+        .select()
+        .from(posDailyReconciliation)
+        .where(
+          and(
+            eq(posDailyReconciliation.restaurantId, ctx.restaurantId),
+            eq(posDailyReconciliation.date, dateValue)
+          )
+        )
+        .limit(1);
+
+      if (existing) {
+        // 미확정이면 posGross/diff 자동 갱신, 확정이면 그대로 반환
+        if (!existing.confirmedAt) {
+          const diff = Number(existing.externalGross) - posGrossNum;
+          await db
+            .update(posDailyReconciliation)
+            .set({ posGross, diff: diff.toFixed(2) })
+            .where(eq(posDailyReconciliation.id, existing.id));
+          return { ...existing, posGross, diff: diff.toFixed(2) };
+        }
+        return existing;
+      }
+
+      // 신규 생성
+      const [result] = await db.insert(posDailyReconciliation).values({
+        restaurantId: ctx.restaurantId,
+        date: dateValue,
+        posGross,
+        externalGross: "0",
+        diff: (-posGrossNum).toFixed(2),
+      });
+      const id = Number((result as { insertId: number }).insertId);
+      const [created] = await db
+        .select()
+        .from(posDailyReconciliation)
+        .where(eq(posDailyReconciliation.id, id))
+        .limit(1);
+      return created;
     }),
-  setExternal: storeManagerProcedure
+
+  // ─── 외부(백화점) 금액 입력 ─────────────────────────────────────
+  setExternal: posStoreManagerProcedure
     .input(
       z.object({
-        date: z.string(),
-        externalGross: z.string(),
+        date: z.string().regex(dateRegex),
+        externalGross: z.string().regex(/^\d+(\.\d{1,2})?$/),
         note: z.string().max(500).optional(),
       })
     )
-    .mutation(async () => {
-      // TODO: externalGross / diff 갱신
-      throw NOT_IMPLEMENTED("reconciliation.setExternal");
+    .mutation(async ({ ctx, input }) => {
+      const dateValue = new Date(input.date);
+      const [existing] = await db
+        .select()
+        .from(posDailyReconciliation)
+        .where(
+          and(
+            eq(posDailyReconciliation.restaurantId, ctx.restaurantId),
+            eq(posDailyReconciliation.date, dateValue)
+          )
+        )
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "대조 행이 없습니다. 먼저 getOrCreate를 호출하세요.",
+        });
+      }
+      if (existing.confirmedAt) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "이미 확정된 대조입니다. 마스터에게 unconfirm을 요청하세요.",
+        });
+      }
+      const diff = Number(input.externalGross) - Number(existing.posGross);
+      await db
+        .update(posDailyReconciliation)
+        .set({
+          externalGross: input.externalGross,
+          diff: diff.toFixed(2),
+          ...(input.note !== undefined ? { note: input.note } : {}),
+        })
+        .where(eq(posDailyReconciliation.id, existing.id));
+      return { ok: true, diff: diff.toFixed(2) };
     }),
-  confirm: storeManagerProcedure
-    .input(z.object({ date: z.string() }))
-    .mutation(async () => {
-      // TODO: confirmedByUserId / confirmedAt 기록
-      throw NOT_IMPLEMENTED("reconciliation.confirm");
+
+  // ─── 확정 (임계치 초과는 경고만) ────────────────────────────────
+  confirm: posStoreManagerProcedure
+    .input(z.object({ date: z.string().regex(dateRegex) }))
+    .mutation(async ({ ctx, input }) => {
+      const dateValue = new Date(input.date);
+      const [existing] = await db
+        .select()
+        .from(posDailyReconciliation)
+        .where(
+          and(
+            eq(posDailyReconciliation.restaurantId, ctx.restaurantId),
+            eq(posDailyReconciliation.date, dateValue)
+          )
+        )
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "대조 행이 없습니다.",
+        });
+      }
+      if (existing.confirmedAt) {
+        return { ok: true, alreadyConfirmed: true };
+      }
+      const [r] = await db
+        .select({ tolerance: restaurants.posReconcileTolerance })
+        .from(restaurants)
+        .where(eq(restaurants.id, ctx.restaurantId))
+        .limit(1);
+      const tolerance = r?.tolerance ?? 0;
+      const diffAbs = Math.abs(Number(existing.diff));
+      const overTolerance = diffAbs > tolerance;
+
+      await db
+        .update(posDailyReconciliation)
+        .set({
+          confirmedByUserId: ctx.user.userId,
+          confirmedAt: new Date(),
+        })
+        .where(eq(posDailyReconciliation.id, existing.id));
+
+      return {
+        ok: true,
+        diff: existing.diff,
+        tolerance,
+        overTolerance,
+        warning: overTolerance
+          ? `차이(${existing.diff})가 임계치(${tolerance})를 초과했지만 확정되었습니다.`
+          : null,
+      };
+    }),
+
+  // ─── 확정 풀기 (master 전용, 매장 격리 안 함) ────────────────────
+  unconfirm: masterProcedure
+    .input(
+      z.object({
+        restaurantId: z.number().int().positive(),
+        date: z.string().regex(dateRegex),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const dateValue = new Date(input.date);
+      const [existing] = await db
+        .select()
+        .from(posDailyReconciliation)
+        .where(
+          and(
+            eq(posDailyReconciliation.restaurantId, input.restaurantId),
+            eq(posDailyReconciliation.date, dateValue)
+          )
+        )
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (!existing.confirmedAt) {
+        return { ok: true, alreadyUnconfirmed: true };
+      }
+      await db
+        .update(posDailyReconciliation)
+        .set({ confirmedByUserId: null, confirmedAt: null })
+        .where(eq(posDailyReconciliation.id, existing.id));
+      return { ok: true };
+    }),
+
+  // ─── 월별 이력 조회 ────────────────────────────────────────────
+  list: posStoreReadProcedure
+    .input(
+      z.object({
+        from: z.string().regex(dateRegex).optional(),
+        to: z.string().regex(dateRegex).optional(),
+        limit: z.number().int().min(1).max(200).default(31),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const conds = [
+        eq(posDailyReconciliation.restaurantId, ctx.restaurantId),
+      ];
+      if (input.from)
+        conds.push(gte(posDailyReconciliation.date, new Date(input.from)));
+      if (input.to)
+        conds.push(lte(posDailyReconciliation.date, new Date(input.to)));
+      return db
+        .select()
+        .from(posDailyReconciliation)
+        .where(and(...conds))
+        .orderBy(desc(posDailyReconciliation.date))
+        .limit(input.limit);
     }),
 });
 
