@@ -18,11 +18,12 @@
  */
 
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray, isNull, desc, gte, lte, sql } from "drizzle-orm";
 import {
   router,
+  publicProcedure,
   protectedProcedure,
   masterProcedure,
   storeReadProcedure,
@@ -43,6 +44,7 @@ import {
   posPayments,
   posOrderCounters,
   posDailyReconciliation,
+  posDevices,
   posMenuCategories,
   posMenuItems,
   posMenuOptionGroups,
@@ -105,6 +107,29 @@ function kstDateRange(date: string): { start: Date; end: Date } {
   const start = new Date(`${date}T00:00:00+09:00`);
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   return { start, end };
+}
+
+// ─── Device 페어링 (Phase 1 본문 #6) ─────────────────────────────────────────
+// 페어링 코드 메모리 캐시 (5분 TTL, 1회용). Railway 재배포 시 휘발 — 의도된 단순성.
+// 사용자가 5분 안에 재발급하면 됨.
+const pairingCodes = new Map<
+  string,
+  { deviceId: number; restaurantId: number; expiresAt: number }
+>();
+
+function cleanupExpiredPairingCodes(): void {
+  const now = Date.now();
+  for (const [code, info] of pairingCodes) {
+    if (info.expiresAt < now) pairingCodes.delete(code);
+  }
+}
+
+function generatePairingCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function hashToken(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -1275,32 +1300,163 @@ const paymentRouter = router({
 });
 
 // ─── 5) Device (POS 디바이스 등록/페어링) ────────────────────────────────────
+// ─── 5) Device (POS 디바이스 등록·페어링·토큰 인증) ─────────────────────────
+// 결정값 (docs/pos-p1-device-patch.md §0):
+//   - 페어링 코드: 6자리 숫자, 1회용, 5분 TTL, 메모리 캐시
+//   - 디바이스 토큰: raw는 클라가 보관, 서버는 SHA-256 해시만 DB 저장
+//   - pair / heartbeat: publicProcedure (토큰 자체가 인증)
 const deviceRouter = router({
-  list: storeOwnerProcedure.query(async () => {
-    throw NOT_IMPLEMENTED("device.list");
+  // ─── 목록 (점장 이상 + 활성화 게이트) ───────────────────────────
+  list: posStoreOwnerProcedure.query(async ({ ctx }) => {
+    const rows = await db
+      .select()
+      .from(posDevices)
+      .where(eq(posDevices.restaurantId, ctx.restaurantId))
+      .orderBy(desc(posDevices.createdAt));
+    // hash 자체는 노출 안 함, hasToken boolean으로 변환
+    return rows.map(({ deviceTokenHash, ...rest }) => ({
+      ...rest,
+      hasToken: deviceTokenHash !== null,
+    }));
   }),
-  create: storeOwnerProcedure
+
+  // ─── 등록 + 페어링 코드 발급 (점장 이상 + 활성화 게이트) ────────
+  create: posStoreOwnerProcedure
     .input(
       z.object({
         name: z.string().min(1).max(100),
         deviceType: z.enum(["staff_counter", "staff_table", "kiosk", "kds"]),
       })
     )
-    .mutation(async () => {
-      // TODO: 페어링 코드 1회용 발급(서버 메모리/캐시), 키오스크/KDS만 토큰 필요
-      throw NOT_IMPLEMENTED("device.create");
+    .mutation(async ({ ctx, input }) => {
+      cleanupExpiredPairingCodes();
+
+      const [result] = await db.insert(posDevices).values({
+        restaurantId: ctx.restaurantId,
+        name: input.name,
+        deviceType: input.deviceType,
+        isActive: true,
+      });
+      const deviceId = Number((result as { insertId: number }).insertId);
+
+      // 충돌 회피 (확률 매우 낮음)
+      let code = generatePairingCode();
+      let tries = 0;
+      while (pairingCodes.has(code) && tries < 20) {
+        code = generatePairingCode();
+        tries++;
+      }
+      if (pairingCodes.has(code)) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "페어링 코드 충돌. 다시 시도하세요.",
+        });
+      }
+
+      const expiresAt = Date.now() + 5 * 60 * 1000;
+      pairingCodes.set(code, {
+        deviceId,
+        restaurantId: ctx.restaurantId,
+        expiresAt,
+      });
+
+      return {
+        ok: true,
+        id: deviceId,
+        pairingCode: code,
+        expiresInSeconds: 300,
+      };
     }),
-  pair: protectedProcedure
-    .input(z.object({ pairingCode: z.string() }))
-    .mutation(async () => {
-      // TODO: 페어링 코드 → 디바이스 토큰 발급 (cookie+localStorage 저장)
-      throw NOT_IMPLEMENTED("device.pair");
+
+  // ─── 페어링 (디바이스가 직접 호출, 인증 없음) ──────────────────
+  pair: publicProcedure
+    .input(
+      z.object({
+        pairingCode: z.string().regex(/^\d{6}$/, "6자리 숫자"),
+      })
+    )
+    .mutation(async ({ input }) => {
+      cleanupExpiredPairingCodes();
+
+      const info = pairingCodes.get(input.pairingCode);
+      if (!info) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "페어링 코드가 잘못되었거나 만료되었습니다.",
+        });
+      }
+      pairingCodes.delete(input.pairingCode); // 1회용
+
+      // raw token = uuid-uuid (72자, 충돌 사실상 0)
+      const rawToken = `${randomUUID()}-${randomUUID()}`;
+      const hash = hashToken(rawToken);
+
+      await db
+        .update(posDevices)
+        .set({ deviceTokenHash: hash, lastSeenAt: new Date() })
+        .where(eq(posDevices.id, info.deviceId));
+
+      const [device] = await db
+        .select()
+        .from(posDevices)
+        .where(eq(posDevices.id, info.deviceId))
+        .limit(1);
+
+      return {
+        ok: true,
+        deviceId: info.deviceId,
+        deviceToken: rawToken,
+        deviceType: device?.deviceType ?? null,
+        restaurantId: info.restaurantId,
+      };
     }),
-  revoke: storeOwnerProcedure
-    .input(z.object({ id: z.number().int() }))
-    .mutation(async () => {
-      // TODO: deviceTokenHash 무효화
-      throw NOT_IMPLEMENTED("device.revoke");
+
+  // ─── 폐기 (점장 이상 + 활성화 게이트) ──────────────────────────
+  revoke: posStoreOwnerProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const [d] = await db
+        .select()
+        .from(posDevices)
+        .where(eq(posDevices.id, input.id))
+        .limit(1);
+      if (!d || d.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      await db
+        .update(posDevices)
+        .set({ deviceTokenHash: null, isActive: false })
+        .where(eq(posDevices.id, input.id));
+      return { ok: true };
+    }),
+
+  // ─── 디바이스 heartbeat (publicProcedure, 토큰이 인증) ──────────
+  heartbeat: publicProcedure
+    .input(z.object({ deviceToken: z.string().min(10) }))
+    .mutation(async ({ input }) => {
+      const hash = hashToken(input.deviceToken);
+      const [d] = await db
+        .select()
+        .from(posDevices)
+        .where(eq(posDevices.deviceTokenHash, hash))
+        .limit(1);
+      if (!d || !d.isActive) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "디바이스 토큰이 잘못되었거나 폐기되었습니다.",
+        });
+      }
+      await db
+        .update(posDevices)
+        .set({ lastSeenAt: new Date() })
+        .where(eq(posDevices.id, d.id));
+      return {
+        ok: true,
+        deviceId: d.id,
+        deviceType: d.deviceType,
+        restaurantId: d.restaurantId,
+        name: d.name,
+      };
     }),
 });
 
