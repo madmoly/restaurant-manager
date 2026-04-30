@@ -1052,11 +1052,17 @@ const orderRouter = router({
 });
 
 // ─── 4) Payment (결제 기록/취소) ──────────────────────────────────────────────
+// 결정값 (docs/pos-p1-payment-patch.md §0):
+//   - paid 자동 전이: 활성 결제 합계가 grandTotal과 정확히 일치할 때만. 초과는 거부.
+//   - voidPayment 후: paid 상태 + 합계 < grandTotal이면 paid → open 자동 되돌림.
+//                     ready/served 상태에서는 voidPayment 거부 (refund 사용).
+//   - approvalNo: 모든 providerType에서 옵션 입력 (1차).
 const paymentRouter = router({
-  record: storeWriteProcedure
+  // ─── 결제 기록 ──────────────────────────────────────────────
+  record: posStoreWriteProcedure
     .input(
       z.object({
-        orderId: z.number().int(),
+        orderId: z.number().int().positive(),
         method: z.enum([
           "card",
           "cash",
@@ -1067,7 +1073,9 @@ const paymentRouter = router({
           "external",
           "etc",
         ]),
-        amount: z.string(),
+        amount: z
+          .string()
+          .regex(/^\d+(\.\d{1,2})?$/, "결제 금액은 양수(소수점 둘째자리까지)"),
         providerType: z.enum([
           "external_dept_store",
           "terminal_bridge",
@@ -1079,18 +1087,182 @@ const paymentRouter = router({
         providerRef: z.string().max(200).optional(),
       })
     )
-    .mutation(async () => {
-      // TODO: 트랜잭션
-      // 1. posPayments insert
-      // 2. order.grandTotal == sum(payments.amount) 이면 status open→paid, paidAt=now
-      // 3. external_dept_store 일 때 approvalNo 선택. 천호점은 미입력 허용
-      throw NOT_IMPLEMENTED("payment.record");
+    .mutation(async ({ ctx, input }) => {
+      const amountNum = Number(input.amount);
+      if (amountNum <= 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "결제 금액은 0보다 커야 합니다. 환불은 pos.order.refund 사용.",
+        });
+      }
+
+      return db.transaction(async (tx) => {
+        // 주문 조회 + 매장 일치 검증
+        const [order] = await tx
+          .select()
+          .from(posOrders)
+          .where(eq(posOrders.id, input.orderId))
+          .limit(1);
+        if (!order || order.restaurantId !== ctx.restaurantId) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "주문을 찾을 수 없습니다.",
+          });
+        }
+
+        // 상태 검증: open/paid 만 결제 추가 가능
+        // (paid 상태에서 추가 결제는 over-pay이므로 합계 검증에서 거부됨)
+        if (order.status !== "open" && order.status !== "paid") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `현재 주문 상태=${order.status}. open 또는 paid 상태에서만 결제 가능.`,
+          });
+        }
+
+        // 기존 활성 결제 합계
+        const existing = await tx
+          .select({ amount: posPayments.amount })
+          .from(posPayments)
+          .where(
+            and(
+              eq(posPayments.orderId, input.orderId),
+              isNull(posPayments.voidedAt)
+            )
+          );
+        const existingTotal = existing.reduce(
+          (s, p) => s + Number(p.amount),
+          0
+        );
+        const newTotal = existingTotal + amountNum;
+        const grandTotal = Number(order.grandTotal);
+
+        // over-pay 거부
+        if (newTotal > grandTotal) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `결제 합계(${newTotal.toFixed(2)})가 주문 금액(${grandTotal.toFixed(2)})을 초과합니다. 남은 금액: ${(grandTotal - existingTotal).toFixed(2)}`,
+          });
+        }
+
+        // 결제 레코드 추가
+        const [pResult] = await tx.insert(posPayments).values({
+          orderId: input.orderId,
+          method: input.method,
+          amount: input.amount,
+          providerType: input.providerType,
+          approvalNo: input.approvalNo ?? null,
+          cardBrand: input.cardBrand ?? null,
+          providerRef: input.providerRef ?? null,
+          createdByUserId: ctx.user.userId,
+        });
+        const paymentId = Number(
+          (pResult as { insertId: number }).insertId
+        );
+
+        // 합계 정확히 일치하면 paid 자동 전이
+        let newStatus = order.status;
+        if (newTotal === grandTotal && order.status === "open") {
+          newStatus = "paid";
+          await tx
+            .update(posOrders)
+            .set({ status: "paid", paidAt: new Date() })
+            .where(eq(posOrders.id, input.orderId));
+        }
+
+        return {
+          ok: true,
+          paymentId,
+          paid: newTotal.toFixed(2),
+          remaining: (grandTotal - newTotal).toFixed(2),
+          orderStatus: newStatus,
+          autoTransitioned: newStatus !== order.status,
+        };
+      });
     }),
-  voidPayment: storeManagerProcedure
-    .input(z.object({ id: z.number().int() }))
-    .mutation(async () => {
-      // TODO: voidedAt=now, order 합계 재계산
-      throw NOT_IMPLEMENTED("payment.voidPayment");
+
+  // ─── 결제 취소 ──────────────────────────────────────────────
+  voidPayment: posStoreManagerProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        reason: z.string().max(200).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return db.transaction(async (tx) => {
+        // 결제 조회
+        const [payment] = await tx
+          .select()
+          .from(posPayments)
+          .where(eq(posPayments.id, input.id))
+          .limit(1);
+        if (!payment) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "결제 레코드를 찾을 수 없습니다.",
+          });
+        }
+        if (payment.voidedAt) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "이미 취소된 결제입니다.",
+          });
+        }
+
+        // 주문 조회 + 매장 일치 검증
+        const [order] = await tx
+          .select()
+          .from(posOrders)
+          .where(eq(posOrders.id, payment.orderId))
+          .limit(1);
+        if (!order || order.restaurantId !== ctx.restaurantId) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+
+        // ready/served 상태에서는 voidPayment 거부 → refund 사용
+        if (order.status === "ready" || order.status === "served") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `현재 상태=${order.status}. 조리/제공 후에는 voidPayment 불가. pos.order.refund 사용.`,
+          });
+        }
+
+        // 결제 취소
+        await tx
+          .update(posPayments)
+          .set({ voidedAt: new Date() })
+          .where(eq(posPayments.id, input.id));
+
+        // 활성 결제 합계 재계산
+        const sums = await tx
+          .select({ amount: posPayments.amount })
+          .from(posPayments)
+          .where(
+            and(
+              eq(posPayments.orderId, payment.orderId),
+              isNull(posPayments.voidedAt)
+            )
+          );
+        const total = sums.reduce((s, p) => s + Number(p.amount), 0);
+        const grandTotal = Number(order.grandTotal);
+
+        // paid 상태에서 합계 < grandTotal이면 open으로 되돌림
+        let newStatus: typeof order.status = order.status;
+        if (order.status === "paid" && total < grandTotal) {
+          newStatus = "open";
+          await tx
+            .update(posOrders)
+            .set({ status: "open", paidAt: null })
+            .where(eq(posOrders.id, payment.orderId));
+        }
+
+        return {
+          ok: true,
+          remaining: (grandTotal - total).toFixed(2),
+          orderStatus: newStatus,
+          autoReverted: newStatus !== order.status,
+        };
+      });
     }),
 });
 
