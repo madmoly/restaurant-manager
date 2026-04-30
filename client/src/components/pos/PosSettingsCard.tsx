@@ -5,13 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -20,6 +13,13 @@ import {
 } from "@/components/ui/dialog";
 import { Settings } from "lucide-react";
 import { toast } from "sonner";
+import {
+  STYLE_PRESET_LABEL,
+  ORDER_MODE_LABEL,
+  PAYMENT_PROVIDER_LABEL,
+  KITCHEN_ROUTER_LABEL,
+  labelOf,
+} from "@/lib/posLabels";
 
 const STYLE_PRESETS = [
   { value: "DEPT_PICKUP", label: "백화점 선불 셀프픽업" },
@@ -105,21 +105,23 @@ export function PosSettingsCard({ restaurantId, canEdit }: Props) {
             </Badge>
             {data?.posStylePreset && (
               <Badge variant="outline" className="text-xs">
-                {data.posStylePreset}
+                {labelOf(STYLE_PRESET_LABEL, data.posStylePreset)}
               </Badge>
             )}
           </div>
           <dl className="text-xs grid grid-cols-2 gap-y-1.5">
             <dt className="text-muted-foreground">주문 모드</dt>
             <dd className="text-foreground">
-              {data?.posDefaultOrderMode ?? "-"}
+              {labelOf(ORDER_MODE_LABEL, data?.posDefaultOrderMode)}
             </dd>
             <dt className="text-muted-foreground">결제 처리</dt>
             <dd className="text-foreground">
-              {data?.posPaymentProvider ?? "-"}
+              {labelOf(PAYMENT_PROVIDER_LABEL, data?.posPaymentProvider)}
             </dd>
             <dt className="text-muted-foreground">주방 라우터</dt>
-            <dd className="text-foreground">{data?.posKitchenRouter ?? "-"}</dd>
+            <dd className="text-foreground">
+              {labelOf(KITCHEN_ROUTER_LABEL, data?.posKitchenRouter)}
+            </dd>
             <dt className="text-muted-foreground">대조 허용 오차</dt>
             <dd className="text-foreground tabular-nums">
               {(data?.posReconcileTolerance ?? 0).toLocaleString("ko-KR")}원
@@ -156,28 +158,35 @@ export function PosSettingsCard({ restaurantId, canEdit }: Props) {
         </div>
       )}
 
-      {/* 프리셋 변경 다이얼로그 */}
+      {/* 프리셋 변경 다이얼로그 — 라디오 카드 */}
       <Dialog open={presetDialogOpen} onOpenChange={setPresetDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>매장 스타일 프리셋 변경</DialogTitle>
           </DialogHeader>
           <div className="space-y-2 py-2">
-            <Select
-              value={selectedPreset}
-              onValueChange={(v) => setSelectedPreset(v as StylePreset)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STYLE_PRESETS.map((p) => (
-                  <SelectItem key={p.value} value={p.value}>
-                    {p.label} ({p.value})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="grid grid-cols-1 gap-2">
+              {STYLE_PRESETS.map((p) => (
+                <label
+                  key={p.value}
+                  className={`flex items-center p-3 border rounded cursor-pointer transition-colors ${
+                    selectedPreset === p.value
+                      ? "border-primary bg-primary/5"
+                      : "hover:bg-muted/50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="settings-preset"
+                    value={p.value}
+                    checked={selectedPreset === p.value}
+                    onChange={() => setSelectedPreset(p.value)}
+                    className="mr-3"
+                  />
+                  <div className="font-medium text-sm">{p.label}</div>
+                </label>
+              ))}
+            </div>
             <p className="text-[11px] text-muted-foreground">
               프리셋을 변경하면 주문 모드·결제·주방·허용오차가 모두 새 값으로
               덮어씁니다. 기존 미세조정은 사라집니다.

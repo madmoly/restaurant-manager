@@ -4,13 +4,6 @@ import { Card } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -19,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Power } from "lucide-react";
 import { toast } from "sonner";
+import { STYLE_PRESET_SHORT, labelOf } from "@/lib/posLabels";
 
 const STYLE_PRESETS = [
   { value: "DEPT_PICKUP", label: "백화점 선불 셀프픽업" },
@@ -95,13 +89,18 @@ export function PosToggleCard() {
                   <p className="text-sm font-medium text-foreground truncate">
                     {r.name}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">id: {r.id}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    매장 ID: {r.id}
+                  </p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0 ml-3">
                   {enabled ? (
                     <>
                       <Badge variant="default" className="text-xs">
-                        활성{preset ? ` · ${preset}` : ""}
+                        활성
+                        {preset
+                          ? ` · ${labelOf(STYLE_PRESET_SHORT, preset)}`
+                          : ""}
                       </Badge>
                       <Button
                         size="sm"
@@ -139,6 +138,7 @@ export function PosToggleCard() {
         </div>
       )}
 
+      {/* 활성화 다이얼로그 — 라디오 카드 */}
       <Dialog
         open={!!enableTarget}
         onOpenChange={(open) => !open && setEnableTarget(null)}
@@ -148,22 +148,29 @@ export function PosToggleCard() {
             <DialogTitle>POS 활성화 — {enableTarget?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-2 py-2">
-            <label className="text-sm font-medium">매장 스타일 프리셋</label>
-            <Select
-              value={stylePreset}
-              onValueChange={(v) => setStylePreset(v as StylePreset)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STYLE_PRESETS.map((p) => (
-                  <SelectItem key={p.value} value={p.value}>
-                    {p.label} ({p.value})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="text-sm font-medium">매장 스타일 프리셋</div>
+            <div className="grid grid-cols-1 gap-2">
+              {STYLE_PRESETS.map((p) => (
+                <label
+                  key={p.value}
+                  className={`flex items-center p-3 border rounded cursor-pointer transition-colors ${
+                    stylePreset === p.value
+                      ? "border-primary bg-primary/5"
+                      : "hover:bg-muted/50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="enable-preset"
+                    value={p.value}
+                    checked={stylePreset === p.value}
+                    onChange={() => setStylePreset(p.value)}
+                    className="mr-3"
+                  />
+                  <div className="font-medium text-sm">{p.label}</div>
+                </label>
+              ))}
+            </div>
             <p className="text-[11px] text-muted-foreground">
               프리셋 선택 시 주문 모드·결제 처리기·주방 라우터·허용 오차가 자동
               적용됩니다. 점장이 추후 변경 가능.
