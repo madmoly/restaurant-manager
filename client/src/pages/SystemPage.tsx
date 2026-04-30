@@ -3,6 +3,7 @@ import { trpc } from "../lib/trpc";
 import { Card, StatCard, PageHeader } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PosToggleCard } from "@/components/pos/PosToggleCard";
 import { ROLE_LABELS } from "@shared/permissions";
 import {
   AlertTriangle, Monitor, User, Store, Calendar, ChevronDown, ChevronUp,
@@ -543,32 +544,35 @@ function SettingsTab() {
   });
 
   return (
-    <Card className="p-5">
-      <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4"><Settings size={14} className="text-primary" /> 시스템 설정</h3>
-      <div className="space-y-2">
-        {settings?.map((s: any) => (
-          <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border border-border">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">{s.settingKey}</p>
-              <p className="text-[10px] text-muted-foreground">{s.description || "-"}</p>
+    <div className="space-y-4">
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4"><Settings size={14} className="text-primary" /> 시스템 설정</h3>
+        <div className="space-y-2">
+          {settings?.map((s: any) => (
+            <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border border-border">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">{s.settingKey}</p>
+                <p className="text-[10px] text-muted-foreground">{s.description || "-"}</p>
+              </div>
+              {editKey === s.settingKey ? (
+                <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                  <input value={editValue} onChange={e => setEditValue(e.target.value)} className="w-32 px-2 py-1 border border-border rounded text-xs bg-background text-foreground" />
+                  <Button size="sm" className="h-7 text-xs" onClick={() => updateMut.mutate({ key: s.settingKey, value: editValue })} disabled={updateMut.isPending}>저장</Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditKey(null)}>취소</Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 shrink-0 ml-3">
+                  <Badge variant="secondary" className="text-xs tabular-nums">{s.settingValue}</Badge>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setEditKey(s.settingKey); setEditValue(s.settingValue ?? ""); }}>수정</Button>
+                </div>
+              )}
             </div>
-            {editKey === s.settingKey ? (
-              <div className="flex items-center gap-1.5 shrink-0 ml-3">
-                <input value={editValue} onChange={e => setEditValue(e.target.value)} className="w-32 px-2 py-1 border border-border rounded text-xs bg-background text-foreground" />
-                <Button size="sm" className="h-7 text-xs" onClick={() => updateMut.mutate({ key: s.settingKey, value: editValue })} disabled={updateMut.isPending}>저장</Button>
-                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditKey(null)}>취소</Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 shrink-0 ml-3">
-                <Badge variant="secondary" className="text-xs tabular-nums">{s.settingValue}</Badge>
-                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setEditKey(s.settingKey); setEditValue(s.settingValue ?? ""); }}>수정</Button>
-              </div>
-            )}
-          </div>
-        ))}
-        {(!settings || settings.length === 0) && <p className="text-xs text-muted-foreground text-center py-6">설정 항목이 없습니다</p>}
-      </div>
-    </Card>
+          ))}
+          {(!settings || settings.length === 0) && <p className="text-xs text-muted-foreground text-center py-6">설정 항목이 없습니다</p>}
+        </div>
+      </Card>
+      <PosToggleCard />
+    </div>
   );
 }
 

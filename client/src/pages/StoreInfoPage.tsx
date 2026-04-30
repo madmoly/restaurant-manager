@@ -8,6 +8,7 @@ import {
   MoreHorizontal, Info, ImagePlus, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PosSettingsCard } from "@/components/pos/PosSettingsCard";
 
 const CARD_TYPES = [
   { value: "notice", label: "공지", icon: Megaphone, color: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800" },
@@ -57,6 +58,11 @@ export default function StoreInfoPage() {
 
   return (
     <div className="max-w-2xl mx-auto py-6 px-4 space-y-4">
+      {/* POS 설정 카드 — 매장이 선택돼있을 때만 */}
+      {restaurantId > 0 && (
+        <PosSettingsCard restaurantId={restaurantId} canEdit={isManager} />
+      )}
+
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

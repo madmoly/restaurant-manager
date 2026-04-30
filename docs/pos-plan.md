@@ -1,7 +1,15 @@
-# POS 시스템 기획·설계 (v0.5 초안)
+# POS 시스템 기획·설계 (v0.6)
 
-> 작성: 2026-04-19 (v0.1) · 갱신: 2026-04-19 (v0.2, v0.3, v0.4, v0.5)
-> 상태: **P1 스키마+라우터 골격 push 완료(38969df)**. 본문 채우기 단계. 천호점 파일럿 기준 범위 확정.
+> 작성: 2026-04-19 (v0.1) · 갱신: 2026-04-19 (v0.2~v0.5), 2026-04-30 (v0.6)
+> 상태: **🎯 P1 백엔드 100% 완료**. 36 endpoint, 59/59 시연 통과. P2 UI 진입 단계.
+>
+> **v0.6 변경 요약 (2026-04-30)**
+> - P1 백엔드 6 PR 모두 push + 시연 통과 (settings 5/5, menu 12/12, order 12/12, payment 10/10, reconciliation 9/9, device 11/11)
+> - §15 P1 백엔드 완료 인벤토리 신설 (commit + endpoint + 시연 결과 표)
+> - §11 파일럿 전환 계획에서 P1 종료 마크, P2 단계 시작 명시
+> - §13 오픈 이슈 정리: P1 단계 모두 해소
+> - 후속 문서 분리: `docs/pos-p2-ui-plan.md` (P2 UI 설계)
+>
 >
 > **v0.5 변경 요약 (2026-04-19)**
 > - **POS 활성화 권한 master 전용 게이트 신설** (사용자 결정)
@@ -448,3 +456,59 @@ interface KitchenRouter {
 - 기존 매장의 프리셋 변경은 `ownerProcedure` 이상만 가능
 - 변경 시 미완료(`open`/`paid`) 주문이 있으면 거부
 - 변경 이력은 `audit_logs`에 보존
+
+---
+
+## 15. P1 백엔드 완료 인벤토리 (2026-04-30)
+
+### 15.1 PR·시연 결과
+
+| 본문 | endpoint | 시연 | commit | 패치 문서 |
+|---|---|---|---|---|
+| #1 settings | 5 | 5/5 | `ebe32ae` | `pos-p1-settings-enable-patch.md` |
+| #2 menu | 12 | 12/12 | `f8c52e0` | `pos-p1-menu-patch.md` |
+| #3 order | 7 | 12/12 | `b610e17` | `pos-p1-order-patch.md` |
+| #4 payment | 2 | 10/10 | `3a013b2` | `pos-p1-payment-patch.md` |
+| #5 reconciliation | 5 | 9/9 | `f8e4596` | `pos-p1-reconciliation-patch.md` |
+| #6 device | 5 | 11/11 | `b60e584` | `pos-p1-device-patch.md` |
+| **합계** | **36 endpoint** | **59/59** | 6 PR | — |
+
+기반 PR: `38969df` (스키마 12 테이블 + restaurants 6컬럼 + 라우터 골격). 추가: `676ff97` (audit 보고서 동행).
+
+### 15.2 검증된 핵심 인프라
+
+- **활성화 게이트**: `posStoreRead/Write/Manager/OwnerProcedure` 4종 합성. 마스터만 enable/disable, 비활성 매장 자동 차단.
+- **트랜잭션**: `order.create` (채번+orders+items+options), `payment.record` (insert+합계검증+paid 전이), `order.refund` (음수 결제+상태 전이) 모두 atomic.
+- **멱등성**: `order.create` `idempotencyKey` + `posOrders.uuid` UNIQUE. 동일 키 재호출 시 1번째 결과 반환.
+- **채번**: KST 일일 4자리 zero-pad (`pos_order_counters` `INSERT ... ON DUPLICATE KEY UPDATE` 원자 증분). 멱등 호출 시 카운터 안 셈.
+- **가격 안전성**: `order.create`에서 `unitPrice` 받지 않음. 서버가 `pos_menu_items.price` + `pos_menu_options.priceDelta` 재계산. N+1 방지(`resolvePricedItems` 일괄 SELECT).
+- **상태머신**: `open / paid / ready / served / voided / refunded` — 전이 검증 + 메시지 명확.
+- **결제 자동 전이**: `payment.record` 합계 정확 일치 시 paid 자동, voidPayment 시 paid → open 자동 되돌림. ready/served는 voidPayment 거부 → refund 사용.
+- **일일 대조**: `getOrCreate` 활성 결제 자동 집계, KST `[start, end)` 24h range. 임계치 초과는 경고만(`posReconcileTolerance`). master만 unconfirm.
+- **디바이스 인증**: 6자리 1회용 페어링 코드 + 5분 TTL + 메모리 캐시. UUID-UUID 72자 raw token, SHA-256 해시 DB 저장. `heartbeat`로 lastSeenAt 갱신, `revoke`로 무력화.
+- **매장 격리**: 모든 mutation/query에서 `restaurantId` 일치 검증. 메뉴→옵션, 주문→메뉴 등 다단계 검증.
+
+### 15.3 1차 운영 적용 상태
+
+- 천호점(id=2) `DEPT_PICKUP` 활성화 완료 (`posReconcileTolerance: 5000`).
+- 7개 매장 중 천호점만 `posEnabled: true`. 나머지(광명AK, 서울숲, 강남, 수원AK 2개, 덕평, 딤섬) 모두 비활성 상태로 단계적 롤아웃 대기.
+- 시연 잔존 데이터: `pos_devices` 1건(revoked), 시연 주문 일부, 일일 대조 1건. 운영 무관.
+
+### 15.4 P1 잔여 작업 (없음)
+
+- 38 endpoint 시그니처 모두 본문 채움. NOT_IMPLEMENTED stub 0개.
+- 모든 본문 트랜잭션·검증·게이트 적용.
+- 후속 보강 가능 항목(non-blocking):
+  - `order.create` idempotency race window (현재 pre-check만)
+  - 페어링 코드 brute force rate limit
+  - `getOrCreate` query 내 INSERT/UPDATE를 mutation으로 전환할지
+
+### 15.5 P2 진입 조건
+
+다음 모두 충족 (현재 충족):
+- ✅ P1 백엔드 36 endpoint 시연 통과
+- ✅ Railway prod 배포 안정
+- ✅ master 활성화 게이트 동작 검증
+- ✅ 천호점 파일럿 매장 활성화 완료
+
+다음 단계: **`docs/pos-p2-ui-plan.md`** 작성 → UI 구현 핸드오프 → P2 시작.
