@@ -1,11 +1,17 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import { toast } from "sonner";
 import {
   X, Upload, Loader2, CheckCircle2, AlertTriangle, AlertCircle,
-  ImageIcon, Trash2, FileText,
+  Trash2, FileText, Link2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  spreadsheetToText,
+  isSpreadsheetFile,
+  isImageOrPdfFile,
+  type SpreadsheetExtractResult,
+} from "../lib/spreadsheetToText";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
 interface OcrItem {
@@ -60,7 +66,16 @@ interface Props {
 }
 
 type Step = "upload" | "result";
-type ActionType = "add_to_system" | "update_amount" | "dismiss";
+type ActionType = "link_alias" | "add_to_system" | "update_amount" | "dismiss";
+
+// 입력 모드: 이미지/PDF는 업로드 후 imageUrls 사용, Excel/CSV는 클라이언트에서 spreadsheetText로 변환
+type InputMode = "image" | "spreadsheet";
+
+// 클라이언트에서 보관하는 정산표 입력 (이미지 URL or 스프레드시트 추출 결과)
+interface SpreadsheetInput {
+  fileName: string;
+  result: SpreadsheetExtractResult;
+}
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
 export default function SettlementStatementCompareModal({
@@ -73,6 +88,7 @@ export default function SettlementStatementCompareModal({
 }: Props) {
   const [step, setStep] = useState<Step>("upload");
   const [uploadedUrls, setUploadedUrls] = useState<string[]>([]);
+  const [spreadsheet, setSpreadsheet] = useState<SpreadsheetInput | null>(null);
   const [uploading, setUploading] = useState(false);
   const [ocrProcessing, setOcrProcessing] = useState(false);
   const [selectedCpId, setSelectedCpId] = useState<number | null>(initialCounterpartyId ?? null);
@@ -80,6 +96,8 @@ export default function SettlementStatementCompareModal({
   const [comparison, setComparison] = useState<CompareResult | null>(null);
   const [auditId, setAuditId] = useState<number | null>(null);
   const [selectedActions, setSelectedActions] = useState<Map<string, ActionType>>(new Map());
+  // link_alias 액션이 가리키는 마스터 items.id (idx → itemId)
+  const [aliasTargets, setAliasTargets] = useState<Map<number, number>>(new Map());
   const [applying, setApplying] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -87,20 +105,68 @@ export default function SettlementStatementCompareModal({
     { restaurantId },
     { enabled: restaurantId > 0 }
   );
+  const itemsQuery = trpc.items.list.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 }
+  );
   const compareMutation = trpc.settlementStatements.compareAndSave.useMutation();
   const applyMutation = trpc.settlementStatements.applySelectedActions.useMutation();
 
+  // 입력 모드 도출 (둘 다 비어있으면 기본 image)
+  const inputMode: InputMode = spreadsheet ? "spreadsheet" : "image";
+  const hasInput = uploadedUrls.length > 0 || !!spreadsheet;
+
   // ─── 업로드 ───────────────────────────────────────────────────────────────
+  // 확장자별 분기:
+  //   - 이미지/PDF: /api/upload/settlement-image 거쳐 URL 받음 (Vision 모드)
+  //   - Excel/CSV: 클라이언트에서 SheetJS dump → spreadsheetText (텍스트 모드)
+  // 두 모드는 상호 배타적 — 새 모드 파일이 들어오면 기존 입력은 초기화.
   const handleFileSelect = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    const arr = Array.from(files);
+
+    // 모드 판정 (혼합 업로드 거부)
+    const sheetFiles = arr.filter(isSpreadsheetFile);
+    const imageFiles = arr.filter((f) => !isSpreadsheetFile(f) && isImageOrPdfFile(f));
+    const unknownFiles = arr.filter((f) => !isSpreadsheetFile(f) && !isImageOrPdfFile(f));
+    if (unknownFiles.length > 0) {
+      toast.error(`지원하지 않는 형식: ${unknownFiles.map((f) => f.name).join(", ")}`);
+      return;
+    }
+    if (sheetFiles.length > 0 && (imageFiles.length > 0 || uploadedUrls.length > 0)) {
+      toast.error("Excel/CSV와 이미지/PDF를 한 번에 업로드할 수 없습니다. 한 모드만 사용해주세요.");
+      return;
+    }
+    if (imageFiles.length > 0 && spreadsheet) {
+      toast.error("이미 Excel/CSV가 등록되어 있습니다. 먼저 제거 후 이미지를 업로드해주세요.");
+      return;
+    }
+
     setUploading(true);
     try {
-      const newUrls: string[] = [];
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith("image/")) {
-          toast.error(`이미지 파일만 업로드 가능합니다: ${file.name}`);
-          continue;
+      // 1) Excel/CSV 모드 — 첫 파일만 사용 (다중 파일은 후속 과제)
+      if (sheetFiles.length > 0) {
+        if (sheetFiles.length > 1) {
+          toast.warning("Excel/CSV는 한 번에 한 파일만 처리됩니다. 첫 파일만 사용합니다.");
         }
+        const file = sheetFiles[0];
+        const result = await spreadsheetToText(file);
+        if (!result.text) {
+          toast.error("스프레드시트에서 데이터를 추출하지 못했습니다. 빈 시트인지 확인해주세요.");
+          return;
+        }
+        setSpreadsheet({ fileName: file.name, result });
+        if (result.truncated) {
+          toast.warning(
+            `용량이 커서 일부 시트가 잘렸습니다 (${result.truncatedSheetNames?.join(", ")}). 파일을 분할 업로드해주세요.`
+          );
+        }
+        return;
+      }
+
+      // 2) 이미지/PDF 모드 — 다중 업로드
+      const newUrls: string[] = [];
+      for (const file of imageFiles) {
         const form = new FormData();
         form.append("file", file);
         const res = await fetch("/api/upload/settlement-image", { method: "POST", body: form });
@@ -120,24 +186,33 @@ export default function SettlementStatementCompareModal({
     setUploadedUrls((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const removeSpreadsheet = () => {
+    setSpreadsheet(null);
+  };
+
   // ─── OCR + 비교 실행 ───────────────────────────────────────────────────────
   const handleAnalyze = async () => {
-    if (uploadedUrls.length === 0) {
-      toast.error("이미지를 1장 이상 업로드해주세요");
+    if (!hasInput) {
+      toast.error("이미지·PDF 또는 Excel/CSV 파일을 업로드해주세요");
       return;
     }
     setOcrProcessing(true);
     try {
-      // 1) OCR 호출
+      // 1) OCR 호출 — 모드별 페이로드 분기
+      const payload: Record<string, unknown> = {
+        restaurantId,
+        hintCounterpartyId: selectedCpId ?? undefined,
+        hintYearMonth: yearMonth,
+      };
+      if (inputMode === "image") {
+        payload.imageUrls = uploadedUrls;
+      } else {
+        payload.spreadsheetText = spreadsheet?.result.text ?? "";
+      }
       const ocrRes = await fetch("/api/ocr/extract-statement", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageUrls: uploadedUrls,
-          restaurantId,
-          hintCounterpartyId: selectedCpId ?? undefined,
-          hintYearMonth: yearMonth,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!ocrRes.ok) {
         const err = await ocrRes.json().catch(() => ({}));
@@ -172,7 +247,7 @@ export default function SettlementStatementCompareModal({
       restaurantId,
       counterpartyId: cpId,
       yearMonth: finalYearMonth,
-      imageUrl: uploadedUrls[0],
+      imageUrl: inputMode === "image" ? uploadedUrls[0] : undefined,
       ocrRawData: ocr,
       items: ocr.items,
       monthlySummary: ocr.monthlySummary,
@@ -215,10 +290,18 @@ export default function SettlementStatementCompareModal({
   const handleApply = async () => {
     if (!auditId || !comparison?.items) return;
     const actions: any[] = [];
+    const missingAliasTargets: number[] = [];
     comparison.items.forEach((row, idx) => {
       const action = selectedActions.get(itemKey(idx));
       if (!action) return;
-      if (action === "add_to_system" && row.ocrItem) {
+      if (action === "link_alias" && row.ocrItem) {
+        const targetItemId = aliasTargets.get(idx);
+        if (!targetItemId) {
+          missingAliasTargets.push(idx);
+          return;
+        }
+        actions.push({ type: "link_alias", ocrItem: row.ocrItem, targetItemId });
+      } else if (action === "add_to_system" && row.ocrItem) {
         actions.push({ type: "add_to_system", ocrItem: row.ocrItem });
       } else if (action === "update_amount" && row.ocrItem && row.systemItem) {
         actions.push({
@@ -230,6 +313,10 @@ export default function SettlementStatementCompareModal({
         actions.push({ type: "dismiss", note: `idx=${idx}` });
       }
     });
+    if (missingAliasTargets.length > 0) {
+      toast.error("alias로 연결할 마스터 품목을 선택해주세요");
+      return;
+    }
     if (actions.length === 0) {
       toast.error("적용할 항목을 선택해주세요");
       return;
@@ -245,6 +332,16 @@ export default function SettlementStatementCompareModal({
     } finally {
       setApplying(false);
     }
+  };
+
+  // alias 타겟 itemId 변경
+  const setAliasTarget = (idx: number, itemId: number | null) => {
+    setAliasTargets((prev) => {
+      const next = new Map(prev);
+      if (itemId == null) next.delete(idx);
+      else next.set(idx, itemId);
+      return next;
+    });
   };
 
   // ─── 렌더링 ───────────────────────────────────────────────────────────────
@@ -270,6 +367,7 @@ export default function SettlementStatementCompareModal({
           {step === "upload" && (
             <UploadStep
               uploadedUrls={uploadedUrls}
+              spreadsheet={spreadsheet}
               uploading={uploading}
               ocrProcessing={ocrProcessing}
               fileInputRef={fileInputRef}
@@ -277,7 +375,8 @@ export default function SettlementStatementCompareModal({
               selectedCpId={selectedCpId}
               setSelectedCpId={setSelectedCpId}
               onFileSelect={handleFileSelect}
-              onRemove={removeImage}
+              onRemoveImage={removeImage}
+              onRemoveSpreadsheet={removeSpreadsheet}
             />
           )}
 
@@ -287,8 +386,11 @@ export default function SettlementStatementCompareModal({
               comparison={comparison}
               selectedCpId={selectedCpId}
               counterpartyOptions={counterpartiesQuery.data ?? []}
+              itemOptions={itemsQuery.data ?? []}
               selectedActions={selectedActions}
+              aliasTargets={aliasTargets}
               onToggleAction={toggleAction}
+              onAliasTargetChange={setAliasTarget}
               onSelectCp={handleSelectCpAndRerun}
               ocrProcessing={ocrProcessing}
             />
@@ -310,7 +412,14 @@ export default function SettlementStatementCompareModal({
           )}
           {step === "result" && (
             <>
-              <Button variant="outline" onClick={() => { setStep("upload"); setComparison(null); setOcrResult(null); setAuditId(null); setSelectedActions(new Map()); }}>
+              <Button variant="outline" onClick={() => {
+                setStep("upload");
+                setComparison(null);
+                setOcrResult(null);
+                setAuditId(null);
+                setSelectedActions(new Map());
+                setAliasTargets(new Map());
+              }}>
                 다시 업로드
               </Button>
               {comparison?.level === "item_mismatch" && (
@@ -332,6 +441,7 @@ export default function SettlementStatementCompareModal({
 // ─── Step 1: 업로드 ───────────────────────────────────────────────────────────
 function UploadStep({
   uploadedUrls,
+  spreadsheet,
   uploading,
   ocrProcessing,
   fileInputRef,
@@ -339,9 +449,11 @@ function UploadStep({
   selectedCpId,
   setSelectedCpId,
   onFileSelect,
-  onRemove,
+  onRemoveImage,
+  onRemoveSpreadsheet,
 }: {
   uploadedUrls: string[];
+  spreadsheet: SpreadsheetInput | null;
   uploading: boolean;
   ocrProcessing: boolean;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
@@ -349,7 +461,8 @@ function UploadStep({
   selectedCpId: number | null;
   setSelectedCpId: (id: number | null) => void;
   onFileSelect: (files: FileList | null) => void;
-  onRemove: (idx: number) => void;
+  onRemoveImage: (idx: number) => void;
+  onRemoveSpreadsheet: () => void;
 }) {
   return (
     <div className="space-y-4">
@@ -371,15 +484,15 @@ function UploadStep({
       </div>
 
       <div>
-        <label className="text-sm font-medium text-foreground">정산표 이미지</label>
+        <label className="text-sm font-medium text-foreground">정산표 파일</label>
         <p className="text-xs text-muted-foreground mb-2">
-          긴 정산표는 페이지별로 캡처하여 여러 장 업로드 가능합니다.
+          이미지/PDF는 여러 장, Excel/CSV는 한 파일. 모드 혼합 업로드는 지원하지 않습니다.
         </p>
 
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept=".jpg,.jpeg,.png,.heic,.heif,.pdf,.xlsx,.xls,.csv,image/*,application/pdf"
           multiple
           className="hidden"
           onChange={(e) => { onFileSelect(e.target.files); e.target.value = ""; }}
@@ -398,12 +511,15 @@ function UploadStep({
               <Upload className="w-6 h-6 text-muted-foreground" />
             )}
             <span className="text-sm text-foreground">
-              {uploading ? "업로드 중..." : "이미지 선택 또는 클릭"}
+              {uploading ? "처리 중..." : "파일 선택 또는 클릭"}
             </span>
-            <span className="text-xs text-muted-foreground">정방향 촬영, 그림자 회피</span>
+            <span className="text-xs text-muted-foreground">
+              사진/PDF (정방향 촬영) · Excel/CSV (디지털 발행)
+            </span>
           </div>
         </button>
 
+        {/* 이미지/PDF 미리보기 */}
         {uploadedUrls.length > 0 && (
           <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
             {uploadedUrls.map((url, idx) => (
@@ -414,7 +530,7 @@ function UploadStep({
                   className="w-full h-24 object-cover rounded border border-border"
                 />
                 <button
-                  onClick={() => onRemove(idx)}
+                  onClick={() => onRemoveImage(idx)}
                   className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <Trash2 className="w-2.5 h-2.5" />
@@ -424,6 +540,27 @@ function UploadStep({
                 </span>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Excel/CSV 카드 */}
+        {spreadsheet && (
+          <div className="mt-3 border border-border rounded-lg p-3 bg-muted/20 flex items-start gap-2">
+            <FileText className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0 text-xs">
+              <div className="font-medium text-foreground truncate">{spreadsheet.fileName}</div>
+              <div className="text-muted-foreground mt-0.5">
+                시트 {spreadsheet.result.sheetCount}개 · 약 {spreadsheet.result.text.length.toLocaleString()}자
+                {spreadsheet.result.truncated && " · 일부 잘림"}
+              </div>
+            </div>
+            <button
+              onClick={onRemoveSpreadsheet}
+              className="p-1 rounded hover:bg-accent shrink-0"
+              title="제거"
+            >
+              <Trash2 className="w-4 h-4 text-muted-foreground" />
+            </button>
           </div>
         )}
       </div>
@@ -437,8 +574,11 @@ function ResultStep({
   comparison,
   selectedCpId,
   counterpartyOptions,
+  itemOptions,
   selectedActions,
+  aliasTargets,
   onToggleAction,
+  onAliasTargetChange,
   onSelectCp,
   ocrProcessing,
 }: {
@@ -446,8 +586,11 @@ function ResultStep({
   comparison: CompareResult | null;
   selectedCpId: number | null;
   counterpartyOptions: any[];
-  selectedActions: Map<string, "add_to_system" | "update_amount" | "dismiss">;
-  onToggleAction: (idx: number, action: "add_to_system" | "update_amount" | "dismiss") => void;
+  itemOptions: { id: number; name: string }[];
+  selectedActions: Map<string, ActionType>;
+  aliasTargets: Map<number, number>;
+  onToggleAction: (idx: number, action: ActionType) => void;
+  onAliasTargetChange: (idx: number, itemId: number | null) => void;
   onSelectCp: (cpId: number) => void;
   ocrProcessing: boolean;
 }) {
@@ -591,29 +734,39 @@ function ResultStep({
         </div>
       )}
 
-      {/* item_mismatch: 4개 섹션 */}
+      {/* item_mismatch: 5개 섹션 (spec §4.2.c) */}
       {comparison.level === "item_mismatch" && comparison.items && (
         <ItemMismatchSection
           items={comparison.items}
+          itemOptions={itemOptions}
           selectedActions={selectedActions}
+          aliasTargets={aliasTargets}
           onToggleAction={onToggleAction}
+          onAliasTargetChange={onAliasTargetChange}
         />
       )}
     </div>
   );
 }
 
-// ─── 항목 불일치 섹션 ─────────────────────────────────────────────────────────
+// ─── 항목 불일치 섹션 (spec §4.2.c 5섹션) ────────────────────────────────────
+// missing_in_system 항목은 [품목 매칭 필요] / [시스템 누락] 두 섹션에 모두 노출되며,
+// selectedActions가 idx 단일 키라 한 항목에 link_alias / add_to_system 중 하나만 선택됨.
 function ItemMismatchSection({
   items,
+  itemOptions,
   selectedActions,
+  aliasTargets,
   onToggleAction,
+  onAliasTargetChange,
 }: {
   items: NonNullable<CompareResult["items"]>;
-  selectedActions: Map<string, "add_to_system" | "update_amount" | "dismiss">;
-  onToggleAction: (idx: number, action: "add_to_system" | "update_amount" | "dismiss") => void;
+  itemOptions: { id: number; name: string }[];
+  selectedActions: Map<string, ActionType>;
+  aliasTargets: Map<number, number>;
+  onToggleAction: (idx: number, action: ActionType) => void;
+  onAliasTargetChange: (idx: number, itemId: number | null) => void;
 }) {
-  // 종류별 분류 (인덱스 보존)
   type IndexedItem = { row: NonNullable<CompareResult["items"]>[number]; idx: number };
   const amountDiff: IndexedItem[] = [];
   const missingInSystem: IndexedItem[] = [];
@@ -629,13 +782,33 @@ function ItemMismatchSection({
 
   return (
     <div className="space-y-4">
+      {/* 1) 품목 매칭 필요 — link_alias */}
+      {missingInSystem.length > 0 && (
+        <Section title={`① 품목 매칭 필요 — 마스터 품목과 연결 (${missingInSystem.length})`} color="blue">
+          <p className="text-[11px] text-muted-foreground px-1 pb-1">
+            정산표에만 있는 품목입니다. 우리 시스템 마스터 품목과 연결하면 다음 정산표부터 자동 매칭됩니다.
+          </p>
+          {missingInSystem.map(({ row, idx }) => (
+            <LinkAliasRow
+              key={`alias_${idx}`}
+              row={row}
+              itemOptions={itemOptions}
+              isSelected={selectedActions.get(`item_${idx}`) === "link_alias"}
+              targetItemId={aliasTargets.get(idx) ?? null}
+              onToggle={() => onToggleAction(idx, "link_alias")}
+              onTargetChange={(itemId) => onAliasTargetChange(idx, itemId)}
+            />
+          ))}
+        </Section>
+      )}
+
+      {/* 2) 금액 차이 — update_amount */}
       {amountDiff.length > 0 && (
-        <Section title={`금액 차이 (${amountDiff.length})`} color="red">
+        <Section title={`② 금액 차이 (${amountDiff.length})`} color="red">
           {amountDiff.map(({ row, idx }) => (
             <ItemRow
-              key={idx}
+              key={`amt_${idx}`}
               row={row}
-              actionType="update_amount"
               actionLabel="시스템 금액 → 정산표 금액으로 수정"
               isSelected={selectedActions.get(`item_${idx}`) === "update_amount"}
               onToggle={() => onToggleAction(idx, "update_amount")}
@@ -644,13 +817,16 @@ function ItemMismatchSection({
         </Section>
       )}
 
+      {/* 3) 시스템 누락 — add_to_system (1번과 동일 항목, 다른 처리) */}
       {missingInSystem.length > 0 && (
-        <Section title={`시스템 누락 — 정산표에는 있는데 시스템엔 없음 (${missingInSystem.length})`} color="amber">
+        <Section title={`③ 시스템 누락 — 매입으로 그대로 추가 (${missingInSystem.length})`} color="amber">
+          <p className="text-[11px] text-muted-foreground px-1 pb-1">
+            마스터 품목 연결 없이 정산표 내용 그대로 매입에 추가합니다. (alias 학습 X)
+          </p>
           {missingInSystem.map(({ row, idx }) => (
             <ItemRow
-              key={idx}
+              key={`add_${idx}`}
               row={row}
-              actionType="add_to_system"
               actionLabel="시스템에 매입 추가"
               isSelected={selectedActions.get(`item_${idx}`) === "add_to_system"}
               onToggle={() => onToggleAction(idx, "add_to_system")}
@@ -659,13 +835,13 @@ function ItemMismatchSection({
         </Section>
       )}
 
+      {/* 4) 정산표 누락 — dismiss */}
       {missingInStatement.length > 0 && (
-        <Section title={`정산표 누락 — 시스템에는 있는데 정산표엔 없음 (${missingInStatement.length})`} color="amber">
+        <Section title={`④ 정산표 누락 — 시스템에는 있는데 정산표엔 없음 (${missingInStatement.length})`} color="amber">
           {missingInStatement.map(({ row, idx }) => (
             <ItemRow
-              key={idx}
+              key={`dis_${idx}`}
               row={row}
-              actionType="dismiss"
               actionLabel="무시 (반품/오입력 가능)"
               isSelected={selectedActions.get(`item_${idx}`) === "dismiss"}
               onToggle={() => onToggleAction(idx, "dismiss")}
@@ -674,14 +850,15 @@ function ItemMismatchSection({
         </Section>
       )}
 
+      {/* 5) 정상 — 접힘 */}
       {matched.length > 0 && (
         <details className="border border-border rounded-lg">
           <summary className="px-3 py-2 text-xs font-medium text-muted-foreground cursor-pointer hover:bg-muted/30">
-            정상 ({matched.length})
+            ⑤ 정상 ({matched.length})
           </summary>
           <div className="p-2 space-y-1">
             {matched.map(({ row, idx }) => (
-              <div key={idx} className="text-xs px-2 py-1 text-muted-foreground">
+              <div key={`ok_${idx}`} className="text-xs px-2 py-1 text-muted-foreground">
                 <span className="font-medium">{row.date}</span>
                 {" · "}
                 {row.ocrItem?.itemName ?? row.systemItem?.itemName}
@@ -696,9 +873,11 @@ function ItemMismatchSection({
   );
 }
 
-function Section({ title, color, children }: { title: string; color: "red" | "amber"; children: React.ReactNode }) {
+function Section({ title, color, children }: { title: string; color: "red" | "amber" | "blue"; children: React.ReactNode }) {
   const colorClass = color === "red"
     ? "border-red-200 dark:border-red-900"
+    : color === "blue"
+    ? "border-blue-200 dark:border-blue-900"
     : "border-amber-200 dark:border-amber-900";
   return (
     <div>
@@ -717,7 +896,6 @@ function ItemRow({
   onToggle,
 }: {
   row: NonNullable<CompareResult["items"]>[number];
-  actionType: "add_to_system" | "update_amount" | "dismiss";
   actionLabel: string;
   isSelected: boolean;
   onToggle: () => void;
@@ -763,5 +941,91 @@ function ItemRow({
         <div className="mt-1 text-primary text-[11px]">{actionLabel}</div>
       </div>
     </label>
+  );
+}
+
+// ─── link_alias 전용 행 (items 검색 + 마스터 품목 dropdown) ─────────────────
+function LinkAliasRow({
+  row,
+  itemOptions,
+  isSelected,
+  targetItemId,
+  onToggle,
+  onTargetChange,
+}: {
+  row: NonNullable<CompareResult["items"]>[number];
+  itemOptions: { id: number; name: string }[];
+  isSelected: boolean;
+  targetItemId: number | null;
+  onToggle: () => void;
+  onTargetChange: (itemId: number | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => {
+    if (!query.trim()) return itemOptions.slice(0, 30);
+    const q = query.trim().toLowerCase();
+    return itemOptions.filter((it) => it.name.toLowerCase().includes(q)).slice(0, 30);
+  }, [itemOptions, query]);
+
+  const selectedItem = targetItemId ? itemOptions.find((i) => i.id === targetItemId) : null;
+
+  return (
+    <div className="p-2 rounded hover:bg-muted/30">
+      <label className="flex items-start gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={onToggle}
+          className="mt-0.5 rounded border-input"
+        />
+        <div className="flex-1 min-w-0 text-xs">
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="font-medium">{row.date}</span>
+            <span className="text-foreground truncate">
+              {row.ocrItem?.itemName || row.ocrItem?.rawItemName}
+            </span>
+            <span className="text-muted-foreground tabular-nums shrink-0">
+              {row.ocrItem?.lineTotal.toLocaleString()}원
+            </span>
+          </div>
+          {row.ocrItem?.rawItemName && row.ocrItem.rawItemName !== row.ocrItem.itemName && (
+            <div className="text-[11px] text-muted-foreground">
+              원문: <span className="font-mono">{row.ocrItem.rawItemName}</span>
+            </div>
+          )}
+        </div>
+      </label>
+
+      {isSelected && (
+        <div className="mt-2 ml-6 space-y-1.5">
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Link2 className="w-3 h-3" />
+            마스터 품목 선택
+          </div>
+          <input
+            type="text"
+            placeholder="품목명 검색..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full text-xs rounded-md border border-input bg-background px-2 py-1"
+          />
+          <select
+            value={targetItemId ?? ""}
+            onChange={(e) => onTargetChange(e.target.value ? Number(e.target.value) : null)}
+            className="w-full text-xs rounded-md border border-input bg-background px-2 py-1"
+          >
+            <option value="">— 선택 —</option>
+            {filtered.map((it) => (
+              <option key={it.id} value={it.id}>{it.name}</option>
+            ))}
+          </select>
+          {selectedItem && (
+            <div className="text-[11px] text-emerald-600 dark:text-emerald-400">
+              ✓ <span className="font-mono">{row.ocrItem?.rawItemName}</span> → {selectedItem.name}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

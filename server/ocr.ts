@@ -947,47 +947,53 @@ ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
       return;
     }
 
-    const { imageUrls, restaurantId, hintCounterpartyId, hintYearMonth } = req.body;
+    const { imageUrls, spreadsheetText, restaurantId, hintCounterpartyId, hintYearMonth } = req.body;
     const urls: string[] = Array.isArray(imageUrls) ? imageUrls
       : (typeof imageUrls === "string" ? [imageUrls] : []);
-    if (urls.length === 0) {
-      res.status(400).json({ error: "imageUrls가 필요합니다 (배열 또는 문자열)" });
+    const sheetText = typeof spreadsheetText === "string" ? spreadsheetText.trim() : "";
+
+    if (urls.length === 0 && !sheetText) {
+      res.status(400).json({ error: "imageUrls 또는 spreadsheetText 중 하나가 필요합니다" });
       return;
     }
+    // 입력 모드 결정 (둘 다 오면 image 우선)
+    const inputMode: "image" | "spreadsheet" = urls.length > 0 ? "image" : "spreadsheet";
 
-    // ── 각 이미지 파일 검증 + EXIF 회전 + 전처리 ──────────────────────────
+    // ── 이미지 모드: 파일 검증 + EXIF 회전 + 전처리 (spreadsheet 모드면 skip) ──
     const imagePayloads: { base64: string; mediaType: string; filePath: string }[] = [];
-    for (const url of urls) {
-      const relativePath = url.replace(/^\/uploads\//, "");
-      const filePath = path.join(UPLOAD_ROOT, relativePath);
-      if (!fs.existsSync(filePath)) {
-        res.status(404).json({ error: `이미지 파일을 찾을 수 없습니다: ${url}` });
-        return;
-      }
-      await fixExifOrientation(filePath);
-
-      // 정산표는 길고 텍스트 위주 → 해상도 3500, 그레이+대비+샤프 (extract-purchase와 동일 v9)
-      try {
-        const meta = await sharp(filePath).metadata();
-        const maxDim = Math.max(meta.width || 0, meta.height || 0);
-        let pipeline = sharp(filePath);
-        if (maxDim > 3500) {
-          pipeline = pipeline.resize(3500, 3500, { fit: "inside", withoutEnlargement: true });
+    if (inputMode === "image") {
+      for (const url of urls) {
+        const relativePath = url.replace(/^\/uploads\//, "");
+        const filePath = path.join(UPLOAD_ROOT, relativePath);
+        if (!fs.existsSync(filePath)) {
+          res.status(404).json({ error: `이미지 파일을 찾을 수 없습니다: ${url}` });
+          return;
         }
-        pipeline = pipeline
-          .grayscale()
-          .normalize()
-          .linear(1.3, -(128 * 1.3 - 128))
-          .gamma(1.2)
-          .sharpen({ sigma: 2.0, m1: 2.0, m2: 1.0 });
-        const enhancedBuf = await pipeline.jpeg({ quality: 95, mozjpeg: true }).toBuffer();
-        fs.writeFileSync(filePath, enhancedBuf);
-      } catch (enhErr: any) {
-        console.warn(`[OCR] statement 전처리 실패 (원본 사용): ${enhErr.message}`);
-      }
+        await fixExifOrientation(filePath);
 
-      const { base64, mediaType } = loadImageBase64Raw(filePath);
-      imagePayloads.push({ base64, mediaType, filePath });
+        // 정산표는 길고 텍스트 위주 → 해상도 3500, 그레이+대비+샤프 (extract-purchase와 동일 v9)
+        try {
+          const meta = await sharp(filePath).metadata();
+          const maxDim = Math.max(meta.width || 0, meta.height || 0);
+          let pipeline = sharp(filePath);
+          if (maxDim > 3500) {
+            pipeline = pipeline.resize(3500, 3500, { fit: "inside", withoutEnlargement: true });
+          }
+          pipeline = pipeline
+            .grayscale()
+            .normalize()
+            .linear(1.3, -(128 * 1.3 - 128))
+            .gamma(1.2)
+            .sharpen({ sigma: 2.0, m1: 2.0, m2: 1.0 });
+          const enhancedBuf = await pipeline.jpeg({ quality: 95, mozjpeg: true }).toBuffer();
+          fs.writeFileSync(filePath, enhancedBuf);
+        } catch (enhErr: any) {
+          console.warn(`[OCR] statement 전처리 실패 (원본 사용): ${enhErr.message}`);
+        }
+
+        const { base64, mediaType } = loadImageBase64Raw(filePath);
+        imagePayloads.push({ base64, mediaType, filePath });
+      }
     }
 
     // ── 거래처 프로파일 힌트 ─────────────────────────────────────────────
@@ -1068,11 +1074,20 @@ ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
 ${hintYearMonth ? `\n참고: 사용자가 ${hintYearMonth} 정산표라고 알려주었습니다.` : ""}
 ${profileHint}`;
 
-    // ── Claude Vision 호출 ────────────────────────────────────────────────
-    const messageContent: any[] = imagePayloads.map((p) => ({
-      type: "image",
-      source: { type: "base64", media_type: p.mediaType, data: p.base64 },
-    }));
+    // ── Claude 호출 (이미지 모드: Vision / 스프레드시트 모드: 텍스트) ────
+    const messageContent: any[] = inputMode === "image"
+      ? imagePayloads.map((p) => ({
+          type: "image" as const,
+          source: { type: "base64" as const, media_type: p.mediaType, data: p.base64 },
+        }))
+      : [];
+
+    if (inputMode === "spreadsheet") {
+      messageContent.push({
+        type: "text",
+        text: `다음은 거래처가 발행한 월매입정산표를 Excel/CSV에서 추출한 표 데이터입니다 (SheetJS dump). 이 표를 정산표 이미지와 동일한 규칙으로 분석해 JSON으로 변환해주세요.\n\n\`\`\`\n${sheetText}\n\`\`\`\n`,
+      });
+    }
     messageContent.push({ type: "text", text: promptText });
 
     const message = await anthropic.messages.create({

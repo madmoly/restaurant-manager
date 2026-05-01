@@ -17,8 +17,16 @@ export interface ParsedItem {
 export interface SystemPurchaseItem {
   purchaseOrderId: number;
   itemRowId: number; // purchase_order_items_v2.id
-  itemName: string; // rawItemName 또는 items.name (조인 결과)
   itemId: number | null;
+  // 매칭 우선순위별 후보 이름 (spec §3.3)
+  // ① supplierItemName: counterparty_items.supplierItemName (alias, 1·2순위)
+  // ② masterItemName: items.name (마스터, 3·4순위)
+  // ③ rawPurchaseName: purchase_order_items_v2.rawItemName (입력 시 원본, 폴백)
+  supplierItemName: string | null;
+  masterItemName: string | null;
+  rawPurchaseName: string | null;
+  // 표시용 통합 이름 (UI 디버깅)
+  itemName: string;
   quantity: number | null;
   unitPrice: number | null;
   lineTotal: number;
@@ -127,57 +135,91 @@ function sumLineTotal(arr: { lineTotal: number }[]): number {
 }
 
 // ─── 항목 매칭: 같은 일자 내 OCR 항목과 시스템 항목을 1:1 매칭 ──────────────
-// 정책: 정규화된 itemName 우선 → 유사도 ≥0.6
-function matchItemsByName(
-  ocrItems: ParsedItem[],
-  systemItems: SystemPurchaseItem[]
-): { ocr?: ParsedItem; system?: SystemPurchaseItem }[] {
-  const matched: { ocr?: ParsedItem; system?: SystemPurchaseItem }[] = [];
-  const usedSystem = new Set<number>(); // itemRowId
-  const usedOcr = new Set<number>(); // index in ocrItems
+//
+// spec §3.3 매칭 우선순위 (확정):
+//   ① counterparty_items.supplierItemName 정확 일치 (정규화 후) — OCR rawItemName 기준
+//   ② counterparty_items.supplierItemName 유사도 ≥ 0.85
+//   ③ items.name 정확 일치 — OCR itemName 기준
+//   ④ items.name 유사도 ≥ 0.85
+//   ⑤ rawPurchaseName 정확 일치 (alias 미학습 폴백)
+//   ⑥ 위 모두 실패 → 미매칭
+//
+// 각 pass는 이전 pass에서 매칭된 항목을 제외하고 진행 (1:1 강제, 그리디).
+// Pass 내에서는 유사도 점수가 가장 높은 후보를 선택.
+const FUZZY_THRESHOLD = 0.85;
 
-  // Pass 1: 완전 일치 (정규화된 이름)
-  ocrItems.forEach((ocr, i) => {
-    if (usedOcr.has(i)) return;
-    const ocrNorm = normalizeKorean(ocr.itemName);
-    if (!ocrNorm) return;
-    const exactMatch = systemItems.find(
-      (s) => !usedSystem.has(s.itemRowId) && normalizeKorean(s.itemName) === ocrNorm
-    );
-    if (exactMatch) {
-      matched.push({ ocr, system: exactMatch });
-      usedOcr.add(i);
-      usedSystem.add(exactMatch.itemRowId);
-    }
-  });
+type MatchPair = { ocr?: ParsedItem; system?: SystemPurchaseItem; passUsed?: number };
 
-  // Pass 2: 유사도 매칭 (≥0.6)
-  ocrItems.forEach((ocr, i) => {
-    if (usedOcr.has(i)) return;
-    const ocrNorm = normalizeKorean(ocr.itemName);
-    if (!ocrNorm) return;
-    let best: { sys: SystemPurchaseItem; score: number } | null = null;
-    for (const sys of systemItems) {
-      if (usedSystem.has(sys.itemRowId)) continue;
-      const sysNorm = normalizeKorean(sys.itemName);
-      const score = fuzzyScore(ocrNorm, sysNorm);
-      if (score >= 0.6 && (!best || score > best.score)) {
+function pickBest(
+  ocrKey: string,
+  systemItems: SystemPurchaseItem[],
+  usedSystem: Set<number>,
+  getter: (s: SystemPurchaseItem) => string | null,
+  exactOnly: boolean
+): SystemPurchaseItem | null {
+  if (!ocrKey) return null;
+  let best: { sys: SystemPurchaseItem; score: number } | null = null;
+  for (const sys of systemItems) {
+    if (usedSystem.has(sys.itemRowId)) continue;
+    const raw = getter(sys);
+    if (!raw) continue;
+    const sysNorm = normalizeKorean(raw);
+    if (!sysNorm) continue;
+    if (exactOnly) {
+      if (sysNorm === ocrKey) return sys;
+    } else {
+      const score = fuzzyScore(ocrKey, sysNorm);
+      if (score >= FUZZY_THRESHOLD && (!best || score > best.score)) {
         best = { sys, score };
       }
     }
-    if (best) {
-      matched.push({ ocr, system: best.sys });
-      usedOcr.add(i);
-      usedSystem.add(best.sys.itemRowId);
-    }
-  });
+  }
+  return best?.sys ?? null;
+}
 
-  // Pass 3: 미매칭 OCR (시스템 누락 후보)
+function matchItemsByName(
+  ocrItems: ParsedItem[],
+  systemItems: SystemPurchaseItem[]
+): MatchPair[] {
+  const matched: MatchPair[] = [];
+  const usedSystem = new Set<number>();
+  const usedOcr = new Set<number>();
+
+  // 5개 pass를 순서대로 적용. 각 pass에서 OCR ↔ system을 1:1 매칭.
+  type Pass = {
+    n: number;
+    ocrKey: (o: ParsedItem) => string;       // OCR 측 비교 키 추출
+    sysGet: (s: SystemPurchaseItem) => string | null; // system 측 후보 필드
+    exactOnly: boolean;
+  };
+  const passes: Pass[] = [
+    { n: 1, ocrKey: (o) => normalizeKorean(o.rawItemName || o.itemName), sysGet: (s) => s.supplierItemName, exactOnly: true },
+    { n: 2, ocrKey: (o) => normalizeKorean(o.rawItemName || o.itemName), sysGet: (s) => s.supplierItemName, exactOnly: false },
+    { n: 3, ocrKey: (o) => normalizeKorean(o.itemName || o.rawItemName), sysGet: (s) => s.masterItemName,   exactOnly: true },
+    { n: 4, ocrKey: (o) => normalizeKorean(o.itemName || o.rawItemName), sysGet: (s) => s.masterItemName,   exactOnly: false },
+    { n: 5, ocrKey: (o) => normalizeKorean(o.rawItemName || o.itemName), sysGet: (s) => s.rawPurchaseName,  exactOnly: true },
+  ];
+
+  for (const pass of passes) {
+    ocrItems.forEach((ocr, i) => {
+      if (usedOcr.has(i)) return;
+      const key = pass.ocrKey(ocr);
+      if (!key) return;
+      const hit = pickBest(key, systemItems, usedSystem, pass.sysGet, pass.exactOnly);
+      if (hit) {
+        matched.push({ ocr, system: hit, passUsed: pass.n });
+        usedOcr.add(i);
+        usedSystem.add(hit.itemRowId);
+      }
+    });
+  }
+
+  // 미매칭 OCR (시스템 누락 후보)
   ocrItems.forEach((ocr, i) => {
     if (!usedOcr.has(i)) matched.push({ ocr });
   });
 
-  // Pass 4: 미매칭 시스템 (정산표 누락 후보)
+  // 미매칭 시스템 (정산표 누락 후보)
   for (const sys of systemItems) {
     if (!usedSystem.has(sys.itemRowId)) matched.push({ system: sys });
   }
