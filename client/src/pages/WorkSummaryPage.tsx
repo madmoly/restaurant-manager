@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
-  ChevronLeft, ChevronRight, Building2, Clock, ChevronDown, ChevronUp,
+  ChevronLeft, ChevronRight, Clock, ChevronDown, ChevronUp,
   FileText, Download, AlertTriangle, UserX, CalendarClock, Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,6 @@ export default function WorkSummaryPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
-  const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
   const [expandedEmpKey, setExpandedEmpKey] = useState<string | null>(null);
 
   const prevMonth = () => { if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1); };
@@ -210,80 +209,54 @@ export default function WorkSummaryPage() {
         </div>
       </div>
 
-      {/* 회사별 카드 */}
+      {/* 직원 카드 (회사 그룹핑 없이 평면 리스트) */}
       {isLoading ? (
         <CompanyCardListSkeleton />
       ) : companies.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground text-sm">해당 월 스케줄 데이터가 없습니다</div>
-      ) : (
-        <div className="space-y-3">
-          {companies.map((company) => {
-            const isExpanded = expandedCompany === company.company;
-            return (
-              <div key={company.company} className="bg-card border border-border rounded-lg overflow-hidden">
-                <div
-                  className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors"
-                  onClick={() => setExpandedCompany(isExpanded ? null : company.company)}
-                >
-                  <Building2 className="w-4 h-4 text-muted-foreground shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-foreground">{company.company}</div>
-                    <div className="text-xs text-muted-foreground">{company.employees.length}명 · 영업 {company.operatingDays ?? '-'}일</div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-sm font-bold text-foreground">{company.totalShifts}일</div>
-                    <div className="text-[11px] text-muted-foreground">{company.totalHours.toFixed(1)}h</div>
-                  </div>
-                  {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
+      ) : (() => {
+        const allEmployees = companies.flatMap(c => c.employees);
+        const regularEmps = allEmployees.filter((e: any) => !e.isTemp);
+        const tempEmps = allEmployees.filter((e: any) => e.isTemp);
+        return (
+          <div className="bg-card border border-border rounded-lg overflow-hidden">
+            <div className="divide-y divide-border/50">
+              {regularEmps.map((emp, i) => (
+                <EmployeeShiftCard
+                  key={`r-${i}`}
+                  emp={emp}
+                  restaurantId={restaurantId}
+                  year={year}
+                  month={month}
+                  expanded={expandedEmpKey === empKey(emp)}
+                  onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
+                />
+              ))}
+            </div>
+            {tempEmps.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/40 border-t border-border">
+                  <UserX className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-[11px] font-semibold text-muted-foreground">임시/주휴미제공 ({tempEmps.length}명)</span>
                 </div>
-
-                {isExpanded && (() => {
-                  const regularEmps = company.employees.filter((e: any) => !e.isTemp);
-                  const tempEmps = company.employees.filter((e: any) => e.isTemp);
-                  return (
-                    <div className="border-t border-border">
-                      <div className="divide-y divide-border/50">
-                        {regularEmps.map((emp, i) => (
-                          <EmployeeShiftCard
-                            key={`r-${i}`}
-                            emp={emp}
-                            restaurantId={restaurantId}
-                            year={year}
-                            month={month}
-                            expanded={expandedEmpKey === empKey(emp)}
-                            onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
-                          />
-                        ))}
-                      </div>
-                      {tempEmps.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/40 border-t border-border">
-                            <UserX className="w-3.5 h-3.5 text-muted-foreground" />
-                            <span className="text-[11px] font-semibold text-muted-foreground">임시/주휴미제공 ({tempEmps.length}명)</span>
-                          </div>
-                          <div className="divide-y divide-border/50">
-                            {tempEmps.map((emp, i) => (
-                              <EmployeeShiftCard
-                                key={`t-${i}`}
-                                emp={emp}
-                                restaurantId={restaurantId}
-                                year={year}
-                                month={month}
-                                expanded={expandedEmpKey === empKey(emp)}
-                                onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
+                <div className="divide-y divide-border/50">
+                  {tempEmps.map((emp, i) => (
+                    <EmployeeShiftCard
+                      key={`t-${i}`}
+                      emp={emp}
+                      restaurantId={restaurantId}
+                      year={year}
+                      month={month}
+                      expanded={expandedEmpKey === empKey(emp)}
+                      onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
+                    />
+                  ))}
+                </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
