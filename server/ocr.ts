@@ -1122,12 +1122,15 @@ ${profileHint}`;
     messageContent.push({ type: "text", text: promptText });
 
     // 정산표는 항목 수가 많을 수 있음 (100~200건도 흔함). 8192는 ~40항목에서 truncate됨.
-    // 32768로 상향 — claude-sonnet-4는 64K까지 지원하지만 평균 정산표는 32K로 충분.
-    const message = await anthropic.messages.create({
+    // 32768로 상향 — claude-sonnet-4는 64K까지 지원.
+    // ⚠️ Anthropic SDK는 max_tokens가 크면 non-streaming 요청을 거부함 (예상 처리시간 >10분).
+    //    streaming으로 호출 후 finalMessage()로 한 번에 받음 (인터페이스는 동일).
+    const stream = anthropic.messages.stream({
       model: "claude-sonnet-4-20250514",
       max_tokens: 32768,
       messages: [{ role: "user", content: messageContent }],
     });
+    const message = await stream.finalMessage();
 
     const inputTokens = message.usage?.input_tokens ?? 0;
     const outputTokens = message.usage?.output_tokens ?? 0;
