@@ -9,16 +9,24 @@ import {
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
 import { loadKoreanFont } from "@/lib/pdfKoreanFont";
+import { formatKRW } from "@/lib/utils";
 
-function fmtWon(n: number | null | undefined) {
+/** 표·PDF용 — 단순 천단위 콤마 (단위 없이) */
+function fmtWonRaw(n: number | null | undefined) {
   if (n == null || !isFinite(n)) return "-";
   return Math.round(n).toLocaleString();
+}
+
+/** 화면 표시용 — "2,000,000원" 형식 */
+function fmtWon(n: number | null | undefined): string {
+  if (n == null || !isFinite(n)) return "-";
+  return formatKRW(Math.round(n));
 }
 
 function fmtDate(d: string | null) {
   if (!d) return "-";
   const date = new Date(d);
-  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
 }
 
 function wageTypeBadge(emp: any): string | null {
@@ -119,9 +127,8 @@ export default function LaborCostPage() {
             contractEndStr,
           ]);
         } else {
-          // 기본 정산: 시스템 계산 결과 포함
+          // 기본 정산: 시스템 계산 결과 포함 (4대보험·원천세는 미계산)
           const wage = Math.round(emp.totalWage);
-          const deduction = !emp.socialInsurance && wage > 0 ? Math.round(wage * 0.033) : 0;
           rows.push([
             company.company,
             nameLabel,
@@ -130,12 +137,12 @@ export default function LaborCostPage() {
             emp.wageAmount ? Number(emp.wageAmount) : 0,
             emp.contractDaysOff ?? 0,
             emp.workedDays ?? 0,
+            emp.totalHours != null ? Number((emp.totalHours).toFixed(1)) : 0,
             emp.daysOff ?? 0,
             subRemain,
             annRemain,
             insuranceLabel,
             wage,
-            deduction,
             emp.bankAccount ?? "-",
             emp.residentNumber ?? "-",
             contractStartStr,
@@ -147,8 +154,8 @@ export default function LaborCostPage() {
     return rows;
   };
 
-  // 헤더 (단어 단축으로 1줄 정렬)
-  const fullHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "계약휴무", "출근일수", "실휴무일", "대휴잔여", "연차잔여", "보험", "인건비", "3.3%공제", "계좌번호", "주민번호", "계약시작", "종료"];
+  // 헤더 (단어 단축으로 1줄 정렬) — 3.3%공제 컬럼 제거(시스템 미계산), 근무시간 컬럼 추가
+  const fullHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "계약휴무", "출근일수", "근무시간", "실휴무일", "대휴잔여", "연차잔여", "보험", "인건비", "계좌번호", "주민번호", "계약시작", "종료"];
   const consultantHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "보험", "출근일수", "실휴무일", "계약휴무", "대휴사용", "대휴잔여", "연차사용", "연차잔여", "계좌번호", "주민번호", "계약시작", "종료"];
   const fileName = consultantMode
     ? `노무사전송_${year}년${month}월_${current?.name ?? ""}`
@@ -165,8 +172,8 @@ export default function LaborCostPage() {
     const colWidths = consultantMode
       // 소속회사,이름,직위,유형,계약급여,보험,출근,실휴무,계약휴무,대휴사용,대휴잔여,연차사용,연차잔여,계좌,주민,계약시작,종료
       ? [14, 10, 8, 6, 12, 8, 6, 7, 8, 7, 7, 7, 7, 18, 16, 12, 12]
-      // 소속회사,이름,직위,유형,계약급여,계약휴무,출근,실휴무,대휴잔여,연차잔여,보험,인건비,3.3%공제,계좌,주민,계약시작,종료
-      : [14, 10, 8, 6, 12, 8, 7, 7, 7, 7, 8, 12, 12, 18, 16, 12, 12];
+      // 소속회사,이름,직위,유형,계약급여,계약휴무,출근,근무시간,실휴무,대휴잔여,연차잔여,보험,인건비,계좌,주민,계약시작,종료
+      : [14, 10, 8, 6, 12, 8, 7, 7, 7, 7, 7, 8, 12, 18, 16, 12, 12];
     ws["!cols"] = colWidths.map((w) => ({ wch: w }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, consultantMode ? "노무사전송" : "인건비정산");
@@ -202,7 +209,7 @@ export default function LaborCostPage() {
         const operatingDays = (data ?? [])[0]?.operatingDays ?? "-";
         doc.text(`대상 직원 ${totalEmployees}명 / 영업일 ${operatingDays}일`, 14, 22);
       } else {
-        doc.text(`합계: ${fmtWon(grandTotalWage)}원`, 14, 22);
+        doc.text(`합계: ${fmtWonRaw(grandTotalWage)}원`, 14, 22);
       }
 
       // 우측정렬 컬럼 인덱스
@@ -217,9 +224,9 @@ export default function LaborCostPage() {
           columnStyles[i] = { ...(rightAlignCols[i] ?? {}), cellWidth: w };
         });
       } else {
-        // 계약급여(4), 계약휴무(5), 출근(6), 실휴무(7), 대휴잔여(8), 연차잔여(9), 인건비(11), 3.3%공제(12)
-        [4, 5, 6, 7, 8, 9, 11, 12].forEach(i => { rightAlignCols[i] = { halign: "right" }; });
-        const widths = [20, 16, 12, 12, 20, 12, 12, 12, 14, 12, 12, 20, 20, 26, 22, 14, 14];
+        // 계약급여(4), 계약휴무(5), 출근일수(6), 근무시간(7), 실휴무(8), 대휴잔여(9), 연차잔여(10), 인건비(12)
+        [4, 5, 6, 7, 8, 9, 10, 12].forEach(i => { rightAlignCols[i] = { halign: "right" }; });
+        const widths = [20, 16, 12, 12, 20, 12, 12, 12, 12, 14, 12, 12, 22, 28, 22, 14, 14];
         widths.forEach((w, i) => {
           columnStyles[i] = { ...(rightAlignCols[i] ?? {}), cellWidth: w };
         });
@@ -323,7 +330,7 @@ export default function LaborCostPage() {
         <div className="text-xs text-muted-foreground mb-1">총 인건비</div>
         <div className="text-base font-bold text-foreground flex items-center justify-center gap-1">
           <Wallet className="w-4 h-4 text-muted-foreground" />
-          ₩{fmtWon(grandTotalWage)}
+          {fmtWon(grandTotalWage)}
         </div>
       </div>
 
@@ -365,7 +372,7 @@ export default function LaborCostPage() {
                     <div className="text-xs text-muted-foreground">{company.employees.length}명 · 영업 {company.operatingDays ?? '-'}일</div>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className="text-sm font-bold text-foreground">₩{fmtWon(company.totalWage)}</div>
+                    <div className="text-sm font-bold text-foreground">{fmtWon(company.totalWage)}</div>
                   </div>
                   {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
                 </div>
@@ -414,7 +421,7 @@ function EffSpan({ label, eff, guide }: { label: string; eff: number | null; gui
   const pColor = p == null ? "" : p > 0 ? "text-emerald-600 dark:text-emerald-400" : p < 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground";
   return (
     <span>
-      {label} <b className="text-foreground">₩{fmtWon(eff)}</b>
+      {label} <b className="text-foreground">{fmtWon(eff)}</b>
       {p != null && <span className={`ml-0.5 ${pColor}`}>({fmtPct(p)})</span>}
     </span>
   );
@@ -443,7 +450,7 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
   const subUsed = emp.substituteLeave && emp.substituteLeave.used > 0;
   const annUsed = emp.annualLeave && emp.annualLeave.used > 0;
   const badge = wageTypeBadge(emp);
-  const wb = emp.wageBreakdown ?? { base: Math.round(emp.totalWage ?? 0), weeklyHoliday: 0, overtime: 0, night: 0, deduction: 0, net: Math.round(emp.totalWage ?? 0) };
+  const wb = emp.wageBreakdown ?? { base: Math.round(emp.totalWage ?? 0), weeklyHoliday: 0, overtime: 0, night: 0 };
   return (
     <div className={`px-4 py-3 space-y-2 ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
       {/* L1: 이름 · 직책 · 임금유형 배지 */}
@@ -459,9 +466,6 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
             )}
             {emp.recheckRequired && <AlertTriangle className="w-3 h-3 text-amber-500" />}
           </div>
-          {emp.hireDate && (
-            <div className="text-[10px] text-muted-foreground">입사 {fmtDate(emp.hireDate)}</div>
-          )}
         </div>
       </div>
 
@@ -477,9 +481,9 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
       <div className="text-[11px]">
         <span className="text-muted-foreground">가이드</span>
         <div className="text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
-          <span>시급 <b>₩{fmtWon(emp.guideHourly)}</b></span>
-          <span>일급 <b>₩{fmtWon(emp.guideDaily)}</b></span>
-          <span>월급 <b>₩{fmtWon(emp.guideMonthly)}</b></span>
+          <span>시급 <b>{fmtWon(emp.guideHourly)}</b></span>
+          <span>일급 <b>{fmtWon(emp.guideDaily)}</b></span>
+          <span>월급 <b>{fmtWon(emp.guideMonthly)}</b></span>
         </div>
       </div>
 
@@ -493,53 +497,41 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
         </div>
       </div>
 
-      {/* L4: 비용 분해 */}
+      {/* L4: 비용 분해 (4대보험·원천세는 시스템 미계산 — 별도 계산) */}
       {(() => {
-        const isExternal = emp.deductionMode === "external";
         const tentative = (wb.base ?? 0) + (wb.weeklyHoliday ?? 0) + (wb.overtime ?? 0) + (wb.night ?? 0);
         return (
-          <div className="text-[11px] grid grid-cols-3 gap-x-3 gap-y-1 pt-1 border-t border-border/30">
-            <div>
-              <span className="text-muted-foreground">기본</span>
-              <div className="font-medium text-foreground">₩{fmtWon(wb.base)}</div>
+          <div className="space-y-1 pt-1 border-t border-border/30">
+            <div className="text-[11px] grid grid-cols-4 gap-x-3 gap-y-1">
+              <div>
+                <span className="text-muted-foreground">근무시간</span>
+                <div className="font-medium text-foreground">{(emp.totalHours ?? 0).toFixed(1)}h</div>
+              </div>
+              <div>
+                <span className="text-muted-foreground">기본</span>
+                <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
+              </div>
+              <div>
+                <span className="text-muted-foreground">주휴</span>
+                <div className="font-medium text-foreground">{fmtWon(wb.weeklyHoliday)}</div>
+              </div>
+              <div>
+                <span className="text-muted-foreground">연장</span>
+                <div className="font-medium text-foreground">{fmtWon(wb.overtime)}</div>
+              </div>
+              <div>
+                <span className="text-muted-foreground">야간</span>
+                <div className="font-medium text-foreground">{fmtWon(wb.night)}</div>
+              </div>
+              <div className="col-span-3">
+                <span className="text-muted-foreground">합계</span>
+                <div className="font-bold text-foreground">{fmtWon(tentative)}</div>
+              </div>
             </div>
-            <div>
-              <span className="text-muted-foreground">주휴</span>
-              <div className="font-medium text-foreground">₩{fmtWon(wb.weeklyHoliday)}</div>
+            <div className="flex items-start gap-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300">
+              <Info className="w-3 h-3 mt-0.5 shrink-0" />
+              <span>4대보험·원천세(3.3%)는 시스템에서 계산하지 않습니다. 별도 계산하세요.</span>
             </div>
-            <div>
-              <span className="text-muted-foreground">연장</span>
-              <div className="font-medium text-foreground">₩{fmtWon(wb.overtime)}</div>
-            </div>
-            <div>
-              <span className="text-muted-foreground">야간</span>
-              <div className="font-medium text-foreground">₩{fmtWon(wb.night)}</div>
-            </div>
-            {isExternal ? (
-              <>
-                <div className="col-span-2">
-                  <span className="text-muted-foreground">공제</span>
-                  <div className="font-medium text-muted-foreground">외부정산(노무사)</div>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">잠정 합계</span>
-                  <div className="font-bold text-foreground">₩{fmtWon(tentative)}</div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div>
-                  <span className="text-muted-foreground">공제 (3.3%)</span>
-                  <div className="font-medium text-orange-600 dark:text-orange-400">
-                    {wb.deduction > 0 ? `-₩${fmtWon(wb.deduction)}` : "-"}
-                  </div>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">실지급</span>
-                  <div className="font-bold text-foreground">₩{fmtWon(wb.net)}</div>
-                </div>
-              </>
-            )}
           </div>
         );
       })()}
@@ -566,9 +558,15 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
             <div className="font-medium text-foreground">{emp.contractDaysOff ?? 0}/{emp.daysOff ?? 0}일</div>
           </div>
           <div>
+            <span className="text-muted-foreground">입사일</span>
+            <div className="font-medium text-foreground text-[10px]">
+              {emp.hireDate ? fmtDate(emp.hireDate) : "-"}
+            </div>
+          </div>
+          <div className="col-span-4">
             <span className="text-muted-foreground">계약기간</span>
             <div className="font-medium text-foreground text-[10px]">
-              {emp.contractStart ? `${fmtDate(emp.contractStart)}~${fmtDate(emp.contractEnd)}` : "-"}
+              {emp.contractStart ? `${fmtDate(emp.contractStart)} ~ ${fmtDate(emp.contractEnd)}` : "-"}
             </div>
           </div>
         </div>

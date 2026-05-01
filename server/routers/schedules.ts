@@ -18,6 +18,12 @@ import {
 } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 import { getHolidayName } from "@shared/holidays";
+import {
+  computeMonthlyStandardHours,
+  computeWageForShift,
+  computeGuideWage,
+  type WageType,
+} from "../helpers/wage";
 
 // ─── 헬퍼 함수 ──────────────────────────────────────────────────────────────
 
@@ -909,6 +915,7 @@ export const schedulesRouter = router({
           contractStart: employeeContracts.contractStart,
           contractEnd: employeeContracts.contractEnd,
           weeklyOffDays: employeeContracts.weeklyOffDays,
+          weeklyHours: employeeContracts.weeklyHours,
           socialInsurance: employeeContracts.socialInsurance,
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
@@ -1012,6 +1019,7 @@ export const schedulesRouter = router({
         employees: Record<string, {
           name: string; totalHours: number; totalWage: number; shifts: number;
           wageType: string | null; wageAmount: string | null;
+          weeklyHours: string | null;
           position: string | null; contractStart: string | null; contractEnd: string | null;
           daysOff: number; contractDaysOff: number;
           hireDate: string | null;
@@ -1043,6 +1051,7 @@ export const schedulesRouter = router({
             name, totalHours: 0, totalWage: 0, shifts: 0,
             wageType: r.wageType ?? (r.tempWageType ?? null),
             wageAmount: r.wageAmount ?? (r.tempWageAmount ?? null),
+            weeklyHours: r.weeklyHours != null ? String(r.weeklyHours) : null,
             position: r.position ?? null,
             contractStart: r.contractStart ? String(r.contractStart) : null,
             contractEnd: r.contractEnd ? String(r.contractEnd) : null,
@@ -1051,7 +1060,7 @@ export const schedulesRouter = router({
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
             recheckRequired: false,
-            // 미지정(소속회사 없음) 또는 임시근로자 또는 주휴미제공 → 3.3% 공제 고정
+            // 4대보험·원천세는 시스템 미계산 — 별도 계산 안내만 표기
             socialInsurance: (r.userId && !treatAsTemp && r.socialInsurance != null) ? r.socialInsurance : false,
             bankAccount: r.bankAccount ?? r.tempBankAccount ?? null,
             residentNumber: r.residentNumber ?? null,
@@ -1066,36 +1075,26 @@ export const schedulesRouter = router({
         const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
         const hours = netMin / 60; // 분 단위 정밀 계산
 
-        // ── 시급 결정 ──
-        // 주휴수당 미제공(noWeeklyHolidayPay) → 임시근로자 경로: 시급×실근무시간만
-        let baseHourlyRate = 0;
-        let isDailyTemp = false;
-        if (r.tempWageType === "daily" && r.tempWageAmount) {
-          isDailyTemp = true;
-        } else if (r.tempWageType === "hourly" && r.tempWageAmount) {
-          baseHourlyRate = Number(r.tempWageAmount);
-        } else if (treatAsTemp && r.wageType === "hourly" && r.wageAmount) {
-          // 주휴미제공 정규직: 시급제 → 시급 그대로 (주휴수당 제외)
-          baseHourlyRate = Number(r.wageAmount);
-        } else if (treatAsTemp && r.wageType === "monthly" && r.wageAmount) {
-          // 주휴미제공 정규직: 월급제 → 주휴 제외 환산 (월급 ÷ 174, 주40h×365/12/7)
-          baseHourlyRate = Number(r.wageAmount) / 174;
-        } else if (r.wageType === "hourly" && r.wageAmount) {
-          baseHourlyRate = Number(r.wageAmount);
-        } else if (r.wageType === "monthly" && r.wageAmount) {
-          // 월급제: 월급 ÷ 209 (월소정근로시간, 주40h+주휴8h 기준)
-          const monthlyContractH = r.weeklyOffDays != null
-            ? Math.round((40 + 8) * (365 / 12 / 7)) // 표준 209h
-            : 209;
-          baseHourlyRate = Number(r.wageAmount) / monthlyContractH;
+        // ── 시급 결정 (server/helpers/wage.ts:computeWageForShift 통일) ──
+        // 임시근로자: tempWageType/Amount 사용. 정규직: wage_history 기준.
+        // 월급제 분모는 직원의 weeklyHours에서 자동 산출 (noWeeklyHolidayPay=true 면 주휴 미포함)
+        let shiftWageType: WageType = null;
+        let shiftWageAmount: number | null = null;
+        let stdHours = computeMonthlyStandardHours(null, false); // 폴백 209h
+        if (r.tempWageType && r.tempWageAmount) {
+          shiftWageType = r.tempWageType as WageType;
+          shiftWageAmount = Number(r.tempWageAmount);
+        } else if (r.wageType && r.wageAmount) {
+          shiftWageType = r.wageType as WageType;
+          shiftWageAmount = Number(r.wageAmount);
+          stdHours = computeMonthlyStandardHours(r.weeklyHours, treatAsTemp);
         }
-
-        let wage = 0;
-        if (isDailyTemp) {
-          wage = Number(r.tempWageAmount);
-        } else if (baseHourlyRate > 0) {
-          wage = hours * baseHourlyRate;
-        }
+        const wage = computeWageForShift({
+          wageType: shiftWageType,
+          wageAmount: shiftWageAmount,
+          hoursWorked: hours,
+          monthlyStandardHours: stdHours,
+        });
 
         // KST 날짜 기준 출근일수 집계 (같은 날 다중 시프트도 1일)
         const kstStartDt = new Date(startDt.getTime() + 9 * 60 * 60 * 1000);
@@ -1144,22 +1143,8 @@ export const schedulesRouter = router({
         else leaveMap[tx.userId][lt].used += d;
       }
 
-      // 등록 임금값 → 가이드(시급/일급/월급) 환산 (209h = 통상임금 표준)
-      const computeGuide = (wageType: string | null, wageAmount: string | null) => {
-        if (!wageType || wageAmount == null) return { hourly: null, daily: null, monthly: null };
-        const v = Number(wageAmount);
-        if (!isFinite(v) || v <= 0) return { hourly: null, daily: null, monthly: null };
-        if (wageType === "hourly") return { hourly: v, daily: v * 8, monthly: v * 209 };
-        if (wageType === "monthly") {
-          const h = v / 209;
-          return { hourly: h, daily: h * 8, monthly: v };
-        }
-        if (wageType === "daily") {
-          const h = v / 8;
-          return { hourly: h, daily: v, monthly: h * 209 };
-        }
-        return { hourly: null, daily: null, monthly: null };
-      };
+      // 등록 임금값 → 가이드(시급/일급/월급) 환산 (server/helpers/wage.ts:computeGuideWage)
+      // 직원의 weeklyHours + noWeeklyHolidayPay 기준으로 분모 동적 산출
 
       return Object.values(companyMap).map(c => ({
         ...c,
@@ -1190,25 +1175,25 @@ export const schedulesRouter = router({
           // 주휴수당 미제공 정규직 → isTemp이지만 userId 보유 (temp_{userId} 키)
           const isNoHolidayPayWorker = isTemp && emp.userId != null;
 
-          // 환산/실효/공제 (분해는 후속 PR — 1차는 base=총임금 폴백)
-          const guide = computeGuide(emp.wageType, emp.wageAmount);
+          // 가이드 환산: 직원의 monthlyStandardHours 기준 (단시간근로자 자동 분모 보정)
+          const empStdHours = computeMonthlyStandardHours(emp.weeklyHours, isNoHolidayPayWorker);
+          const guide = computeGuideWage({
+            wageType: emp.wageType as WageType,
+            wageAmount: emp.wageAmount,
+            monthlyStandardHours: empStdHours,
+          });
           const workedDays = emp.dateSet.size;
           const effectiveHourly = emp.totalHours > 0 ? emp.totalWage / emp.totalHours : null;
           const effectiveDaily = workedDays > 0 ? emp.totalWage / workedDays : null;
           const effectiveMonthly = emp.totalWage;
 
-          // 공제 산출: 4대보험은 노무사 외부 정산 → 시스템 미반영(0).
-          // 3.3% 케이스만 시스템에서 산출.
+          // 4대보험·원천세는 시스템 미계산 (별도 계산 안내만 표기)
           const totalWageR = Math.round(emp.totalWage);
-          const deductionMode: "3.3%" | "external" = emp.socialInsurance ? "external" : "3.3%";
-          const deduction = deductionMode === "3.3%" && totalWageR > 0 ? Math.round(totalWageR * 0.033) : 0;
           const wageBreakdown = {
             base: totalWageR,
             weeklyHoliday: 0,
             overtime: 0,
             night: 0,
-            deduction,
-            net: totalWageR - deduction,
           };
 
           return {
@@ -1225,7 +1210,6 @@ export const schedulesRouter = router({
             effectiveDaily,
             effectiveMonthly,
             wageBreakdown,
-            deductionMode,
             substituteLeave: lb ? { earned: lb.substitute.earned, used: lb.substitute.used, remaining: lb.substitute.earned - lb.substitute.used } : null,
             annualLeave: lb ? { earned: lb.annual.earned, used: lb.annual.used, remaining: lb.annual.earned - lb.annual.used } : null,
             userId: undefined, // 클라이언트에 노출하지 않음

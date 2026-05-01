@@ -2,9 +2,10 @@ import { z } from "zod";
 import { eq, and, between, sql, desc, inArray } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
-import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures, schedules, employeeContracts } from "../../drizzle/schema";
+import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures, schedules, employeeContracts, employeeWageHistory } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 import { verifyOperatingDay } from "../middleware/operatingDayGuard";
+import { computeMonthlyStandardHours, computeWageForShift, type WageType } from "../helpers/wage";
 
 export const dailyClosingsRouter = router({
   // ─── Sales Types (매출 항목 유형 관리) ──────────────────────────────────────
@@ -101,6 +102,7 @@ export const dailyClosingsRouter = router({
       const fromUtc = kstDate.toISOString().slice(0, 19).replace("T", " ");
       const toUtc = kstNext.toISOString().slice(0, 19).replace("T", " ");
 
+      // wage_history 시점 매칭으로 정합성 확보 (월정산과 동일 출처)
       const schedRows = await db
         .select({
           startTime: schedules.startTime,
@@ -108,14 +110,22 @@ export const dailyClosingsRouter = router({
           breakMinutes: schedules.breakMinutes,
           tempWageType: schedules.tempWageType,
           tempWageAmount: schedules.tempWageAmount,
-          wageType: employeeContracts.wageType,
-          wageAmount: employeeContracts.wageAmount,
+          wageType: employeeWageHistory.wageType,
+          wageAmount: employeeWageHistory.wageAmount,
+          weeklyHours: employeeContracts.weeklyHours,
+          noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
         })
         .from(schedules)
         .leftJoin(employeeContracts, and(
           eq(employeeContracts.userId, schedules.userId),
           eq(employeeContracts.restaurantId, input.restaurantId),
           eq(employeeContracts.isActive, true),
+        ))
+        .leftJoin(employeeWageHistory, and(
+          eq(employeeWageHistory.userId, schedules.userId),
+          eq(employeeWageHistory.restaurantId, input.restaurantId),
+          sql`DATE_FORMAT(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00'), '%Y-%m-01') >= ${employeeWageHistory.effectiveFrom}`,
+          sql`(${employeeWageHistory.effectiveTo} IS NULL OR DATE_FORMAT(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00'), '%Y-%m-01') < ${employeeWageHistory.effectiveTo})`,
         ))
         .where(and(
           eq(schedules.restaurantId, input.restaurantId),
@@ -131,19 +141,19 @@ export const dailyClosingsRouter = router({
         const gMin = (eDt.getTime() - sDt.getTime()) / 60000;
         const nMin = Math.max(0, gMin - (r.breakMinutes ?? 0));
         const hrs = nMin / 60;
-        let rate = 0;
-        if (r.tempWageType === "daily" && r.tempWageAmount) {
-          laborCostCalc += Number(r.tempWageAmount); continue;
-        } else if (r.tempWageType === "hourly" && r.tempWageAmount) {
-          rate = Number(r.tempWageAmount);
-        } else if (r.wageType === "hourly" && r.wageAmount) {
-          rate = Number(r.wageAmount);
-        } else if (r.wageType === "monthly" && r.wageAmount) {
-          rate = Number(r.wageAmount) / 209;
+
+        let wt: WageType = null;
+        let wa: number | null = null;
+        let stdHours = computeMonthlyStandardHours(null, false); // 폴백
+        if (r.tempWageType && r.tempWageAmount) {
+          wt = r.tempWageType as WageType;
+          wa = Number(r.tempWageAmount);
+        } else if (r.wageType && r.wageAmount) {
+          wt = r.wageType as WageType;
+          wa = Number(r.wageAmount);
+          stdHours = computeMonthlyStandardHours(r.weeklyHours, !!r.noWeeklyHolidayPay);
         }
-        if (rate > 0) {
-          laborCostCalc += hrs * rate;
-        }
+        laborCostCalc += computeWageForShift({ wageType: wt, wageAmount: wa, hoursWorked: hrs, monthlyStandardHours: stdHours });
       }
 
       return {

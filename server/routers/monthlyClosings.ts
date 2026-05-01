@@ -3,6 +3,7 @@ import { eq, and, gte, sql, sum, count, between } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+import { computeMonthlyStandardHours, computeWageForShift, type WageType } from "../helpers/wage";
 import {
   monthlyClosings,
   purchaseOrdersV2,
@@ -171,6 +172,8 @@ async function sumLaborByCompany(
     tempWageAmount: schedules.tempWageAmount,
     wageType: employeeWageHistory.wageType,
     wageAmount: employeeWageHistory.wageAmount,
+    weeklyHours: employeeContracts.weeklyHours,
+    noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
     contractIsActive: employeeContracts.isActive,
   }).from(schedules)
     .leftJoin(employeeContracts, and(
@@ -224,16 +227,19 @@ async function sumLaborByCompany(
     const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
     const hours = netMin / 60;
 
-    let pay = 0;
-    if (r.tempWageType === "daily" && r.tempWageAmount) {
-      pay = Number(r.tempWageAmount);
-    } else if (r.tempWageType === "hourly" && r.tempWageAmount) {
-      pay = hours * Number(r.tempWageAmount);
-    } else if (r.wageType === "hourly" && r.wageAmount) {
-      pay = hours * Number(r.wageAmount);
-    } else if (r.wageType === "monthly" && r.wageAmount) {
-      pay = hours * (Number(r.wageAmount) / 209);
+    // 시급 결정 (server/helpers/wage.ts:computeWageForShift 통일)
+    let wt: WageType = null;
+    let wa: number | null = null;
+    let stdHours = computeMonthlyStandardHours(null, false); // 폴백 209h
+    if (r.tempWageType && r.tempWageAmount) {
+      wt = r.tempWageType as WageType;
+      wa = Number(r.tempWageAmount);
+    } else if (r.wageType && r.wageAmount) {
+      wt = r.wageType as WageType;
+      wa = Number(r.wageAmount);
+      stdHours = computeMonthlyStandardHours(r.weeklyHours, !!r.noWeeklyHolidayPay);
     }
+    const pay = computeWageForShift({ wageType: wt, wageAmount: wa, hoursWorked: hours, monthlyStandardHours: stdHours });
     totalCost += pay;
 
     const company = r.tempWorkerName ? "임시근로" : (r.userId ? affMap.get(r.userId) ?? "기본" : "기본");
