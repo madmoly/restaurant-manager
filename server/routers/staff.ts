@@ -64,6 +64,9 @@ function computeMismatchedFields(
     affiliatedCompany?: string | null;
     hireDate?: string | Date | null;
     weeklyOffDays?: number | null;
+    weeklyHours?: string | number | null;
+    wageType?: string | null;
+    wageAmount?: string | number | null;
   },
   snapshot: {
     snapshotName?: string | null;
@@ -73,10 +76,24 @@ function computeMismatchedFields(
     snapshotBankAccount?: string | null;
     snapshotAffiliatedCompany?: string | null;
     snapshotWeeklyOffDays?: number | null;
+    snapshotWeeklyHours?: string | number | null;
+    snapshotWageType?: string | null;
+    snapshotWage?: string | number | null;
   } | null,
 ): string[] {
   if (!snapshot) return [];
   const diff: string[] = [];
+  const numEq = (a: any, b: any): boolean => {
+    if ((a == null || a === "") && (b == null || b === "")) return true;
+    return Number(a) === Number(b);
+  };
+  // 임금: wageType + wageAmount 결합 비교 (한 쪽이라도 다르면 wage 라벨)
+  const wageMismatch =
+    (current.wageType ?? "") !== (snapshot.snapshotWageType ?? "") ||
+    !numEq(current.wageAmount, snapshot.snapshotWage);
+  if (current.wageType || snapshot.snapshotWageType || current.wageAmount || snapshot.snapshotWage) {
+    if (wageMismatch) diff.push("wage");
+  }
   const pairs: Array<[string, any, any]> = [
     ["name", current.name, snapshot.snapshotName],
     ["phone", normalizePhone(current.phone), normalizePhone(snapshot.snapshotPhone)],
@@ -87,11 +104,14 @@ function computeMismatchedFields(
     ["weeklyOffDays", current.weeklyOffDays ?? null, snapshot.snapshotWeeklyOffDays ?? null],
   ];
   for (const [field, a, b] of pairs) {
-    // 양쪽 모두 비어있으면 무시
     const isEmptyA = a === null || a === undefined || a === "";
     const isEmptyB = b === null || b === undefined || b === "";
     if (isEmptyA && isEmptyB) continue;
     if (String(a ?? "") !== String(b ?? "")) diff.push(field);
+  }
+  // 주근로시간 (decimal): 숫자 비교
+  if (current.weeklyHours != null || snapshot.snapshotWeeklyHours != null) {
+    if (!numEq(current.weeklyHours, snapshot.snapshotWeeklyHours)) diff.push("weeklyHours");
   }
   return diff;
 }
@@ -167,6 +187,9 @@ export const staffRouter = router({
             snapshotBankAccount: employmentElectronicContracts.snapshotBankAccount,
             snapshotAffiliatedCompany: employmentElectronicContracts.snapshotAffiliatedCompany,
             snapshotWeeklyOffDays: employmentElectronicContracts.snapshotWeeklyOffDays,
+            snapshotWeeklyHours: employmentElectronicContracts.snapshotWeeklyHours,
+            snapshotWageType: employmentElectronicContracts.snapshotWageType,
+            snapshotWage: employmentElectronicContracts.snapshotWage,
           })
           .from(employmentElectronicContracts)
           .where(and(
@@ -223,6 +246,9 @@ export const staffRouter = router({
             affiliatedCompany: r.affiliatedCompany,
             hireDate: r.hireDate,
             weeklyOffDays: r.weeklyOffDays,
+            weeklyHours: r.weeklyHours,
+            wageType: r.wageType,
+            wageAmount: r.wageAmount,
           },
           snap,
         );

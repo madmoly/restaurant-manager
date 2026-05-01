@@ -21,6 +21,18 @@ const STORE_ROLE_LABELS: Record<string, string> = {
   employee: "직원",       // 레거시
 };
 
+const MISMATCH_FIELD_LABELS: Record<string, string> = {
+  name: "이름",
+  phone: "연락처",
+  address: "주소",
+  residentNumber: "주민번호",
+  bankAccount: "계좌번호",
+  affiliatedCompany: "소속회사",
+  weeklyOffDays: "주휴무일수",
+  weeklyHours: "주근로시간",
+  wage: "임금",
+};
+
 // ─── 보건증 만료일 계산 헬퍼 ──────────────────────────────────────────────────
 function getHealthCertStatus(expiry: string | null | undefined) {
   if (!expiry) return null;
@@ -519,6 +531,12 @@ export default function StaffPage() {
                       {isOwnerOrAdmin && contracts && !contracts.some((c: any) => c.employeeId === s.userId) && !s.resignedAt && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
                           계약서 없음
+                        </span>
+                      )}
+                      {/* 계약서↔직원정보 정합성 불일치 */}
+                      {Array.isArray(s.mismatchedFields) && s.mismatchedFields.length > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800" title={`불일치: ${s.mismatchedFields.map((f: string) => MISMATCH_FIELD_LABELS[f] ?? f).join(", ")}`}>
+                          ⚠ 계약서 불일치 ({s.mismatchedFields.length})
                         </span>
                       )}
                     </div>
