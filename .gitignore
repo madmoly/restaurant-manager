@@ -30,6 +30,7 @@ porting-strategy.md
 
 # Claude Code
 .claude/credentials.json
+.claude/scheduled_tasks.lock
 .commitmsg
 
 # System junk
