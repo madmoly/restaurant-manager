@@ -503,63 +503,33 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
         </>
       )}
 
-      {/* L4: 비용 분해 (시급제는 시간×시급 + 주휴별도 가산. 월급제는 4대 분해) */}
+      {/* L4: 비용 분해 — 사용자 요청 2026-05-02: 연장/야간 컬럼 제거. 주휴 0원이면 "포함" 표시 */}
       {(() => {
-        const tentative = (wb.base ?? 0) + (wb.weeklyHoliday ?? 0) + (wb.overtime ?? 0) + (wb.night ?? 0);
-        const showWeeklyHoliday = (wb.weeklyHoliday ?? 0) > 0;
+        const wHoliday = wb.weeklyHoliday ?? 0;
+        const tentative = (wb.base ?? 0) + wHoliday;
+        const holidayCell = wHoliday > 0
+          ? <span className="font-medium text-foreground">{fmtWon(wHoliday)}</span>
+          : <span className="font-medium text-muted-foreground">포함</span>;
         return (
           <div className="space-y-1 pt-1 border-t border-border/30">
-            {emp.wageType === "hourly" ? (
-              // 시급제: 시간 × 시급. 주휴별도 + 주15h 이상이면 주휴 가산 라인 추가
-              <div className="text-[11px] grid grid-cols-3 gap-x-3 gap-y-1">
-                <div>
-                  <span className="text-muted-foreground">근무시간</span>
-                  <div className="font-medium text-foreground">{(emp.totalHours ?? 0).toFixed(1)}h</div>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">시간×시급</span>
-                  <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
-                </div>
-                {showWeeklyHoliday && (
-                  <div>
-                    <span className="text-muted-foreground">주휴(별도)</span>
-                    <div className="font-medium text-foreground">{fmtWon(wb.weeklyHoliday)}</div>
-                  </div>
-                )}
-                <div className="col-span-3">
-                  <span className="text-muted-foreground">합계</span>
-                  <div className="font-bold text-foreground">{fmtWon(tentative)}</div>
-                </div>
+            <div className="text-[11px] grid grid-cols-3 gap-x-3 gap-y-1">
+              <div>
+                <span className="text-muted-foreground">근무시간</span>
+                <div className="font-medium text-foreground">{(emp.totalHours ?? 0).toFixed(1)}h</div>
               </div>
-            ) : (
-              // 월급제: 기본/주휴/연장/야간 4분해 + 합계
-              <div className="text-[11px] grid grid-cols-4 gap-x-3 gap-y-1">
-                <div>
-                  <span className="text-muted-foreground">근무시간</span>
-                  <div className="font-medium text-foreground">{(emp.totalHours ?? 0).toFixed(1)}h</div>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">기본</span>
-                  <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">주휴</span>
-                  <div className="font-medium text-foreground">{fmtWon(wb.weeklyHoliday)}</div>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">연장</span>
-                  <div className="font-medium text-foreground">{fmtWon(wb.overtime)}</div>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">야간</span>
-                  <div className="font-medium text-foreground">{fmtWon(wb.night)}</div>
-                </div>
-                <div className="col-span-3">
-                  <span className="text-muted-foreground">합계</span>
-                  <div className="font-bold text-foreground">{fmtWon(tentative)}</div>
-                </div>
+              <div>
+                <span className="text-muted-foreground">{emp.wageType === "hourly" ? "시간×시급" : "기본"}</span>
+                <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
               </div>
-            )}
+              <div>
+                <span className="text-muted-foreground">주휴</span>
+                <div>{holidayCell}</div>
+              </div>
+              <div className="col-span-3">
+                <span className="text-muted-foreground">합계</span>
+                <div className="font-bold text-foreground">{fmtWon(tentative)}</div>
+              </div>
+            </div>
             <div className="flex items-start gap-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300">
               <Info className="w-3 h-3 mt-0.5 shrink-0" />
               <span>
