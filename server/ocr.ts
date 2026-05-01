@@ -959,16 +959,29 @@ ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
     // 입력 모드 결정 (둘 다 오면 image 우선)
     const inputMode: "image" | "spreadsheet" = urls.length > 0 ? "image" : "spreadsheet";
 
-    // ── 이미지 모드: 파일 검증 + EXIF 회전 + 전처리 (spreadsheet 모드면 skip) ──
-    const imagePayloads: { base64: string; mediaType: string; filePath: string }[] = [];
+    // ── 이미지/PDF 모드: 파일 검증 + (이미지만) EXIF 회전 + 전처리 ──
+    // PDF는 sharp 전처리 없이 base64로 그대로 Anthropic document 블록에 전달.
+    const fileBlocks: any[] = [];
     if (inputMode === "image") {
       for (const url of urls) {
         const relativePath = url.replace(/^\/uploads\//, "");
         const filePath = path.join(UPLOAD_ROOT, relativePath);
         if (!fs.existsSync(filePath)) {
-          res.status(404).json({ error: `이미지 파일을 찾을 수 없습니다: ${url}` });
+          res.status(404).json({ error: `파일을 찾을 수 없습니다: ${url}` });
           return;
         }
+
+        const isPdf = filePath.toLowerCase().endsWith(".pdf");
+        if (isPdf) {
+          // PDF는 그대로 document block으로 전달 — Anthropic이 페이지별 OCR 처리
+          const pdfBuf = fs.readFileSync(filePath);
+          fileBlocks.push({
+            type: "document" as const,
+            source: { type: "base64" as const, media_type: "application/pdf", data: pdfBuf.toString("base64") },
+          });
+          continue;
+        }
+
         await fixExifOrientation(filePath);
 
         // 정산표는 길고 텍스트 위주 → 해상도 3500, 그레이+대비+샤프 (extract-purchase와 동일 v9)
@@ -992,7 +1005,10 @@ ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
         }
 
         const { base64, mediaType } = loadImageBase64Raw(filePath);
-        imagePayloads.push({ base64, mediaType, filePath });
+        fileBlocks.push({
+          type: "image" as const,
+          source: { type: "base64" as const, media_type: mediaType, data: base64 },
+        });
       }
     }
 
@@ -1074,13 +1090,8 @@ ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
 ${hintYearMonth ? `\n참고: 사용자가 ${hintYearMonth} 정산표라고 알려주었습니다.` : ""}
 ${profileHint}`;
 
-    // ── Claude 호출 (이미지 모드: Vision / 스프레드시트 모드: 텍스트) ────
-    const messageContent: any[] = inputMode === "image"
-      ? imagePayloads.map((p) => ({
-          type: "image" as const,
-          source: { type: "base64" as const, media_type: p.mediaType, data: p.base64 },
-        }))
-      : [];
+    // ── Claude 호출 (이미지/PDF 모드: Vision+Document / 스프레드시트 모드: 텍스트) ────
+    const messageContent: any[] = inputMode === "image" ? [...fileBlocks] : [];
 
     if (inputMode === "spreadsheet") {
       messageContent.push({

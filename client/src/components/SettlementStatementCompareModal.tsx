@@ -404,7 +404,7 @@ export default function SettlementStatementCompareModal({
               <Button variant="outline" onClick={onClose}>취소</Button>
               <Button
                 onClick={handleAnalyze}
-                disabled={uploadedUrls.length === 0 || ocrProcessing}
+                disabled={!hasInput || ocrProcessing}
               >
                 {ocrProcessing ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> 분석 중...</> : "분석 시작"}
               </Button>

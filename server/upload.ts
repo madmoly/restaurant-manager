@@ -201,8 +201,9 @@ const settlementUpload = multer({
   storage: settlementStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter(_req, file, cb) {
-    if (!file.mimetype.startsWith("image/")) {
-      cb(new Error("이미지 파일만 업로드 가능합니다"));
+    const allowed = file.mimetype.startsWith("image/") || file.mimetype === "application/pdf";
+    if (!allowed) {
+      cb(new Error("이미지 또는 PDF 파일만 업로드 가능합니다"));
       return;
     }
     cb(null, true);

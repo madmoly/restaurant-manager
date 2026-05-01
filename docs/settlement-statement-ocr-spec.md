@@ -387,7 +387,7 @@ function compareWithSystem(
 - **혼합 과세 거래처** (`settlementBasis='mixed'`): 1차 구현 X. OCR이 taxType을 정확히 잡지 못하면 단가 기반 추정 필요. 후속.
 - **반품 처리**: xlsx 양식의 "반품액" 컬럼은 무시. 향후 `purchase_returns` 테이블 도입 시 통합.
 - **수금 대조**: `monthlySummary.paymentTotal`은 저장만. 시스템에 거래처 수금 입력 기능이 없음 — 이건 별도 기획.
-- **PDF 다페이지**: PDF.js로 페이지별 이미지화 후 다중 OCR. 1차는 사용자가 페이지별 캡처 업로드 권장.
+- **PDF 다페이지**: Anthropic document type으로 직접 처리. 페이지 분할 불필요.
 - **중복 적용 방지**: 같은 yearMonth+counterpartyId의 audit이 `applied` 상태면 새 업로드 시 경고.
 - **Excel 거대 파일**: SheetJS dump 결과가 50k 토큰 초과 시 시트 단위 분할. 1차는 첫 시트만 처리하고 사용자에게 알림. 다중 시트 자동 통합은 후속.
 - **Alias 충돌**: 동일 supplierItemName이 매장 간 다른 itemId에 매핑돼야 하는 경우 (예: 같은 거래처가 매장별로 다른 품목 코드 사용)는 `(restaurantId, counterpartyId, supplierItemName)` 단위로 격리됨 — 현 스키마가 restaurantId 포함이라 OK. 단 한 거래처가 같은 supplierItemName을 다른 itemId에 동시 매핑하려 하면 사용자 알림 후 거부.
