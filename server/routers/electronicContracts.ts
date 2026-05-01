@@ -3,7 +3,7 @@ import { eq, and, desc, sql, isNotNull, isNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { employmentElectronicContracts, employeeContracts, employeeWageHistory, restaurantContracts, restaurants, restaurantUsers, users } from "../../drizzle/schema";
+import { employmentElectronicContracts, employeeContracts, employeeWageHistory, employerPresets, restaurantContracts, restaurants, restaurantUsers, users } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -183,6 +183,69 @@ export const electronicContractsRouter = router({
       return rows
         .filter((r) => r.affiliatedCompany)
         .map((r) => ({ name: r.affiliatedCompany!, businessNumber: r.employerBusinessNumber || "" }));
+    }),
+
+  /** 사업주 프리셋 목록 (계약서 사업주 태그) */
+  listEmployerPresets: managerProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      return db
+        .select()
+        .from(employerPresets)
+        .where(eq(employerPresets.restaurantId, input.restaurantId))
+        .orderBy(desc(employerPresets.isDefault), employerPresets.companyName);
+    }),
+
+  /** 사업주 프리셋 추가 (동일 companyName 존재 시 사업자등록번호만 갱신) */
+  addEmployerPreset: managerProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        companyName: z.string().min(1),
+        businessNumber: z.string().optional(),
+        isDefault: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      const [existing] = await db
+        .select()
+        .from(employerPresets)
+        .where(and(
+          eq(employerPresets.restaurantId, input.restaurantId),
+          eq(employerPresets.companyName, input.companyName),
+        ))
+        .limit(1);
+      if (existing) {
+        if (input.businessNumber && existing.businessNumber !== input.businessNumber) {
+          await db.update(employerPresets)
+            .set({ businessNumber: input.businessNumber })
+            .where(eq(employerPresets.id, existing.id));
+        }
+        return { id: existing.id, ok: true };
+      }
+      const [result] = await db.insert(employerPresets).values({
+        restaurantId: input.restaurantId,
+        companyName: input.companyName,
+        businessNumber: input.businessNumber || null,
+        isDefault: input.isDefault ?? false,
+        createdBy: ctx.user.userId,
+      });
+      return { id: (result as any).insertId as number, ok: true };
+    }),
+
+  /** 사업주 프리셋 삭제 */
+  deleteEmployerPreset: managerProcedure
+    .input(z.object({ restaurantId: z.number(), id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      await db.delete(employerPresets)
+        .where(and(
+          eq(employerPresets.id, input.id),
+          eq(employerPresets.restaurantId, input.restaurantId),
+        ));
+      return { ok: true };
     }),
 
   /** 매장의 가장 최근 계약서 내용 반환 (새 계약서 작성 시 기본값으로 사용) */
