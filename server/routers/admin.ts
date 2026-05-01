@@ -203,14 +203,15 @@ export const adminRouter = router({
         return null;
       }
 
-      // 사용자 통계
+      // 사용자 통계 — 시스템 enum: master/admin/user (CLAUDE.md §8)
       const userStats = await db
         .select({
           total: sql<number>`COUNT(*)`,
           active: sql<number>`SUM(CASE WHEN ${users.isActive} = true THEN 1 ELSE 0 END)`,
+          masters: sql<number>`SUM(CASE WHEN ${users.role} = 'master' THEN 1 ELSE 0 END)`,
           admins: sql<number>`SUM(CASE WHEN ${users.role} = 'admin' THEN 1 ELSE 0 END)`,
-          managers: sql<number>`SUM(CASE WHEN ${users.role} = 'manager' THEN 1 ELSE 0 END)`,
-          employees: sql<number>`SUM(CASE WHEN ${users.role} = 'staff' THEN 1 ELSE 0 END)`,        })
+          users: sql<number>`SUM(CASE WHEN ${users.role} = 'user' THEN 1 ELSE 0 END)`,
+        })
         .from(users);
 
       // 매장 통계 (tutorial 제외 — active+archived 모두 포함하므로 deletedAt 필터 없음)

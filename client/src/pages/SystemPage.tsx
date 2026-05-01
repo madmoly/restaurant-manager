@@ -246,6 +246,7 @@ function SystemStatusTab() {
         <Card className="p-5">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4"><Shield size={14} className="text-primary" /> 역할별 사용자 분포</h3>
           <div className="space-y-3">
+            <RoleRow label="개발자 (master)" count={u?.masters ?? 0} color="bg-purple-500" total={u?.total ?? 1} />
             <RoleRow label="대표 (admin)" count={u?.admins ?? 0} color="bg-blue-500" total={u?.total ?? 1} />
             <RoleRow label="일반 사용자" count={u?.users ?? 0} color="bg-slate-500" total={u?.total ?? 1} />
           </div>

@@ -150,6 +150,7 @@ export default function MasterDashboard() {
             </button>
           </div>
           <div className="space-y-3">
+            <RoleRow label="개발자 (master)" count={u?.masters ?? 0} color="bg-purple-500" total={u?.total ?? 1} />
             <RoleRow label="대표 (admin)" count={u?.admins ?? 0} color="bg-blue-500" total={u?.total ?? 1} />
             <RoleRow label="일반 사용자" count={u?.users ?? 0} color="bg-slate-500" total={u?.total ?? 1} />
           </div>

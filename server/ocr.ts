@@ -1275,7 +1275,7 @@ ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
       return;
     }
 
-    const { base64, mediaType } = await loadImageBase64(filePath);
+    const { base64, mediaType } = loadImageBase64Raw(filePath);
 
     // 보건증은 단순 구조 → haiku로 충분 (비용 절감)
     const message = await anthropic.messages.create({
