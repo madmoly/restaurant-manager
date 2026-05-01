@@ -3,7 +3,7 @@ import { eq, and, desc, sql, isNotNull, isNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { affiliatedCompanies, employmentElectronicContracts, employeeWageHistory, employerPresets, restaurantContracts, restaurantUsers } from "../../drizzle/schema";
+import { affiliatedCompanies, employmentElectronicContracts, employeeWageHistory, employerPresets, restaurants, restaurantContracts, restaurantUsers } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 import { getOver5FromCompany } from "../helpers/labor";

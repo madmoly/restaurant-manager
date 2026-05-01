@@ -1584,8 +1584,23 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             </div>
             <div>
               <label className={labelCls}>주 근무시간</label>
-              <input type="number" className={inputCls} value={form.weeklyHours} onChange={(e) => setForm({ ...form, weeklyHours: e.target.value })} />
-              {isUnder15Hours && <p className="text-[10px] text-amber-500 mt-0.5">주 15시간 미만: 주휴수당·4대보험 미적용</p>}
+              {form.wageType === "hourly" && form.weeklyHours === "0" ? (
+                <input type="text" className={inputCls} value="미정" disabled />
+              ) : (
+                <input type="number" className={inputCls} value={form.weeklyHours}
+                  onChange={(e) => setForm({ ...form, weeklyHours: e.target.value })} />
+              )}
+              {form.wageType === "hourly" && (
+                <label className="flex items-center gap-1 mt-1 cursor-pointer">
+                  <input type="checkbox" checked={form.weeklyHours === "0"}
+                    onChange={(e) => setForm({ ...form, weeklyHours: e.target.checked ? "0" : "40" })}
+                    className="rounded border-input" />
+                  <span className="text-[10px] text-muted-foreground">미정 (시급제 변동근무)</span>
+                </label>
+              )}
+              {form.wageType === "monthly" && isUnder15Hours && (
+                <p className="text-[10px] text-amber-500 mt-0.5">주 15시간 미만: 주휴수당·4대보험 미적용</p>
+              )}
             </div>
             <div>
               <label className={labelCls}>주당 휴무일수</label>
@@ -1597,6 +1612,36 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               </select>
             </div>
           </div>
+
+          {/* ═══ 시급제 + 주휴수당 처리 — 재설계 2026-05-02: 임금 영역 직후 배치 ═══ */}
+          {form.wageType === "hourly" && (
+            <div className="space-y-2 py-1">
+              <label className={labelCls}>주휴수당 처리</label>
+              <div className="flex items-center gap-4 pl-1 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="hourlyWageHoliday" checked={form.hourlyWageIncludesHolidayPay}
+                    onChange={() => setForm({ ...form, hourlyWageIncludesHolidayPay: true })}
+                    className="rounded border-input" />
+                  <span className="text-sm text-foreground">시급에 주휴수당 포함</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="hourlyWageHoliday" checked={!form.hourlyWageIncludesHolidayPay}
+                    onChange={() => setForm({ ...form, hourlyWageIncludesHolidayPay: false })}
+                    className="rounded border-input" />
+                  <span className="text-sm text-foreground">주휴수당 별도 산정</span>
+                </label>
+              </div>
+              {!form.hourlyWageIncludesHolidayPay && (
+                <p className="text-[10px] text-blue-600 dark:text-blue-400 pl-1">
+                  {weeklyHoursNum >= 15
+                    ? "주 15시간 이상 — 정산 시 주휴수당(주1회 8h × 시급) 자동 가산"
+                    : weeklyHoursNum > 0
+                    ? "주 15시간 미만 — 주휴수당 미발생"
+                    : "근무시간 미정 — 주별 실근무 15시간 도달 시 정산에서 자동 가산"}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* ═══ 포괄임금 구성항목 (월급제 전용) — 재설계 2026-05-02: 5인 미만이면 연차수당 행 숨김 ═══ */}
           {form.wageType === "monthly" && wageNum > 0 && (
@@ -1745,33 +1790,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             )}
           </div>
 
-          {/* ═══ 시급제 + 주휴포함 여부 — 재설계 2026-05-02 ═══ */}
-          {form.wageType === "hourly" && (
-            <div className="space-y-2 py-1">
-              <label className={labelCls}>주휴수당 처리</label>
-              <div className="flex items-center gap-4 pl-1">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="hourlyWageHoliday" checked={form.hourlyWageIncludesHolidayPay}
-                    onChange={() => setForm({ ...form, hourlyWageIncludesHolidayPay: true })}
-                    className="rounded border-input" />
-                  <span className="text-sm text-foreground">시급에 주휴수당 포함</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="hourlyWageHoliday" checked={!form.hourlyWageIncludesHolidayPay}
-                    onChange={() => setForm({ ...form, hourlyWageIncludesHolidayPay: false })}
-                    className="rounded border-input" />
-                  <span className="text-sm text-foreground">주휴수당 별도 산정</span>
-                </label>
-              </div>
-              {!form.hourlyWageIncludesHolidayPay && (
-                <p className="text-[10px] text-blue-600 dark:text-blue-400 pl-1">
-                  {weeklyHoursNum >= 15
-                    ? "주 15시간 이상 — 정산 시 주휴수당(주1회 8h × 시급) 자동 가산"
-                    : "주 15시간 미만 — 주휴수당 미발생"}
-                </p>
-              )}
-            </div>
-          )}
+          {/* (주휴수당 처리 라디오는 임금 영역 직후로 이동됨 — 재설계 2026-05-02 위치 변경) */}
 
           {/* ═══ 특약사항 ═══ */}
           <div>

@@ -198,7 +198,7 @@ export default function ContractSignPage({ token }: { token: string }) {
                 <ContractRow label="4. 업무내용" value={contract.jobDescription || "(사업주 지시에 따름)"} />
                 <ContractRow
                   label="5. 근무시간"
-                  value={`${contract.workStartTime} ~ ${contract.workEndTime} (주 ${Number(contract.weeklyHours)}시간, 휴게 ${contract.breakMinutes ?? 60}분)`}
+                  value={`${contract.workStartTime} ~ ${contract.workEndTime} (${weeklyHoursNum > 0 ? `주 ${weeklyHoursNum}시간` : "주 근무시간 미정 (시급제 변동근무)"}, 휴게 ${contract.breakMinutes ?? 60}분)`}
                 />
                 <ContractRow
                   label="6. 주휴일"
@@ -208,8 +208,8 @@ export default function ContractSignPage({ token }: { token: string }) {
                   label="7. 임금"
                   value={
                     isHourly
-                      ? `시급 ${Number(contract.wageAmount).toLocaleString()}원 (${includesHoliday ? "주휴수당 포함" : "주휴수당 별도 산정"})`
-                      : `월급 ${Number(contract.wageAmount).toLocaleString()}원`
+                      ? `시급 ${Math.round(Number(contract.wageAmount)).toLocaleString()}원 (${includesHoliday ? "주휴수당 포함" : "주휴수당 별도 산정"})`
+                      : `월급 ${Math.round(Number(contract.wageAmount)).toLocaleString()}원`
                   }
                 />
                 {/* 포괄임금 구성항목 (월급제 + basePay 존재 시). 5인 미만이면 포괄연차수당 행 숨김 — 재설계 2026-05-02 */}
@@ -232,28 +232,28 @@ export default function ContractSignPage({ token }: { token: string }) {
                               <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
                                 <td style={{ padding: "5px 12px", color: "#6b7280" }}>통상시급</td>
                                 <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
-                                  {Number(contract.hourlyWage).toLocaleString()}원
+                                  {Math.round(Number(contract.hourlyWage)).toLocaleString()}원
                                 </td>
                               </tr>
                             )}
                             <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
                               <td style={{ padding: "5px 12px", color: "#6b7280" }}>기본급{contract.monthlyContractHours ? ` (${Number(contract.monthlyContractHours)}h)` : ""}</td>
                               <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
-                                {Number(contract.basePay).toLocaleString()}원
+                                {Math.round(Number(contract.basePay)).toLocaleString()}원
                               </td>
                             </tr>
                             {effectiveOver5 && contract.annualLeavePay && Number(contract.annualLeavePay) > 0 && (
                               <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
                                 <td style={{ padding: "5px 12px", color: "#6b7280" }}>포괄연차수당 (8h)</td>
                                 <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
-                                  {Number(contract.annualLeavePay).toLocaleString()}원
+                                  {Math.round(Number(contract.annualLeavePay)).toLocaleString()}원
                                 </td>
                               </tr>
                             )}
                             <tr style={{ background: "#f9fafb" }}>
                               <td style={{ padding: "6px 12px", fontWeight: 600 }}>합계 (월급)</td>
                               <td style={{ padding: "6px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>
-                                {Number(contract.wageAmount).toLocaleString()}원
+                                {Math.round(Number(contract.wageAmount)).toLocaleString()}원
                               </td>
                             </tr>
                           </tbody>
