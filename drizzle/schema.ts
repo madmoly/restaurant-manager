@@ -175,6 +175,10 @@ export const counterparties = mysqlTable("counterparties", {
   contactName: varchar("contactName", { length: 50 }),
   contactPhone: varchar("contactPhone", { length: 30 }),
   note: text("note"),
+  // 정산표 OCR 대조: 비교 기준 (supply=공급가, total=공급가+부가세, mixed=항목별 자동판정)
+  settlementBasis: mysqlEnum("settlementBasis", ["supply", "total", "mixed"]).default("supply").notNull(),
+  // 합계 비교 허용 오차(원). 기본 100원 (원단위 절상/절사 흡수)
+  settlementMatchTolerance: int("settlementMatchTolerance").default(100).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -917,6 +921,36 @@ export const auditLogs = mysqlTable("audit_logs", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type AuditLog = typeof auditLogs.$inferSelect;
+
+// ─── Settlement Statement Audits (월매입정산표 OCR 대조 이력) ────────────────
+// 거래처가 발행한 월정산표를 OCR로 읽어 시스템 매입과 대조한 결과를 보존.
+// 같은 정산표 중복 적용 방지 + 사후 감사용.
+export const settlementStatementAudits = mysqlTable("settlement_statement_audits", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  counterpartyId: int("counterpartyId"),
+  // OCR이 읽은 거래처명 원문 (매칭 실패 시 보존)
+  counterpartyNameRaw: varchar("counterpartyNameRaw", { length: 100 }),
+  yearMonth: varchar("yearMonth", { length: 7 }).notNull(), // 'YYYY-MM'
+  imageUrl: varchar("imageUrl", { length: 500 }),
+  // OCR 원본 응답 전체
+  ocrRawData: json("ocrRawData").notNull(),
+  // 정규화된 항목 배열
+  parsedItems: json("parsedItems").notNull(),
+  ocrTotal: decimal("ocrTotal", { precision: 14, scale: 2 }),
+  systemTotal: decimal("systemTotal", { precision: 14, scale: 2 }),
+  // 비교 결과 요약 {dateMismatches, itemMismatches, missingInSystem, missingInStatement}
+  diffSummary: json("diffSummary"),
+  status: mysqlEnum("status", ["pending", "reviewed", "applied", "dismissed"]).default("pending").notNull(),
+  // 사용자가 적용한 액션 로그
+  appliedActions: json("appliedActions"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  reviewedAt: timestamp("reviewedAt"),
+  appliedAt: timestamp("appliedAt"),
+});
+
+export type SettlementStatementAudit = typeof settlementStatementAudits.$inferSelect;
 
 // ─── 시스템 설정 ──────────────────────────────────────────────────────────────
 export const systemSettings = mysqlTable("system_settings", {

@@ -1115,6 +1115,44 @@ app.use(express.json({ limit: "10mb" }));
       )
     `).catch(() => {});
 
+    // ─── 정산표 OCR 대조 (2026-05-01) ─────────────────────────────────────────
+    // counterparties: 정산 기준 플래그 + 합계 비교 허용 오차
+    await addColumnIfNotExists(
+      "counterparties",
+      "settlementBasis",
+      "ENUM('supply','total','mixed') NOT NULL DEFAULT 'supply'"
+    );
+    await addColumnIfNotExists(
+      "counterparties",
+      "settlementMatchTolerance",
+      "INT NOT NULL DEFAULT 100"
+    );
+
+    // settlement_statement_audits: 대조 이력 보존 (중복 적용 방지 + 사후 감사)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS settlement_statement_audits (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        counterpartyId INT,
+        counterpartyNameRaw VARCHAR(100),
+        yearMonth VARCHAR(7) NOT NULL,
+        imageUrl VARCHAR(500),
+        ocrRawData JSON NOT NULL,
+        parsedItems JSON NOT NULL,
+        ocrTotal DECIMAL(14,2),
+        systemTotal DECIMAL(14,2),
+        diffSummary JSON,
+        status ENUM('pending','reviewed','applied','dismissed') NOT NULL DEFAULT 'pending',
+        appliedActions JSON,
+        createdBy INT NOT NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        reviewedAt TIMESTAMP NULL,
+        appliedAt TIMESTAMP NULL,
+        INDEX idx_settlement_rest_month (restaurantId, yearMonth),
+        INDEX idx_settlement_counterparty (counterpartyId)
+      )
+    `).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

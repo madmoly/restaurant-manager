@@ -934,6 +934,273 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// POST /api/ocr/extract-statement — 월매입정산표(거래원장) OCR
+// 거래처가 발행한 한 달치 매입 정산표를 OCR로 읽어 구조화된 JSON으로 반환.
+// 비교 알고리즘은 settlementStatements 라우터에서 별도 처리.
+// ═════════════════════════════════════════════════════════════════════════════
+ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
+  const ocrStartTime = Date.now();
+  try {
+    const anthropic = getAnthropicClient();
+    if (!anthropic) {
+      res.status(500).json({ error: "ANTHROPIC_API_KEY가 설정되지 않았습니다." });
+      return;
+    }
+
+    const { imageUrls, restaurantId, hintCounterpartyId, hintYearMonth } = req.body;
+    const urls: string[] = Array.isArray(imageUrls) ? imageUrls
+      : (typeof imageUrls === "string" ? [imageUrls] : []);
+    if (urls.length === 0) {
+      res.status(400).json({ error: "imageUrls가 필요합니다 (배열 또는 문자열)" });
+      return;
+    }
+
+    // ── 각 이미지 파일 검증 + EXIF 회전 + 전처리 ──────────────────────────
+    const imagePayloads: { base64: string; mediaType: string; filePath: string }[] = [];
+    for (const url of urls) {
+      const relativePath = url.replace(/^\/uploads\//, "");
+      const filePath = path.join(UPLOAD_ROOT, relativePath);
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ error: `이미지 파일을 찾을 수 없습니다: ${url}` });
+        return;
+      }
+      await fixExifOrientation(filePath);
+
+      // 정산표는 길고 텍스트 위주 → 해상도 3500, 그레이+대비+샤프 (extract-purchase와 동일 v9)
+      try {
+        const meta = await sharp(filePath).metadata();
+        const maxDim = Math.max(meta.width || 0, meta.height || 0);
+        let pipeline = sharp(filePath);
+        if (maxDim > 3500) {
+          pipeline = pipeline.resize(3500, 3500, { fit: "inside", withoutEnlargement: true });
+        }
+        pipeline = pipeline
+          .grayscale()
+          .normalize()
+          .linear(1.3, -(128 * 1.3 - 128))
+          .gamma(1.2)
+          .sharpen({ sigma: 2.0, m1: 2.0, m2: 1.0 });
+        const enhancedBuf = await pipeline.jpeg({ quality: 95, mozjpeg: true }).toBuffer();
+        fs.writeFileSync(filePath, enhancedBuf);
+      } catch (enhErr: any) {
+        console.warn(`[OCR] statement 전처리 실패 (원본 사용): ${enhErr.message}`);
+      }
+
+      const { base64, mediaType } = loadImageBase64Raw(filePath);
+      imagePayloads.push({ base64, mediaType, filePath });
+    }
+
+    // ── 거래처 프로파일 힌트 ─────────────────────────────────────────────
+    const hintCpId = hintCounterpartyId ? Number(hintCounterpartyId) : null;
+    const profile = await getOcrProfile(hintCpId);
+    const profileHint = buildProfileHint(profile);
+
+    // ── 정산표 전용 프롬프트 ─────────────────────────────────────────────
+    const promptText = `이 이미지(들)는 거래처가 발행한 **월매입정산표(거래원장)**입니다.
+하나의 거래처와 하나의 매장 사이의 한 달치 거래내역이 표 형태로 나열되어 있습니다.
+
+## 추출 규칙
+
+### 1. 헤더
+- counterpartyName: 거래처(공급자/판매자) 회사명
+- counterpartyBusinessNumber: 사업자등록번호 (있으면)
+- yearMonth: 정산 대상 연월 (YYYY-MM 형식). 헤더의 "2024년 4월" 같은 텍스트 또는 거래일자 다수에서 추론.
+
+### 2. 거래 라인 (items 배열)
+각 행은 **일자 + 품목 + (수량) + (단가) + 합계금액**의 4~6요소.
+
+- date: YYYY-MM-DD (헤더 연월과 일자 합성)
+- rawItemName: 적요/품목/내역 컬럼의 **원문 그대로**
+- itemName: 정규화된 품목명 (예: "삼겹살(국내산) [1kg]" → "삼겹살")
+- spec: 규격/단위 정보 (예: "1kg", "박스", "20kg"). 없으면 null
+- quantity: 숫자만. 정수형이면 정수, 소수면 소수. 없으면 null
+- unitPrice: 단가 (원). 없으면 null
+- lineTotal: 그 행의 거래 금액 (원). **반드시 추출** — 정산표에서 가장 중요한 값
+- taxType: "taxable"(과세) | "exempt"(면세) | "unknown" — 양식에 명시(과/면, V/X)되어 있으면 그대로, 없으면 unknown
+- uncertain: 판독 자신없는 행이면 true
+- confidence: 0~1 사이 추정 신뢰도
+
+### 3. 양식 다양성 처리
+- "판매" / "수금" / "잔액" 컬럼이 분리된 양식이면 → **판매(매출) 행만 items로**, 수금은 monthlySummary.paymentTotal 합산.
+- 적요란이 \`삼겹살(국내산) [1kg] / 6 * 12,000\` 형식이면 itemName/spec/quantity/unitPrice를 분해.
+- 한 일자에 여러 품목 행이 있으면 모두 추출 (일자 칼럼이 비어 있어도 직전 일자 상속).
+- "월계", "거래처계", "합계", "전월이월", "당월잔액" 등 합계/누적 행은 items에 포함하지 말고 monthlySummary에 넣어.
+- "반품", "환입" 라인은 lineTotal을 음수로(-)하여 items에 포함.
+
+### 4. 월간 요약 (monthlySummary)
+- salesTotal: 월 판매(거래) 합계 (양식에 명시되어 있으면 그 값, 없으면 null)
+- paymentTotal: 월 수금 합계 (있으면)
+- balance: 잔액/미수금 (있으면)
+
+### 5. 다중 이미지
+이미지가 여러 장이면 같은 정산표의 연속된 페이지로 간주하고 모든 페이지의 거래라인을 하나의 items 배열로 합쳐.
+
+## 출력 형식 (JSON만, 마크다운 코드펜스 없이)
+
+\`\`\`json
+{
+  "counterpartyName": "거래처명",
+  "counterpartyBusinessNumber": "123-45-67890" | null,
+  "yearMonth": "YYYY-MM",
+  "documentType": "양식 유형 추정 (예: '거래원장', '월정산서', 'Ecount')",
+  "items": [
+    {
+      "date": "YYYY-MM-DD",
+      "rawItemName": "...",
+      "itemName": "...",
+      "spec": "..." | null,
+      "quantity": 6 | null,
+      "unitPrice": 12000 | null,
+      "lineTotal": 72000,
+      "taxType": "taxable" | "exempt" | "unknown",
+      "uncertain": false,
+      "confidence": 0.95
+    }
+  ],
+  "monthlySummary": {
+    "salesTotal": 1234567 | null,
+    "paymentTotal": 1000000 | null,
+    "balance": 234567 | null
+  }
+}
+\`\`\`
+
+${hintYearMonth ? `\n참고: 사용자가 ${hintYearMonth} 정산표라고 알려주었습니다.` : ""}
+${profileHint}`;
+
+    // ── Claude Vision 호출 ────────────────────────────────────────────────
+    const messageContent: any[] = imagePayloads.map((p) => ({
+      type: "image",
+      source: { type: "base64", media_type: p.mediaType, data: p.base64 },
+    }));
+    messageContent.push({ type: "text", text: promptText });
+
+    const message = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 8192,
+      messages: [{ role: "user", content: messageContent }],
+    });
+
+    const inputTokens = message.usage?.input_tokens ?? 0;
+    const outputTokens = message.usage?.output_tokens ?? 0;
+    const text = extractText(message);
+    const ocrElapsed = Date.now() - ocrStartTime;
+
+    if (!text) {
+      logOcrApiUsage({ endpoint: "extract-statement", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "AI 응답 비어있음", inputTokens, outputTokens, model: "sonnet" });
+      res.status(500).json({ error: "AI 응답이 비어있습니다", retryable: true });
+      return;
+    }
+
+    let parsed: any;
+    try {
+      parsed = parseAIJson(text);
+    } catch (parseErr: any) {
+      logOcrApiUsage({ endpoint: "extract-statement", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "JSON 파싱 실패", inputTokens, outputTokens, model: "sonnet" });
+      res.status(500).json({ error: "AI 응답을 처리하지 못했습니다. 다시 시도해주세요.", retryable: true, rawText: text.slice(0, 500) });
+      return;
+    }
+
+    // ── 항목 정규화 + 검증 ───────────────────────────────────────────────
+    const rawItems: any[] = Array.isArray(parsed.items) ? parsed.items : [];
+    const normalizedItems = rawItems.map((it) => {
+      const lineTotal = Number(String(it.lineTotal ?? "").replace(/,/g, "")) || 0;
+      const quantity = it.quantity !== null && it.quantity !== undefined && it.quantity !== ""
+        ? Number(String(it.quantity).replace(/,/g, "")) : null;
+      const unitPrice = it.unitPrice !== null && it.unitPrice !== undefined && it.unitPrice !== ""
+        ? Number(String(it.unitPrice).replace(/,/g, "")) : null;
+
+      // 합계 검증: quantity × unitPrice ≈ lineTotal (둘 다 있고 lineTotal>0인 경우)
+      let uncertain = !!it.uncertain;
+      if (quantity && unitPrice && lineTotal > 0) {
+        const calculated = Math.round(quantity * unitPrice);
+        const diff = Math.abs(lineTotal - calculated);
+        if (diff > 1 && diff / Math.max(lineTotal, calculated) > 0.05) {
+          // 5% 이상 차이 — 부가세 분리 가능성 등. 일단 lineTotal을 신뢰
+          uncertain = true;
+        }
+      }
+
+      return {
+        date: String(it.date || ""),
+        rawItemName: String(it.rawItemName || it.itemName || ""),
+        itemName: String(it.itemName || it.rawItemName || "").trim(),
+        spec: it.spec ? String(it.spec) : null,
+        quantity,
+        unitPrice,
+        lineTotal,
+        taxType: ["taxable", "exempt", "unknown"].includes(it.taxType) ? it.taxType : "unknown",
+        uncertain,
+        confidence: typeof it.confidence === "number" ? it.confidence : 0.8,
+      };
+    }).filter((it) => {
+      // 빈 항목, 합계행 잔재 제거
+      if (!it.itemName && !it.rawItemName) return false;
+      const lower = it.rawItemName.trim().toLowerCase();
+      if (/^(합계|소계|총합|월계|거래처계|이월|잔액|total|subtotal)$/i.test(lower)) return false;
+      return true;
+    });
+
+    // ── 거래처 매칭 ──────────────────────────────────────────────────────
+    const counterpartyName = parsed.counterpartyName || null;
+    const cpId = hintCpId
+      || (counterpartyName && restaurantId
+            ? await findCounterpartyId(counterpartyName, Number(restaurantId))
+            : null);
+
+    // ── 거래처 후보 (자동매칭 실패 시) ───────────────────────────────────
+    let counterpartyCandidates: { id: number; name: string; score: number }[] = [];
+    if (!hintCpId && !cpId && counterpartyName && restaurantId) {
+      counterpartyCandidates = await findCounterpartyCandidates(counterpartyName, Number(restaurantId));
+    }
+
+    // ── 월계 요약 ────────────────────────────────────────────────────────
+    const monthlySummary = parsed.monthlySummary || {};
+    const result = {
+      counterpartyName,
+      counterpartyId: cpId,
+      counterpartyBusinessNumber: parsed.counterpartyBusinessNumber || null,
+      counterpartyCandidates: counterpartyCandidates.length > 0 ? counterpartyCandidates : undefined,
+      yearMonth: parsed.yearMonth || hintYearMonth || null,
+      documentType: parsed.documentType || null,
+      items: normalizedItems,
+      monthlySummary: {
+        salesTotal: monthlySummary.salesTotal != null ? Number(String(monthlySummary.salesTotal).replace(/,/g, "")) : null,
+        paymentTotal: monthlySummary.paymentTotal != null ? Number(String(monthlySummary.paymentTotal).replace(/,/g, "")) : null,
+        balance: monthlySummary.balance != null ? Number(String(monthlySummary.balance).replace(/,/g, "")) : null,
+      },
+      rawText: text,
+    };
+
+    logOcrApiUsage({
+      endpoint: "extract-statement",
+      restaurantId: restaurantId ? Number(restaurantId) : undefined,
+      responseTimeMs: ocrElapsed,
+      success: true,
+      inputTokens, outputTokens,
+      model: "sonnet",
+      itemCount: normalizedItems.length,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error("[OCR] extract-statement error:", err);
+    await logOcrError(`정산표 OCR 오류: ${err.message}`, {
+      stack: err.stack?.substring(0, 1000),
+      imageUrls: req.body?.imageUrls,
+    }, req.body?.restaurantId ? Number(req.body.restaurantId) : undefined);
+    logOcrApiUsage({
+      endpoint: "extract-statement",
+      restaurantId: req.body?.restaurantId ? Number(req.body.restaurantId) : undefined,
+      responseTimeMs: Date.now() - ocrStartTime,
+      success: false,
+      errorMessage: err.message,
+    });
+    res.status(500).json({ error: "정산표 OCR 처리 중 오류가 발생했습니다.", retryable: true });
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // POST /api/ocr/extract-health-cert — 보건증 판독 (haiku로 변경)
 // ═════════════════════════════════════════════════════════════════════════════
 ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {

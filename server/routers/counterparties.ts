@@ -25,6 +25,9 @@ export const counterpartiesRouter = router({
       contactName: z.string().optional(),
       contactPhone: z.string().optional(),
       note: z.string().optional(),
+      // 정산표 OCR 대조용
+      settlementBasis: z.enum(["supply", "total", "mixed"]).optional(),
+      settlementMatchTolerance: z.number().int().min(0).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
@@ -43,6 +46,9 @@ export const counterpartiesRouter = router({
       contactName: z.string().nullable().optional(),
       contactPhone: z.string().nullable().optional(),
       note: z.string().nullable().optional(),
+      // 정산표 OCR 대조용
+      settlementBasis: z.enum(["supply", "total", "mixed"]).optional(),
+      settlementMatchTolerance: z.number().int().min(0).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
