@@ -5,7 +5,7 @@ import { db } from "../db";
 import {
   restaurants, restaurantUsers, users, sales, purchaseOrders,
   dailyClosings, dailyOperations, intermediateSales,
-  schedules, dailySalesDetail, businessGroups,
+  schedules, dailySalesDetail, businessGroups, dailyExpenses,
 } from "../../drizzle/schema";
 import { ROLE_LEVEL } from "@shared/permissions";
 import { getOwnedRestaurants, getOwnedRestaurantIds, realStoreCondition } from "../helpers/restaurantScope";
@@ -67,10 +67,20 @@ export const adminRouter = router({
           const purchasesTotal = Number(purchaseRow?.total ?? 0);
           const laborCost = Number(closingRow?.laborCost ?? 0);
 
-          // 고정비 합계 (공통 함수 — costType별 월할 + 기간 필터 + sales_ratio 포함)
-          const fixedResult = await calcMonthlyFixedCosts(r.id, input.year, input.month, salesTotal);
+          // 즉시 지출 (profit_ratio 정확 계산용)
+          const [expRow] = await db
+            .select({ total: sql<string>`COALESCE(SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2))), 0)` })
+            .from(dailyExpenses)
+            .where(and(eq(dailyExpenses.restaurantId, r.id), between(dailyExpenses.date, start, end)));
+          const expensesTotal = Math.round(Number(expRow?.total ?? 0));
+
+          // 고정비 합계 (sales_ratio + profit_ratio closed-form 적용)
+          const fixedResult = await calcMonthlyFixedCosts(
+            r.id, input.year, input.month, salesTotal,
+            { purchases: purchasesTotal, labor: laborCost, expenses: expensesTotal },
+          );
           const fixedCostTotal = fixedResult.totalWithRatio;
-          const profit = salesTotal - purchasesTotal - laborCost - fixedCostTotal;
+          const profit = salesTotal - purchasesTotal - laborCost - fixedCostTotal - expensesTotal;
 
           return {
             restaurantId: r.id,

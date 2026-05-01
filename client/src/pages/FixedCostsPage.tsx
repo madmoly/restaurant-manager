@@ -10,6 +10,7 @@ const COST_TYPE_OPTIONS = [
   { value: "yearly", label: "연간 (월할)" },
   { value: "quarterly", label: "분기별 (3개월할)" },
   { value: "sales_ratio", label: "매출대비 %" },
+  { value: "profit_ratio", label: "월순이익대비 %" },
 ];
 
 const CATEGORY_OPTIONS = [
@@ -26,6 +27,7 @@ const COST_TYPE_LABELS: Record<string, string> = {
   yearly: "연간",
   quarterly: "분기별",
   sales_ratio: "매출%",
+  profit_ratio: "순이익%",
   one_time: "일회성",
 };
 
@@ -34,6 +36,7 @@ const BADGE_VARIANTS: Record<string, string> = {
   yearly: "warning",
   quarterly: "default",
   sales_ratio: "success",
+  profit_ratio: "success",
   one_time: "default",
 };
 
@@ -134,6 +137,17 @@ export default function FixedCostsPage() {
               ))}
             </div>
           )}
+          {(monthlyTotal as any).profitRatioItems?.length > 0 && (
+            <div className="px-4 py-2 bg-muted/50 rounded-lg space-y-1">
+              <p className="text-xs text-muted-foreground">월순이익대비 비율 항목 (월정산 시 자동 계산)</p>
+              {(monthlyTotal as any).profitRatioItems.map((r: any, i: number) => (
+                <span key={i} className="text-xs text-foreground mr-3">
+                  {r.name}: {r.ratio}%
+                  {r.amount > 0 && ` (${Number(r.amount).toLocaleString()}원)`}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -184,7 +198,7 @@ export default function FixedCostsPage() {
                         )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {fc.costType === "sales_ratio" ? (
+                        {(fc.costType === "sales_ratio" || fc.costType === "profit_ratio") ? (
                           <span className="text-sm font-semibold text-foreground tabular-nums">{Number(fc.amount)}%</span>
                         ) : (
                           <div className="text-right">
@@ -362,12 +376,21 @@ function FixedCostForm({
         <Select label="유형" value={costType} onChange={(e: any) => setCostType(e.target.value)} options={COST_TYPE_OPTIONS} />
       </div>
       <Input
-        label={costType === "sales_ratio" ? "비율 (%)" : "금액 (원)"}
+        label={
+          costType === "sales_ratio" ? "비율 (%, 매출 기준)" :
+          costType === "profit_ratio" ? "비율 (%, 월순이익 기준)" :
+          "금액 (원)"
+        }
         type="number"
         value={amount}
         onChange={(e: any) => setAmount(e.target.value)}
-        placeholder={costType === "sales_ratio" ? "5.5" : "0"}
+        placeholder={costType === "sales_ratio" || costType === "profit_ratio" ? "5.5" : "0"}
       />
+      {costType === "profit_ratio" && (
+        <p className="text-xs text-muted-foreground -mt-2">
+          적자월에는 0원으로 처리됩니다. 월정산 시 매출−매입−인건비−고정비−즉시지출 계산 후 자동 적용.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Input
           label="적용 시작월"

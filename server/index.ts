@@ -203,9 +203,9 @@ app.use(express.json({ limit: "10mb" }));
       if (!e.message.includes("Duplicate")) console.log("[migrate] notifications type:", e.message);
     }
 
-    // 고정비: costType enum 확장 (quarterly, sales_ratio 추가) + attachmentUrl 컬럼
+    // 고정비: costType enum 확장 (quarterly, sales_ratio, profit_ratio 추가) + attachmentUrl 컬럼
     try {
-      await conn.query(`ALTER TABLE fixed_costs MODIFY COLUMN costType ENUM('monthly','yearly','one_time','quarterly','sales_ratio') NOT NULL DEFAULT 'monthly'`);
+      await conn.query(`ALTER TABLE fixed_costs MODIFY COLUMN costType ENUM('monthly','yearly','one_time','quarterly','sales_ratio','profit_ratio') NOT NULL DEFAULT 'monthly'`);
       console.log("[migrate] fixed_costs.costType enum 확장 완료");
     } catch (e: any) {
       console.log("[migrate] fixed_costs costType:", e.message);

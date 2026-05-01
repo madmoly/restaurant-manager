@@ -242,3 +242,133 @@ describe("월정산 시나리오", () => {
     expect(profitRatio).toBe(42.7); // 19200000/45000000
   });
 });
+
+// ─── profit_ratio closed-form (server/helpers/fixedCostCalc.ts에서 인라인 추출) ───
+
+/**
+ * 월순이익비율형(profit_ratio) closed-form 계산
+ * - preProfit > 0 + 비율 항목 존재 → monthlyProfit = round(preProfit × 100 / (100 + R_p))
+ *   profitRatioTotal = preProfit − monthlyProfit
+ *   각 항목 안분, 잔차는 마지막 항목에 흡수
+ * - 적자월(preProfit ≤ 0) 또는 항목 없음 → 모두 0원, monthlyProfit = preProfit
+ */
+function calcProfitRatioClosedForm(
+  preProfit: number,
+  ratios: number[],
+): { monthlyProfit: number; profitRatioTotal: number; itemAmounts: number[] } {
+  if (preProfit <= 0 || ratios.length === 0) {
+    return {
+      monthlyProfit: preProfit,
+      profitRatioTotal: 0,
+      itemAmounts: ratios.map(() => 0),
+    };
+  }
+  const Rp = ratios.reduce((s, r) => s + r, 0);
+  const monthlyProfit = Math.round(preProfit * 100 / (100 + Rp));
+  const profitRatioTotal = preProfit - monthlyProfit;
+
+  const itemAmounts: number[] = [];
+  let acc = 0;
+  ratios.forEach((r, idx) => {
+    const isLast = idx === ratios.length - 1;
+    const amt = isLast ? profitRatioTotal - acc : Math.round(monthlyProfit * r / 100);
+    acc += amt;
+    itemAmounts.push(amt);
+  });
+  return { monthlyProfit, profitRatioTotal, itemAmounts };
+}
+
+describe("profit_ratio closed-form 계산", () => {
+  it("핸드오프 §1.3 검증 항등식: S=1억, R_s=3%, R_p=10%", () => {
+    const S = 100_000_000;
+    const P = 30_000_000;
+    const L = 25_000_000;
+    const F = 5_000_000;
+    const E = 1_000_000;
+    const Rs = 3;
+
+    const salesRatioAmt = Math.round(S * Rs / 100);
+    expect(salesRatioAmt).toBe(3_000_000);
+
+    const preProfit = S - P - L - F - salesRatioAmt - E;
+    expect(preProfit).toBe(36_000_000);
+
+    const result = calcProfitRatioClosedForm(preProfit, [10]);
+    expect(result.monthlyProfit).toBe(32_727_273);
+    expect(result.profitRatioTotal).toBe(3_272_727);
+    expect(result.itemAmounts).toEqual([3_272_727]);
+
+    // fixedCostsTotal = F + salesRatioAmt + profitRatioTotal
+    const fixedCostsTotal = F + salesRatioAmt + result.profitRatioTotal;
+    expect(fixedCostsTotal).toBe(11_272_727);
+
+    // profit = S − P − L − fixedCostsTotal − E (= monthlyProfit)
+    const profit = calcProfit(S, P, L, fixedCostsTotal, E);
+    expect(profit).toBe(result.monthlyProfit);
+  });
+
+  it("R_p = 0 (profit_ratio 항목 없음): preProfit 그대로 반환", () => {
+    const result = calcProfitRatioClosedForm(10_000_000, []);
+    expect(result.monthlyProfit).toBe(10_000_000);
+    expect(result.profitRatioTotal).toBe(0);
+    expect(result.itemAmounts).toEqual([]);
+  });
+
+  it("적자월: preProfit ≤ 0이면 항목 금액 모두 0", () => {
+    const result = calcProfitRatioClosedForm(-1_500_000, [10]);
+    expect(result.monthlyProfit).toBe(-1_500_000);
+    expect(result.profitRatioTotal).toBe(0);
+    expect(result.itemAmounts).toEqual([0]);
+  });
+
+  it("preProfit = 0: 비율 항목 모두 0", () => {
+    const result = calcProfitRatioClosedForm(0, [5, 5]);
+    expect(result.monthlyProfit).toBe(0);
+    expect(result.profitRatioTotal).toBe(0);
+    expect(result.itemAmounts).toEqual([0, 0]);
+  });
+
+  it("다중 항목: 잔차가 마지막 항목에 흡수되어 합계가 정확히 일치", () => {
+    const preProfit = 36_000_000;
+    const result = calcProfitRatioClosedForm(preProfit, [5, 5]);
+    // R_p = 10 → monthlyProfit = round(36M × 100 / 110) = 32_727_273
+    expect(result.monthlyProfit).toBe(32_727_273);
+    // 첫째 항목: round(32_727_273 × 5/100) = 1_636_364
+    expect(result.itemAmounts[0]).toBe(1_636_364);
+    // 둘째 항목: 잔차 흡수
+    const sum = result.itemAmounts.reduce((s, a) => s + a, 0);
+    expect(sum).toBe(result.profitRatioTotal);
+    expect(sum + result.monthlyProfit).toBe(preProfit);
+  });
+
+  it("R_s + R_p 동시 적용: salesRatioAmt와 profitRatio가 독립 계산", () => {
+    const S = 50_000_000;
+    const P = 15_000_000;
+    const L = 10_000_000;
+    const F = 2_000_000;
+    const E = 500_000;
+    const Rs = 5;
+    const Rp = 10;
+
+    const salesRatioAmt = Math.round(S * Rs / 100); // 2_500_000
+    const preProfit = S - P - L - F - salesRatioAmt - E; // 20_000_000
+    expect(preProfit).toBe(20_000_000);
+
+    const result = calcProfitRatioClosedForm(preProfit, [Rp]);
+    // monthlyProfit = round(20M × 100/110) = 18_181_818
+    expect(result.monthlyProfit).toBe(18_181_818);
+    expect(result.profitRatioTotal).toBe(20_000_000 - 18_181_818); // 1_818_182
+
+    const fixedCostsTotal = F + salesRatioAmt + result.profitRatioTotal;
+    const profit = calcProfit(S, P, L, fixedCostsTotal, E);
+    expect(profit).toBe(result.monthlyProfit);
+  });
+
+  it("큰 비율(R_p=50%): 정확히 나뉘어 떨어짐", () => {
+    // preProfit = 150 → monthlyProfit = 150 × 100/150 = 100, profitRatioTotal = 50
+    const result = calcProfitRatioClosedForm(150, [50]);
+    expect(result.monthlyProfit).toBe(100);
+    expect(result.profitRatioTotal).toBe(50);
+    expect(result.itemAmounts).toEqual([50]);
+  });
+});

@@ -1,13 +1,28 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
 import { fixedCosts } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 import { calcMonthlyFixedCosts } from "../helpers/fixedCostCalc";
 
-const costTypeEnum = z.enum(["monthly", "yearly", "quarterly", "sales_ratio"]);
+const costTypeEnum = z.enum(["monthly", "yearly", "quarterly", "sales_ratio", "profit_ratio"]);
 const categoryEnum = z.enum(["임대료", "관리비", "보험", "로열티/수수료", "유틸리티", "기타"]);
+
+/** 비율형(sales_ratio/profit_ratio) amount 검증: 0 초과 100 이하 */
+function validateRatioAmount(costType: string, amountStr: string) {
+  if (costType !== "sales_ratio" && costType !== "profit_ratio") return;
+  const ratio = Number(amountStr);
+  if (!isFinite(ratio) || ratio <= 0 || ratio > 100) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: costType === "profit_ratio"
+        ? "월순이익 비율은 0 초과 100 이하여야 합니다."
+        : "매출 비율은 0 초과 100 이하여야 합니다.",
+    });
+  }
+}
 
 export const fixedCostsRouter = router({
   list: protectedProcedure
@@ -26,11 +41,27 @@ export const fixedCostsRouter = router({
       year: z.number(),
       month: z.number(),
       salesAmount: z.number().optional(),
+      // profit_ratio 정확 계산용 (셋 다 전달된 경우에만 적용)
+      purchasesAmount: z.number().optional(),
+      laborAmount: z.number().optional(),
+      expensesAmount: z.number().optional(),
     }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const externalCosts = (
+        input.purchasesAmount !== undefined &&
+        input.laborAmount !== undefined &&
+        input.expensesAmount !== undefined
+      )
+        ? {
+            purchases: input.purchasesAmount,
+            labor: input.laborAmount,
+            expenses: input.expensesAmount,
+          }
+        : undefined;
+
       const result = await calcMonthlyFixedCosts(
-        input.restaurantId, input.year, input.month, input.salesAmount,
+        input.restaurantId, input.year, input.month, input.salesAmount, externalCosts,
       );
       return {
         total: result.fixedTotal.toString(),
@@ -38,10 +69,22 @@ export const fixedCostsRouter = router({
         breakdown: result.breakdown.map(b => ({
           name: b.name, amount: b.amount, type: b.type, category: b.category,
         })),
-        ratioItems: result.ratioItems.map(r => ({
+        // 하위호환 alias
+        ratioItems: result.salesRatioItems.map(r => ({
           name: r.name, ratio: r.ratio, category: r.category,
         })),
-        ratioTotal: result.ratioTotal,
+        ratioTotal: result.salesRatioTotal,
+        // 신규
+        salesRatioItems: result.salesRatioItems.map(r => ({
+          name: r.name, ratio: r.ratio, category: r.category,
+        })),
+        salesRatioTotal: result.salesRatioTotal,
+        profitRatioItems: result.profitRatioItems.map(r => ({
+          name: r.name, ratio: r.ratio, category: r.category, amount: r.amount,
+        })),
+        profitRatioTotal: result.profitRatioTotal,
+        monthlyProfit: result.monthlyProfit,
+        preProfit: result.preProfit,
       };
     }),
 
@@ -59,6 +102,7 @@ export const fixedCostsRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
+      validateRatioAmount(input.costType, input.amount);
       // 기본 startMonth: 이번 달
       const now = new Date();
       const defaultStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -92,6 +136,9 @@ export const fixedCostsRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
+      if (input.costType !== undefined && input.amount !== undefined) {
+        validateRatioAmount(input.costType, input.amount);
+      }
       const { id, restaurantId, ...data } = input;
       await db.update(fixedCosts).set(data as any).where(eq(fixedCosts.id, id));
       return { ok: true };

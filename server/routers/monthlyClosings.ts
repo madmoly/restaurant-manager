@@ -369,23 +369,9 @@ export const monthlyClosingsRouter = router({
       ));
       const draftScheduleCount = Number(draftRow?.cnt ?? 0);
 
-      // ── 고정비 (1회만 호출, salesTotal 포함) ──
-      // 확정 매출 먼저 계산
+      // ── 매출 (일마감 기준) ──
       const confirmedSales = await sumSalesByMethod(restaurantId, closedDateStrs, startDate, endDate);
       const unconfirmedSalesTotal = await sumUnconfirmedSales(restaurantId, unclosedDates);
-
-      const fixedResult = await calcMonthlyFixedCosts(restaurantId, year, month, confirmedSales.salesTotal);
-      const fixedCostCount = fixedResult.breakdown.length + fixedResult.ratioItems.length;
-      const fixedCostsTotal = fixedResult.totalWithRatio;
-      const fixedBreakdown = [
-        ...fixedResult.breakdown.map(f => ({ name: f.name, type: f.type, amount: f.amount, ratio: null as number | null })),
-        ...fixedResult.ratioItems.map(r => ({
-          name: r.name,
-          type: "sales_ratio" as const,
-          amount: Math.round(confirmedSales.salesTotal * r.ratio / 100),
-          ratio: r.ratio,
-        })),
-      ];
 
       // ── 매입 (일마감 기준) ──
       const confirmedPurchases = await sumPurchasesByCP(restaurantId, startDate, endDate, true);
@@ -409,6 +395,29 @@ export const monthlyClosingsRouter = router({
           sql`${dailyExpenses.date} <= ${endDate}`,
         ));
       const expensesTotal = Math.round(Number(expRow?.total ?? 0));
+
+      // ── 고정비 (profit_ratio 정확 계산을 위해 매입/인건비/즉시지출 이후 호출) ──
+      const fixedResult = await calcMonthlyFixedCosts(
+        restaurantId, year, month, confirmedSales.salesTotal,
+        { purchases: confirmedPurchases.total, labor: confirmedLabor.totalCost, expenses: expensesTotal },
+      );
+      const fixedCostCount = fixedResult.breakdown.length + fixedResult.salesRatioItems.length + fixedResult.profitRatioItems.length;
+      const fixedCostsTotal = fixedResult.totalWithRatio;
+      const fixedBreakdown = [
+        ...fixedResult.breakdown.map(f => ({ name: f.name, type: f.type, amount: f.amount, ratio: null as number | null })),
+        ...fixedResult.salesRatioItems.map(r => ({
+          name: r.name,
+          type: "sales_ratio" as const,
+          amount: Math.round(confirmedSales.salesTotal * r.ratio / 100),
+          ratio: r.ratio,
+        })),
+        ...fixedResult.profitRatioItems.map(r => ({
+          name: r.name,
+          type: "profit_ratio" as const,
+          amount: r.amount,
+          ratio: r.ratio,
+        })),
+      ];
 
       // ── 손익 (확정분 기준) ──
       const profit = confirmedSales.salesTotal - confirmedPurchases.total - confirmedLabor.totalCost - fixedCostsTotal - expensesTotal;
@@ -630,15 +639,11 @@ export const monthlyClosingsRouter = router({
       const purchResult = await sumPurchasesByCP(input.restaurantId, startDate, endDate, true);
       const purchasesTotal = purchResult.total;
 
-      // 3. 고정비 합계
-      const fixedResult = await calcMonthlyFixedCosts(input.restaurantId, input.year, input.month, salesTotal);
-      const fixedCostsTotal = fixedResult.totalWithRatio;
-
-      // 4. 인건비 (일마감 기준)
+      // 3. 인건비 (일마감 기준)
       const laborResult = await sumLaborByCompany(input.restaurantId, input.year, input.month, closedDateStrs);
       const laborCost = laborResult.totalCost;
 
-      // 5. 즉시 지출
+      // 4. 즉시 지출
       const [expRow] = await db
         .select({ total: sql<string>`COALESCE(SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2))), 0)` })
         .from(dailyExpenses)
@@ -648,6 +653,13 @@ export const monthlyClosingsRouter = router({
           sql`${dailyExpenses.date} <= ${endDate}`,
         ));
       const expensesTotalClose = Math.round(Number(expRow?.total ?? 0));
+
+      // 5. 고정비 합계 (profit_ratio 정확 계산을 위해 위 항목 이후 호출)
+      const fixedResult = await calcMonthlyFixedCosts(
+        input.restaurantId, input.year, input.month, salesTotal,
+        { purchases: purchasesTotal, labor: laborCost, expenses: expensesTotalClose },
+      );
+      const fixedCostsTotal = fixedResult.totalWithRatio;
 
       const profit = salesTotal - purchasesTotal - laborCost - fixedCostsTotal - expensesTotalClose;
 

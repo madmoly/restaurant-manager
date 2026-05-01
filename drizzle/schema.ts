@@ -222,11 +222,12 @@ export const fixedCosts = mysqlTable("fixed_costs", {
   id: int("id").autoincrement().primaryKey(),
   restaurantId: int("restaurantId").notNull(),
   costName: varchar("costName", { length: 100 }).notNull(),
-  // monthly: 월 고정, yearly: 연간(월할), quarterly: 분기별(3개월할), sales_ratio: 매출대비 %
-  costType: mysqlEnum("costType", ["monthly", "yearly", "one_time", "quarterly", "sales_ratio"]).default("monthly").notNull(),
+  // monthly: 월 고정, yearly: 연간(월할), quarterly: 분기별(3개월할),
+  // sales_ratio: 매출대비 %, profit_ratio: 월순이익대비 % (closed-form, 적자월 0)
+  costType: mysqlEnum("costType", ["monthly", "yearly", "one_time", "quarterly", "sales_ratio", "profit_ratio"]).default("monthly").notNull(),
   category: varchar("category", { length: 50 }).default("기타"),  // 임대료, 관리비, 보험, 로열티/수수료, 유틸리티, 기타
   amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
-  // yearly→12분할, quarterly→3분할, sales_ratio→amount는 % 값 (예: 5.5 = 5.5%)
+  // yearly→12분할, quarterly→3분할, sales_ratio→amount는 매출 % 값, profit_ratio→월순이익 % 값
   startMonth: varchar("startMonth", { length: 7 }),   // YYYY-MM, 적용 시작월 (NULL=무기한)
   endMonth: varchar("endMonth", { length: 7 }),        // YYYY-MM, 적용 종료월 (NULL=무기한)
   effectiveMonth: varchar("effectiveMonth", { length: 7 }), // YYYY-MM (레거시, 신규에서 미사용)
