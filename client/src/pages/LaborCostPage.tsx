@@ -67,7 +67,7 @@ export default function LaborCostPage() {
   if (!restaurantId) return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
 
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const [includeSettlement, setIncludeSettlement] = useState(true);
+  const [consultantMode, setConsultantMode] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
   // 외부 클릭 시 메뉴 닫기
@@ -81,46 +81,65 @@ export default function LaborCostPage() {
   }, [showExportMenu]);
 
   // 데이터 행 생성 (공통) — 임시근로자를 회사별 하단으로 정렬
-  const buildRows = (withSettlement: boolean) => {
+  const buildRows = (consultant: boolean) => {
     if (!data) return [];
     const rows: (string | number)[][] = [];
     for (const company of data) {
       const sorted = [...company.employees].sort((a: any, b: any) => (a.isTemp ? 1 : 0) - (b.isTemp ? 1 : 0));
       for (const emp of sorted) {
-        const wage = Math.round(emp.totalWage);
-        const deduction = !emp.socialInsurance && wage > 0 ? Math.round(wage * 0.033) : 0;
         const subRemain = emp.substituteLeave ? emp.substituteLeave.remaining : "-";
         const annRemain = emp.annualLeave ? emp.annualLeave.remaining : "-";
+        const subUsed = emp.substituteLeave ? emp.substituteLeave.used : 0;
+        const annUsed = emp.annualLeave ? emp.annualLeave.used : 0;
         const nameLabel = emp.isNoHolidayPayWorker ? `${emp.name} (주휴미제공)` : emp.isTemp ? `${emp.name} (임시)` : emp.name;
-        if (withSettlement) {
+        const wageTypeLabel = emp.wageType === "hourly" ? "시급" : emp.wageType === "monthly" ? "월급" : emp.wageType === "daily" ? "일급" : "-";
+        const insuranceLabel = emp.socialInsurance ? "4대보험" : "3.3%공제";
+        const contractStartStr = emp.contractStart ? new Date(emp.contractStart).toLocaleDateString("ko-KR") : "-";
+        const contractEndStr = emp.contractEnd ? new Date(emp.contractEnd).toLocaleDateString("ko-KR") : "-";
+
+        if (consultant) {
+          // 노무사전송용: 시스템 계산 급여 제외, 계약·근무·신원 raw data만
           rows.push([
             company.company,
             nameLabel,
             emp.position ?? "-",
-            emp.wageType === "hourly" ? "시급" : emp.wageType === "monthly" ? "월급" : emp.wageType === "daily" ? "일급" : "-",
+            wageTypeLabel,
+            emp.wageAmount ? Number(emp.wageAmount) : 0,
+            insuranceLabel,
+            emp.workedDays ?? 0,
+            emp.daysOff ?? 0,
+            emp.contractDaysOff ?? 0,
+            subUsed,
+            subRemain,
+            annUsed,
+            annRemain,
+            emp.bankAccount ?? "-",
+            emp.residentNumber ?? "-",
+            contractStartStr,
+            contractEndStr,
+          ]);
+        } else {
+          // 기본 정산: 시스템 계산 결과 포함
+          const wage = Math.round(emp.totalWage);
+          const deduction = !emp.socialInsurance && wage > 0 ? Math.round(wage * 0.033) : 0;
+          rows.push([
+            company.company,
+            nameLabel,
+            emp.position ?? "-",
+            wageTypeLabel,
             emp.wageAmount ? Number(emp.wageAmount) : 0,
             emp.contractDaysOff ?? 0,
             emp.workedDays ?? 0,
             emp.daysOff ?? 0,
             subRemain,
             annRemain,
-            emp.socialInsurance ? "4대보험" : "3.3%공제",
+            insuranceLabel,
             wage,
             deduction,
             emp.bankAccount ?? "-",
             emp.residentNumber ?? "-",
-            emp.contractStart ? new Date(emp.contractStart).toLocaleDateString("ko-KR") : "-",
-            emp.contractEnd ? new Date(emp.contractEnd).toLocaleDateString("ko-KR") : "-",
-          ]);
-        } else {
-          rows.push([
-            company.company,
-            nameLabel,
-            emp.position ?? "-",
-            emp.workedDays ?? 0,
-            emp.daysOff ?? 0,
-            subRemain,
-            annRemain,
+            contractStartStr,
+            contractEndStr,
           ]);
         }
       }
@@ -128,24 +147,29 @@ export default function LaborCostPage() {
     return rows;
   };
 
-  const fullHeaders = ["소속회사", "이름", "직위", "급여유형", "계약급여", "계약휴무", "출근일수", "실휴무일", "대체휴무잔여", "연차잔여", "보험구분", "인건비(원)", "3.3%공제", "계좌번호", "주민번호", "계약시작", "계약종료"];
-  const basicHeaders = ["소속회사", "이름", "직위", "출근일수", "실휴무일", "대체휴무잔여", "연차잔여"];
-  const fileName = `인건비정산_${year}년${month}월_${current?.name ?? ""}`;
+  // 헤더 (단어 단축으로 1줄 정렬)
+  const fullHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "계약휴무", "출근일수", "실휴무일", "대휴잔여", "연차잔여", "보험", "인건비", "3.3%공제", "계좌번호", "주민번호", "계약시작", "종료"];
+  const consultantHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "보험", "출근일수", "실휴무일", "계약휴무", "대휴사용", "대휴잔여", "연차사용", "연차잔여", "계좌번호", "주민번호", "계약시작", "종료"];
+  const fileName = consultantMode
+    ? `노무사전송_${year}년${month}월_${current?.name ?? ""}`
+    : `인건비정산_${year}년${month}월_${current?.name ?? ""}`;
 
   const handleExportExcel = async () => {
     setShowExportMenu(false);
-    const headers = includeSettlement ? fullHeaders : basicHeaders;
-    const rows = buildRows(includeSettlement);
+    const headers = consultantMode ? consultantHeaders : fullHeaders;
+    const rows = buildRows(consultantMode);
     if (!rows.length) return;
     const XLSX = await import("xlsx");
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    if (includeSettlement) {
-      ws["!cols"] = headers.map((_h: string, i: number) => ({ wch: i === 0 ? 14 : i === 12 ? 14 : i === 14 ? 22 : i === 15 ? 16 : 10 }));
-    } else {
-      ws["!cols"] = headers.map(() => ({ wch: 12 }));
-    }
+    // 컬럼별 폭 (consultantMode·fullMode 동일 패턴, 헤더 단축 반영)
+    const colWidths = consultantMode
+      // 소속회사,이름,직위,유형,계약급여,보험,출근,실휴무,계약휴무,대휴사용,대휴잔여,연차사용,연차잔여,계좌,주민,계약시작,종료
+      ? [14, 10, 8, 6, 12, 8, 6, 7, 8, 7, 7, 7, 7, 18, 16, 12, 12]
+      // 소속회사,이름,직위,유형,계약급여,계약휴무,출근,실휴무,대휴잔여,연차잔여,보험,인건비,3.3%공제,계좌,주민,계약시작,종료
+      : [14, 10, 8, 6, 12, 8, 7, 7, 7, 7, 8, 12, 12, 18, 16, 12, 12];
+    ws["!cols"] = colWidths.map((w) => ({ wch: w }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "인건비정산");
+    XLSX.utils.book_append_sheet(wb, ws, consultantMode ? "노무사전송" : "인건비정산");
     const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const url = URL.createObjectURL(blob);
@@ -159,37 +183,57 @@ export default function LaborCostPage() {
   const handleExportPDF = async () => {
     setShowExportMenu(false);
     try {
-      const headers = includeSettlement ? fullHeaders : basicHeaders;
-      const rows = buildRows(includeSettlement);
+      const headers = consultantMode ? consultantHeaders : fullHeaders;
+      const rows = buildRows(consultantMode);
       if (!rows.length) return;
       const { jsPDF } = await import("jspdf");
       const atModule = await import("jspdf-autotable");
       const autoTable = atModule.default || atModule.autoTable;
-      const doc = new jsPDF({ orientation: includeSettlement ? "landscape" : "portrait", unit: "mm", format: "a4" });
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       await loadKoreanFont(doc);
 
       // 제목
       doc.setFontSize(14);
       doc.text(`${fileName}`, 14, 15);
       doc.setFontSize(9);
-      doc.text(`합계: ${fmtWon(grandTotalWage)}원`, 14, 22);
-
-      const rightAlignCols: Record<number, { halign: "right" }> = {};
-      if (includeSettlement) {
-        // 급여액(4), 계약휴무(5), 출근일수(6), 실휴무일(7), 대체휴무(8), 연차(9), 인건비(11), 3.3%(12)
-        [4, 5, 6, 7, 8, 9, 11, 12].forEach(i => { rightAlignCols[i] = { halign: "right" }; });
+      if (consultantMode) {
+        // 시스템 계산 금액 노출 회피
+        const totalEmployees = (data ?? []).reduce((s, c) => s + c.employees.length, 0);
+        const operatingDays = (data ?? [])[0]?.operatingDays ?? "-";
+        doc.text(`대상 직원 ${totalEmployees}명 / 영업일 ${operatingDays}일`, 14, 22);
       } else {
-        // 출근일수(3), 실휴무일(4), 대체휴무(5), 연차(6)
-        [3, 4, 5, 6].forEach(i => { rightAlignCols[i] = { halign: "right" }; });
+        doc.text(`합계: ${fmtWon(grandTotalWage)}원`, 14, 22);
+      }
+
+      // 우측정렬 컬럼 인덱스
+      const rightAlignCols: Record<number, { halign: "right" }> = {};
+      const columnStyles: Record<number, any> = {};
+      if (consultantMode) {
+        // 계약급여(4), 출근(6), 실휴무(7), 계약휴무(8), 대휴사용(9), 대휴잔여(10), 연차사용(11), 연차잔여(12)
+        [4, 6, 7, 8, 9, 10, 11, 12].forEach(i => { rightAlignCols[i] = { halign: "right" }; });
+        // 폭 (mm) — A4 landscape 가용 ~281mm 기준
+        const widths = [22, 16, 12, 12, 22, 14, 12, 12, 14, 14, 14, 12, 12, 30, 24, 18, 18];
+        widths.forEach((w, i) => {
+          columnStyles[i] = { ...(rightAlignCols[i] ?? {}), cellWidth: w };
+        });
+      } else {
+        // 계약급여(4), 계약휴무(5), 출근(6), 실휴무(7), 대휴잔여(8), 연차잔여(9), 인건비(11), 3.3%공제(12)
+        [4, 5, 6, 7, 8, 9, 11, 12].forEach(i => { rightAlignCols[i] = { halign: "right" }; });
+        const widths = [20, 16, 12, 12, 20, 12, 12, 12, 14, 12, 12, 20, 20, 26, 22, 14, 14];
+        widths.forEach((w, i) => {
+          columnStyles[i] = { ...(rightAlignCols[i] ?? {}), cellWidth: w };
+        });
       }
 
       autoTable(doc, {
         startY: 28,
         head: [headers],
         body: rows.map(r => r.map(c => String(c))),
-        styles: { fontSize: 8, cellPadding: 2, font: "NanumGothic" },
-        headStyles: { fillColor: [59, 130, 246], textColor: 255, fontSize: 8, font: "NanumGothic", fontStyle: "normal" },
-        columnStyles: rightAlignCols,
+        styles: { fontSize: 7.5, cellPadding: 1.2, font: "NanumGothic", overflow: "linebreak" },
+        headStyles: { fillColor: [59, 130, 246], textColor: 255, fontSize: 7.5, font: "NanumGothic", fontStyle: "normal" },
+        columnStyles,
+        tableWidth: "auto",
+        margin: { left: 8, right: 8 },
       });
 
       const pdfBlob = doc.output("blob");
@@ -223,11 +267,11 @@ export default function LaborCostPage() {
                   >
                     <input
                       type="checkbox"
-                      checked={includeSettlement}
-                      onChange={(e) => setIncludeSettlement(e.target.checked)}
+                      checked={consultantMode}
+                      onChange={(e) => setConsultantMode(e.target.checked)}
                       className="rounded border-border"
                     />
-                    정산내역 포함
+                    노무사전송용 (시스템 계산 급여 제외)
                   </label>
                   <div className="border-t border-border my-1" />
                   <button
