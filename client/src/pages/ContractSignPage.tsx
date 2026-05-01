@@ -102,6 +102,24 @@ export default function ContractSignPage({ token }: { token: string }) {
   const pageStyle = { background: "#f9fafb", color: "#1f2937" };
   const cardStyle = { background: "#ffffff", border: "1px solid #e5e7eb" };
 
+  // ─── 본문 분기 헬퍼 (재설계 2026-05-02) ───────────────────────────────────
+  // 서명 완료 후엔 snapshot 우선, 미서명 단계(draft/sent)에선 입력값 우선
+  const effectiveOver5: boolean = Boolean(
+    isSigned ? (contract as any).snapshotOver5Employees ?? (contract as any).over5Employees
+             : (contract as any).over5Employees ?? (contract as any).snapshotOver5Employees
+  );
+  const effectiveTaxMode: string = isSigned
+    ? ((contract as any).snapshotTaxMode || (contract as any).taxMode || "social_insurance")
+    : ((contract as any).taxMode || (contract as any).snapshotTaxMode || "social_insurance");
+  const is3_3 = effectiveTaxMode === "biz_income_3_3";
+  const isHourly = contract.wageType === "hourly";
+  const isMonthly = contract.wageType === "monthly";
+  const includesHoliday = Boolean((contract as any).hourlyWageIncludesHolidayPay);
+  const weeklyHoursNum = Number(contract.weeklyHours) || 0;
+  const isUnder15Hours = weeklyHoursNum < 15;
+  const displayHireDate: string | null =
+    (contract as any).snapshotHireDate || (contract as any).hireDate || null;
+
   return (
     <div className="min-h-screen py-6 px-4" style={pageStyle}>
       <div className="max-w-2xl mx-auto">
@@ -150,6 +168,13 @@ export default function ContractSignPage({ token }: { token: string }) {
               (이하 "근로자"라 한다)은(는) 다음과 같이 근로계약을 체결한다.
             </p>
 
+            {/* 재설계 2026-05-02: 입사일 (snapshotHireDate 박제값 우선) — 본문 표시 */}
+            {displayHireDate && (
+              <p className="text-sm" style={{ color: "#374151" }}>
+                <strong>입사일:</strong> {fmt(displayHireDate)}
+              </p>
+            )}
+
             {/* 조항 테이블 */}
             <table className="w-full border-collapse">
               <tbody>
@@ -181,10 +206,14 @@ export default function ContractSignPage({ token }: { token: string }) {
                 />
                 <ContractRow
                   label="7. 임금"
-                  value={`${contract.wageType === "hourly" ? "시급" : "월급"} ${Number(contract.wageAmount).toLocaleString()}원`}
+                  value={
+                    isHourly
+                      ? `시급 ${Number(contract.wageAmount).toLocaleString()}원 (${includesHoliday ? "주휴수당 포함" : "주휴수당 별도 산정"})`
+                      : `월급 ${Number(contract.wageAmount).toLocaleString()}원`
+                  }
                 />
-                {/* 포괄임금 구성항목 (월급제 + basePay 존재 시) */}
-                {contract.wageType === "monthly" && contract.basePay && (
+                {/* 포괄임금 구성항목 (월급제 + basePay 존재 시). 5인 미만이면 포괄연차수당 행 숨김 — 재설계 2026-05-02 */}
+                {isMonthly && contract.basePay && (
                   <tr>
                     <td colSpan={2} style={{ padding: "0 0 0 0" }}>
                       <div style={{ margin: "0 16px 12px 16px", border: "1px solid #d1d5db", borderRadius: "6px", overflow: "hidden" }}>
@@ -192,6 +221,9 @@ export default function ContractSignPage({ token }: { token: string }) {
                           <span style={{ fontSize: "11px", fontWeight: 600, color: "#374151" }}>임금 구성항목 (근기법 제17조)</span>
                           {contract.monthlyContractHours && (
                             <span style={{ fontSize: "10px", color: "#6b7280", marginLeft: "8px" }}>월소정근로 {Number(contract.monthlyContractHours)}h</span>
+                          )}
+                          {!effectiveOver5 && (
+                            <span style={{ fontSize: "10px", color: "#92400e", marginLeft: "8px" }}>(5인 미만 — 연차수당 미산정)</span>
                           )}
                         </div>
                         <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
@@ -210,8 +242,7 @@ export default function ContractSignPage({ token }: { token: string }) {
                                 {Number(contract.basePay).toLocaleString()}원
                               </td>
                             </tr>
-                            {/* 고정연장/휴일수당 필드 제거됨 */}
-                            {contract.annualLeavePay && (
+                            {effectiveOver5 && contract.annualLeavePay && Number(contract.annualLeavePay) > 0 && (
                               <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
                                 <td style={{ padding: "5px 12px", color: "#6b7280" }}>포괄연차수당 (8h)</td>
                                 <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
@@ -238,7 +269,7 @@ export default function ContractSignPage({ token }: { token: string }) {
                 />
                 <ContractRow
                   label="10. 세무처리"
-                  value={contract.taxMode === "biz_income_3_3" ? "사업소득 3.3% 원천공제" : "4대보험 가입"}
+                  value={is3_3 ? "사업소득 3.3% 원천공제" : "4대보험 가입"}
                 />
                 {contract.mealProvided && (
                   <ContractRow
@@ -281,18 +312,53 @@ export default function ContractSignPage({ token }: { token: string }) {
 
               {/* 연장·야간·휴일근로 조항 제거됨 */}
 
-              {/* 휴일·휴가 */}
+              {/* 휴일·휴가 — 재설계 2026-05-02: 시급 주휴포함/별도, 월급 5인 미만/이상 분기 */}
               <div>
                 <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>휴일 및 연차유급휴가</h3>
                 <div className="space-y-1" style={{ paddingLeft: "8px" }}>
-                  <p>① 주휴일은 스케줄상 지정일 또는 당사자 간 협의에 따르며, 1주 소정근로일을 개근한 경우 유급으로 부여한다.</p>
-                  {contract.wageType === "monthly" && contract.annualLeavePay ? (
+                  {isHourly && includesHoliday && (
+                    <p>① 본 계약의 시급에는 주휴수당이 포함되어 있다. 별도의 주휴수당은 지급하지 아니한다.</p>
+                  )}
+                  {isHourly && !includesHoliday && !isUnder15Hours && (
+                    <p>① 1주 소정근로시간이 15시간 이상이고 1주 소정근로일을 개근한 경우, 주휴일에 대하여 주휴수당(주1회 8시간 × 약정 시급)을 별도로 지급한다.</p>
+                  )}
+                  {isHourly && !includesHoliday && isUnder15Hours && (
+                    <p>① 1주 소정근로시간이 15시간 미만이므로 주휴수당은 발생하지 아니한다 (근로기준법 제18조 제3항).</p>
+                  )}
+                  {isMonthly && (
+                    <p>① 주휴일은 스케줄상 지정일 또는 당사자 간 협의에 따르며, 1주 소정근로일을 개근한 경우 유급으로 부여한다.</p>
+                  )}
+
+                  {isMonthly && effectiveOver5 && contract.annualLeavePay && Number(contract.annualLeavePay) > 0 ? (
                     <>
                       <p>② 연차유급휴가는 근로기준법 제60조에 따라 부여한다. 본 계약의 임금에는 상기 임금 구성항목에 명시된 포괄연차수당이 포함되어 있으며, 해당 일수 범위 내의 연차사용에 대해서는 별도 수당을 지급하지 아니한다.</p>
                       <p>③ 포괄연차수당에 해당하는 일수를 초과하여 연차를 사용하는 경우 관련 법령에 따라 처리한다.</p>
                     </>
+                  ) : isMonthly && !effectiveOver5 ? (
+                    <p>② 본 사업장은 상시 근로자 5인 미만으로 근로기준법 제60조(연차유급휴가)·제56조(가산수당)·제23조(부당해고 제한)가 적용되지 아니한다.</p>
+                  ) : isHourly && effectiveOver5 ? (
+                    <p>② 연차유급휴가는 근로기준법 제60조에 따라 부여하며, 미사용 연차에 대해서는 관련 법령에 따라 수당으로 정산한다.</p>
+                  ) : isHourly && !effectiveOver5 ? (
+                    <p>② 본 사업장은 상시 근로자 5인 미만으로 근로기준법 제60조(연차유급휴가)·제56조(가산수당)·제23조(부당해고 제한)가 적용되지 아니한다.</p>
                   ) : (
                     <p>② 연차유급휴가는 근로기준법 제60조에 따라 부여하며, 미사용 연차에 대해서는 관련 법령에 따라 수당으로 정산한다.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* 세무처리 — 재설계 2026-05-02: 3.3% 사업소득 시 사업소득 조항 추가, 4대보험 행 숨김 */}
+              <div>
+                <h3 className="font-semibold mb-1.5" style={{ color: "#111827", fontSize: "13px" }}>
+                  {is3_3 ? "사업소득 처리" : "4대보험 가입"}
+                </h3>
+                <div className="space-y-1" style={{ paddingLeft: "8px" }}>
+                  {is3_3 ? (
+                    <>
+                      <p>① 본 계약은 사업소득(3.3% 원천공제)으로 처리하며, 근로자는 매월 지급받는 보수에서 소득세 3% 및 지방소득세 0.3%(합계 3.3%)를 원천공제 후 수령한다.</p>
+                      <p>② 본 계약은 4대보험 가입 대상이 아니다. 다만 산업재해보상보험은 관련 법령에 따라 가입 대상이 될 수 있다.</p>
+                    </>
+                  ) : (
+                    <p>① 사업주는 근로자에 대하여 국민연금·건강보험·고용보험·산업재해보상보험(4대보험)을 관계 법령에 따라 가입 신고한다.</p>
                   )}
                 </div>
               </div>
@@ -386,7 +452,9 @@ export default function ContractSignPage({ token }: { token: string }) {
                       </tr>
                       <tr style={{ borderBottom: "1px solid #d1d5db" }}>
                         <td style={{ padding: "6px 10px", fontWeight: 600, background: "#f3f4f6", verticalAlign: "top" }}>수집·이용 목적</td>
-                        <td style={{ padding: "6px 10px" }}>근로계약 체결·이행, 급여 지급, 4대보험 신고, 근태·인사 관리, 법령상 의무 이행</td>
+                        <td style={{ padding: "6px 10px" }}>
+                          근로계약 체결·이행, 급여 지급, {is3_3 ? "사업소득 원천공제 신고" : "4대보험 신고"}, 근태·인사 관리, 법령상 의무 이행
+                        </td>
                       </tr>
                       <tr style={{ borderBottom: "1px solid #d1d5db" }}>
                         <td style={{ padding: "6px 10px", fontWeight: 600, background: "#f3f4f6", verticalAlign: "top" }}>보유·이용 기간</td>
@@ -487,7 +555,9 @@ export default function ContractSignPage({ token }: { token: string }) {
                   className="w-full mt-1 px-3 py-2 rounded-md text-sm"
                   style={{ border: "1px solid #d1d5db", background: "#ffffff" }}
                 />
-                <p className="text-[10px] mt-1" style={{ color: "#9ca3af" }}>4대보험 신고 및 급여 지급 목적으로만 사용됩니다</p>
+                <p className="text-[10px] mt-1" style={{ color: "#9ca3af" }}>
+                  {is3_3 ? "사업소득 원천공제 신고" : "4대보험 신고"} 및 급여 지급 목적으로만 사용됩니다
+                </p>
               </div>
             </div>
 

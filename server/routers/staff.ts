@@ -163,6 +163,8 @@ export const staffRouter = router({
           storeRole: restaurantUsers.role,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
+          // 재설계 2026-05-02 (Phase B): weeklyOffDays SSOT는 restaurant_users
+          weeklyOffDays: restaurantUsers.weeklyOffDays,
           rehiredAt: restaurantUsers.rehiredAt,
           // 활성 employeeContracts (민감영역 현재상태)
           wageType: employeeContracts.wageType,
@@ -171,7 +173,6 @@ export const staffRouter = router({
           contractStart: employeeContracts.contractStart,
           contractEnd: employeeContracts.contractEnd,
           weeklyHours: employeeContracts.weeklyHours,
-          weeklyOffDays: employeeContracts.weeklyOffDays,
           bankName: employeeContracts.bankName,
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
@@ -767,7 +768,7 @@ export const staffRouter = router({
       residentNumber: z.string().optional(),
       affiliatedCompany: z.string().nullable().optional(),
       hireDate: z.string().nullable().optional(),
-      weeklyOffDays: z.number().min(0).max(7).optional(),
+      weeklyOffDays: z.number().int().min(1).max(3).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
@@ -797,10 +798,11 @@ export const staffRouter = router({
         await db.update(users).set(usersUpdate).where(eq(users.id, input.userId));
       }
 
-      // restaurant_users 업데이트
+      // restaurant_users 업데이트 (재설계 2026-05-02: weeklyOffDays SSOT 포함)
       const ruUpdate: Record<string, any> = {};
       if (input.affiliatedCompany !== undefined) ruUpdate.affiliatedCompany = input.affiliatedCompany;
       if (input.hireDate !== undefined) ruUpdate.hireDate = input.hireDate;
+      if (input.weeklyOffDays !== undefined) ruUpdate.weeklyOffDays = input.weeklyOffDays;
       if (Object.keys(ruUpdate).length > 0) {
         await db.update(restaurantUsers).set(ruUpdate).where(eq(restaurantUsers.id, ru.id));
       }
@@ -809,8 +811,7 @@ export const staffRouter = router({
       if (
         input.bankName !== undefined ||
         input.bankAccount !== undefined ||
-        input.residentNumber !== undefined ||
-        input.weeklyOffDays !== undefined
+        input.residentNumber !== undefined
       ) {
         const [ec] = await db
           .select({ id: employeeContracts.id })
@@ -825,7 +826,6 @@ export const staffRouter = router({
         if (input.bankName !== undefined) ecUpdate.bankName = input.bankName;
         if (input.bankAccount !== undefined) ecUpdate.bankAccount = input.bankAccount;
         if (input.residentNumber !== undefined) ecUpdate.residentNumber = input.residentNumber;
-        if (input.weeklyOffDays !== undefined) ecUpdate.weeklyOffDays = input.weeklyOffDays;
         if (ec) {
           await db.update(employeeContracts).set(ecUpdate).where(eq(employeeContracts.id, ec.id));
         } else {
@@ -835,7 +835,6 @@ export const staffRouter = router({
             bankName: ecUpdate.bankName ?? null,
             bankAccount: ecUpdate.bankAccount ?? null,
             residentNumber: ecUpdate.residentNumber ?? null,
-            weeklyOffDays: ecUpdate.weeklyOffDays ?? 1,
             isActive: true,
           } as any);
         }

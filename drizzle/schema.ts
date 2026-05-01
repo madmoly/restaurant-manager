@@ -129,6 +129,8 @@ export const restaurantUsers = mysqlTable(
   role: mysqlEnum("role", ["owner", "supervisor", "staff", "store_manager", "manager", "employee"]).notNull().default("staff"),
     affiliatedCompany: varchar("affiliatedCompany", { length: 100 }),
     hireDate: date("hireDate"),
+    // 주당 휴무일수 (1·2·3) — 재설계 2026-05-02: SSOT는 restaurant_users (Phase B 보강)
+    weeklyOffDays: int("weeklyOffDays").default(1).notNull(),
     // 재입사 처리 시 기록 (퇴사 → 복귀)
     rehiredAt: timestamp("rehiredAt"),
     resignedAt: date("resignedAt"),

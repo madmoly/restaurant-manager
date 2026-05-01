@@ -85,6 +85,8 @@ app.use(express.json({ limit: "10mb" }));
     await addColumnIfNotExists("restaurant_users", "hireDate", "DATE DEFAULT NULL");
     await addColumnIfNotExists("restaurant_users", "resignedAt", "DATE DEFAULT NULL");
     await addColumnIfNotExists("restaurant_users", "resignReason", "VARCHAR(200) DEFAULT NULL");
+    // 재설계 2026-05-02 (Phase B 보강): weeklyOffDays SSOT를 restaurant_users로 일원화
+    await addColumnIfNotExists("restaurant_users", "weeklyOffDays", "INT NOT NULL DEFAULT 1");
     await addColumnIfNotExists("employee_contracts", "weeklyOffDays", "INT DEFAULT 1");
 
     // employment_electronic_contracts 소속회사 + 사업자등록번호 + 근무장소 주소

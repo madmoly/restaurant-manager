@@ -915,12 +915,13 @@ export const schedulesRouter = router({
           tempPhone: schedules.tempPhone,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
+          // 재설계 2026-05-02 (Phase B): weeklyOffDays SSOT는 restaurant_users
+          weeklyOffDays: restaurantUsers.weeklyOffDays,
           wageType: employeeWageHistory.wageType,
           wageAmount: employeeWageHistory.wageAmount,
           position: employeeContracts.position,
           contractStart: employeeContracts.contractStart,
           contractEnd: employeeContracts.contractEnd,
-          weeklyOffDays: employeeContracts.weeklyOffDays,
           weeklyHours: employeeContracts.weeklyHours,
           bankName: employeeContracts.bankName,
           bankAccount: employeeContracts.bankAccount,
@@ -1473,8 +1474,9 @@ export const schedulesRouter = router({
           tempWorkerName: schedules.tempWorkerName,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
+          // 재설계 2026-05-02 (Phase B): weeklyOffDays SSOT는 restaurant_users
+          weeklyOffDays: restaurantUsers.weeklyOffDays,
           position: employeeContracts.position,
-          weeklyOffDays: employeeContracts.weeklyOffDays,
           contractIsActive: employeeContracts.isActive,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
         })

@@ -21,18 +21,6 @@ const STORE_ROLE_LABELS: Record<string, string> = {
   employee: "직원",       // 레거시
 };
 
-const MISMATCH_FIELD_LABELS: Record<string, string> = {
-  name: "이름",
-  phone: "연락처",
-  address: "주소",
-  residentNumber: "주민번호",
-  bankAccount: "계좌번호",
-  affiliatedCompany: "소속회사",
-  weeklyOffDays: "주휴무일수",
-  weeklyHours: "주근로시간",
-  wage: "임금",
-};
-
 // ─── 보건증 만료일 계산 헬퍼 ──────────────────────────────────────────────────
 function getHealthCertStatus(expiry: string | null | undefined) {
   if (!expiry) return null;
@@ -101,6 +89,12 @@ export default function StaffPage() {
   );
 
   const { data: contracts } = trpc.electronicContracts.listEmploymentContracts.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+
+  // 재설계 2026-05-02: 소속회사 마스터 (5인 미만/이상 자동 결정 + select 옵션 제공)
+  const { data: affiliatedCompaniesList = [] } = trpc.affiliatedCompanies.list.useQuery(
     { restaurantId },
     { enabled: restaurantId > 0 },
   );
@@ -277,6 +271,23 @@ export default function StaffPage() {
     const company = s.affiliatedCompany || "(미지정)";
     companyCounts[company] = (companyCounts[company] || 0) + 1;
   });
+  // 회사명 → over5Employees(소속회사 마스터 기준) 맵
+  const companyOver5Map = new Map<string, boolean>();
+  affiliatedCompaniesList.forEach((c: any) => companyOver5Map.set(c.companyName, !!c.over5Employees));
+
+  // 재설계 2026-05-02: SSOT vs 최신 서명 박제 어긋남 판정 (갱신 필요 배너용)
+  const computeNeedsRenewal = (s: any): { needs: boolean; fields: string[] } => {
+    if (!s.latestContractSignedAt) return { needs: false, fields: [] };
+    const f: string[] = [];
+    if ((s.snapshotAffiliatedCompany ?? null) !== (s.affiliatedCompany ?? null)) f.push("소속회사");
+    if (
+      s.snapshotHireDate != null &&
+      String(s.snapshotHireDate).slice(0, 10) !== (s.hireDate ?? "").slice(0, 10)
+    ) f.push("입사일");
+    if ((s.snapshotWeeklyOffDays ?? null) !== (s.weeklyOffDays ?? null)) f.push("주휴무일수");
+    if (s.snapshotOver5Employees != null && Boolean(s.snapshotOver5Employees) !== Boolean(s.effectiveOver5)) f.push("5인 여부");
+    return { needs: f.length > 0, fields: f };
+  };
 
   if (!restaurantId || restaurantId <= 0) {
     return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
@@ -449,16 +460,21 @@ export default function StaffPage() {
           </div>
           {Object.keys(companyCounts).length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {Object.entries(companyCounts).map(([company, count]) => (
-                <div key={company} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-background text-xs">
-                  <Building2 className="w-3 h-3 text-muted-foreground" />
-                  <span className="font-medium">{company}</span>
-                  <span className="text-muted-foreground">{count}명</span>
-                  <span className={`ml-1 font-medium ${count >= 5 ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400"}`}>
-                    {count >= 5 ? "5인↑" : "5인↓"}
-                  </span>
-                </div>
-              ))}
+              {Object.entries(companyCounts).map(([company, count]) => {
+                const over5 = companyOver5Map.get(company);
+                return (
+                  <div key={company} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-background text-xs">
+                    <Building2 className="w-3 h-3 text-muted-foreground" />
+                    <span className="font-medium">{company}</span>
+                    <span className="text-muted-foreground">{count}명</span>
+                    {over5 != null && (
+                      <span className={`ml-1 font-medium ${over5 ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400"}`}>
+                        {over5 ? "5인↑" : "5인↓"}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -533,12 +549,6 @@ export default function StaffPage() {
                           계약서 없음
                         </span>
                       )}
-                      {/* 계약서↔직원정보 정합성 불일치 */}
-                      {Array.isArray(s.mismatchedFields) && s.mismatchedFields.length > 0 && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800" title={`불일치: ${s.mismatchedFields.map((f: string) => MISMATCH_FIELD_LABELS[f] ?? f).join(", ")}`}>
-                          ⚠ 계약서 불일치 ({s.mismatchedFields.length})
-                        </span>
-                      )}
                     </div>
                     {/* 부가 정보 행 */}
                     <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
@@ -557,8 +567,19 @@ export default function StaffPage() {
                 </div>
 
                 {/* 확장 패널 */}
-                {isExpanded && (
+                {isExpanded && (() => {
+                  const renewal = computeNeedsRenewal(s);
+                  return (
                   <div className="border-t border-border px-4 py-3 space-y-3 bg-muted/30">
+                    {/* 재설계 2026-05-02: SSOT-스냅샷 어긋날 때 갱신 필요 배너 1개로 통합 */}
+                    {renewal.needs && (
+                      <div className="text-[11px] rounded-md px-3 py-2 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                        <AlertTriangle className="w-3 h-3 inline mr-1" />
+                        계약서 갱신 필요 — 직원정보가 최신 서명 계약서와 다릅니다 ({renewal.fields.join(", ")}).
+                        새 계약서를 작성·서명하면 박제값이 갱신됩니다.
+                      </div>
+                    )}
+
                     {/* 역할 변경 */}
                     {canChangeRole && (
                       <div className="flex items-center gap-3">
@@ -577,24 +598,26 @@ export default function StaffPage() {
                       </div>
                     )}
 
-                    {/* 소속회사 */}
-                    <div className="flex items-center gap-3">
+                    {/* 소속회사 (재설계 2026-05-02: free text → select) */}
+                    <div className="flex items-center gap-3 flex-wrap">
                       <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
                         <Building2 className="w-3 h-3" /> 소속
                       </label>
                       {editingCompany?.userId === s.userId ? (
                         <div className="flex items-center gap-2 flex-1">
-                          <input
-                            className="text-xs px-2 py-1 rounded border border-input bg-background flex-1 max-w-[200px]"
+                          <select
+                            className="text-xs px-2 py-1.5 rounded border border-input bg-background flex-1 max-w-[220px]"
                             value={editingCompany!.value}
                             onChange={(e) => setEditingCompany({ userId: s.userId, value: e.target.value })}
-                            placeholder="소속회사명"
                             autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") updateCompany.mutate({ restaurantId, userId: s.userId, affiliatedCompany: editingCompany!.value || null });
-                              if (e.key === "Escape") setEditingCompany(null);
-                            }}
-                          />
+                          >
+                            <option value="">(미지정)</option>
+                            {affiliatedCompaniesList.map((c: any) => (
+                              <option key={c.id} value={c.companyName}>
+                                {c.companyName} {c.over5Employees ? "(5인↑)" : "(5인↓)"}
+                              </option>
+                            ))}
+                          </select>
                           <button
                             onClick={() => updateCompany.mutate({ restaurantId, userId: s.userId, affiliatedCompany: editingCompany!.value || null })}
                             className="p-1 rounded hover:bg-accent text-green-600"
@@ -602,26 +625,16 @@ export default function StaffPage() {
                           <button onClick={() => setEditingCompany(null)} className="p-1 rounded hover:bg-accent text-muted-foreground">
                             <X className="w-3.5 h-3.5" />
                           </button>
-                          {/* 수동 편집 시 계약서 불일치 경고 */}
-                          {s.contractAffiliatedCompany && editingCompany!.value && editingCompany!.value !== s.contractAffiliatedCompany && (
-                            <span className="text-[10px] text-orange-600 dark:text-orange-400">
-                              ⚠ 계약서: {s.contractAffiliatedCompany}
-                            </span>
-                          )}
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs text-foreground">{s.affiliatedCompany || "(미지정)"}</span>
-                          {/* 계약서 기반 소속과 불일치 시 경고 표시 */}
-                          {s.contractAffiliatedCompany && s.affiliatedCompany !== s.contractAffiliatedCompany && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
-                              ⚠ 계약서: {s.contractAffiliatedCompany}
-                            </span>
-                          )}
-                          {/* 계약서 연동 표시 (일치 시) */}
-                          {s.contractAffiliatedCompany && s.affiliatedCompany === s.contractAffiliatedCompany && s.latestContractSignedAt && (
-                            <span className="text-[10px] text-muted-foreground">
-                              (계약서 연동)
+                          {/* 5인 미만/이상 배지 (소속회사 마스터 기준, 읽기 전용) */}
+                          {s.affiliatedCompany && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                              s.effectiveOver5 ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                            }`}>
+                              {s.effectiveOver5 ? "5인 이상" : "5인 미만"}
                             </span>
                           )}
                           <button
@@ -629,6 +642,11 @@ export default function StaffPage() {
                             className="p-1 rounded hover:bg-accent text-muted-foreground"
                           ><Edit3 className="w-3 h-3" /></button>
                         </div>
+                      )}
+                      {affiliatedCompaniesList.length === 0 && editingCompany?.userId === s.userId && (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 basis-full">
+                          ⚠ 등록된 소속회사가 없습니다. 매장 정보에서 먼저 등록하세요.
+                        </span>
                       )}
                     </div>
 
@@ -665,10 +683,10 @@ export default function StaffPage() {
                       )}
                     </div>
 
-                    {/* 주당 계약휴무 */}
+                    {/* 주당 휴무 (재설계 2026-05-02: 1·2·3) */}
                     <div className="flex items-center gap-3">
                       <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
-                        <CalendarDays className="w-3 h-3" /> 계약휴무
+                        <CalendarDays className="w-3 h-3" /> 휴무
                       </label>
                       {editingOffDays?.userId === s.userId ? (
                         <div className="flex items-center gap-2 flex-1">
@@ -678,7 +696,7 @@ export default function StaffPage() {
                             onChange={(e) => setEditingOffDays({ userId: s.userId, value: Number(e.target.value) })}
                             autoFocus
                           >
-                            {[0,1,2,3,4,5,6,7].map(v => (
+                            {[1,2,3].map(v => (
                               <option key={v} value={v}>주 {v}일</option>
                             ))}
                           </select>
@@ -694,7 +712,10 @@ export default function StaffPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-foreground">주 {s.weeklyOffDays ?? 1}일</span>
                           <button
-                            onClick={() => setEditingOffDays({ userId: s.userId, value: s.weeklyOffDays ?? 1 })}
+                            onClick={() => {
+                              const v = s.weeklyOffDays ?? 1;
+                              setEditingOffDays({ userId: s.userId, value: v >= 1 && v <= 3 ? v : 1 });
+                            }}
                             className="p-1 rounded hover:bg-accent text-muted-foreground"
                           ><Edit3 className="w-3 h-3" /></button>
                         </div>
@@ -719,11 +740,11 @@ export default function StaffPage() {
                                   {contract.wageType === "hourly" ? "시급" : "월급"} {formatKRW(Number(contract.wageAmount))}
                                 </span>
                                 {/* 재설계 2026-05-02: socialInsurance 폐기 → snapshotTaxMode 사용. noWeeklyHolidayPay 폐기 */}
-                                {(staff as any).snapshotTaxMode === "biz_income_3_3" ? (
+                                {s.snapshotTaxMode === "biz_income_3_3" ? (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">3.3%</span>
-                                ) : (
+                                ) : s.snapshotTaxMode === "social_insurance" ? (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">4대보험</span>
-                                )}
+                                ) : null}
                                 {!activeContract && draftContract && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300">초안</span>
                                 )}
@@ -860,7 +881,8 @@ export default function StaffPage() {
                       )}
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             );
           })}
@@ -1248,46 +1270,54 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     specialTerms: ec?.specialTerms ?? "",
     employerBusinessNumber: ec?.employerBusinessNumber ?? "",
     weeklyHoliday: ec?.weeklyHoliday ?? "일요일",
-    weeklyOffDays: ec?.weeklyOffDays ?? 1,
+    weeklyOffDays: (() => {
+      const v = (ec?.weeklyOffDays ?? 1) as number;
+      return v >= 1 && v <= 3 ? v : 1;
+    })(),
   });
 
   // ── 최근 계약서 템플릿 자동 적용 (새 계약서 + 첫 로드 시 1회) ──
   useEffect(() => {
     if (!defaultEmployee && !editingContract && latestTemplate && !templateApplied) {
-      setForm((prev) => ({
-        ...prev,
-        position: latestTemplate.position || prev.position,
-        contractType: (latestTemplate.contractType as any) || prev.contractType,
-        wageType: (latestTemplate.wageType as any) || prev.wageType,
-        wageAmount: latestTemplate.wageAmount || prev.wageAmount,
-        weeklyHours: latestTemplate.weeklyHours || prev.weeklyHours,
-        workStartTime: latestTemplate.workStartTime || prev.workStartTime,
-        workEndTime: latestTemplate.workEndTime || prev.workEndTime,
-        breakMinutes: latestTemplate.breakMinutes ?? prev.breakMinutes,
-        weeklyHoliday: latestTemplate.weeklyHoliday || prev.weeklyHoliday,
-        weeklyOffDays: (latestTemplate as any).weeklyOffDays ?? prev.weeklyOffDays,
-        payDay: latestTemplate.payDay ?? prev.payDay,
-        payMethod: (latestTemplate.payMethod as any) || prev.payMethod,
-        over5Employees: latestTemplate.over5Employees ?? prev.over5Employees,
-        // 재설계 2026-05-02 신규
-        taxMode: ((latestTemplate as any).taxMode ?? prev.taxMode) as "social_insurance" | "biz_income_3_3",
-        hourlyWageIncludesHolidayPay: (latestTemplate as any).hourlyWageIncludesHolidayPay ?? prev.hourlyWageIncludesHolidayPay,
-        hasProbation: latestTemplate.hasProbation ?? prev.hasProbation,
-        probationMonths: latestTemplate.probationMonths ?? prev.probationMonths,
-        mealProvided: latestTemplate.mealProvided ?? prev.mealProvided,
-        mealAllowance: latestTemplate.mealAllowance || prev.mealAllowance,
-        workPlace: latestTemplate.workPlace || prev.workPlace,
-        jobDescription: latestTemplate.jobDescription || prev.jobDescription,
-        specialTerms: latestTemplate.specialTerms || prev.specialTerms,
-        affiliatedCompany: latestTemplate.affiliatedCompany || prev.affiliatedCompany,
-        employerBusinessNumber: (latestTemplate as any).employerBusinessNumber || prev.employerBusinessNumber,
-        workPlaceAddress: (latestTemplate as any).workPlaceAddress || prev.workPlaceAddress,
-      }));
-      // 포괄임금 시간 값도 템플릿에서 복원
-      // 고정연장/휴일 시간 필드 제거됨
+      setForm((prev) => {
+        const company = latestTemplate.affiliatedCompany || prev.affiliatedCompany;
+        const sel = affiliatedCompaniesMaster.find((c: any) => c.companyName === company);
+        return {
+          ...prev,
+          position: latestTemplate.position || prev.position,
+          contractType: (latestTemplate.contractType as any) || prev.contractType,
+          wageType: (latestTemplate.wageType as any) || prev.wageType,
+          wageAmount: latestTemplate.wageAmount || prev.wageAmount,
+          weeklyHours: latestTemplate.weeklyHours || prev.weeklyHours,
+          workStartTime: latestTemplate.workStartTime || prev.workStartTime,
+          workEndTime: latestTemplate.workEndTime || prev.workEndTime,
+          breakMinutes: latestTemplate.breakMinutes ?? prev.breakMinutes,
+          weeklyHoliday: latestTemplate.weeklyHoliday || prev.weeklyHoliday,
+          weeklyOffDays: (() => {
+            const v = ((latestTemplate as any).weeklyOffDays ?? prev.weeklyOffDays) as number;
+            return v >= 1 && v <= 3 ? v : 1;
+          })(),
+          payDay: latestTemplate.payDay ?? prev.payDay,
+          payMethod: (latestTemplate.payMethod as any) || prev.payMethod,
+          // 재설계 2026-05-02: over5는 소속회사 마스터에서 자동 결정 (표시 전용)
+          over5Employees: sel ? !!sel.over5Employees : (latestTemplate.over5Employees ?? prev.over5Employees),
+          taxMode: ((latestTemplate as any).taxMode ?? prev.taxMode) as "social_insurance" | "biz_income_3_3",
+          hourlyWageIncludesHolidayPay: (latestTemplate as any).hourlyWageIncludesHolidayPay ?? prev.hourlyWageIncludesHolidayPay,
+          hasProbation: latestTemplate.hasProbation ?? prev.hasProbation,
+          probationMonths: latestTemplate.probationMonths ?? prev.probationMonths,
+          mealProvided: latestTemplate.mealProvided ?? prev.mealProvided,
+          mealAllowance: latestTemplate.mealAllowance || prev.mealAllowance,
+          workPlace: latestTemplate.workPlace || prev.workPlace,
+          jobDescription: latestTemplate.jobDescription || prev.jobDescription,
+          specialTerms: latestTemplate.specialTerms || prev.specialTerms,
+          affiliatedCompany: company,
+          employerBusinessNumber: (latestTemplate as any).employerBusinessNumber || sel?.businessNumber || prev.employerBusinessNumber,
+          workPlaceAddress: (latestTemplate as any).workPlaceAddress || prev.workPlaceAddress,
+        };
+      });
       setTemplateApplied(true);
     }
-  }, [latestTemplate, defaultEmployee, editingContract, templateApplied]);
+  }, [latestTemplate, defaultEmployee, editingContract, templateApplied, affiliatedCompaniesMaster]);
 
   // ── 스케줄 풀타임 프리셋 → 출퇴근/휴게/주근로시간 자동 반영 (항상 적용) ──
   const [presetApplied, setPresetApplied] = useState(false);
@@ -1326,24 +1356,29 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     onError(err) { toast.error(err.message); },
   });
 
-  // 사업주 프리셋
-  const employerPresetsQuery = trpc.electronicContracts.listEmployerPresets.useQuery(
+  // 재설계 2026-05-02: 소속회사는 affiliated_companies 마스터에서 select. employer_presets 폐기
+  const { data: affiliatedCompaniesMaster = [] } = trpc.affiliatedCompanies.list.useQuery(
     { restaurantId },
     { enabled: restaurantId > 0 },
   );
-  const addPresetMut = trpc.electronicContracts.addEmployerPreset.useMutation({
-    onSuccess() { toast.success("사업주 프리셋 저장됨"); utils.electronicContracts.listEmployerPresets.invalidate(); },
-    onError(err) { toast.error(err.message); },
-  });
-  const deletePresetMut = trpc.electronicContracts.deleteEmployerPreset.useMutation({
-    onSuccess() { toast.success("프리셋 삭제됨"); utils.electronicContracts.listEmployerPresets.invalidate(); },
-    onError(err) { toast.error(err.message); },
-  });
 
   const selectStaff = (userId: number) => {
     const staff = staffList.find((s: any) => s.userId === userId);
     if (staff) {
-      setForm({ ...form, employeeId: userId, employeeName: staff.name, employeePhone: staff.phone || "", affiliatedCompany: staff.affiliatedCompany || "" });
+      // 직원정보 SSOT의 hireDate를 default로 채움 (계약서 박제 시 사용자 변경 가능)
+      const ssotHireDate = staff.hireDate ? String(staff.hireDate).slice(0, 10) : "";
+      const company = staff.affiliatedCompany || "";
+      const sel = affiliatedCompaniesMaster.find((c: any) => c.companyName === company);
+      setForm({
+        ...form,
+        employeeId: userId,
+        employeeName: staff.name,
+        employeePhone: staff.phone || "",
+        affiliatedCompany: company,
+        employerBusinessNumber: sel?.businessNumber || form.employerBusinessNumber,
+        over5Employees: sel ? !!sel.over5Employees : form.over5Employees,
+        hireDate: form.hireDate || ssotHireDate,
+      });
     }
   };
 
@@ -1355,11 +1390,13 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
   // 표준: 40h → 주휴 8h → 월소정 209h
   const monthlyContractHours = Math.round((weeklyHoursNum + (weeklyHoursNum >= 15 ? 8 : 0)) * (365 / 12 / 7));
 
-  // 통상시급 = 계약급여 / (월소정 + 연차8)
-  const divisor = monthlyContractHours + 8;
+  // 재설계 2026-05-02: 5인 미만이면 연차 8h를 분모에서 제외 (포괄연차수당 없음)
+  // form.over5Employees는 사업주 select 시 마스터에서 자동 채움 (표시 전용)
+  const divisor = monthlyContractHours + (form.over5Employees ? 8 : 0);
   const hourlyWageCalc = divisor > 0 ? wageNum / divisor : 0;
   const basePayCalc = Math.round(hourlyWageCalc * monthlyContractHours);
-  const annualLeavePayCalc = Math.round(hourlyWageCalc * 8);
+  const annualLeavePayCalc = form.over5Employees ? Math.round(hourlyWageCalc * 8) : 0;
+  const wageCheckSum = basePayCalc + annualLeavePayCalc;
   const annualSalaryCalc = wageNum * 12;
 
   const inputCls = "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
@@ -1382,33 +1419,34 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             </div>
           )}
 
-          {/* ═══ 사업주 정보 + 사업장 규모 ═══ */}
+          {/* ═══ 사업주 (소속회사) — 재설계 2026-05-02: select + over5 자동 ═══ */}
           <div className="rounded-lg border border-border p-3 space-y-2">
             <div>
               <label className={labelCls}>사업주 (소속회사)</label>
-              {/* 프리셋 태그 */}
-              {(employerPresetsQuery.data ?? []).length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-1.5 mb-2">
-                  {(employerPresetsQuery.data ?? []).map((p: any) => (
-                    <button key={p.id} type="button"
-                      onClick={() => setForm({ ...form, affiliatedCompany: p.companyName, employerBusinessNumber: p.businessNumber || "" })}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs transition-colors ${
-                        form.affiliatedCompany === p.companyName
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card border-border text-muted-foreground hover:bg-accent"
-                      }`}
-                    >
-                      <span>{p.companyName}</span>
-                      {p.businessNumber && <span className="opacity-60">({p.businessNumber})</span>}
-                      {p.isDefault && <span className="text-[9px] opacity-70">기본</span>}
-                    </button>
-                  ))}
-                </div>
+              <select className={inputCls} value={form.affiliatedCompany}
+                onChange={(e) => {
+                  const sel = affiliatedCompaniesMaster.find((c: any) => c.companyName === e.target.value);
+                  setForm({
+                    ...form,
+                    affiliatedCompany: e.target.value,
+                    employerBusinessNumber: sel?.businessNumber || form.employerBusinessNumber,
+                    // 표시 전용 (서버가 마스터에서 다시 결정)
+                    over5Employees: sel ? !!sel.over5Employees : false,
+                  });
+                }}
+              >
+                <option value="">선택하세요</option>
+                {affiliatedCompaniesMaster.map((c: any) => (
+                  <option key={c.id} value={c.companyName}>
+                    {c.companyName} {c.over5Employees ? "(5인↑)" : "(5인↓)"}
+                  </option>
+                ))}
+              </select>
+              {affiliatedCompaniesMaster.length === 0 && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                  ⚠ 등록된 소속회사가 없습니다. 매장 정보에서 먼저 등록하세요.
+                </p>
               )}
-              <input className={inputCls} value={form.affiliatedCompany}
-                onChange={(e) => setForm({ ...form, affiliatedCompany: e.target.value })}
-                placeholder="계약서 사업주명" />
-              <p className={subLabelCls}>계약서에 사업주로 표기됩니다</p>
             </div>
             <div>
               <label className={labelCls}>사업자등록번호</label>
@@ -1416,36 +1454,16 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 onChange={(e) => setForm({ ...form, employerBusinessNumber: e.target.value })}
                 placeholder="000-00-00000" />
             </div>
-            {/* 현재 입력값을 프리셋으로 저장 */}
-            {form.affiliatedCompany && !(employerPresetsQuery.data ?? []).some((p: any) => p.companyName === form.affiliatedCompany) && (
-              <button type="button"
-                onClick={() => addPresetMut.mutate({ restaurantId, companyName: form.affiliatedCompany, businessNumber: form.employerBusinessNumber || undefined })}
-                className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
-              >
-                + 현재 사업주를 프리셋으로 저장
-              </button>
-            )}
-            <div className="flex items-center justify-between pt-2">
-              <label className={labelCls}>사업장 규모</label>
-              <div className="flex gap-1 bg-muted p-0.5 rounded-lg">
-                <button type="button" onClick={() => setForm({ ...form, over5Employees: false })}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!form.over5Employees ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
-                  5인 미만
-                </button>
-                <button type="button" onClick={() => setForm({ ...form, over5Employees: true })}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${form.over5Employees ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
-                  5인 이상
-                </button>
+            {form.affiliatedCompany && (
+              <div className={`text-[11px] rounded-md px-3 py-2 space-y-0.5 ${form.over5Employees ? "bg-blue-500/10 text-blue-700 dark:text-blue-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>
+                {form.over5Employees ? (
+                  <><p className="font-semibold">5인 이상 — 근로기준법 전면 적용</p><p>연차유급휴가, 부당해고 제한, 주휴수당 의무</p></>
+                ) : (
+                  <><p className="font-semibold">5인 미만 — 근로기준법 일부 적용</p><p>해고예고(30일), 퇴직금, 최저임금 적용 / 연차·가산수당·부당해고 규정 미적용</p></>
+                )}
               </div>
-            </div>
-            <div className={`text-[11px] rounded-md px-3 py-2 space-y-0.5 ${form.over5Employees ? "bg-blue-500/10 text-blue-700 dark:text-blue-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>
-              {form.over5Employees ? (
-                <><p className="font-semibold">근로기준법 전면 적용</p><p>연차유급휴가, 부당해고 제한, 주휴수당 의무</p></>
-              ) : (
-                <><p className="font-semibold">근로기준법 일부 적용</p><p>해고예고(30일), 퇴직금, 최저임금 적용 / 연차·가산수당·부당해고 규정 미적용</p></>
-              )}
-            </div>
-            <p className={subLabelCls}>※ 사업장 규모는 계약서 생성 기준 참고용이며, 실제 계약서에는 기재되지 않습니다</p>
+            )}
+            <p className={subLabelCls}>※ 5인 여부는 소속회사 마스터(매장 정보)에서 토글합니다</p>
           </div>
 
           {/* ═══ 직원 정보 ═══ */}
@@ -1478,6 +1496,13 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 <option value="permanent">정규직</option>
                 <option value="daily">일용직</option>
               </select>
+            </div>
+            <div>
+              {/* 재설계 2026-05-02: 입사일 — 계약서 박제용 (직원정보 hireDate와 분리) */}
+              <label className={labelCls}>입사일</label>
+              <input type="date" className={inputCls} value={form.hireDate}
+                onChange={(e) => setForm({ ...form, hireDate: e.target.value })} />
+              <p className={subLabelCls}>계약서 시점에 박제됩니다 (직원정보 SSOT와 분리)</p>
             </div>
           </div>
 
@@ -1572,26 +1597,25 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             </div>
             <div>
               <label className={labelCls}>주당 휴무일수</label>
-              <select className={inputCls} value={form.weeklyOffDays} onChange={(e) => setForm({ ...form, weeklyOffDays: Number(e.target.value) })}>
-                <option value={0}>없음</option>
+              <select className={inputCls} value={form.weeklyOffDays}
+                onChange={(e) => setForm({ ...form, weeklyOffDays: Number(e.target.value) })}>
                 <option value={1}>1일</option>
                 <option value={2}>2일</option>
                 <option value={3}>3일</option>
-                <option value={4}>4일</option>
-                <option value={5}>5일</option>
               </select>
             </div>
           </div>
 
-          {/* ═══ 포괄임금 구성항목 (월급제 전용) ═══ */}
+          {/* ═══ 포괄임금 구성항목 (월급제 전용) — 재설계 2026-05-02: 5인 미만이면 연차수당 행 숨김 ═══ */}
           {form.wageType === "monthly" && wageNum > 0 && (
             <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-500/5 p-3 space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">임금 구성항목 (근기법 제17조)</p>
-                <p className="text-[10px] text-blue-500">월소정근로 {monthlyContractHours}h</p>
+                <p className="text-[10px] text-blue-500">
+                  월소정근로 {monthlyContractHours}h{form.over5Employees ? " + 연차 8h" : " (5인 미만 — 연차 분모 제외)"}
+                </p>
               </div>
 
-              {/* 자동 역산 결과 */}
               <div className="text-xs space-y-1.5 pt-1">
                 <div className="flex justify-between items-center">
                   <span style={{ color: "#6b7280" }}>통상시급</span>
@@ -1601,16 +1625,18 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                   <span style={{ color: "#6b7280" }}>기본급 ({monthlyContractHours}h × 통상시급)</span>
                   <span className="font-mono font-medium">{basePayCalc.toLocaleString()}원</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span style={{ color: "#6b7280" }}>포괄연차수당 (8h × 통상시급)</span>
-                  <span className="font-mono font-medium">{annualLeavePayCalc.toLocaleString()}원</span>
-                </div>
+                {form.over5Employees && (
+                  <div className="flex justify-between items-center">
+                    <span style={{ color: "#6b7280" }}>포괄연차수당 (8h × 통상시급)</span>
+                    <span className="font-mono font-medium">{annualLeavePayCalc.toLocaleString()}원</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center pt-1.5" style={{ borderTop: "1px solid #e5e7eb" }}>
                   <span className="font-semibold">합계</span>
-                  <span className="font-mono font-semibold">{(basePayCalc + annualLeavePayCalc).toLocaleString()}원</span>
+                  <span className="font-mono font-semibold">{wageCheckSum.toLocaleString()}원</span>
                 </div>
-                {Math.abs((basePayCalc + annualLeavePayCalc) - wageNum) > 10 && (
-                  <p className="text-[10px] text-amber-600">※ 단수 차이 {((basePayCalc + annualLeavePayCalc) - wageNum).toLocaleString()}원 — 반올림에 의한 차이입니다</p>
+                {Math.abs(wageCheckSum - wageNum) > 10 && (
+                  <p className="text-[10px] text-amber-600">※ 단수 차이 {(wageCheckSum - wageNum).toLocaleString()}원 — 반올림에 의한 차이입니다</p>
                 )}
                 {hourlyWageCalc > 0 && hourlyWageCalc < 10320 && (
                   <p className="text-[10px] text-red-600 font-semibold">⚠ 통상시급이 2026년 최저시급(10,320원) 미만입니다</p>
@@ -1745,6 +1771,13 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                   <span className="text-sm text-foreground">주휴수당 별도 산정</span>
                 </label>
               </div>
+              {!form.hourlyWageIncludesHolidayPay && (
+                <p className="text-[10px] text-blue-600 dark:text-blue-400 pl-1">
+                  {weeklyHoursNum >= 15
+                    ? "주 15시간 이상 — 정산 시 주휴수당(주1회 8h × 시급) 자동 가산"
+                    : "주 15시간 미만 — 주휴수당 미발생"}
+                </p>
+              )}
             </div>
           )}
 
@@ -1763,6 +1796,13 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           <Button variant="outline" onClick={onClose}>취소</Button>
           <Button
             onClick={() => {
+              // 재설계 2026-05-02: 클라 측 선택 검증
+              if (!form.affiliatedCompany) {
+                toast.error("소속회사를 선택하세요"); return;
+              }
+              if (form.taxMode !== "social_insurance" && form.taxMode !== "biz_income_3_3") {
+                toast.error("세무처리(4대보험/3.3%)를 선택하세요"); return;
+              }
               const payload = {
                 employeeName: form.employeeName,
                 employeePhone: form.employeePhone || undefined,
@@ -1805,7 +1845,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 create.mutate({ restaurantId, employeeId: form.employeeId || undefined, hasProbation: false, probationMonths: 0, ...payload });
               }
             }}
-            disabled={!form.employeeName || create.isPending || updateContract.isPending}
+            disabled={!form.employeeName || !form.affiliatedCompany || create.isPending || updateContract.isPending}
           >
             {(create.isPending || updateContract.isPending) ? "처리 중..." : editingContract ? "수정 저장" : "초안 생성"}
           </Button>

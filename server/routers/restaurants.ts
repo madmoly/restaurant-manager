@@ -288,18 +288,12 @@ export const restaurantsRouter = router({
           bankBookUrl: users.bankBookUrl,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
+          // 재설계 2026-05-02 (Phase B): weeklyOffDays SSOT는 restaurant_users
+          weeklyOffDays: restaurantUsers.weeklyOffDays,
           resignedAt: restaurantUsers.resignedAt,
           resignReason: restaurantUsers.resignReason,
           createdAt: restaurantUsers.createdAt,
-          // 최신 서명 계약서의 소속회사
-          contractAffiliatedCompany: sql<string | null>`(
-            SELECT ec.affiliatedCompany FROM employment_electronic_contracts ec
-            WHERE ec.employeeId = ${restaurantUsers.userId}
-              AND ec.restaurantId = ${restaurantUsers.restaurantId}
-              AND ec.status = 'signed'
-            ORDER BY ec.signedAt DESC LIMIT 1
-          )`.as("contractAffiliatedCompany"),
-          // 최신 서명 계약서 서명일
+          // 최신 서명 계약서 박제값 (갱신 배너 + UI 표시용)
           latestContractSignedAt: sql<string | null>`(
             SELECT ec.signedAt FROM employment_electronic_contracts ec
             WHERE ec.employeeId = ${restaurantUsers.userId}
@@ -307,13 +301,54 @@ export const restaurantsRouter = router({
               AND ec.status = 'signed'
             ORDER BY ec.signedAt DESC LIMIT 1
           )`.as("latestContractSignedAt"),
+          snapshotAffiliatedCompany: sql<string | null>`(
+            SELECT ec.snapshotAffiliatedCompany FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotAffiliatedCompany"),
+          snapshotHireDate: sql<string | null>`(
+            SELECT ec.snapshotHireDate FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotHireDate"),
+          snapshotWeeklyOffDays: sql<number | null>`(
+            SELECT ec.snapshotWeeklyOffDays FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotWeeklyOffDays"),
+          snapshotOver5Employees: sql<boolean | null>`(
+            SELECT ec.snapshotOver5Employees FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotOver5Employees"),
+          snapshotTaxMode: sql<string | null>`(
+            SELECT ec.snapshotTaxMode FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotTaxMode"),
+          // 소속회사 마스터의 5인 여부 (effectiveOver5)
+          effectiveOver5: sql<boolean>`COALESCE((
+            SELECT ac.over5Employees FROM affiliated_companies ac
+            WHERE ac.restaurantId = ${restaurantUsers.restaurantId}
+              AND ac.companyName = ${restaurantUsers.affiliatedCompany}
+            LIMIT 1
+          ), FALSE)`.as("effectiveOver5"),
           // employeeContracts (현재 활성 계약)
           wageType: employeeContracts.wageType,
           wageAmount: employeeContracts.wageAmount,
           position: employeeContracts.position,
           contractStart: employeeContracts.contractStart,
           contractEnd: employeeContracts.contractEnd,
-          weeklyOffDays: employeeContracts.weeklyOffDays,
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
         })
@@ -396,35 +431,22 @@ export const restaurantsRouter = router({
       return { ok: true };
     }),
 
-  /** 주당 휴무일수 수정 (employee_contracts.weeklyOffDays) */
+  /** 주당 휴무일수 수정 (재설계 2026-05-02: SSOT는 restaurant_users.weeklyOffDays) */
   updateWeeklyOffDays: managerProcedure
     .input(z.object({
       restaurantId: z.number(),
       userId: z.number(),
-      weeklyOffDays: z.number().min(0).max(7),
+      weeklyOffDays: z.number().int().min(1).max(3),
     }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
-      // 활성 계약이 있으면 업데이트, 없으면 새로 생성
-      const [existing] = await db.select({ id: employeeContracts.id })
-        .from(employeeContracts)
+      await db
+        .update(restaurantUsers)
+        .set({ weeklyOffDays: input.weeklyOffDays })
         .where(and(
-          eq(employeeContracts.userId, input.userId),
-          eq(employeeContracts.restaurantId, input.restaurantId),
-          eq(employeeContracts.isActive, true)
-        ))
-        .limit(1);
-      if (existing) {
-        await db.update(employeeContracts)
-          .set({ weeklyOffDays: input.weeklyOffDays })
-          .where(eq(employeeContracts.id, existing.id));
-      } else {
-        await db.insert(employeeContracts).values({
-          userId: input.userId,
-          restaurantId: input.restaurantId,
-          weeklyOffDays: input.weeklyOffDays,
-        });
-      }
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId)
+        ));
       return { ok: true };
     }),
 
