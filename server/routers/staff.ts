@@ -472,11 +472,13 @@ export const staffRouter = router({
       }
 
       // 2. restaurant_users 배정
+      // Phase 2: 신규 직원은 contractMigrated=false 명시. 전자계약서 서명 시 true로 전환.
       const [created] = await db.insert(restaurantUsers).values({
         restaurantId: input.restaurantId,
         userId,
         role: input.role,
-      }).$returningId();
+        contractMigrated: false,
+      } as any).$returningId();
 
       // audit
       await db.insert(auditLogs).values({

@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { eq, and, between, sql, isNull, isNotNull, desc } from "drizzle-orm";
-import { router, adminProcedure, protectedProcedure } from "../trpc";
+import { TRPCError } from "@trpc/server";
+import { router, adminProcedure, protectedProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
 import {
   restaurants, restaurantUsers, users, sales, purchaseOrders,
   dailyClosings, dailyOperations, intermediateSales,
   schedules, dailySalesDetail, businessGroups, dailyExpenses,
+  employeeWageHistory, auditLogs, notifications,
 } from "../../drizzle/schema";
 import { ROLE_LEVEL } from "@shared/permissions";
 import { getOwnedRestaurants, getOwnedRestaurantIds, realStoreCondition } from "../helpers/restaurantScope";
@@ -253,5 +255,87 @@ export const adminRouter = router({
         recentLogins,
         storeStaffCounts,
       };
+    }),
+
+  /**
+   * 급여 긴급 정정 (master 전용 — Phase 2.4)
+   * 현재 open `employee_wage_history` row의 wageAmount를 덮어쓴다.
+   * - audit_logs에 before/after/reason 필수 기록 (트랜잭션 내 강제)
+   * - 해당 매장 owner에게 알림 발송
+   * - 정상 경로(전자계약서 재서명)가 막힌 예외 상황 전용
+   */
+  emergencyWageCorrection: masterProcedure
+    .input(z.object({
+      userId: z.number(),
+      restaurantId: z.number(),
+      newWageAmount: z.string(),
+      reason: z.string().min(5, "정정 사유는 5자 이상 필수"),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { userId, restaurantId, newWageAmount, reason } = input;
+
+      // 1) 현재 open wage_history row 조회
+      const [openRow] = await db.select()
+        .from(employeeWageHistory)
+        .where(and(
+          eq(employeeWageHistory.userId, userId),
+          eq(employeeWageHistory.restaurantId, restaurantId),
+          isNull(employeeWageHistory.effectiveTo),
+        ))
+        .limit(1);
+
+      if (!openRow) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "현재 유효한 급여이력이 없습니다 — 전자계약서 서명 또는 백필 후 재시도",
+        });
+      }
+
+      const before = { wageAmount: openRow.wageAmount, wageType: openRow.wageType };
+      const after = { wageAmount: newWageAmount, wageType: openRow.wageType };
+
+      // 2) 트랜잭션: wage 갱신 + audit (필수) + 매장 owner 알림
+      await db.transaction(async (tx) => {
+        await tx.update(employeeWageHistory)
+          .set({ wageAmount: newWageAmount })
+          .where(eq(employeeWageHistory.id, openRow.id));
+
+        await tx.insert(auditLogs).values({
+          userId: ctx.user.userId,
+          userName: ctx.user.name || ctx.user.username,
+          restaurantId,
+          action: "update",
+          target: "employee_wage_history",
+          targetId: openRow.id,
+          details: {
+            kind: "emergency_wage_correction",
+            targetUserId: userId,
+            before,
+            after,
+            reason,
+          },
+        });
+
+        const owners = await tx.select({ userId: restaurantUsers.userId })
+          .from(restaurantUsers)
+          .where(and(
+            eq(restaurantUsers.restaurantId, restaurantId),
+            eq(restaurantUsers.role, "owner"),
+            isNull(restaurantUsers.resignedAt),
+          ));
+
+        for (const o of owners) {
+          if (!o.userId) continue;
+          await tx.insert(notifications).values({
+            recipientId: o.userId,
+            type: "general",
+            title: "급여 긴급 정정 알림",
+            content: `master가 직원 #${userId} 의 급여를 ₩${before.wageAmount} → ₩${after.wageAmount} 로 정정했습니다. 사유: ${reason}`,
+            restaurantId,
+          });
+        }
+      });
+
+      return { ok: true, before, after };
     }),
 });

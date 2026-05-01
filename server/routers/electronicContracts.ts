@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { eq, and, desc, sql, isNotNull, ne } from "drizzle-orm";
+import { eq, and, desc, sql, isNotNull, isNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { employmentElectronicContracts, employeeContracts, restaurantContracts, restaurants, restaurantUsers, users } from "../../drizzle/schema";
+import { employmentElectronicContracts, employeeContracts, employeeWageHistory, restaurantContracts, restaurants, restaurantUsers, users } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -662,6 +662,51 @@ export const electronicContractsRouter = router({
               residentNumber: finalResidentNumber,
               isActive: true,
             } as any);
+
+            // ── 4. employee_wage_history (Phase 2 — 급여이력 단일 경로) ──
+            // 신 계약서 contractStart의 월 1일을 effectiveFrom 으로 사용.
+            // 월 중 시작이어도 해당 월 1일로 잘라 저장 → 전월 급여 소급 효과 (의도된 동작).
+            const csDate = contract.contractStart
+              ? (contract.contractStart instanceof Date
+                  ? contract.contractStart
+                  : new Date(contract.contractStart as any))
+              : new Date();
+            const ymFirst = `${csDate.getFullYear()}-${String(csDate.getMonth() + 1).padStart(2, "0")}-01`;
+
+            // 4-1. 기존 open row 닫기 (effectiveTo = 신 계약 시작 월 1일)
+            await tx.update(employeeWageHistory)
+              .set({ effectiveTo: ymFirst })
+              .where(and(
+                eq(employeeWageHistory.userId, contract.employeeId),
+                eq(employeeWageHistory.restaurantId, contract.restaurantId),
+                isNull(employeeWageHistory.effectiveTo),
+              ));
+
+            // 4-2. 신 row 생성 — 같은 월 재서명 시 (uniq 충돌) update로 갱신
+            await tx.insert(employeeWageHistory).values({
+              userId: contract.employeeId,
+              restaurantId: contract.restaurantId,
+              wageType: (contract.wageType as "hourly" | "monthly") ?? "hourly",
+              wageAmount: contract.wageAmount ?? "0",
+              effectiveFrom: ymFirst,
+              effectiveTo: null,
+              sourceContractId: contract.id,
+            } as any).onDuplicateKeyUpdate({
+              set: {
+                wageType: (contract.wageType as "hourly" | "monthly") ?? "hourly",
+                wageAmount: contract.wageAmount ?? "0",
+                sourceContractId: contract.id,
+                effectiveTo: null,
+              },
+            });
+
+            // 4-3. restaurant_users.contractMigrated = true (Phase 2 전환 플래그)
+            await tx.update(restaurantUsers)
+              .set({ contractMigrated: true } as any)
+              .where(and(
+                eq(restaurantUsers.userId, contract.employeeId),
+                eq(restaurantUsers.restaurantId, contract.restaurantId),
+              ));
           }
         });
         console.log(`[signContract] tx complete for contract ${contract.id}`);

@@ -1179,7 +1179,8 @@ export const schedulesRouter = router({
               }
             } else {
               if (!emp.wageType && !emp.wageAmount) {
-                zeroWageReason = "근로계약서 미작성 (급여 정보 없음)";
+                // Phase 2: wage_history row 부재 = 전자계약서 미서명
+                zeroWageReason = "전자계약서 미서명 (급여이력 없음)";
               } else if (emp.wageAmount && Number(emp.wageAmount) === 0) {
                 zeroWageReason = "계약서 급여액이 0원으로 설정됨";
               }
