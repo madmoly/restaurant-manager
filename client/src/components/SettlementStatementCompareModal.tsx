@@ -43,6 +43,8 @@ interface OcrResponse {
   rawText: string;
 }
 
+type CompareWarning = "ocr_items_partial" | "ocr_no_summary" | "system_only_diff";
+
 interface CompareResult {
   level: "monthly_match" | "date_mismatch" | "item_mismatch";
   monthly: { ocr: number; system: number; diff: number; ok: boolean; tolerance: number };
@@ -54,6 +56,9 @@ interface CompareResult {
     systemItem?: { itemRowId: number; itemName: string; quantity: number | null; unitPrice: number | null; lineTotal: number };
     diff?: number;
   }[];
+  warnings?: CompareWarning[];
+  ocrItemsSum?: number;
+  ocrSummaryTotal?: number | null;
 }
 
 interface Props {
@@ -715,9 +720,53 @@ function ResultStep({
     </div>
   );
 
+  // 경고 박스 렌더링 (server warnings + client-side fallback)
+  const warnings = comparison.warnings ?? [];
+  const warningBoxes = warnings.length > 0 ? (
+    <div className="space-y-2">
+      {warnings.includes("ocr_items_partial") && (
+        <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+          <div className="text-xs">
+            <p className="font-medium text-foreground">OCR이 일부 거래 라인을 빠뜨렸을 수 있습니다</p>
+            <p className="text-muted-foreground mt-0.5 tabular-nums">
+              정산표 footer 합계 <strong>{(comparison.ocrSummaryTotal ?? 0).toLocaleString()}원</strong>과
+              {" "}OCR이 추출한 라인 합 <strong>{(comparison.ocrItemsSum ?? 0).toLocaleString()}원</strong>이 5% 이상 차이.
+              {" "}원본을 직접 확인하거나 페이지별로 분할 업로드해주세요.
+            </p>
+          </div>
+        </div>
+      )}
+      {warnings.includes("ocr_no_summary") && (
+        <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+          <div className="text-xs">
+            <p className="font-medium text-foreground">정산표 footer 합계를 읽지 못했습니다</p>
+            <p className="text-muted-foreground mt-0.5">
+              월합계 검증을 OCR 라인 합으로 대체했습니다. 라인 누락 여부는 직접 확인이 필요합니다.
+            </p>
+          </div>
+        </div>
+      )}
+      {warnings.includes("system_only_diff") && (
+        <div className="p-3 rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/30 dark:border-red-800 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+          <div className="text-xs">
+            <p className="font-medium text-foreground">합계 차이가 있지만 액션 가능 항목이 없습니다</p>
+            <p className="text-muted-foreground mt-0.5">
+              OCR 또는 시스템 매입 일부가 인식되지 않았을 수 있습니다.
+              {" "}매입 관리 페이지에서 직접 확인하거나 정산표를 다시 업로드해주세요.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="space-y-4">
       {monthlyHeader}
+      {warningBoxes}
 
       {/* date_mismatch: 일자별 표 */}
       {comparison.level === "date_mismatch" && comparison.dates && (
@@ -799,72 +848,88 @@ function ItemMismatchSection({
   return (
     <div className="space-y-4">
       {/* 1) 품목 매칭 필요 — link_alias */}
-      {missingInSystem.length > 0 && (
-        <Section title={`① 품목 매칭 필요 — 마스터 품목과 연결 (${missingInSystem.length})`} color="blue">
-          <p className="text-[11px] text-muted-foreground px-1 pb-1">
-            정산표에만 있는 품목입니다. 우리 시스템 마스터 품목과 연결하면 다음 정산표부터 자동 매칭됩니다.
-          </p>
-          {missingInSystem.map(({ row, idx }) => (
-            <LinkAliasRow
-              key={`alias_${idx}`}
-              row={row}
-              itemOptions={itemOptions}
-              isSelected={selectedActions.get(`item_${idx}`) === "link_alias"}
-              targetItemId={aliasTargets.get(idx) ?? null}
-              onToggle={() => onToggleAction(idx, "link_alias")}
-              onTargetChange={(itemId) => onAliasTargetChange(idx, itemId)}
-            />
-          ))}
-        </Section>
-      )}
+      <Section
+        title={`① 품목 매칭 필요 — 마스터 품목과 연결 (${missingInSystem.length})`}
+        color="blue"
+        empty={missingInSystem.length === 0}
+      >
+        {missingInSystem.length > 0 ? (
+          <>
+            <p className="text-[11px] text-muted-foreground px-1 pb-1">
+              정산표에만 있는 품목입니다. 우리 시스템 마스터 품목과 연결하면 다음 정산표부터 자동 매칭됩니다.
+            </p>
+            {missingInSystem.map(({ row, idx }) => (
+              <LinkAliasRow
+                key={`alias_${idx}`}
+                row={row}
+                itemOptions={itemOptions}
+                isSelected={selectedActions.get(`item_${idx}`) === "link_alias"}
+                targetItemId={aliasTargets.get(idx) ?? null}
+                onToggle={() => onToggleAction(idx, "link_alias")}
+                onTargetChange={(itemId) => onAliasTargetChange(idx, itemId)}
+              />
+            ))}
+          </>
+        ) : null}
+      </Section>
 
       {/* 2) 금액 차이 — update_amount */}
-      {amountDiff.length > 0 && (
-        <Section title={`② 금액 차이 (${amountDiff.length})`} color="red">
-          {amountDiff.map(({ row, idx }) => (
-            <ItemRow
-              key={`amt_${idx}`}
-              row={row}
-              actionLabel="시스템 금액 → 정산표 금액으로 수정"
-              isSelected={selectedActions.get(`item_${idx}`) === "update_amount"}
-              onToggle={() => onToggleAction(idx, "update_amount")}
-            />
-          ))}
-        </Section>
-      )}
+      <Section
+        title={`② 금액 차이 (${amountDiff.length})`}
+        color="red"
+        empty={amountDiff.length === 0}
+      >
+        {amountDiff.map(({ row, idx }) => (
+          <ItemRow
+            key={`amt_${idx}`}
+            row={row}
+            actionLabel="시스템 금액 → 정산표 금액으로 수정"
+            isSelected={selectedActions.get(`item_${idx}`) === "update_amount"}
+            onToggle={() => onToggleAction(idx, "update_amount")}
+          />
+        ))}
+      </Section>
 
       {/* 3) 시스템 누락 — add_to_system (1번과 동일 항목, 다른 처리) */}
-      {missingInSystem.length > 0 && (
-        <Section title={`③ 시스템 누락 — 매입으로 그대로 추가 (${missingInSystem.length})`} color="amber">
-          <p className="text-[11px] text-muted-foreground px-1 pb-1">
-            마스터 품목 연결 없이 정산표 내용 그대로 매입에 추가합니다. (alias 학습 X)
-          </p>
-          {missingInSystem.map(({ row, idx }) => (
-            <ItemRow
-              key={`add_${idx}`}
-              row={row}
-              actionLabel="시스템에 매입 추가"
-              isSelected={selectedActions.get(`item_${idx}`) === "add_to_system"}
-              onToggle={() => onToggleAction(idx, "add_to_system")}
-            />
-          ))}
-        </Section>
-      )}
+      <Section
+        title={`③ 시스템 누락 — 매입으로 그대로 추가 (${missingInSystem.length})`}
+        color="amber"
+        empty={missingInSystem.length === 0}
+      >
+        {missingInSystem.length > 0 ? (
+          <>
+            <p className="text-[11px] text-muted-foreground px-1 pb-1">
+              마스터 품목 연결 없이 정산표 내용 그대로 매입에 추가합니다. (alias 학습 X)
+            </p>
+            {missingInSystem.map(({ row, idx }) => (
+              <ItemRow
+                key={`add_${idx}`}
+                row={row}
+                actionLabel="시스템에 매입 추가"
+                isSelected={selectedActions.get(`item_${idx}`) === "add_to_system"}
+                onToggle={() => onToggleAction(idx, "add_to_system")}
+              />
+            ))}
+          </>
+        ) : null}
+      </Section>
 
       {/* 4) 정산표 누락 — dismiss */}
-      {missingInStatement.length > 0 && (
-        <Section title={`④ 정산표 누락 — 시스템에는 있는데 정산표엔 없음 (${missingInStatement.length})`} color="amber">
-          {missingInStatement.map(({ row, idx }) => (
-            <ItemRow
-              key={`dis_${idx}`}
-              row={row}
-              actionLabel="무시 (반품/오입력 가능)"
-              isSelected={selectedActions.get(`item_${idx}`) === "dismiss"}
-              onToggle={() => onToggleAction(idx, "dismiss")}
-            />
-          ))}
-        </Section>
-      )}
+      <Section
+        title={`④ 정산표 누락 — 시스템에는 있는데 정산표엔 없음 (${missingInStatement.length})`}
+        color="amber"
+        empty={missingInStatement.length === 0}
+      >
+        {missingInStatement.map(({ row, idx }) => (
+          <ItemRow
+            key={`dis_${idx}`}
+            row={row}
+            actionLabel="무시 (반품/오입력 가능)"
+            isSelected={selectedActions.get(`item_${idx}`) === "dismiss"}
+            onToggle={() => onToggleAction(idx, "dismiss")}
+          />
+        ))}
+      </Section>
 
       {/* 5) 정상 — 접힘 */}
       {matched.length > 0 && (
@@ -889,12 +954,22 @@ function ItemMismatchSection({
   );
 }
 
-function Section({ title, color, children }: { title: string; color: "red" | "amber" | "blue"; children: React.ReactNode }) {
+function Section({ title, color, empty, children }: { title: string; color: "red" | "amber" | "blue"; empty?: boolean; children: React.ReactNode }) {
   const colorClass = color === "red"
     ? "border-red-200 dark:border-red-900"
     : color === "blue"
     ? "border-blue-200 dark:border-blue-900"
     : "border-amber-200 dark:border-amber-900";
+  if (empty) {
+    return (
+      <div className="opacity-60">
+        <p className="text-xs font-medium text-muted-foreground mb-2">{title}</p>
+        <div className="border border-dashed border-muted-foreground/30 rounded-lg p-2 text-[11px] text-muted-foreground text-center">
+          해당 항목 없음
+        </div>
+      </div>
+    );
+  }
   return (
     <div>
       <p className="text-xs font-medium text-foreground mb-2">{title}</p>

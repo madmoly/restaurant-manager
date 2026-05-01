@@ -58,6 +58,9 @@ async function loadSystemPurchases(
   // counterparty_items는 (counterpartyId, itemId) 단위 alias.
   // 시스템 매입 항목과 (itemId == counterparty_items.itemId) 기준 leftJoin.
   // counterpartyId 조건은 above filter로 이미 보장됨.
+  // ⚠️ purchaseDate는 DATE 컬럼이지만 mysql2 드라이버가 Date 객체로 반환하면서
+  //    KST 자정이 UTC 15:00 전일로 해석되는 버그가 있음 → DATE_FORMAT으로 문자열 직접 반환.
+  // status='received' + 일마감(closingDate) 필터로 좌측 매입 패널과 동일 기준 적용.
   const rows = await db
     .select({
       purchaseOrderId: purchaseOrdersV2.id,
@@ -69,7 +72,7 @@ async function loadSystemPurchases(
       quantity: purchaseOrderItemsV2.quantity,
       unitPrice: purchaseOrderItemsV2.unitPrice,
       lineTotal: purchaseOrderItemsV2.lineTotal,
-      purchaseDate: purchaseOrdersV2.purchaseDate,
+      purchaseDate: sql<string>`DATE_FORMAT(${purchaseOrdersV2.purchaseDate}, '%Y-%m-%d')`,
     })
     .from(purchaseOrderItemsV2)
     .innerJoin(purchaseOrdersV2, eq(purchaseOrderItemsV2.purchaseOrderId, purchaseOrdersV2.id))
@@ -86,6 +89,7 @@ async function loadSystemPurchases(
       and(
         eq(purchaseOrdersV2.restaurantId, restaurantId),
         eq(purchaseOrdersV2.counterpartyId, counterpartyId),
+        eq(purchaseOrdersV2.status, "received"),
         sql`${purchaseOrdersV2.purchaseDate} >= ${startDate}`,
         sql`${purchaseOrdersV2.purchaseDate} < ${nextMonthStart}`
       )
@@ -102,9 +106,7 @@ async function loadSystemPurchases(
     quantity: r.quantity != null ? Number(r.quantity) : null,
     unitPrice: r.unitPrice != null ? Number(r.unitPrice) : null,
     lineTotal: Number(r.lineTotal) || 0,
-    date: typeof r.purchaseDate === "string"
-      ? r.purchaseDate
-      : (r.purchaseDate instanceof Date ? r.purchaseDate.toISOString().slice(0, 10) : ""),
+    date: typeof r.purchaseDate === "string" ? r.purchaseDate : "",
   }));
 }
 

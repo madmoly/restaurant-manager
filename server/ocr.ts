@@ -1021,10 +1021,34 @@ ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
     const promptText = `이 이미지(들)는 거래처가 발행한 **월매입정산표(거래원장)**입니다.
 하나의 거래처와 하나의 매장 사이의 한 달치 거래내역이 표 형태로 나열되어 있습니다.
 
+## 🚨 최우선 규칙 (위반 금지)
+
+1. **모든 거래 라인을 빠짐없이 추출.** 행 수가 100개를 넘어도 전부 items 배열에 담아라.
+2. **요약·생략·축약 금지.** "...나머지 동일", "이하 생략", "총 N건" 같은 메타 표현으로 라인을 대체하지 마라.
+3. **footer/합계행에서 읽은 salesTotal과 items의 lineTotal 합이 일치해야 한다.**
+   - 일치하지 않으면 items 일부가 누락된 것이므로 누락된 라인을 다시 찾아 추가하라.
+   - 추출 직전에 \`Σ items.lineTotal\` 계산 후 monthlySummary.salesTotal과 검증.
+4. **합계행은 절대 items에 포함하지 마라.** 키워드: "계", "일계", "월 계", "거래처계", "합계", "소계", "총합", "전월이월", "당월잔액", "Total", "Subtotal".
+   - 이 행들의 금액은 monthlySummary로만 사용.
+
+## 입력 형식별 레이아웃
+
+### PDF 거래원장
+- 페이지 레이아웃은 일반적으로 \`[전월이월][일자별 거래라인들][일계][...반복][총합계]\`.
+- 페이지 경계에서 라인이 잘리지 않도록 모든 페이지를 끝까지 스캔.
+- "전월이월" / "당월잔액" 행은 items 제외, monthlySummary.balance 후보.
+
+### Excel/CSV 표 데이터
+- 표 텍스트의 모든 행을 검사. 합계행 키워드(위 4번)에 매칭되는 행만 monthlySummary로 분리.
+- 셀 분할이 명확하므로 일자/품목/수량/단가/합계 컬럼을 정확히 매핑.
+
+### 다중 이미지
+이미지가 여러 장이면 같은 정산표의 연속된 페이지로 간주하고 모든 페이지의 거래라인을 하나의 items 배열로 합쳐.
+
 ## 추출 규칙
 
 ### 1. 헤더
-- counterpartyName: 거래처(공급자/판매자) 회사명
+- counterpartyName: 거래처(공급자/판매자) 회사명. **매장명이 아님 — 발행처(공급사)만**
 - counterpartyBusinessNumber: 사업자등록번호 (있으면)
 - yearMonth: 정산 대상 연월 (YYYY-MM 형식). 헤더의 "2024년 4월" 같은 텍스트 또는 거래일자 다수에서 추론.
 
@@ -1046,16 +1070,12 @@ ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
 - "판매" / "수금" / "잔액" 컬럼이 분리된 양식이면 → **판매(매출) 행만 items로**, 수금은 monthlySummary.paymentTotal 합산.
 - 적요란이 \`삼겹살(국내산) [1kg] / 6 * 12,000\` 형식이면 itemName/spec/quantity/unitPrice를 분해.
 - 한 일자에 여러 품목 행이 있으면 모두 추출 (일자 칼럼이 비어 있어도 직전 일자 상속).
-- "월계", "거래처계", "합계", "전월이월", "당월잔액" 등 합계/누적 행은 items에 포함하지 말고 monthlySummary에 넣어.
 - "반품", "환입" 라인은 lineTotal을 음수로(-)하여 items에 포함.
 
 ### 4. 월간 요약 (monthlySummary)
-- salesTotal: 월 판매(거래) 합계 (양식에 명시되어 있으면 그 값, 없으면 null)
+- salesTotal: 월 판매(거래) 합계. footer/합계행에서 명시된 값 그대로 추출. **null로 두지 말고 반드시 찾을 것** — 합계행이 보이지 않으면 마지막 페이지 끝까지 스캔.
 - paymentTotal: 월 수금 합계 (있으면)
 - balance: 잔액/미수금 (있으면)
-
-### 5. 다중 이미지
-이미지가 여러 장이면 같은 정산표의 연속된 페이지로 간주하고 모든 페이지의 거래라인을 하나의 items 배열로 합쳐.
 
 ## 출력 형식 (JSON만, 마크다운 코드펜스 없이)
 
@@ -1101,9 +1121,11 @@ ${profileHint}`;
     }
     messageContent.push({ type: "text", text: promptText });
 
+    // 정산표는 항목 수가 많을 수 있음 (100~200건도 흔함). 8192는 ~40항목에서 truncate됨.
+    // 32768로 상향 — claude-sonnet-4는 64K까지 지원하지만 평균 정산표는 32K로 충분.
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 8192,
+      max_tokens: 32768,
       messages: [{ role: "user", content: messageContent }],
     });
 

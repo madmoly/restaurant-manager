@@ -55,11 +55,19 @@ export interface ItemDiff {
   diff?: number; // ocr - system
 }
 
+export type ComparisonWarning =
+  | "ocr_items_partial"      // OCR이 footer 합계는 읽었지만 items 합이 5%+ 차이 → 라인 누락 의심
+  | "ocr_no_summary"         // monthlySummary.salesTotal 자체가 null → footer 합계 미추출
+  | "system_only_diff";      // 1~4섹션 비고 정상만 있는데 monthly diff가 있음 → 사용자 액션 경로 차단 경고
+
 export interface ComparisonResult {
   level: "monthly_match" | "date_mismatch" | "item_mismatch";
   monthly: { ocr: number; system: number; diff: number; ok: boolean; tolerance: number };
   dates?: DateRow[];
   items?: ItemDiff[];
+  warnings?: ComparisonWarning[];
+  ocrItemsSum?: number;       // sum(items.lineTotal) — UI에서 footer 합계와 비교 노출용
+  ocrSummaryTotal?: number | null; // monthlySummary.salesTotal 원본
 }
 
 export interface CounterpartyForCompare {
@@ -238,9 +246,18 @@ export function compareWithSystem(
   const basis = counterparty.settlementBasis ?? "supply";
 
   // ── Level 1: 월합계 ────────────────────────────────────────────────────
-  const ocrMonthTotal = monthlySummary?.salesTotal != null
-    ? monthlySummary.salesTotal
-    : sumLineTotal(ocrItems);
+  const ocrItemsSum = sumLineTotal(ocrItems);
+  const ocrSummaryTotal = monthlySummary?.salesTotal ?? null;
+  const ocrMonthTotal = ocrSummaryTotal != null ? ocrSummaryTotal : ocrItemsSum;
+
+  // OCR items 합 vs footer 합계 검증: 5% 이상 차이면 라인 누락 의심
+  const warnings: ComparisonWarning[] = [];
+  if (ocrSummaryTotal == null) {
+    warnings.push("ocr_no_summary");
+  } else if (ocrSummaryTotal > 0) {
+    const diffRatio = Math.abs(ocrItemsSum - ocrSummaryTotal) / Math.max(ocrSummaryTotal, ocrItemsSum);
+    if (diffRatio > 0.05) warnings.push("ocr_items_partial");
+  }
 
   const sysMonthTotalRaw = sumLineTotal(systemPurchases);
   // 시스템 합계를 정산표 기준으로 변환 (전체 평균 — mixed는 항목별 처리지만 합계 단계에선 raw 사용)
@@ -257,7 +274,7 @@ export function compareWithSystem(
   };
 
   if (monthly.ok) {
-    return { level: "monthly_match", monthly };
+    return { level: "monthly_match", monthly, warnings: warnings.length ? warnings : undefined, ocrItemsSum, ocrSummaryTotal };
   }
 
   // ── Level 2: 일자별 합계 ─────────────────────────────────────────────────
@@ -276,7 +293,7 @@ export function compareWithSystem(
   const mismatchDates = dateRows.filter((r) => !r.ok);
   if (mismatchDates.length === 0) {
     // 일자별로는 모두 맞는데 월합계만 다름 — 합계 계산 오차
-    return { level: "date_mismatch", monthly, dates: dateRows };
+    return { level: "date_mismatch", monthly, dates: dateRows, warnings: warnings.length ? warnings : undefined, ocrItemsSum, ocrSummaryTotal };
   }
 
   // ── Level 3: 항목 단위 (불일치 일자만) ──────────────────────────────────
@@ -303,7 +320,22 @@ export function compareWithSystem(
     }
   }
 
-  return { level: "item_mismatch", monthly, dates: dateRows, items: itemRows };
+  // Level 3까지 와서 모든 항목이 match인데 monthly diff가 있으면
+  // → 1~4 액션 섹션이 비어 사용자 액션 경로 차단. 경고 추가.
+  const actionableCount = itemRows.filter(
+    (r) => r.kind === "amount_diff" || r.kind === "missing_in_system" || r.kind === "missing_in_statement"
+  ).length;
+  if (actionableCount === 0 && !monthly.ok) warnings.push("system_only_diff");
+
+  return {
+    level: "item_mismatch",
+    monthly,
+    dates: dateRows,
+    items: itemRows,
+    warnings: warnings.length ? warnings : undefined,
+    ocrItemsSum,
+    ocrSummaryTotal,
+  };
 }
 
 // ─── 결과 요약 (audit.diffSummary용) ─────────────────────────────────────────
