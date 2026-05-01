@@ -138,7 +138,7 @@ export const dailyClosingsRouter = router({
           eq(schedules.restaurantId, input.restaurantId),
           sql`${schedules.startTime} >= ${fromUtc}`,
           sql`${schedules.startTime} < ${toUtc}`,
-          sql`${schedules.status} IN ('confirmed','completed')`,
+          sql`${schedules.status} = 'completed'`,
         ));
 
       // 회사명별 5인 여부 batch lookup

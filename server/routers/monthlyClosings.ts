@@ -191,7 +191,7 @@ async function sumLaborByCompany(
       eq(schedules.restaurantId, restaurantId),
       sql`${schedules.startTime} >= ${fromUtc}`,
       sql`${schedules.startTime} < ${toUtc}`,
-      sql`${schedules.status} IN ('confirmed','completed')`,
+      sql`${schedules.status} = 'completed'`,
       ...(dateCondition ? [dateCondition] : []),
     ));
 

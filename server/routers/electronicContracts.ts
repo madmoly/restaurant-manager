@@ -308,7 +308,10 @@ export const electronicContractsRouter = router({
         contractStart: z.string(),
         contractEnd: z.string().optional(),
         wageType: z.enum(["hourly", "monthly"]).default("hourly"),
-        wageAmount: z.string(),
+        wageAmount: z.string().refine(
+          (s) => { const n = Number(s); return isFinite(n) && n > 0; },
+          { message: "임금 금액을 입력하세요 (1원 이상)" },
+        ),
         weeklyHours: z.string().default("40"),
         workStartTime: z.string().default("09:00"),
         workEndTime: z.string().default("18:00"),
@@ -436,7 +439,10 @@ export const electronicContractsRouter = router({
         contractStart: z.string().optional(),
         contractEnd: z.string().nullable().optional(),
         wageType: z.enum(["hourly", "monthly"]).optional(),
-        wageAmount: z.string().optional(),
+        wageAmount: z.string().refine(
+          (s) => { const n = Number(s); return isFinite(n) && n > 0; },
+          { message: "임금 금액을 입력하세요 (1원 이상)" },
+        ).optional(),
         weeklyHours: z.string().optional(),
         workStartTime: z.string().optional(),
         workEndTime: z.string().optional(),

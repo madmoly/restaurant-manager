@@ -1795,6 +1795,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               if (form.taxMode !== "social_insurance" && form.taxMode !== "biz_income_3_3") {
                 toast.error("세무처리(4대보험/3.3%)를 선택하세요"); return;
               }
+              // 임금액 검증 — DB가 NOT NULL이라 빈 값/0이면 INSERT 실패
+              const wageAmountNum = Number(form.wageAmount);
+              if (!form.wageAmount || !isFinite(wageAmountNum) || wageAmountNum <= 0) {
+                toast.error(`${form.wageType === "hourly" ? "시급" : "월급"} 금액을 입력하세요`); return;
+              }
               const payload = {
                 employeeName: form.employeeName,
                 employeePhone: form.employeePhone || undefined,

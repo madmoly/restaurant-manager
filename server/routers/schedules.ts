@@ -959,7 +959,7 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             sql`${schedules.startTime} >= ${fromStr}`,
             sql`${schedules.startTime} < ${toStr}`,
-            sql`${schedules.status} IN ('confirmed','completed')`
+            sql`${schedules.status} = 'completed'`
           )
         )
         .orderBy(schedules.startTime);
@@ -1500,7 +1500,7 @@ export const schedulesRouter = router({
             eq(schedules.restaurantId, input.restaurantId),
             sql`${schedules.startTime} >= ${fromStr}`,
             sql`${schedules.startTime} < ${toStr}`,
-            sql`${schedules.status} IN ('confirmed','completed')`,
+            sql`${schedules.status} = 'completed'`,
           ),
         )
         .orderBy(schedules.startTime);
