@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/dialog";
 import { loadKoreanFont } from "@/lib/pdfKoreanFont";
 
-// ─── 유틸 ──────────────────────────────────────────────────────────────────
+const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+
 function fmtDate(d: string | null) {
   if (!d) return "-";
   const date = new Date(d);
@@ -36,6 +37,7 @@ export default function WorkSummaryPage() {
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
+  const [expandedEmpKey, setExpandedEmpKey] = useState<string | null>(null);
   const [detailTarget, setDetailTarget] = useState<{
     userId: number | null;
     tempWorkerName: string | null;
@@ -50,8 +52,12 @@ export default function WorkSummaryPage() {
     { enabled: restaurantId > 0 },
   );
 
-  const grandTotalHours = data?.reduce((s, c) => s + c.totalHours, 0) ?? 0;
-  const grandTotalShifts = data?.reduce((s, c) => s + c.totalShifts, 0) ?? 0;
+  const companies = data?.companies ?? [];
+  const closedDates = data?.closedDates ?? [];
+  const closedWeekdays = data?.closedWeekdays ?? [];
+
+  const grandTotalHours = companies.reduce((s, c) => s + c.totalHours, 0);
+  const grandTotalShifts = companies.reduce((s, c) => s + c.totalShifts, 0);
 
   if (!restaurantId) return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
 
@@ -69,9 +75,8 @@ export default function WorkSummaryPage() {
   }, [showExportMenu]);
 
   const buildRows = () => {
-    if (!data) return [];
     const rows: (string | number)[][] = [];
-    for (const company of data) {
+    for (const company of companies) {
       const sorted = [...company.employees].sort((a: any, b: any) => (a.isTemp ? 1 : 0) - (b.isTemp ? 1 : 0));
       for (const emp of sorted) {
         const subRemain = emp.substituteLeave ? emp.substituteLeave.remaining : "-";
@@ -84,7 +89,7 @@ export default function WorkSummaryPage() {
           nameLabel,
           emp.position ?? "-",
           emp.shifts,
-          Math.floor(emp.totalHours),
+          Math.round(emp.totalHours * 10) / 10,
           emp.daysOff ?? 0,
           emp.contractDaysOff ?? 0,
           subRemain,
@@ -130,7 +135,7 @@ export default function WorkSummaryPage() {
     doc.setFontSize(14);
     doc.text(fileName, 14, 15);
     doc.setFontSize(9);
-    doc.text(`합계: ${grandTotalShifts}일 근무 / ${Math.floor(grandTotalHours)}시간`, 14, 22);
+    doc.text(`합계: ${grandTotalShifts}일 근무 / ${grandTotalHours.toFixed(1)}시간`, 14, 22);
 
     const rightCols: Record<number, { halign: "right" }> = {};
     [3, 4, 5, 6, 7, 8].forEach(i => { rightCols[i] = { halign: "right" }; });
@@ -149,8 +154,10 @@ export default function WorkSummaryPage() {
     window.open(pdfUrl, "_blank");
   };
 
+  const empKey = (emp: any) => `${emp.userId ?? "t"}_${emp.name}`;
+
   return (
-    <div className="p-4 md:p-6 max-w-2xl mx-auto space-y-4">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-4">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -158,7 +165,7 @@ export default function WorkSummaryPage() {
         </h1>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{current?.name}</span>
-          {data && data.length > 0 && (
+          {companies.length > 0 && (
             <div className="relative" ref={exportRef}>
               <Button variant="outline" size="sm" onClick={() => setShowExportMenu(!showExportMenu)} className="gap-1">
                 <Download className="h-3.5 w-3.5" />
@@ -193,7 +200,7 @@ export default function WorkSummaryPage() {
       </div>
 
       {/* 재확인 배너 */}
-      {data && data.some(c => c.employees.some((e: any) => e.recheckRequired)) && (
+      {companies.some(c => c.employees.some((e: any) => e.recheckRequired)) && (
         <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>완료된 스케줄이 수정된 직원이 있습니다. 세부 근무내역에서 확인하세요.</span>
@@ -210,7 +217,7 @@ export default function WorkSummaryPage() {
           <div className="text-xs text-muted-foreground mb-1">총 근무시간</div>
           <div className="text-sm font-bold text-foreground flex items-center justify-center gap-1">
             <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-            {Math.floor(grandTotalHours)}h
+            {grandTotalHours.toFixed(1)}h
           </div>
         </div>
       </div>
@@ -218,11 +225,11 @@ export default function WorkSummaryPage() {
       {/* 회사별 카드 */}
       {isLoading ? (
         <CompanyCardListSkeleton />
-      ) : !data || data.length === 0 ? (
+      ) : companies.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground text-sm">해당 월 스케줄 데이터가 없습니다</div>
       ) : (
         <div className="space-y-3">
-          {data.map((company) => {
+          {companies.map((company) => {
             const isExpanded = expandedCompany === company.company;
             return (
               <div key={company.company} className="bg-card border border-border rounded-lg overflow-hidden">
@@ -237,7 +244,7 @@ export default function WorkSummaryPage() {
                   </div>
                   <div className="text-right shrink-0">
                     <div className="text-sm font-bold text-foreground">{company.totalShifts}일</div>
-                    <div className="text-[11px] text-muted-foreground">{Math.floor(company.totalHours)}h</div>
+                    <div className="text-[11px] text-muted-foreground">{company.totalHours.toFixed(1)}h</div>
                   </div>
                   {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
                 </div>
@@ -247,32 +254,61 @@ export default function WorkSummaryPage() {
                   const tempEmps = company.employees.filter((e: any) => e.isTemp);
                   return (
                     <div className="border-t border-border">
-                      <div className="divide-y divide-border/50">
-                        {regularEmps.map((emp, i) => (
-                          <EmployeeSummaryRow
-                            key={`r-${i}`}
-                            emp={emp}
-                            onOpenDetail={() => setDetailTarget({ userId: emp.userId, tempWorkerName: emp.tempWorkerName ?? null, name: emp.name })}
-                          />
-                        ))}
+                      {/* 데스크톱 매트릭스 */}
+                      <div className="hidden md:block p-3">
+                        <DesktopMatrix
+                          year={year}
+                          month={month}
+                          employees={[...regularEmps, ...tempEmps]}
+                          closedDates={closedDates}
+                          closedWeekdays={closedWeekdays}
+                          onOpenDetail={(emp) =>
+                            setDetailTarget({ userId: emp.userId, tempWorkerName: emp.tempWorkerName ?? (emp.isTemp ? emp.name : null), name: emp.name })
+                          }
+                        />
                       </div>
-                      {tempEmps.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/40 border-t border-border">
-                            <UserX className="w-3.5 h-3.5 text-muted-foreground" />
-                            <span className="text-[11px] font-semibold text-muted-foreground">임시/주휴미제공 ({tempEmps.length}명)</span>
-                          </div>
-                          <div className="divide-y divide-border/50">
-                            {tempEmps.map((emp, i) => (
-                              <EmployeeSummaryRow
-                                key={`t-${i}`}
-                                emp={emp}
-                                onOpenDetail={() => setDetailTarget({ userId: emp.userId, tempWorkerName: emp.tempWorkerName ?? emp.name, name: emp.name })}
-                              />
-                            ))}
-                          </div>
+
+                      {/* 모바일 직원 카드 */}
+                      <div className="md:hidden">
+                        <div className="divide-y divide-border/50">
+                          {regularEmps.map((emp, i) => (
+                            <MobileEmployeeRow
+                              key={`r-${i}`}
+                              emp={emp}
+                              year={year}
+                              month={month}
+                              closedDates={closedDates}
+                              closedWeekdays={closedWeekdays}
+                              expanded={expandedEmpKey === empKey(emp)}
+                              onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
+                              onOpenDetail={() => setDetailTarget({ userId: emp.userId, tempWorkerName: emp.tempWorkerName ?? null, name: emp.name })}
+                            />
+                          ))}
                         </div>
-                      )}
+                        {tempEmps.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/40 border-t border-border">
+                              <UserX className="w-3.5 h-3.5 text-muted-foreground" />
+                              <span className="text-[11px] font-semibold text-muted-foreground">임시/주휴미제공 ({tempEmps.length}명)</span>
+                            </div>
+                            <div className="divide-y divide-border/50">
+                              {tempEmps.map((emp, i) => (
+                                <MobileEmployeeRow
+                                  key={`t-${i}`}
+                                  emp={emp}
+                                  year={year}
+                                  month={month}
+                                  closedDates={closedDates}
+                                  closedWeekdays={closedWeekdays}
+                                  expanded={expandedEmpKey === empKey(emp)}
+                                  onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
+                                  onOpenDetail={() => setDetailTarget({ userId: emp.userId, tempWorkerName: emp.tempWorkerName ?? emp.name, name: emp.name })}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })()}
@@ -295,20 +331,26 @@ export default function WorkSummaryPage() {
   );
 }
 
-// ─── 직원 요약 행 ────────────────────────────────────────────────────────
-function EmployeeSummaryRow({
-  emp, onOpenDetail,
+// ─── 모바일 직원 행 (펼침 시 미니캘린더) ─────────────────────────────────
+function MobileEmployeeRow({
+  emp, year, month, closedDates, closedWeekdays, expanded, onToggle, onOpenDetail,
 }: {
   emp: any;
+  year: number;
+  month: number;
+  closedDates: string[];
+  closedWeekdays: number[];
+  expanded: boolean;
+  onToggle: () => void;
   onOpenDetail: () => void;
 }) {
   const subUsed = emp.substituteLeave && emp.substituteLeave.used > 0;
   const annUsed = emp.annualLeave && emp.annualLeave.used > 0;
   return (
     <div className={`px-4 py-3 space-y-2 ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
-      {/* 1행: 이름 + 상세 버튼 */}
+      {/* 1행: 이름 + 펼침 + 상세 */}
       <div className="flex items-start justify-between gap-2">
-        <div>
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={onToggle}>
           <div className="text-sm font-semibold text-foreground flex items-center gap-1">
             {emp.name}
             {emp.isTemp && (
@@ -318,6 +360,7 @@ function EmployeeSummaryRow({
             )}
             {emp.position && <span className="text-[10px] text-muted-foreground font-normal">({emp.position})</span>}
             {emp.recheckRequired && <AlertTriangle className="w-3 h-3 text-amber-500" />}
+            {expanded ? <ChevronUp className="w-3 h-3 text-muted-foreground ml-auto" /> : <ChevronDown className="w-3 h-3 text-muted-foreground ml-auto" />}
           </div>
           {emp.hireDate && (
             <div className="text-[10px] text-muted-foreground">입사 {fmtDate(emp.hireDate)}</div>
@@ -327,49 +370,217 @@ function EmployeeSummaryRow({
           onClick={onOpenDetail}
           className="shrink-0 text-[11px] text-primary hover:text-primary/80 hover:bg-primary/10 rounded px-2 py-1 flex items-center gap-1"
         >
-          <Eye className="w-3 h-3" /> 세부 내역
+          <Eye className="w-3 h-3" /> 세부
         </button>
       </div>
 
-      {/* 2행: 근무 요약 그리드 */}
-      <div className="grid grid-cols-4 gap-x-3 gap-y-1 text-xs">
-        <div>
-          <span className="text-muted-foreground">실근무</span>
-          <div className="font-medium text-foreground">{emp.shifts}일 / {Math.floor(emp.totalHours)}h</div>
-        </div>
-        <div>
-          <span className="text-muted-foreground">실휴무</span>
-          <div className="font-medium text-foreground">{emp.daysOff ?? 0}일</div>
-        </div>
-        <div>
-          <span className="text-muted-foreground">계약휴무</span>
-          <div className="font-medium text-foreground">{emp.contractDaysOff ?? 0}일</div>
-        </div>
-        <div>
-          <span className="text-muted-foreground">주당시간</span>
-          <div className="font-medium text-foreground">{(emp.totalHours / 4.33).toFixed(1)}h</div>
-        </div>
+      {/* 메타 칩 */}
+      <div className="flex flex-wrap gap-1.5 text-[10px]">
+        <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
+          실근무 <b className="text-foreground">{emp.shifts}일 · {emp.totalHours.toFixed(1)}h</b>
+        </span>
+        <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
+          실휴무 <b className="text-foreground">{emp.daysOff ?? 0}일</b>
+        </span>
+        <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
+          계약휴무 <b className="text-foreground">{emp.contractDaysOff ?? 0}일</b>
+        </span>
+        {!emp.isTemp && emp.substituteLeave && (
+          <span className="bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 rounded px-1.5 py-0.5">
+            대휴 {subUsed ? "사용" : "미사용"} · 잔 {emp.substituteLeave.remaining}일
+          </span>
+        )}
+        {!emp.isTemp && emp.annualLeave && (
+          <span className="bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 rounded px-1.5 py-0.5">
+            연차 {annUsed ? "사용" : "미사용"} · 잔 {emp.annualLeave.remaining}일
+          </span>
+        )}
       </div>
 
-      {/* 3행: 휴가 잔여 (정규직원만) */}
-      {!emp.isTemp && (
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-          <div>
-            <span className="text-muted-foreground">대체휴무</span>
-            <div className="font-medium text-foreground">
-              {subUsed ? "사용" : "미사용"}
-              {emp.substituteLeave && <span className="text-muted-foreground"> (잔여 {emp.substituteLeave.remaining}일)</span>}
-            </div>
-          </div>
-          <div>
-            <span className="text-muted-foreground">연차</span>
-            <div className="font-medium text-foreground">
-              {annUsed ? "사용" : "미사용"}
-              {emp.annualLeave && <span className="text-muted-foreground"> (잔여 {emp.annualLeave.remaining}일)</span>}
-            </div>
-          </div>
+      {/* 펼침: 미니캘린더 */}
+      {expanded && (
+        <div className="pt-2">
+          <MiniCalendar
+            year={year}
+            month={month}
+            daily={emp.daily ?? []}
+            closedDates={closedDates}
+            closedWeekdays={closedWeekdays}
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── 미니캘린더 (모바일) ──────────────────────────────────────────────────
+function MiniCalendar({
+  year, month, daily, closedDates, closedWeekdays,
+}: {
+  year: number;
+  month: number;
+  daily: { date: string; hours: number; shifts: number }[];
+  closedDates: string[];
+  closedWeekdays: number[];
+}) {
+  const monthStr = String(month).padStart(2, "0");
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const firstDay = new Date(year, month - 1, 1).getDay(); // 0=일
+  const dailyMap = useMemo(() => new Map(daily.map(d => [d.date, d])), [daily]);
+  const closedSet = useMemo(() => new Set(closedDates), [closedDates]);
+  const closedWdSet = useMemo(() => new Set(closedWeekdays), [closedWeekdays]);
+
+  type Cell = { type: "pad" } | { type: "day"; day: number; date: string; weekday: number; isClosed: boolean; data?: { hours: number; shifts: number } };
+  const cells: Cell[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push({ type: "pad" });
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dStr = String(d).padStart(2, "0");
+    const dateStr = `${year}-${monthStr}-${dStr}`;
+    const weekday = (firstDay + d - 1) % 7;
+    const isClosed = closedSet.has(dateStr) || closedWdSet.has(weekday);
+    cells.push({ type: "day", day: d, date: dateStr, weekday, isClosed, data: dailyMap.get(dateStr) });
+  }
+
+  return (
+    <div className="grid grid-cols-7 gap-px bg-border rounded overflow-hidden">
+      {WEEKDAY_LABELS.map((w, i) => (
+        <div
+          key={i}
+          className={`text-[9px] text-center py-1 bg-muted/40 font-medium ${
+            i === 0 ? "text-rose-500" : i === 6 ? "text-blue-500" : "text-muted-foreground"
+          }`}
+        >
+          {w}
+        </div>
+      ))}
+      {cells.map((cell, i) => {
+        if (cell.type === "pad") return <div key={i} className="bg-background h-12" />;
+        const dayWeekdayColor = cell.weekday === 0 ? "text-rose-500" : cell.weekday === 6 ? "text-blue-500" : "text-muted-foreground";
+        return (
+          <div
+            key={i}
+            className={`h-12 px-1 py-0.5 flex flex-col text-[10px] ${cell.isClosed ? "bg-muted/60" : "bg-background"}`}
+          >
+            <div className={`text-[9px] ${dayWeekdayColor}`}>{cell.day}</div>
+            {cell.data ? (
+              <div className="text-foreground font-semibold leading-tight">{cell.data.hours.toFixed(1)}h</div>
+            ) : (
+              <div className="text-muted-foreground/30 text-[8px] leading-tight">·</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── 데스크톱 매트릭스 ────────────────────────────────────────────────────
+function DesktopMatrix({
+  year, month, employees, closedDates, closedWeekdays, onOpenDetail,
+}: {
+  year: number;
+  month: number;
+  employees: any[];
+  closedDates: string[];
+  closedWeekdays: number[];
+  onOpenDetail: (emp: any) => void;
+}) {
+  const monthStr = String(month).padStart(2, "0");
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const firstDay = new Date(year, month - 1, 1).getDay();
+  const closedSet = useMemo(() => new Set(closedDates), [closedDates]);
+  const closedWdSet = useMemo(() => new Set(closedWeekdays), [closedWeekdays]);
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="text-[10px] border-collapse">
+        <thead>
+          <tr>
+            <th className="sticky left-0 z-10 bg-card px-2 py-1.5 text-left font-medium text-muted-foreground border-b border-border min-w-[120px]">
+              직원
+            </th>
+            {days.map(d => {
+              const dStr = String(d).padStart(2, "0");
+              const dateStr = `${year}-${monthStr}-${dStr}`;
+              const weekday = (firstDay + d - 1) % 7;
+              const isClosed = closedSet.has(dateStr) || closedWdSet.has(weekday);
+              const wdColor = weekday === 0 ? "text-rose-500" : weekday === 6 ? "text-blue-500" : "text-muted-foreground";
+              return (
+                <th
+                  key={d}
+                  className={`px-1 py-1 text-center font-normal min-w-[26px] border-b border-border ${isClosed ? "bg-muted/40" : ""}`}
+                >
+                  <div className={`${wdColor} font-medium`}>{d}</div>
+                  <div className={`text-[8px] ${wdColor}`}>{WEEKDAY_LABELS[weekday]}</div>
+                </th>
+              );
+            })}
+            <th className="px-2 py-1.5 text-right font-medium text-muted-foreground border-b border-border min-w-[60px]">
+              합계
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {employees.map((emp) => {
+            const dailyMap = new Map(emp.daily?.map((d: any) => [d.date, d]) ?? []);
+            const subRem = emp.substituteLeave?.remaining;
+            const annRem = emp.annualLeave?.remaining;
+            return (
+              <tr key={`${emp.userId ?? "t"}_${emp.name}`} className={emp.recheckRequired ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}>
+                <td className="sticky left-0 z-10 bg-card px-2 py-1.5 border-b border-border/50">
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <button
+                      onClick={() => onOpenDetail(emp)}
+                      className="font-medium text-foreground hover:text-primary"
+                    >
+                      {emp.name}
+                    </button>
+                    {emp.isTemp && (
+                      <span className="text-[8px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1 rounded">
+                        {emp.isNoHolidayPayWorker ? "주휴미제공" : "임시"}
+                      </span>
+                    )}
+                    {emp.recheckRequired && <AlertTriangle className="w-3 h-3 text-amber-500" />}
+                  </div>
+                  <div className="flex items-center gap-1 mt-0.5 text-[9px] text-muted-foreground">
+                    {emp.position && <span>({emp.position})</span>}
+                    {subRem != null && <span className="text-blue-600 dark:text-blue-400">대휴 {subRem}</span>}
+                    {annRem != null && <span className="text-emerald-600 dark:text-emerald-400">연차 {annRem}</span>}
+                  </div>
+                </td>
+                {days.map(d => {
+                  const dStr = String(d).padStart(2, "0");
+                  const dateStr = `${year}-${monthStr}-${dStr}`;
+                  const weekday = (firstDay + d - 1) % 7;
+                  const isClosed = closedSet.has(dateStr) || closedWdSet.has(weekday);
+                  const data = dailyMap.get(dateStr) as { hours: number; shifts: number } | undefined;
+                  const tooltip = data
+                    ? `${dateStr} (${WEEKDAY_LABELS[weekday]}) · ${data.hours.toFixed(1)}h · ${data.shifts}시프트`
+                    : `${dateStr} (${WEEKDAY_LABELS[weekday]})`;
+                  return (
+                    <td
+                      key={d}
+                      title={tooltip}
+                      className={`px-1 py-1 text-center border-b border-border/40 ${isClosed ? "bg-muted/40" : ""}`}
+                    >
+                      {data ? (
+                        <span className="text-foreground font-medium">{data.hours.toFixed(1)}</span>
+                      ) : (
+                        <span className="text-muted-foreground/30">·</span>
+                      )}
+                    </td>
+                  );
+                })}
+                <td className="px-2 py-1.5 text-right font-semibold text-foreground border-b border-border/50">
+                  {emp.totalHours.toFixed(1)}h
+                  <div className="text-[9px] text-muted-foreground font-normal">{emp.shifts}일</div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

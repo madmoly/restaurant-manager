@@ -1021,6 +1021,7 @@ export const schedulesRouter = router({
           bankAccount: string | null;
           residentNumber: string | null;
           phone: string | null;
+          dateSet: Set<string>;
         }>;
         totalHours: number;
         totalWage: number;
@@ -1055,6 +1056,7 @@ export const schedulesRouter = router({
             bankAccount: r.bankAccount ?? r.tempBankAccount ?? null,
             residentNumber: r.residentNumber ?? null,
             phone: r.tempPhone ?? null,
+            dateSet: new Set<string>(),
           };
         }
 
@@ -1095,9 +1097,14 @@ export const schedulesRouter = router({
           wage = hours * baseHourlyRate;
         }
 
+        // KST 날짜 기준 출근일수 집계 (같은 날 다중 시프트도 1일)
+        const kstStartDt = new Date(startDt.getTime() + 9 * 60 * 60 * 1000);
+        const dateStr = kstStartDt.toISOString().slice(0, 10);
+
         companyMap[company].employees[empKey].totalHours += hours;
         companyMap[company].employees[empKey].totalWage += wage;
         companyMap[company].employees[empKey].shifts++;
+        companyMap[company].employees[empKey].dateSet.add(dateStr);
         if (r.payrollRecheckRequired) companyMap[company].employees[empKey].recheckRequired = true;
         companyMap[company].totalHours += hours;
         companyMap[company].totalWage += wage;
@@ -1137,6 +1144,23 @@ export const schedulesRouter = router({
         else leaveMap[tx.userId][lt].used += d;
       }
 
+      // 등록 임금값 → 가이드(시급/일급/월급) 환산 (209h = 통상임금 표준)
+      const computeGuide = (wageType: string | null, wageAmount: string | null) => {
+        if (!wageType || wageAmount == null) return { hourly: null, daily: null, monthly: null };
+        const v = Number(wageAmount);
+        if (!isFinite(v) || v <= 0) return { hourly: null, daily: null, monthly: null };
+        if (wageType === "hourly") return { hourly: v, daily: v * 8, monthly: v * 209 };
+        if (wageType === "monthly") {
+          const h = v / 209;
+          return { hourly: h, daily: h * 8, monthly: v };
+        }
+        if (wageType === "daily") {
+          const h = v / 8;
+          return { hourly: h, daily: v, monthly: h * 209 };
+        }
+        return { hourly: null, daily: null, monthly: null };
+      };
+
       return Object.values(companyMap).map(c => ({
         ...c,
         employees: Object.entries(c.employees).map(([empKey, emp]) => {
@@ -1165,15 +1189,46 @@ export const schedulesRouter = router({
           // 주휴수당 미제공 정규직 → isTemp이지만 userId 보유 (temp_{userId} 키)
           const isNoHolidayPayWorker = isTemp && emp.userId != null;
 
+          // 환산/실효/공제 (분해는 후속 PR — 1차는 base=총임금 폴백)
+          const guide = computeGuide(emp.wageType, emp.wageAmount);
+          const workedDays = emp.dateSet.size;
+          const effectiveHourly = emp.totalHours > 0 ? emp.totalWage / emp.totalHours : null;
+          const effectiveDaily = workedDays > 0 ? emp.totalWage / workedDays : null;
+          const effectiveMonthly = emp.totalWage;
+
+          // 공제 산출: 4대보험은 노무사 외부 정산 → 시스템 미반영(0).
+          // 3.3% 케이스만 시스템에서 산출.
+          const totalWageR = Math.round(emp.totalWage);
+          const deductionMode: "3.3%" | "external" = emp.socialInsurance ? "external" : "3.3%";
+          const deduction = deductionMode === "3.3%" && totalWageR > 0 ? Math.round(totalWageR * 0.033) : 0;
+          const wageBreakdown = {
+            base: totalWageR,
+            weeklyHoliday: 0,
+            overtime: 0,
+            night: 0,
+            deduction,
+            net: totalWageR - deduction,
+          };
+
           return {
             ...emp,
             isTemp,
             isNoHolidayPayWorker,
             zeroWageReason,
             daysOff: Math.max(0, operatingDays - emp.shifts),
+            workedDays,
+            guideHourly: guide.hourly,
+            guideDaily: guide.daily,
+            guideMonthly: guide.monthly,
+            effectiveHourly,
+            effectiveDaily,
+            effectiveMonthly,
+            wageBreakdown,
+            deductionMode,
             substituteLeave: lb ? { earned: lb.substitute.earned, used: lb.substitute.used, remaining: lb.substitute.earned - lb.substitute.used } : null,
             annualLeave: lb ? { earned: lb.annual.earned, used: lb.annual.used, remaining: lb.annual.earned - lb.annual.used } : null,
             userId: undefined, // 클라이언트에 노출하지 않음
+            dateSet: undefined, // 내부 집계용
           };
         }),
       }));
@@ -1471,6 +1526,7 @@ export const schedulesRouter = router({
           contractDaysOff: number;
           recheckRequired: boolean;
           isNoHolidayPayWorker: boolean;
+          dailyMap: Map<string, { hours: number; shifts: number }>;
         }>;
       }> = {};
 
@@ -1495,6 +1551,7 @@ export const schedulesRouter = router({
             contractDaysOff: treatAsTemp ? 0 : Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
             recheckRequired: false,
             isNoHolidayPayWorker: treatAsTemp,
+            dailyMap: new Map<string, { hours: number; shifts: number }>(),
           };
         }
 
@@ -1503,6 +1560,14 @@ export const schedulesRouter = router({
         const grossMin = (endDt.getTime() - startDt.getTime()) / 60000;
         const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
         const hours = netMin / 60;
+
+        // KST 날짜 기준 일자별 집계
+        const kstStartDt = new Date(startDt.getTime() + 9 * 60 * 60 * 1000);
+        const dateStr = kstStartDt.toISOString().slice(0, 10);
+        const cur = companyMap[company].employees[empKey].dailyMap.get(dateStr) ?? { hours: 0, shifts: 0 };
+        cur.hours += hours;
+        cur.shifts += 1;
+        companyMap[company].employees[empKey].dailyMap.set(dateStr, cur);
 
         companyMap[company].employees[empKey].totalHours += hours;
         companyMap[company].employees[empKey].shifts += 1;
@@ -1540,7 +1605,7 @@ export const schedulesRouter = router({
         else leaveMap[tx.userId][lt].used += d;
       }
 
-      return Object.values(companyMap).map(c => ({
+      const companies = Object.values(companyMap).map(c => ({
         company: c.company,
         operatingDays: c.operatingDays,
         totalHours: c.totalHours,
@@ -1549,6 +1614,9 @@ export const schedulesRouter = router({
           const uid = emp.userId;
           const lb = uid ? leaveMap[uid] : null;
           const isTemp = empKey.startsWith("temp_");
+          const daily = Array.from(emp.dailyMap.entries())
+            .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+            .map(([date, v]) => ({ date, hours: v.hours, shifts: v.shifts }));
           return {
             name: emp.name,
             position: emp.position,
@@ -1562,6 +1630,7 @@ export const schedulesRouter = router({
             isTemp,
             isNoHolidayPayWorker: emp.isNoHolidayPayWorker,
             recheckRequired: emp.recheckRequired,
+            daily,
             substituteLeave: lb ? {
               earned: lb.substitute.earned,
               used: lb.substitute.used,
@@ -1575,6 +1644,13 @@ export const schedulesRouter = router({
           };
         }),
       }));
+
+      return {
+        companies,
+        operatingDays,
+        closedDates: Array.from(closedDateSet).sort(),
+        closedWeekdays: Array.from(closedWeekdays).sort(),
+      };
     }),
 
   /**
