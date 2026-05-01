@@ -73,7 +73,7 @@ const fmtBytes = (b: number) => {
 // 메인: 시스템 관리 (7탭)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type Tab = "status" | "announce" | "audit" | "session" | "settings" | "api" | "integrity" | "backup" | "errors" | "errorGroups" | "errorList" | "ocr" | "phoneAudit";
+type Tab = "status" | "announce" | "audit" | "session" | "settings" | "api" | "integrity" | "backup" | "errors" | "errorGroups" | "errorList" | "ocr" | "phoneAudit" | "contractAudit";
 
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: "status", label: "현황", icon: <Activity size={12} /> },
@@ -83,6 +83,7 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: "settings", label: "설정", icon: <Settings size={12} /> },
   { key: "api", label: "API", icon: <Cpu size={12} /> },
   { key: "integrity", label: "정합성", icon: <CheckCircle2 size={12} /> },
+  { key: "contractAudit", label: "계약박제", icon: <CheckCircle2 size={12} /> },
   { key: "backup", label: "백업", icon: <HardDrive size={12} /> },
   { key: "errors", label: "에러개요", icon: <AlertTriangle size={12} /> },
   { key: "errorGroups", label: "에러그룹", icon: <AlertOctagon size={12} /> },
@@ -124,6 +125,7 @@ export default function SystemPage() {
       {tab === "settings" && <SettingsTab />}
       {tab === "api" && <ApiUsageTab />}
       {tab === "integrity" && <IntegrityTab />}
+      {tab === "contractAudit" && <ContractSnapshotAuditTab />}
       {tab === "backup" && <BackupTab />}
       {tab === "errors" && <ErrorOverviewTab />}
       {tab === "errorGroups" && <ErrorGroupsTab />}
@@ -1572,6 +1574,124 @@ function DatasetExportSection() {
             <div><span className="font-medium text-foreground">dataset-metadata.json</span> — 데이터셋 설명/스키마/통계.</div>
           </div>
         </div>
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 재설계 2026-05-02 §4 / Phase D [16]: 계약서 SSOT vs 박제 정합성 점검
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ContractSnapshotAuditTab() {
+  const { data, isLoading, refetch, isFetching } = trpc.system.contractSnapshotAudit.useQuery();
+  const [filter, setFilter] = useState<"all" | "mismatched" | "noContract">("mismatched");
+
+  const rows = (data?.rows ?? []).filter((r: any) => {
+    if (filter === "mismatched") return r.mismatchedFields.length > 0;
+    if (filter === "noContract") return !r.hasContract;
+    return true;
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <CheckCircle2 size={14} className="text-primary" /> 계약서 SSOT vs 박제 정합성
+            </h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              직원정보(SSOT) ↔ 최신 서명 계약서 박제 비교. 갱신 필요 직원은 점장이 신규 계약서 작성·서명해야 합니다.
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching}>
+            {isFetching ? "조회 중..." : "다시 조회"}
+          </Button>
+        </div>
+
+        {data?.summary && (
+          <div className="grid grid-cols-3 gap-2">
+            <Card className="p-3 text-center">
+              <p className="text-xs text-muted-foreground">전체 직원</p>
+              <p className="text-xl font-bold text-foreground tabular-nums">{data.summary.total}</p>
+            </Card>
+            <Card className="p-3 text-center bg-amber-50 dark:bg-amber-950/30">
+              <p className="text-xs text-amber-700 dark:text-amber-400">갱신 필요</p>
+              <p className="text-xl font-bold text-amber-700 dark:text-amber-400 tabular-nums">{data.summary.mismatched}</p>
+            </Card>
+            <Card className="p-3 text-center bg-red-50 dark:bg-red-950/30">
+              <p className="text-xs text-red-700 dark:text-red-400">계약서 없음</p>
+              <p className="text-xl font-bold text-red-700 dark:text-red-400 tabular-nums">{data.summary.noContract}</p>
+            </Card>
+          </div>
+        )}
+
+        <div className="flex gap-1.5 flex-wrap">
+          {[
+            { key: "mismatched" as const, label: "갱신 필요만" },
+            { key: "noContract" as const, label: "계약서 없음" },
+            { key: "all" as const, label: "전체" },
+          ].map((f) => (
+            <Button
+              key={f.key}
+              size="sm"
+              variant={filter === f.key ? "default" : "outline"}
+              className="text-xs"
+              onClick={() => setFilter(f.key)}
+            >{f.label}</Button>
+          ))}
+        </div>
+
+        {isLoading ? (
+          <p className="text-center py-6 text-sm text-muted-foreground">로딩 중...</p>
+        ) : rows.length === 0 ? (
+          <p className="text-center py-6 text-sm text-muted-foreground">
+            {filter === "mismatched" ? "갱신 필요 직원 없음 — 모든 SSOT가 박제와 일치합니다" :
+             filter === "noContract" ? "계약서 없는 직원 없음" : "표시할 직원 없음"}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((r: any) => (
+              <div key={`${r.userId}-${r.restaurantId}`} className="border border-border rounded-md p-3 space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-semibold text-foreground">{r.userName}</span>
+                  <span className="text-[10px] text-muted-foreground">@{r.restaurantName}</span>
+                  {r.userPhone && <span className="text-[10px] text-muted-foreground">{r.userPhone}</span>}
+                  {r.mismatchedFields.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">
+                      갱신 필요 ({r.mismatchedFields.join(", ")})
+                    </span>
+                  )}
+                  {!r.hasContract && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-medium">
+                      계약서 없음
+                    </span>
+                  )}
+                </div>
+                {r.hasContract && (
+                  <div className="grid grid-cols-2 gap-3 text-[11px]">
+                    <div className="space-y-0.5">
+                      <div className="text-muted-foreground font-medium">SSOT (직원정보)</div>
+                      <div>소속회사: <span className="text-foreground">{r.ssot.affiliatedCompany ?? "(미지정)"}</span></div>
+                      <div>입사일: <span className="text-foreground">{r.ssot.hireDate ?? "(미설정)"}</span></div>
+                      <div>주휴무: <span className="text-foreground">{r.ssot.weeklyOffDays ?? "-"}일</span></div>
+                      <div>5인 여부: <span className="text-foreground">{r.ssot.effectiveOver5 ? "5인 이상" : "5인 미만"}</span></div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-muted-foreground font-medium">박제 (최신 서명 계약서)</div>
+                      <div>소속회사: <span className={r.mismatchedFields.includes("소속회사") ? "text-amber-600 dark:text-amber-400 font-medium" : "text-foreground"}>{r.snapshot.affiliatedCompany ?? "-"}</span></div>
+                      <div>입사일: <span className={r.mismatchedFields.includes("입사일") ? "text-amber-600 dark:text-amber-400 font-medium" : "text-foreground"}>{r.snapshot.hireDate ?? "-"}</span></div>
+                      <div>주휴무: <span className={r.mismatchedFields.includes("주휴무일수") ? "text-amber-600 dark:text-amber-400 font-medium" : "text-foreground"}>{r.snapshot.weeklyOffDays ?? "-"}일</span></div>
+                      <div>5인 여부: <span className={r.mismatchedFields.includes("5인 여부") ? "text-amber-600 dark:text-amber-400 font-medium" : "text-foreground"}>{r.snapshot.over5Employees ? "5인 이상" : "5인 미만"}</span></div>
+                      <div className="text-muted-foreground text-[10px]">서명일: {r.snapshot.signedAt ? new Date(r.snapshot.signedAt).toLocaleDateString("ko-KR") : "-"}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );

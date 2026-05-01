@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import {
   Plus, X, Edit3, Trash2, Pin, Megaphone, DoorOpen, Phone, BookOpen,
-  MoreHorizontal, Info, ImagePlus, Loader2,
+  MoreHorizontal, Info, ImagePlus, Loader2, Building2, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PosSettingsCard } from "@/components/pos/PosSettingsCard";
@@ -61,6 +61,11 @@ export default function StoreInfoPage() {
       {/* POS 설정 카드 — 매장이 선택돼있을 때만 */}
       {restaurantId > 0 && (
         <PosSettingsCard restaurantId={restaurantId} canEdit={isManager} />
+      )}
+
+      {/* 재설계 2026-05-02: 소속회사 마스터 (5인 미만/이상 토글) — manager 이상 */}
+      {restaurantId > 0 && isManager && (
+        <AffiliatedCompaniesSection restaurantId={restaurantId} />
       )}
 
       {/* 헤더 */}
@@ -318,6 +323,195 @@ function InfoCardFormModal({ restaurantId, editId, cards, onClose }: {
           <Button variant="outline" onClick={onClose}>취소</Button>
           <Button onClick={handleSubmit} disabled={create.isPending || update.isPending}>
             {(create.isPending || update.isPending) ? "저장 중..." : editId ? "수정" : "등록"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 소속회사 마스터 (재설계 2026-05-02) ────────────────────────────────────
+
+function AffiliatedCompaniesSection({ restaurantId }: { restaurantId: number }) {
+  const utils = trpc.useUtils();
+  const { data: list = [], isLoading } = trpc.affiliatedCompanies.list.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<any | null>(null);
+
+  const createMut = trpc.affiliatedCompanies.create.useMutation({
+    onSuccess() { toast.success("소속회사 등록됨"); utils.affiliatedCompanies.list.invalidate(); setShowForm(false); },
+    onError(e) { toast.error(e.message); },
+  });
+  const updateMut = trpc.affiliatedCompanies.update.useMutation({
+    onSuccess() { toast.success("수정됨"); utils.affiliatedCompanies.list.invalidate(); utils.restaurants.getStaff.invalidate(); setEditing(null); },
+    onError(e) { toast.error(e.message); },
+  });
+  const deleteMut = trpc.affiliatedCompanies.delete.useMutation({
+    onSuccess() { toast.success("삭제됨"); utils.affiliatedCompanies.list.invalidate(); },
+    onError(e) { toast.error(e.message); },
+  });
+
+  return (
+    <div className="border border-border rounded-lg bg-card p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Building2 className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-semibold text-foreground">소속회사 관리</h2>
+          <span className="text-xs text-muted-foreground">{list.length}건</span>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => { setEditing(null); setShowForm(true); }}>
+          <Plus className="w-3.5 h-3.5 mr-1" /> 등록
+        </Button>
+      </div>
+
+      {!isLoading && list.length === 0 && (
+        <div className="text-[11px] rounded-md px-3 py-2 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+          <AlertTriangle className="w-3 h-3 inline mr-1" />
+          등록된 소속회사가 없습니다. 신규 직원·계약서 작성 전에 먼저 등록하세요.
+        </div>
+      )}
+
+      {!isLoading && list.length > 0 && (
+        <div className="space-y-2">
+          {list.map((c: any) => (
+            <div key={c.id} className="border border-border rounded-md p-3 space-y-2">
+              <div className="flex items-start justify-between gap-2 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-foreground">{c.companyName}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                      c.over5Employees ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                    }`}>{c.over5Employees ? "5인 이상" : "5인 미만"}</span>
+                    {c.isDefault && <span className="text-[10px] text-muted-foreground">기본</span>}
+                  </div>
+                  {c.businessNumber && (
+                    <div className="text-[11px] text-muted-foreground mt-0.5">{c.businessNumber}</div>
+                  )}
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <button
+                    onClick={() => updateMut.mutate({
+                      id: c.id, restaurantId,
+                      over5Employees: !c.over5Employees,
+                    })}
+                    className="text-[11px] px-2 py-1 rounded border border-border hover:bg-accent text-foreground"
+                    title="5인 미만/이상 토글"
+                  >
+                    {c.over5Employees ? "→ 5인 미만" : "→ 5인 이상"}
+                  </button>
+                  <button
+                    onClick={() => { setEditing(c); setShowForm(true); }}
+                    className="p-1.5 rounded hover:bg-accent text-muted-foreground"
+                    title="수정"
+                  ><Edit3 className="w-3.5 h-3.5" /></button>
+                  <button
+                    onClick={() => {
+                      if (confirm(`"${c.companyName}"을(를) 삭제하시겠습니까?\n해당 회사 소속 직원이 있으면 차단됩니다.`)) {
+                        deleteMut.mutate({ id: c.id, restaurantId });
+                      }
+                    }}
+                    className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500"
+                    title="삭제"
+                  ><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[10px] text-muted-foreground">
+        ⚠ 5인 미만/이상 토글 변경 시 기존 직원의 계약서 박제(snapshotOver5Employees)는 변경되지 않습니다. 새 계약서부터 적용.
+      </p>
+
+      {showForm && (
+        <AffiliatedCompanyFormModal
+          restaurantId={restaurantId}
+          editing={editing}
+          onClose={() => { setShowForm(false); setEditing(null); }}
+          onSubmit={(payload) => {
+            if (editing) updateMut.mutate({ id: editing.id, restaurantId, ...payload });
+            else createMut.mutate({ restaurantId, ...payload });
+          }}
+          isPending={createMut.isPending || updateMut.isPending}
+        />
+      )}
+    </div>
+  );
+}
+
+function AffiliatedCompanyFormModal({ editing, onClose, onSubmit, isPending }: {
+  restaurantId: number;
+  editing: any | null;
+  onClose: () => void;
+  onSubmit: (payload: { companyName: string; businessNumber?: string | null; over5Employees: boolean; isDefault: boolean }) => void;
+  isPending: boolean;
+}) {
+  const [companyName, setCompanyName] = useState(editing?.companyName ?? "");
+  const [businessNumber, setBusinessNumber] = useState(editing?.businessNumber ?? "");
+  const [over5, setOver5] = useState<boolean>(editing?.over5Employees ?? false);
+  const [isDefault, setIsDefault] = useState<boolean>(editing?.isDefault ?? false);
+
+  const inputCls = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md mx-4 p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">{editing ? "소속회사 수정" : "소속회사 등록"}</h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">회사명 *</label>
+          <input className={inputCls} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="(주)회사명" autoFocus />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">사업자등록번호</label>
+          <input className={inputCls} value={businessNumber} onChange={(e) => setBusinessNumber(e.target.value)} placeholder="000-00-00000" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">사업장 규모</label>
+          <div className="mt-1 flex gap-1 bg-muted p-0.5 rounded-lg w-fit">
+            <button type="button" onClick={() => setOver5(false)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!over5 ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+              5인 미만
+            </button>
+            <button type="button" onClick={() => setOver5(true)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${over5 ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+              5인 이상
+            </button>
+          </div>
+          {editing && editing.over5Employees !== over5 && (
+            <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+              ⚠ 기존 직원 계약서 박제는 변경되지 않습니다. 신규 계약서부터 적용.
+            </p>
+          )}
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} className="rounded" />
+          기본 회사로 설정
+        </label>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose}>취소</Button>
+          <Button
+            onClick={() => {
+              if (!companyName.trim()) { toast.error("회사명을 입력하세요"); return; }
+              onSubmit({
+                companyName: companyName.trim(),
+                businessNumber: businessNumber.trim() || null,
+                over5Employees: over5,
+                isDefault,
+              });
+            }}
+            disabled={isPending || !companyName.trim()}
+          >
+            {isPending ? "저장 중..." : editing ? "수정" : "등록"}
           </Button>
         </div>
       </div>

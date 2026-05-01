@@ -5,7 +5,7 @@ import { db } from "../db";
 import {
   auditLogs, systemSettings, apiUsageLogs, dbBackupLogs,
   notifications, users, restaurants, sales, dailyClosings, schedules,
-  fixedCosts, restaurantUsers,
+  fixedCosts, restaurantUsers, employmentElectronicContracts, affiliatedCompanies,
 } from "../../drizzle/schema";
 
 export const systemRouter = router({
@@ -518,5 +518,129 @@ export const systemRouter = router({
       });
       return { ok: false, error: e.message };
     }
+  }),
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 8. 계약서 SSOT vs 박제 정합성 점검 (재설계 2026-05-02 §4 / Phase D [16])
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** 모든 매장의 직원별 SSOT vs 최신 서명 계약서 스냅샷 diff */
+  contractSnapshotAudit: masterProcedure.query(async () => {
+    const ru = await db
+      .select({
+        userId: restaurantUsers.userId,
+        restaurantId: restaurantUsers.restaurantId,
+        userName: users.name,
+        userPhone: users.phone,
+        restaurantName: restaurants.name,
+        affiliatedCompany: restaurantUsers.affiliatedCompany,
+        hireDate: restaurantUsers.hireDate,
+        weeklyOffDays: restaurantUsers.weeklyOffDays,
+      })
+      .from(restaurantUsers)
+      .innerJoin(users, eq(users.id, restaurantUsers.userId))
+      .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
+      .where(and(
+        isNull(restaurantUsers.resignedAt),
+        eq(users.isActive, true),
+      ));
+
+    if (ru.length === 0) return { rows: [], summary: { total: 0, mismatched: 0, noContract: 0 } };
+
+    // 매장-회사 마스터 매핑 (effectiveOver5)
+    const ac = await db
+      .select({
+        restaurantId: affiliatedCompanies.restaurantId,
+        companyName: affiliatedCompanies.companyName,
+        over5Employees: affiliatedCompanies.over5Employees,
+      })
+      .from(affiliatedCompanies);
+    const over5Key = (rid: number, c: string) => `${rid}::${c}`;
+    const over5Map = new Map<string, boolean>();
+    for (const x of ac) over5Map.set(over5Key(x.restaurantId, x.companyName), Boolean(x.over5Employees));
+
+    // 직원별 최신 서명 계약서 조회 (한 번에)
+    const userIds = Array.from(new Set(ru.map((r) => r.userId)));
+    const restaurantIds = Array.from(new Set(ru.map((r) => r.restaurantId)));
+    const snaps = await db
+      .select({
+        employeeId: employmentElectronicContracts.employeeId,
+        restaurantId: employmentElectronicContracts.restaurantId,
+        signedAt: employmentElectronicContracts.signedAt,
+        snapshotAffiliatedCompany: employmentElectronicContracts.snapshotAffiliatedCompany,
+        snapshotHireDate: employmentElectronicContracts.snapshotHireDate,
+        snapshotWeeklyOffDays: employmentElectronicContracts.snapshotWeeklyOffDays,
+        snapshotOver5Employees: employmentElectronicContracts.snapshotOver5Employees,
+        snapshotTaxMode: employmentElectronicContracts.snapshotTaxMode,
+      })
+      .from(employmentElectronicContracts)
+      .where(and(
+        eq(employmentElectronicContracts.status, "signed"),
+      ))
+      .orderBy(desc(employmentElectronicContracts.signedAt));
+    void userIds; void restaurantIds; // (전체 fetch 후 메모리에서 매핑 — 직원 수 N=수백 규모)
+
+    const snapKey = (uid: number, rid: number) => `${uid}::${rid}`;
+    const snapMap = new Map<string, typeof snaps[number]>();
+    for (const s of snaps) {
+      if (s.employeeId == null || s.restaurantId == null) continue;
+      const k = snapKey(s.employeeId, s.restaurantId);
+      if (!snapMap.has(k)) snapMap.set(k, s);
+    }
+
+    const dateIso = (d: any) => {
+      if (d == null || d === "") return "";
+      const dt = d instanceof Date ? d : new Date(d);
+      return Number.isNaN(dt.getTime()) ? "" : dt.toISOString().slice(0, 10);
+    };
+
+    const rows = ru.map((r) => {
+      const snap = snapMap.get(snapKey(r.userId, r.restaurantId)) ?? null;
+      const effectiveOver5 = r.affiliatedCompany ? over5Map.get(over5Key(r.restaurantId, r.affiliatedCompany)) ?? false : false;
+      const fields: string[] = [];
+      if (snap) {
+        if ((snap.snapshotAffiliatedCompany ?? "") !== (r.affiliatedCompany ?? "")) fields.push("소속회사");
+        if (dateIso(snap.snapshotHireDate) !== dateIso(r.hireDate)) fields.push("입사일");
+        if ((snap.snapshotWeeklyOffDays ?? null) !== (r.weeklyOffDays ?? null)) fields.push("주휴무일수");
+        if (snap.snapshotOver5Employees != null && Boolean(snap.snapshotOver5Employees) !== Boolean(effectiveOver5)) fields.push("5인 여부");
+      }
+      return {
+        userId: r.userId,
+        userName: r.userName,
+        userPhone: r.userPhone,
+        restaurantId: r.restaurantId,
+        restaurantName: r.restaurantName,
+        ssot: {
+          affiliatedCompany: r.affiliatedCompany,
+          hireDate: r.hireDate ? dateIso(r.hireDate) : null,
+          weeklyOffDays: r.weeklyOffDays,
+          effectiveOver5,
+        },
+        snapshot: snap ? {
+          signedAt: snap.signedAt,
+          affiliatedCompany: snap.snapshotAffiliatedCompany,
+          hireDate: dateIso(snap.snapshotHireDate),
+          weeklyOffDays: snap.snapshotWeeklyOffDays,
+          over5Employees: snap.snapshotOver5Employees,
+          taxMode: snap.snapshotTaxMode,
+        } : null,
+        mismatchedFields: fields,
+        hasContract: !!snap,
+      };
+    });
+
+    const mismatched = rows.filter((r) => r.mismatchedFields.length > 0).length;
+    const noContract = rows.filter((r) => !r.hasContract).length;
+
+    return {
+      rows: rows.sort((a, b) => {
+        // 갱신 필요 먼저, 그 다음 계약서 없음, 그 다음 정상
+        const aPri = a.mismatchedFields.length > 0 ? 0 : !a.hasContract ? 1 : 2;
+        const bPri = b.mismatchedFields.length > 0 ? 0 : !b.hasContract ? 1 : 2;
+        if (aPri !== bPri) return aPri - bPri;
+        return (a.restaurantName || "").localeCompare(b.restaurantName || "");
+      }),
+      summary: { total: rows.length, mismatched, noContract },
+    };
   }),
 });

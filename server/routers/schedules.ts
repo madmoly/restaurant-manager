@@ -1049,6 +1049,8 @@ export const schedulesRouter = router({
           // 재설계 2026-05-02: 시급제 + 주휴별도(hourlyWageIncludesHolidayPay=false) 직원의 주별 시간 누적
           hourlyWageIncludesHolidayPay: boolean;
           taxMode: string | null;
+          // 시급제 + 주휴별도 가산 합계 (월말 일괄 계산 후 wageBreakdown.weeklyHoliday로 노출)
+          weeklyHolidayBonus: number;
           dateSet: Set<string>;
           shiftsForWeek: Array<{ startDate: string; hours: number }>;
         }>;
@@ -1089,6 +1091,7 @@ export const schedulesRouter = router({
             // 시급제 + 주휴포함 여부 (latest signed contract). null 시 true 폴백 (보수적)
             hourlyWageIncludesHolidayPay: r.hourlyWageIncludesHolidayPay ?? true,
             taxMode: r.taxMode ?? null,
+            weeklyHolidayBonus: 0,
             dateSet: new Set<string>(),
             shiftsForWeek: [],
           };
@@ -1138,7 +1141,7 @@ export const schedulesRouter = router({
         companyMap[company].totalWage += wage;
       }
 
-      // 시급제 + 주휴별도 직원 → 주별 8h × 시급 가산 (월말 일괄)
+      // 시급제 + 주휴별도 직원 → 주별 8h × 시급 가산 (월말 일괄). bonus는 별도 필드로 보관해 wageBreakdown 분리 표시
       for (const c of Object.values(companyMap)) {
         for (const emp of Object.values(c.employees)) {
           if (emp.wageType !== "hourly") continue;
@@ -1148,6 +1151,7 @@ export const schedulesRouter = router({
           const weekMap = groupHoursByWeek(emp.shiftsForWeek);
           const bonus = computeWeeklyHolidayPay(weekMap, hourly);
           emp.totalWage += bonus;
+          emp.weeklyHolidayBonus = bonus;
           c.totalWage += bonus;
         }
       }
@@ -1232,9 +1236,10 @@ export const schedulesRouter = router({
 
           // 4대보험·원천세는 시스템 미계산 (별도 계산 안내만 표기)
           const totalWageR = Math.round(emp.totalWage);
+          const weeklyHolidayR = Math.round(emp.weeklyHolidayBonus || 0);
           const wageBreakdown = {
-            base: totalWageR,
-            weeklyHoliday: 0,
+            base: totalWageR - weeklyHolidayR,
+            weeklyHoliday: weeklyHolidayR,
             overtime: 0,
             night: 0,
           };

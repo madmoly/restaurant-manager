@@ -478,60 +478,93 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
         </div>
       )}
 
-      {/* L2: 가이드 — 등록값 기준 환산 */}
-      <div className="text-[11px]">
-        <span className="text-muted-foreground">가이드</span>
-        <div className="text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
-          <span>시급 <b>{fmtWon(emp.guideHourly)}</b></span>
-          <span>일급 <b>{fmtWon(emp.guideDaily)}</b></span>
-          <span>월급 <b>{fmtWon(emp.guideMonthly)}</b></span>
-        </div>
-      </div>
+      {/* L2~L3: 가이드/실효 — 재설계 2026-05-02: 월급제만 표시 (시급제는 합계만) */}
+      {emp.wageType === "monthly" && (
+        <>
+          <div className="text-[11px]">
+            <span className="text-muted-foreground">가이드</span>
+            {!emp.over5Employees && (
+              <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400">5인 미만 — 연차 분모 제외</span>
+            )}
+            <div className="text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
+              <span>시급 <b>{fmtWon(emp.guideHourly)}</b></span>
+              <span>일급 <b>{fmtWon(emp.guideDaily)}</b></span>
+              <span>월급 <b>{fmtWon(emp.guideMonthly)}</b></span>
+            </div>
+          </div>
+          <div className="text-[11px]">
+            <span className="text-muted-foreground">실효</span>
+            <div className="text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
+              <EffSpan label="시급" eff={emp.effectiveHourly} guide={emp.guideHourly} />
+              <EffSpan label="일급" eff={emp.effectiveDaily} guide={emp.guideDaily} />
+              <EffSpan label="월급" eff={emp.effectiveMonthly} guide={emp.guideMonthly} />
+            </div>
+          </div>
+        </>
+      )}
 
-      {/* L3: 실효 — ±% */}
-      <div className="text-[11px]">
-        <span className="text-muted-foreground">실효</span>
-        <div className="text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
-          <EffSpan label="시급" eff={emp.effectiveHourly} guide={emp.guideHourly} />
-          <EffSpan label="일급" eff={emp.effectiveDaily} guide={emp.guideDaily} />
-          <EffSpan label="월급" eff={emp.effectiveMonthly} guide={emp.guideMonthly} />
-        </div>
-      </div>
-
-      {/* L4: 비용 분해 (4대보험·원천세는 시스템 미계산 — 별도 계산) */}
+      {/* L4: 비용 분해 (시급제는 시간×시급 + 주휴별도 가산. 월급제는 4대 분해) */}
       {(() => {
         const tentative = (wb.base ?? 0) + (wb.weeklyHoliday ?? 0) + (wb.overtime ?? 0) + (wb.night ?? 0);
+        const showWeeklyHoliday = (wb.weeklyHoliday ?? 0) > 0;
         return (
           <div className="space-y-1 pt-1 border-t border-border/30">
-            <div className="text-[11px] grid grid-cols-4 gap-x-3 gap-y-1">
-              <div>
-                <span className="text-muted-foreground">근무시간</span>
-                <div className="font-medium text-foreground">{(emp.totalHours ?? 0).toFixed(1)}h</div>
+            {emp.wageType === "hourly" ? (
+              // 시급제: 시간 × 시급. 주휴별도 + 주15h 이상이면 주휴 가산 라인 추가
+              <div className="text-[11px] grid grid-cols-3 gap-x-3 gap-y-1">
+                <div>
+                  <span className="text-muted-foreground">근무시간</span>
+                  <div className="font-medium text-foreground">{(emp.totalHours ?? 0).toFixed(1)}h</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">시간×시급</span>
+                  <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
+                </div>
+                {showWeeklyHoliday && (
+                  <div>
+                    <span className="text-muted-foreground">주휴(별도)</span>
+                    <div className="font-medium text-foreground">{fmtWon(wb.weeklyHoliday)}</div>
+                  </div>
+                )}
+                <div className="col-span-3">
+                  <span className="text-muted-foreground">합계</span>
+                  <div className="font-bold text-foreground">{fmtWon(tentative)}</div>
+                </div>
               </div>
-              <div>
-                <span className="text-muted-foreground">기본</span>
-                <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
+            ) : (
+              // 월급제: 기본/주휴/연장/야간 4분해 + 합계
+              <div className="text-[11px] grid grid-cols-4 gap-x-3 gap-y-1">
+                <div>
+                  <span className="text-muted-foreground">근무시간</span>
+                  <div className="font-medium text-foreground">{(emp.totalHours ?? 0).toFixed(1)}h</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">기본</span>
+                  <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">주휴</span>
+                  <div className="font-medium text-foreground">{fmtWon(wb.weeklyHoliday)}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">연장</span>
+                  <div className="font-medium text-foreground">{fmtWon(wb.overtime)}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">야간</span>
+                  <div className="font-medium text-foreground">{fmtWon(wb.night)}</div>
+                </div>
+                <div className="col-span-3">
+                  <span className="text-muted-foreground">합계</span>
+                  <div className="font-bold text-foreground">{fmtWon(tentative)}</div>
+                </div>
               </div>
-              <div>
-                <span className="text-muted-foreground">주휴</span>
-                <div className="font-medium text-foreground">{fmtWon(wb.weeklyHoliday)}</div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">연장</span>
-                <div className="font-medium text-foreground">{fmtWon(wb.overtime)}</div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">야간</span>
-                <div className="font-medium text-foreground">{fmtWon(wb.night)}</div>
-              </div>
-              <div className="col-span-3">
-                <span className="text-muted-foreground">합계</span>
-                <div className="font-bold text-foreground">{fmtWon(tentative)}</div>
-              </div>
-            </div>
+            )}
             <div className="flex items-start gap-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300">
               <Info className="w-3 h-3 mt-0.5 shrink-0" />
-              <span>4대보험·원천세(3.3%)는 시스템에서 계산하지 않습니다. 별도 계산하세요.</span>
+              <span>
+                {emp.taxMode === "biz_income_3_3" ? "원천세(3.3%)" : "4대보험·원천세"}는 시스템에서 계산하지 않습니다. 별도 계산하세요.
+              </span>
             </div>
           </div>
         );
