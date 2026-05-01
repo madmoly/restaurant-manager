@@ -296,6 +296,7 @@ export const employeeContracts = mysqlTable("employee_contracts", {
   weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }),
   weeklyOffDays: int("weeklyOffDays").default(1),
   socialInsurance: boolean("socialInsurance").default(true),
+  bankName: varchar("bankName", { length: 50 }),
   bankAccount: varchar("bankAccount", { length: 100 }),
   residentNumber: varchar("residentNumber", { length: 20 }),
   noWeeklyHolidayPay: boolean("noWeeklyHolidayPay").default(false).notNull(),
@@ -773,7 +774,8 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   employeeSignature: mediumtext("employeeSignature"),
   signedIp: varchar("signedIp", { length: 45 }),
   // ── 직원이 서명 시 입력 ──
-  employeeBankAccount: varchar("employeeBankAccount", { length: 100 }), // 계좌번호 (은행명 포함)
+  bankName: varchar("bankName", { length: 50 }), // 은행명 (계약서 본문에 박힘)
+  employeeBankAccount: varchar("employeeBankAccount", { length: 100 }), // 계좌번호 (은행명 분리됨)
   employeeResidentNumber: varchar("employeeResidentNumber", { length: 20 }), // 주민등록번호
   previousContractId: int("previousContractId"),
   // ── 서명 시점 스냅샷 (박제 — 서명 후 불변) ──
@@ -781,6 +783,7 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   snapshotPhone: varchar("snapshotPhone", { length: 30 }),
   snapshotAddress: text("snapshotAddress"),
   snapshotResidentNumber: varchar("snapshotResidentNumber", { length: 20 }),
+  snapshotBankName: varchar("snapshotBankName", { length: 50 }),
   snapshotBankAccount: varchar("snapshotBankAccount", { length: 100 }),
   snapshotWage: decimal("snapshotWage", { precision: 12, scale: 2 }),
   snapshotWageType: varchar("snapshotWageType", { length: 20 }),

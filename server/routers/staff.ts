@@ -153,6 +153,7 @@ export const staffRouter = router({
           weeklyHours: employeeContracts.weeklyHours,
           weeklyOffDays: employeeContracts.weeklyOffDays,
           socialInsurance: employeeContracts.socialInsurance,
+          bankName: employeeContracts.bankName,
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
         })
@@ -718,6 +719,7 @@ export const staffRouter = router({
       phone: z.string().optional(),
       address: z.string().optional(),
       email: z.string().email().optional().or(z.literal("")),
+      bankName: z.string().optional(),
       bankAccount: z.string().optional(),
       residentNumber: z.string().optional(),
       affiliatedCompany: z.string().nullable().optional(),
@@ -762,6 +764,7 @@ export const staffRouter = router({
 
       // employee_contracts (민감영역 현재상태) 업데이트
       if (
+        input.bankName !== undefined ||
         input.bankAccount !== undefined ||
         input.residentNumber !== undefined ||
         input.weeklyOffDays !== undefined
@@ -776,6 +779,7 @@ export const staffRouter = router({
           ))
           .limit(1);
         const ecUpdate: Record<string, any> = {};
+        if (input.bankName !== undefined) ecUpdate.bankName = input.bankName;
         if (input.bankAccount !== undefined) ecUpdate.bankAccount = input.bankAccount;
         if (input.residentNumber !== undefined) ecUpdate.residentNumber = input.residentNumber;
         if (input.weeklyOffDays !== undefined) ecUpdate.weeklyOffDays = input.weeklyOffDays;
@@ -785,6 +789,7 @@ export const staffRouter = router({
           await db.insert(employeeContracts).values({
             userId: input.userId,
             restaurantId: input.restaurantId,
+            bankName: ecUpdate.bankName ?? null,
             bankAccount: ecUpdate.bankAccount ?? null,
             residentNumber: ecUpdate.residentNumber ?? null,
             weeklyOffDays: ecUpdate.weeklyOffDays ?? 1,

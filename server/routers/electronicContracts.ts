@@ -603,7 +603,8 @@ export const electronicContractsRouter = router({
       z.object({
         token: z.string(),
         signature: z.string(), // base64 서명 이미지
-        bankAccount: z.string().optional(), // 계좌번호 (직원 입력)
+        bankName: z.string().optional(), // 은행명 (직원 입력)
+        bankAccount: z.string().optional(), // 계좌번호만 (직원 입력)
         residentNumber: z.string().optional(), // 주민번호 (직원 입력)
         employeeName: z.string().optional(),
         employeePhone: z.string().optional(),
@@ -625,6 +626,7 @@ export const electronicContractsRouter = router({
       const finalName = input.employeeName ?? contract.employeeName;
       const finalPhone = input.employeePhone ?? contract.employeePhone ?? null;
       const finalAddress = input.employeeAddress ?? contract.employeeAddress ?? null;
+      const finalBankName = input.bankName ?? null;
       const finalBankAccount = input.bankAccount ?? null;
       const finalResidentNumber = input.residentNumber ?? null;
       const finalAffiliatedCompany = contract.affiliatedCompany ?? null;
@@ -644,6 +646,7 @@ export const electronicContractsRouter = router({
               status: "signed",
               signedAt: new Date(),
               employeeSignature: input.signature,
+              bankName: finalBankName,
               employeeBankAccount: finalBankAccount,
               employeeResidentNumber: finalResidentNumber,
               // 서명 시점 스냅샷
@@ -651,6 +654,7 @@ export const electronicContractsRouter = router({
               snapshotPhone: finalPhone,
               snapshotAddress: finalAddress,
               snapshotResidentNumber: finalResidentNumber,
+              snapshotBankName: finalBankName,
               snapshotBankAccount: finalBankAccount,
               snapshotWage: contract.wageAmount ?? null,
               snapshotWageType: contract.wageType ?? null,
@@ -721,6 +725,7 @@ export const electronicContractsRouter = router({
               weeklyOffDays: contract.weeklyOffDays ?? 1,
               socialInsurance: contract.socialInsurance ?? true,
               noWeeklyHolidayPay: contract.noWeeklyHolidayPay ?? false,
+              bankName: finalBankName,
               bankAccount: finalBankAccount,
               residentNumber: finalResidentNumber,
               isActive: true,

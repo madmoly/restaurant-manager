@@ -22,6 +22,7 @@ export default function ContractSignPage({ token }: { token: string }) {
   const [agreed, setAgreed] = useState(false);
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [showSignPad, setShowSignPad] = useState(false);
+  const [bankName, setBankName] = useState("");
   const [bankAccount, setBankAccount] = useState("");
   const [residentNumber, setResidentNumber] = useState("");
   const [emailInput, setEmailInput] = useState("");
@@ -91,6 +92,7 @@ export default function ContractSignPage({ token }: { token: string }) {
     sign.mutate({
       token,
       signature: signatureData,
+      ...(bankName ? { bankName } : {}),
       ...(bankAccount ? { bankAccount } : {}),
       ...(residentNumber ? { residentNumber } : {}),
     });
@@ -454,15 +456,27 @@ export default function ContractSignPage({ token }: { token: string }) {
             {/* 직원 정보 입력 */}
             <div className="space-y-3 mb-5 p-4 rounded-lg" style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
               <p className="text-xs font-medium" style={{ color: "#374151" }}>급여 지급을 위해 아래 정보를 입력해주세요</p>
-              <div>
-                <label className="text-xs" style={{ color: "#6b7280" }}>계좌번호 (은행명 포함)</label>
-                <input
-                  value={bankAccount}
-                  onChange={(e) => setBankAccount(e.target.value)}
-                  placeholder="예: 국민은행 123-456-789012"
-                  className="w-full mt-1 px-3 py-2 rounded-md text-sm"
-                  style={{ border: "1px solid #d1d5db", background: "#ffffff" }}
-                />
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-1">
+                  <label className="text-xs" style={{ color: "#6b7280" }}>은행명</label>
+                  <input
+                    value={bankName}
+                    onChange={(e) => setBankName(e.target.value)}
+                    placeholder="예: 국민은행"
+                    className="w-full mt-1 px-3 py-2 rounded-md text-sm"
+                    style={{ border: "1px solid #d1d5db", background: "#ffffff" }}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs" style={{ color: "#6b7280" }}>계좌번호</label>
+                  <input
+                    value={bankAccount}
+                    onChange={(e) => setBankAccount(e.target.value)}
+                    placeholder="예: 123-456-789012"
+                    className="w-full mt-1 px-3 py-2 rounded-md text-sm"
+                    style={{ border: "1px solid #d1d5db", background: "#ffffff" }}
+                  />
+                </div>
               </div>
               <div>
                 <label className="text-xs" style={{ color: "#6b7280" }}>주민등록번호</label>

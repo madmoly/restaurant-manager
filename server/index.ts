@@ -470,6 +470,42 @@ app.use(express.json({ limit: "10mb" }));
     await conn.query(`
       ALTER TABLE employment_electronic_contracts ADD COLUMN noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
+    // 은행/계좌 분리: bankName 컬럼 신규. bankAccount는 계좌번호만 보관.
+    await conn.query(`
+      ALTER TABLE employee_contracts ADD COLUMN bankName VARCHAR(50) DEFAULT NULL
+    `).catch(() => {});
+    await conn.query(`
+      ALTER TABLE employment_electronic_contracts ADD COLUMN bankName VARCHAR(50) DEFAULT NULL
+    `).catch(() => {});
+    await conn.query(`
+      ALTER TABLE employment_electronic_contracts ADD COLUMN snapshotBankName VARCHAR(50) DEFAULT NULL
+    `).catch(() => {});
+    // 기존 bankAccount 데이터 자동 분리 (idempotent: bankName이 비어있고 bankAccount에 공백 포함일 때만)
+    // 패턴: "하나은행 175-18-515110" → bankName="하나은행", bankAccount="175-18-515110"
+    await conn.query(`
+      UPDATE employee_contracts
+      SET bankName = TRIM(SUBSTRING_INDEX(bankAccount, ' ', 1)),
+          bankAccount = TRIM(SUBSTRING(bankAccount, LOCATE(' ', bankAccount) + 1))
+      WHERE bankName IS NULL
+        AND bankAccount IS NOT NULL
+        AND LOCATE(' ', bankAccount) > 0
+    `).catch(() => {});
+    await conn.query(`
+      UPDATE employment_electronic_contracts
+      SET bankName = TRIM(SUBSTRING_INDEX(employeeBankAccount, ' ', 1)),
+          employeeBankAccount = TRIM(SUBSTRING(employeeBankAccount, LOCATE(' ', employeeBankAccount) + 1))
+      WHERE bankName IS NULL
+        AND employeeBankAccount IS NOT NULL
+        AND LOCATE(' ', employeeBankAccount) > 0
+    `).catch(() => {});
+    await conn.query(`
+      UPDATE employment_electronic_contracts
+      SET snapshotBankName = TRIM(SUBSTRING_INDEX(snapshotBankAccount, ' ', 1)),
+          snapshotBankAccount = TRIM(SUBSTRING(snapshotBankAccount, LOCATE(' ', snapshotBankAccount) + 1))
+      WHERE snapshotBankName IS NULL
+        AND snapshotBankAccount IS NOT NULL
+        AND LOCATE(' ', snapshotBankAccount) > 0
+    `).catch(() => {});
     // 월마감에 즉시지출 합계 컬럼
     await conn.query(`
       ALTER TABLE monthly_closings ADD COLUMN expensesTotal DECIMAL(14,2) NOT NULL DEFAULT 0

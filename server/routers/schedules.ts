@@ -917,6 +917,7 @@ export const schedulesRouter = router({
           weeklyOffDays: employeeContracts.weeklyOffDays,
           weeklyHours: employeeContracts.weeklyHours,
           socialInsurance: employeeContracts.socialInsurance,
+          bankName: employeeContracts.bankName,
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
           contractIsActive: employeeContracts.isActive,
@@ -1026,6 +1027,7 @@ export const schedulesRouter = router({
           userId: number | null;
           recheckRequired: boolean;
           socialInsurance: boolean;
+          bankName: string | null;
           bankAccount: string | null;
           residentNumber: string | null;
           phone: string | null;
@@ -1062,6 +1064,7 @@ export const schedulesRouter = router({
             recheckRequired: false,
             // 4대보험·원천세는 시스템 미계산 — 별도 계산 안내만 표기
             socialInsurance: (r.userId && !treatAsTemp && r.socialInsurance != null) ? r.socialInsurance : false,
+            bankName: r.bankName ?? null,
             bankAccount: r.bankAccount ?? r.tempBankAccount ?? null,
             residentNumber: r.residentNumber ?? null,
             phone: r.tempPhone ?? null,

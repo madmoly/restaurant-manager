@@ -638,11 +638,14 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
             </div>
           )}
         </div>
-      ) : (emp.bankAccount || emp.residentNumber) ? (
+      ) : (emp.bankAccount || emp.bankName || emp.residentNumber) ? (
         <div className="grid grid-cols-2 gap-x-3 text-xs pt-1 border-t border-border/30">
           <div>
             <span className="text-muted-foreground">계좌번호</span>
-            <div className="font-medium text-foreground">{emp.bankAccount || "-"}</div>
+            <div className="font-medium text-foreground">
+              {emp.bankName ? <span className="text-muted-foreground mr-1">{emp.bankName}</span> : null}
+              {emp.bankAccount || "-"}
+            </div>
           </div>
           <div>
             <span className="text-muted-foreground">주민번호</span>
