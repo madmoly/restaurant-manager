@@ -1,18 +1,13 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   ChevronLeft, ChevronRight, Building2, Clock, ChevronDown, ChevronUp,
-  FileText, Download, AlertTriangle, UserX, CalendarClock, Eye, X,
+  FileText, Download, AlertTriangle, UserX, CalendarClock, Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
 import { loadKoreanFont } from "@/lib/pdfKoreanFont";
-
-const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
 function fmtDate(d: string | null) {
   if (!d) return "-";
@@ -38,11 +33,6 @@ export default function WorkSummaryPage() {
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
   const [expandedEmpKey, setExpandedEmpKey] = useState<string | null>(null);
-  const [detailTarget, setDetailTarget] = useState<{
-    userId: number | null;
-    tempWorkerName: string | null;
-    name: string;
-  } | null>(null);
 
   const prevMonth = () => { if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1); };
@@ -53,8 +43,6 @@ export default function WorkSummaryPage() {
   );
 
   const companies = data?.companies ?? [];
-  const closedDates = data?.closedDates ?? [];
-  const closedWeekdays = data?.closedWeekdays ?? [];
 
   const grandTotalHours = companies.reduce((s, c) => s + c.totalHours, 0);
   const grandTotalShifts = companies.reduce((s, c) => s + c.totalShifts, 0);
@@ -203,7 +191,7 @@ export default function WorkSummaryPage() {
       {companies.some(c => c.employees.some((e: any) => e.recheckRequired)) && (
         <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span>완료된 스케줄이 수정된 직원이 있습니다. 세부 근무내역에서 확인하세요.</span>
+          <span>완료된 스케줄이 수정된 직원이 있습니다. 카드를 펼쳐 확인하세요.</span>
         </div>
       )}
 
@@ -254,61 +242,40 @@ export default function WorkSummaryPage() {
                   const tempEmps = company.employees.filter((e: any) => e.isTemp);
                   return (
                     <div className="border-t border-border">
-                      {/* 데스크톱 매트릭스 */}
-                      <div className="hidden md:block p-3">
-                        <DesktopMatrix
-                          year={year}
-                          month={month}
-                          employees={[...regularEmps, ...tempEmps]}
-                          closedDates={closedDates}
-                          closedWeekdays={closedWeekdays}
-                          onOpenDetail={(emp) =>
-                            setDetailTarget({ userId: emp.userId, tempWorkerName: emp.tempWorkerName ?? (emp.isTemp ? emp.name : null), name: emp.name })
-                          }
-                        />
+                      <div className="divide-y divide-border/50">
+                        {regularEmps.map((emp, i) => (
+                          <EmployeeShiftCard
+                            key={`r-${i}`}
+                            emp={emp}
+                            restaurantId={restaurantId}
+                            year={year}
+                            month={month}
+                            expanded={expandedEmpKey === empKey(emp)}
+                            onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
+                          />
+                        ))}
                       </div>
-
-                      {/* 모바일 직원 카드 */}
-                      <div className="md:hidden">
-                        <div className="divide-y divide-border/50">
-                          {regularEmps.map((emp, i) => (
-                            <MobileEmployeeRow
-                              key={`r-${i}`}
-                              emp={emp}
-                              year={year}
-                              month={month}
-                              closedDates={closedDates}
-                              closedWeekdays={closedWeekdays}
-                              expanded={expandedEmpKey === empKey(emp)}
-                              onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
-                              onOpenDetail={() => setDetailTarget({ userId: emp.userId, tempWorkerName: emp.tempWorkerName ?? null, name: emp.name })}
-                            />
-                          ))}
-                        </div>
-                        {tempEmps.length > 0 && (
-                          <div>
-                            <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/40 border-t border-border">
-                              <UserX className="w-3.5 h-3.5 text-muted-foreground" />
-                              <span className="text-[11px] font-semibold text-muted-foreground">임시/주휴미제공 ({tempEmps.length}명)</span>
-                            </div>
-                            <div className="divide-y divide-border/50">
-                              {tempEmps.map((emp, i) => (
-                                <MobileEmployeeRow
-                                  key={`t-${i}`}
-                                  emp={emp}
-                                  year={year}
-                                  month={month}
-                                  closedDates={closedDates}
-                                  closedWeekdays={closedWeekdays}
-                                  expanded={expandedEmpKey === empKey(emp)}
-                                  onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
-                                  onOpenDetail={() => setDetailTarget({ userId: emp.userId, tempWorkerName: emp.tempWorkerName ?? emp.name, name: emp.name })}
-                                />
-                              ))}
-                            </div>
+                      {tempEmps.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/40 border-t border-border">
+                            <UserX className="w-3.5 h-3.5 text-muted-foreground" />
+                            <span className="text-[11px] font-semibold text-muted-foreground">임시/주휴미제공 ({tempEmps.length}명)</span>
                           </div>
-                        )}
-                      </div>
+                          <div className="divide-y divide-border/50">
+                            {tempEmps.map((emp, i) => (
+                              <EmployeeShiftCard
+                                key={`t-${i}`}
+                                emp={emp}
+                                restaurantId={restaurantId}
+                                year={year}
+                                month={month}
+                                expanded={expandedEmpKey === empKey(emp)}
+                                onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -317,40 +284,41 @@ export default function WorkSummaryPage() {
           })}
         </div>
       )}
-
-      {/* 세부 근무내역 모달 */}
-      <ShiftDetailDialog
-        open={!!detailTarget}
-        onClose={() => setDetailTarget(null)}
-        restaurantId={restaurantId}
-        year={year}
-        month={month}
-        target={detailTarget}
-      />
     </div>
   );
 }
 
-// ─── 모바일 직원 행 (펼침 시 미니캘린더) ─────────────────────────────────
-function MobileEmployeeRow({
-  emp, year, month, closedDates, closedWeekdays, expanded, onToggle, onOpenDetail,
+// ─── 인원별 카드 (헤더 + 펼침 시 세부 근무내역 인라인 테이블) ────────────────
+function EmployeeShiftCard({
+  emp, restaurantId, year, month, expanded, onToggle,
 }: {
   emp: any;
+  restaurantId: number;
   year: number;
   month: number;
-  closedDates: string[];
-  closedWeekdays: number[];
   expanded: boolean;
   onToggle: () => void;
-  onOpenDetail: () => void;
 }) {
   const subUsed = emp.substituteLeave && emp.substituteLeave.used > 0;
   const annUsed = emp.annualLeave && emp.annualLeave.used > 0;
+
+  const userId = emp.userId ?? null;
+  const tempWorkerName = emp.tempWorkerName ?? (emp.isTemp ? emp.name : null);
+  const enabled = expanded && (userId !== null || !!tempWorkerName);
+
+  const { data: shifts, isLoading } = trpc.schedules.employeeMonthlyShifts.useQuery(
+    { restaurantId, year, month, userId, tempWorkerName },
+    { enabled },
+  );
+
+  const totalHours = shifts?.reduce((s, r) => s + r.netHours, 0) ?? 0;
+  const totalDays = shifts?.length ?? 0;
+
   return (
     <div className={`px-4 py-3 space-y-2 ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
-      {/* 1행: 이름 + 펼침 + 상세 */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0 cursor-pointer" onClick={onToggle}>
+      {/* 1행: 이름 + 펼침 */}
+      <div className="flex items-start justify-between gap-2 cursor-pointer" onClick={onToggle}>
+        <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-foreground flex items-center gap-1">
             {emp.name}
             {emp.isTemp && (
@@ -366,12 +334,6 @@ function MobileEmployeeRow({
             <div className="text-[10px] text-muted-foreground">입사 {fmtDate(emp.hireDate)}</div>
           )}
         </div>
-        <button
-          onClick={onOpenDetail}
-          className="shrink-0 text-[11px] text-primary hover:text-primary/80 hover:bg-primary/10 rounded px-2 py-1 flex items-center gap-1"
-        >
-          <Eye className="w-3 h-3" /> 세부
-        </button>
       </div>
 
       {/* 메타 칩 */}
@@ -397,313 +359,86 @@ function MobileEmployeeRow({
         )}
       </div>
 
-      {/* 펼침: 미니캘린더 */}
+      {/* 펼침: 세부 근무내역 인라인 테이블 */}
       {expanded && (
-        <div className="pt-2">
-          <MiniCalendar
-            year={year}
-            month={month}
-            daily={emp.daily ?? []}
-            closedDates={closedDates}
-            closedWeekdays={closedWeekdays}
-          />
+        <div className="pt-2 space-y-2">
+          {/* 상단 요약 */}
+          <div className="grid grid-cols-2 gap-2 px-3 py-2 border border-border rounded bg-muted/20">
+            <div className="text-center">
+              <div className="text-[10px] text-muted-foreground">근무일</div>
+              <div className="text-sm font-bold text-foreground">{totalDays}일</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-muted-foreground">총 근무시간</div>
+              <div className="text-sm font-bold text-foreground">{totalHours.toFixed(1)}h</div>
+            </div>
+          </div>
+
+          {/* 테이블 */}
+          {isLoading ? (
+            <div className="p-4 text-center text-xs text-muted-foreground">불러오는 중...</div>
+          ) : !shifts || shifts.length === 0 ? (
+            <div className="p-4 text-center text-xs text-muted-foreground">해당 월 스케줄이 없습니다</div>
+          ) : (
+            <div className="overflow-x-auto border border-border rounded">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/60">
+                  <tr className="text-muted-foreground">
+                    <th className="text-left px-3 py-2 font-medium">날짜</th>
+                    <th className="text-left px-2 py-2 font-medium">시간</th>
+                    <th className="text-right px-2 py-2 font-medium">휴게</th>
+                    <th className="text-right px-2 py-2 font-medium">순근무</th>
+                    <th className="text-left px-2 py-2 font-medium">유형</th>
+                    <th className="text-left px-3 py-2 font-medium">상태</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shifts.map((s) => (
+                    <tr key={s.id} className="border-t border-border/40">
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1">
+                          <span className="text-foreground font-medium">{s.date.slice(5)}</span>
+                          <span className={`text-[10px] ${s.weekday === 0 ? "text-red-500" : s.weekday === 6 ? "text-blue-500" : "text-muted-foreground"}`}>
+                            ({s.weekdayLabel})
+                          </span>
+                        </div>
+                        {s.holidayName && (
+                          <div className="text-[9px] text-red-500 font-medium">{s.holidayName}</div>
+                        )}
+                        {s.isStoreClosed && !s.holidayName && (
+                          <div className="text-[9px] text-muted-foreground">매장휴무</div>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-foreground whitespace-nowrap">
+                        {s.startTime}–{s.endTime}
+                      </td>
+                      <td className="px-2 py-2 text-right text-muted-foreground">
+                        {s.breakMinutes > 0 ? `${s.breakMinutes}분` : "-"}
+                      </td>
+                      <td className="px-2 py-2 text-right text-foreground font-medium">
+                        {s.netHours.toFixed(1)}h
+                      </td>
+                      <td className="px-2 py-2">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${s.shiftPreset === "open" ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300" : s.shiftPreset === "close" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300" : s.shiftPreset === "full" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" : "bg-muted text-muted-foreground"}`}>
+                          {PRESET_LABEL[s.shiftPreset] ?? s.shiftPreset}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={`text-[10px] ${s.status === "completed" ? "text-emerald-600 dark:text-emerald-400" : s.status === "confirmed" ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground"}`}>
+                          {STATUS_LABEL[s.status] ?? s.status}
+                        </span>
+                        {s.payrollRecheckRequired && (
+                          <AlertTriangle className="w-3 h-3 text-amber-500 inline ml-1" />
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
-  );
-}
-
-// ─── 미니캘린더 (모바일) ──────────────────────────────────────────────────
-function MiniCalendar({
-  year, month, daily, closedDates, closedWeekdays,
-}: {
-  year: number;
-  month: number;
-  daily: { date: string; hours: number; shifts: number }[];
-  closedDates: string[];
-  closedWeekdays: number[];
-}) {
-  const monthStr = String(month).padStart(2, "0");
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const firstDay = new Date(year, month - 1, 1).getDay(); // 0=일
-  const dailyMap = useMemo(() => new Map(daily.map(d => [d.date, d])), [daily]);
-  const closedSet = useMemo(() => new Set(closedDates), [closedDates]);
-  const closedWdSet = useMemo(() => new Set(closedWeekdays), [closedWeekdays]);
-
-  type Cell = { type: "pad" } | { type: "day"; day: number; date: string; weekday: number; isClosed: boolean; data?: { hours: number; shifts: number } };
-  const cells: Cell[] = [];
-  for (let i = 0; i < firstDay; i++) cells.push({ type: "pad" });
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dStr = String(d).padStart(2, "0");
-    const dateStr = `${year}-${monthStr}-${dStr}`;
-    const weekday = (firstDay + d - 1) % 7;
-    const isClosed = closedSet.has(dateStr) || closedWdSet.has(weekday);
-    cells.push({ type: "day", day: d, date: dateStr, weekday, isClosed, data: dailyMap.get(dateStr) });
-  }
-
-  return (
-    <div className="grid grid-cols-7 gap-px bg-border rounded overflow-hidden">
-      {WEEKDAY_LABELS.map((w, i) => (
-        <div
-          key={i}
-          className={`text-[9px] text-center py-1 bg-muted/40 font-medium ${
-            i === 0 ? "text-rose-500" : i === 6 ? "text-blue-500" : "text-muted-foreground"
-          }`}
-        >
-          {w}
-        </div>
-      ))}
-      {cells.map((cell, i) => {
-        if (cell.type === "pad") return <div key={i} className="bg-background h-12" />;
-        const dayWeekdayColor = cell.weekday === 0 ? "text-rose-500" : cell.weekday === 6 ? "text-blue-500" : "text-muted-foreground";
-        return (
-          <div
-            key={i}
-            className={`h-12 px-1 py-0.5 flex flex-col text-[10px] ${cell.isClosed ? "bg-muted/60" : "bg-background"}`}
-          >
-            <div className={`text-[9px] ${dayWeekdayColor}`}>{cell.day}</div>
-            {cell.data ? (
-              <div className="text-foreground font-semibold leading-tight">{cell.data.hours.toFixed(1)}h</div>
-            ) : (
-              <div className="text-muted-foreground/30 text-[8px] leading-tight">·</div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── 데스크톱 매트릭스 ────────────────────────────────────────────────────
-function DesktopMatrix({
-  year, month, employees, closedDates, closedWeekdays, onOpenDetail,
-}: {
-  year: number;
-  month: number;
-  employees: any[];
-  closedDates: string[];
-  closedWeekdays: number[];
-  onOpenDetail: (emp: any) => void;
-}) {
-  const monthStr = String(month).padStart(2, "0");
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const firstDay = new Date(year, month - 1, 1).getDay();
-  const closedSet = useMemo(() => new Set(closedDates), [closedDates]);
-  const closedWdSet = useMemo(() => new Set(closedWeekdays), [closedWeekdays]);
-  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="text-[10px] border-collapse">
-        <thead>
-          <tr>
-            <th className="sticky left-0 z-10 bg-card px-2 py-1.5 text-left font-medium text-muted-foreground border-b border-border min-w-[120px]">
-              직원
-            </th>
-            {days.map(d => {
-              const dStr = String(d).padStart(2, "0");
-              const dateStr = `${year}-${monthStr}-${dStr}`;
-              const weekday = (firstDay + d - 1) % 7;
-              const isClosed = closedSet.has(dateStr) || closedWdSet.has(weekday);
-              const wdColor = weekday === 0 ? "text-rose-500" : weekday === 6 ? "text-blue-500" : "text-muted-foreground";
-              return (
-                <th
-                  key={d}
-                  className={`px-1 py-1 text-center font-normal min-w-[26px] border-b border-border ${isClosed ? "bg-muted/40" : ""}`}
-                >
-                  <div className={`${wdColor} font-medium`}>{d}</div>
-                  <div className={`text-[8px] ${wdColor}`}>{WEEKDAY_LABELS[weekday]}</div>
-                </th>
-              );
-            })}
-            <th className="px-2 py-1.5 text-right font-medium text-muted-foreground border-b border-border min-w-[60px]">
-              합계
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {employees.map((emp) => {
-            const dailyMap = new Map(emp.daily?.map((d: any) => [d.date, d]) ?? []);
-            const subRem = emp.substituteLeave?.remaining;
-            const annRem = emp.annualLeave?.remaining;
-            return (
-              <tr key={`${emp.userId ?? "t"}_${emp.name}`} className={emp.recheckRequired ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}>
-                <td className="sticky left-0 z-10 bg-card px-2 py-1.5 border-b border-border/50">
-                  <div className="flex items-center gap-1 flex-wrap">
-                    <button
-                      onClick={() => onOpenDetail(emp)}
-                      className="font-medium text-foreground hover:text-primary"
-                    >
-                      {emp.name}
-                    </button>
-                    {emp.isTemp && (
-                      <span className="text-[8px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1 rounded">
-                        {emp.isNoHolidayPayWorker ? "주휴미제공" : "임시"}
-                      </span>
-                    )}
-                    {emp.recheckRequired && <AlertTriangle className="w-3 h-3 text-amber-500" />}
-                  </div>
-                  <div className="flex items-center gap-1 mt-0.5 text-[9px] text-muted-foreground">
-                    {emp.position && <span>({emp.position})</span>}
-                    {subRem != null && <span className="text-blue-600 dark:text-blue-400">대휴 {subRem}</span>}
-                    {annRem != null && <span className="text-emerald-600 dark:text-emerald-400">연차 {annRem}</span>}
-                  </div>
-                </td>
-                {days.map(d => {
-                  const dStr = String(d).padStart(2, "0");
-                  const dateStr = `${year}-${monthStr}-${dStr}`;
-                  const weekday = (firstDay + d - 1) % 7;
-                  const isClosed = closedSet.has(dateStr) || closedWdSet.has(weekday);
-                  const data = dailyMap.get(dateStr) as { hours: number; shifts: number } | undefined;
-                  const tooltip = data
-                    ? `${dateStr} (${WEEKDAY_LABELS[weekday]}) · ${data.hours.toFixed(1)}h · ${data.shifts}시프트`
-                    : `${dateStr} (${WEEKDAY_LABELS[weekday]})`;
-                  return (
-                    <td
-                      key={d}
-                      title={tooltip}
-                      className={`px-1 py-1 text-center border-b border-border/40 ${isClosed ? "bg-muted/40" : ""}`}
-                    >
-                      {data ? (
-                        <span className="text-foreground font-medium">{data.hours.toFixed(1)}</span>
-                      ) : (
-                        <span className="text-muted-foreground/30">·</span>
-                      )}
-                    </td>
-                  );
-                })}
-                <td className="px-2 py-1.5 text-right font-semibold text-foreground border-b border-border/50">
-                  {emp.totalHours.toFixed(1)}h
-                  <div className="text-[9px] text-muted-foreground font-normal">{emp.shifts}일</div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ─── 세부 근무내역 모달 ──────────────────────────────────────────────────
-function ShiftDetailDialog({
-  open, onClose, restaurantId, year, month, target,
-}: {
-  open: boolean;
-  onClose: () => void;
-  restaurantId: number;
-  year: number;
-  month: number;
-  target: { userId: number | null; tempWorkerName: string | null; name: string } | null;
-}) {
-  const enabled = open && !!target && (target.userId !== null || !!target.tempWorkerName);
-  const { data: shifts, isLoading } = trpc.schedules.employeeMonthlyShifts.useQuery(
-    {
-      restaurantId,
-      year,
-      month,
-      userId: target?.userId ?? null,
-      tempWorkerName: target?.tempWorkerName ?? null,
-    },
-    { enabled },
-  );
-
-  const totalHours = shifts?.reduce((s, r) => s + r.netHours, 0) ?? 0;
-  const totalDays = shifts?.length ?? 0;
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden flex flex-col p-0">
-        <DialogHeader className="px-4 pt-4 pb-2 border-b border-border">
-          <DialogTitle className="text-base flex items-center gap-2">
-            <CalendarClock className="w-4 h-4" />
-            {target?.name ?? "-"} · {year}년 {month}월 근무내역
-          </DialogTitle>
-        </DialogHeader>
-
-        {/* 상단 요약 */}
-        <div className="grid grid-cols-2 gap-2 px-4 py-3 border-b border-border bg-muted/20">
-          <div className="text-center">
-            <div className="text-[10px] text-muted-foreground">근무일</div>
-            <div className="text-sm font-bold text-foreground">{totalDays}일</div>
-          </div>
-          <div className="text-center">
-            <div className="text-[10px] text-muted-foreground">총 근무시간</div>
-            <div className="text-sm font-bold text-foreground">{totalHours.toFixed(1)}h</div>
-          </div>
-        </div>
-
-        {/* 리스트 */}
-        <div className="flex-1 overflow-y-auto">
-          {isLoading ? (
-            <div className="p-6 text-center text-xs text-muted-foreground">불러오는 중...</div>
-          ) : !shifts || shifts.length === 0 ? (
-            <div className="p-6 text-center text-xs text-muted-foreground">해당 월 스케줄이 없습니다</div>
-          ) : (
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-muted/60 backdrop-blur">
-                <tr className="text-muted-foreground">
-                  <th className="text-left px-3 py-2 font-medium">날짜</th>
-                  <th className="text-left px-2 py-2 font-medium">시간</th>
-                  <th className="text-right px-2 py-2 font-medium">휴게</th>
-                  <th className="text-right px-2 py-2 font-medium">순근무</th>
-                  <th className="text-left px-2 py-2 font-medium">유형</th>
-                  <th className="text-left px-3 py-2 font-medium">상태</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shifts.map((s) => (
-                  <tr key={s.id} className="border-t border-border/40">
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-1">
-                        <span className="text-foreground font-medium">{s.date.slice(5)}</span>
-                        <span className={`text-[10px] ${s.weekday === 0 ? "text-red-500" : s.weekday === 6 ? "text-blue-500" : "text-muted-foreground"}`}>
-                          ({s.weekdayLabel})
-                        </span>
-                      </div>
-                      {s.holidayName && (
-                        <div className="text-[9px] text-red-500 font-medium">{s.holidayName}</div>
-                      )}
-                      {s.isStoreClosed && !s.holidayName && (
-                        <div className="text-[9px] text-muted-foreground">매장휴무</div>
-                      )}
-                    </td>
-                    <td className="px-2 py-2 text-foreground whitespace-nowrap">
-                      {s.startTime}–{s.endTime}
-                    </td>
-                    <td className="px-2 py-2 text-right text-muted-foreground">
-                      {s.breakMinutes > 0 ? `${s.breakMinutes}분` : "-"}
-                    </td>
-                    <td className="px-2 py-2 text-right text-foreground font-medium">
-                      {s.netHours.toFixed(1)}h
-                    </td>
-                    <td className="px-2 py-2">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${s.shiftPreset === "open" ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300" : s.shiftPreset === "close" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300" : s.shiftPreset === "full" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" : "bg-muted text-muted-foreground"}`}>
-                        {PRESET_LABEL[s.shiftPreset] ?? s.shiftPreset}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className={`text-[10px] ${s.status === "completed" ? "text-emerald-600 dark:text-emerald-400" : s.status === "confirmed" ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground"}`}>
-                        {STATUS_LABEL[s.status] ?? s.status}
-                      </span>
-                      {s.payrollRecheckRequired && (
-                        <AlertTriangle className="w-3 h-3 text-amber-500 inline ml-1" />
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* 푸터 */}
-        <div className="px-4 py-2 border-t border-border flex justify-end">
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="w-3.5 h-3.5 mr-1" /> 닫기
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
