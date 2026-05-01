@@ -1,24 +1,31 @@
 # 거래처 월매입정산표 OCR 대조 — 구현 명세
 
 > 작성: 2026-05-01 (Cowork 설계 → Claude Code 전달용)
+> 갱신: 2026-05-01 (Excel 입력 추가 / 품목 alias 학습 흐름 명시)
 > 위치: 월정산 페이지(`/monthly-settlement`) 매입 섹션
 > 사용자 결정 (2026-05-01):
 > - 비교 단위: **월합계 우선 → 불일치 시 일자/항목 드릴다운**
 > - 양식 범위: **양식 무관 범용 OCR** (양식별 분기 X, 후처리로 정규화)
+> - 입력 형식: **사진 / PDF / Excel(.xlsx, .xls) / CSV** (Excel은 SheetJS dump 후 동일 Claude 프롬프트 텍스트 모드 호출)
 > - 부가세 처리: **거래처별 플래그** (`counterparties.settlementBasis`)
+> - 품목 매칭: **`counterparty_items.supplierItemName`을 alias로 재사용** (별도 alias 테이블 신설 X)
 > - 차이 처리: **보고 + 항목별 선택 적용** (체크박스 → 일괄 동기화)
 
 ---
 
 ## 1. 개요
 
-거래처가 월말에 발행하는 월매입정산표(거래원장)를 사진/PDF로 업로드하면 OCR로 인식하여 `purchase_orders_v2` 입력 내역과 자동 대조한다. 차이가 발견되면 항목별로 보여주고 사용자가 선택해 적용한다.
+거래처가 월말에 발행하는 월매입정산표(거래원장)를 **사진/PDF/Excel/CSV**로 업로드하면 정규화된 JSON으로 변환해 `purchase_orders_v2` 입력 내역과 자동 대조한다. 차이가 발견되면 항목별로 보여주고 사용자가 선택해 적용한다.
 
-### 입력 양식 다양성 (확인된 2종)
-- (주)331컴퍼니 — Ecount 단순 양식: 일자/적요/판매/수금/잔액
-- 풍부한 식자재 공급업체 양식: 연월일/유형/품목/규격/수량/단가/판매금액/반품액/결제액/미수금/비고
+### 입력 양식 다양성 (확인된 2종 + 디지털)
+- (주)331컴퍼니 — Ecount 단순 양식: 일자/적요/판매/수금/잔액 (PDF/이미지)
+- 풍부한 식자재 공급업체 양식: 연월일/유형/품목/규격/수량/단가/판매금액/반품액/결제액/미수금/비고 (PDF/이미지)
+- 디지털 발행: 거래처가 Excel/CSV로 직접 보내는 경우 (양식 가변)
 
-→ 양식별 파서 작성 비현실적. **Claude Vision에 자유 형식으로 던져 정규화된 JSON으로 받는다.**
+→ 양식별 파서 작성 비현실적. **자유 형식으로 Claude에 던져 정규화된 JSON으로 받는다.**
+- 사진/PDF: Claude Vision (이미지 입력)
+- Excel/CSV: SheetJS로 셀 dump → 마크다운 표 형태 텍스트화 → Claude Sonnet 텍스트 입력
+- 동일한 출력 스키마(§3.1)로 수렴시킨다.
 
 ### 비교 흐름 (단계적)
 
@@ -89,11 +96,25 @@ CREATE TABLE IF NOT EXISTS settlement_statement_audits (
 
 ### 3.1 OCR 엔드포인트 — `POST /api/ocr/extract-statement`
 
-`server/ocr.ts`에 추가. 기존 `extract-purchase` 패턴 그대로.
+`server/ocr.ts`에 추가. 기존 `extract-purchase` 패턴 그대로. **이미지/PDF와 Excel/CSV 모두 지원**.
+
+#### 입력 분기
+- `imageUrls`: 사진/PDF (기존 업로드 인프라 재사용)
+- `spreadsheetText`: SheetJS dump 결과(마크다운 표 형식 문자열). 클라이언트에서 Excel/CSV 파싱 후 전송
+- 둘 중 하나만 채워서 요청. 서버에서 분기:
+  - `imageUrls` 있으면 → Vision 모드 (이미지 입력)
+  - `spreadsheetText` 있으면 → 텍스트 모드 (`role: user, content: spreadsheetText`)
+- **프롬프트와 출력 스키마는 동일**. 모델 선택만 분기.
 
 ```ts
 // 요청
-{ imageUrls: string[], restaurantId: number, hintCounterpartyId?: number, hintYearMonth?: string }
+{
+  imageUrls?: string[],
+  spreadsheetText?: string,    // SheetJS dump (Excel/CSV 입력 시)
+  restaurantId: number,
+  hintCounterpartyId?: number,
+  hintYearMonth?: string
+}
 
 // 응답
 {
@@ -135,6 +156,14 @@ CREATE TABLE IF NOT EXISTS settlement_statement_audits (
 - `findCounterpartyId(name, restaurantId)` 그대로 사용
 - 실패 시 `counterpartyName` 원문만 보존 → UI에서 사용자가 거래처 수동 지정
 
+#### Excel/CSV 클라이언트 전처리
+- `client/src/lib/spreadsheetToText.ts` (신규 유틸):
+  - 입력: File (xlsx/xls/csv)
+  - 처리: SheetJS(`xlsx` 패키지, 이미 의존성 존재) → 시트별로 `sheet_to_csv` 또는 `sheet_to_json({header:1})` → 마크다운 표 형식 문자열
+  - 다중 시트면 `## 시트명` 헤더로 구분, 빈 행/공백 컬럼 정리
+  - 결과 토큰 수가 너무 크면(>50k) 시트 단위로 분할해서 첫 시트만 또는 사용자 선택
+- 업로드 모달이 파일 확장자로 자동 분기 (`.xlsx|.xls|.csv` → spreadsheet 모드, 그 외 → image 모드)
+
 ### 3.2 tRPC 라우터 — `server/routers/settlementStatements.ts` (신규)
 
 ```ts
@@ -167,16 +196,20 @@ output: SettlementStatementAudit + 재계산된 comparison
 input: {
   auditId,
   actions: Array<{
-    type: 'add_to_system' | 'update_amount' | 'create_order' | 'dismiss',
+    type: 'link_alias' | 'add_to_system' | 'update_amount' | 'create_order' | 'dismiss',
     itemRef: ...,
     targetPurchaseOrderId?: number,
+    targetItemId?: number,        // link_alias 시 사용자가 선택한 items.id
+    rawItemName?: string,         // link_alias 시 OCR 원문 → counterparty_items.supplierItemName
     payload?: { quantity, unitPrice, lineTotal, ... }
   }>
 }
-처리:
-  - 트랜잭션 내에서 각 액션을 purchase_orders_v2 / purchase_order_items_v2에 반영
-  - audit.status='applied', appliedActions 기록
-  - editHistory에 "정산표 대조 적용" 항목 추가
+처리 순서 (트랜잭션 내):
+  1) link_alias 액션부터 처리 → counterparty_items 갱신/신규 → 메모리 매칭 테이블 갱신
+  2) 갱신된 매칭으로 add/update/create 액션 실행
+  3) purchase_orders_v2 / purchase_order_items_v2에 반영
+  4) audit.status='applied', appliedActions 기록
+  5) editHistory에 "정산표 대조 적용" 항목 추가
 
 // 5. dismissAudit (managerProcedure)
 input: { auditId, reason? }
@@ -239,6 +272,21 @@ function compareWithSystem(
 
 매칭 함수는 기존 `matchCounterpartyItems` / `fuzzyScore` / `normalizeKorean` 재사용.
 
+#### 매칭 우선순위 (확정)
+1. `counterparty_items.supplierItemName` 정확 일치 (정규화 후)
+2. `counterparty_items.supplierItemName` 유사도 ≥ 0.85
+3. `items.name` 정확 일치
+4. `items.name` 유사도 ≥ 0.85
+5. 위 모두 실패 → "미매칭" 분류
+
+#### Alias 학습 (사용자가 1회 매핑하면 다음부터 자동 적용)
+- 미매칭 OCR 라인을 사용자가 "이 품목은 X" 연결 시:
+  - 해당 `(counterpartyId, itemId)` 행이 `counterparty_items`에 있으면 → `supplierItemName`을 OCR rawItemName으로 갱신(빈 값일 때만, 기존값 덮어쓰기 X)
+  - 행이 없으면 → 신규 `counterparty_items` 행 생성 (`supplierItemName=rawItemName`, `purchaseUnit=spec`)
+- 이 처리는 `applySelectedActions` 트랜잭션 내에서 액션 타입 `link_alias`로 함께 수행
+- 결과: 다음 정산표부터 동일 품목명은 1순위로 즉시 매칭됨
+- **주의**: 같은 supplierItemName이 여러 itemId에 매핑되는 충돌 케이스는 신규 행 생성 시 거부하고 사용자에게 알림
+
 ### 3.4 부가세 처리
 
 비교 직전 `counterparty.settlementBasis`로 분기:
@@ -258,7 +306,11 @@ function compareWithSystem(
 
 #### Step 1: 업로드
 - 거래처 선택 드롭다운 (월에 매입 있는 거래처 목록 + "OCR로 자동감지")
-- 이미지/PDF 업로드 (다중, 긴 정산표는 페이지 여러 장)
+- 파일 업로드 (다중, 긴 정산표는 페이지 여러 장)
+  - 허용 확장자: `.jpg .jpeg .png .heic .pdf .xlsx .xls .csv`
+  - 클라이언트에서 확장자 분기:
+    - 이미지/PDF → 기존 업로드 → `imageUrls` 채워서 호출
+    - Excel/CSV → 클라이언트에서 SheetJS dump → `spreadsheetText` 채워서 호출
 - "분석 시작" → `extractAndCompare` 호출
 
 #### Step 2: 결과 (비교 레벨에 따라 다른 화면)
@@ -267,13 +319,15 @@ function compareWithSystem(
 
 **b) `date_mismatch` (일자별로는 다 맞음)** — 노란 배지 "월합계만 N원 차이. 일자별 합계는 모두 일치." + 일자별 표
 
-**c) `item_mismatch`** — 메인 화면. 4개 섹션:
-1. **금액 차이** — `[ ] 시스템 금액 → 정산표 금액으로 수정` 체크박스 행
-2. **시스템 누락** (정산표에 있는데 시스템엔 없음) — `[ ] 시스템에 매입 추가` 체크박스 행
-3. **정산표 누락** (시스템에 있는데 정산표엔 없음) — `[ ] 무시(반품/오입력 가능)` 또는 `[ ] 시스템에서 삭제 표시`
-4. **정상** (참고용 접힘)
+**c) `item_mismatch`** — 메인 화면. 5개 섹션:
+1. **품목 매칭 필요** — OCR 품목명이 시스템 품목 어디에도 안 잡힌 라인. 드롭다운으로 우리 `items` 선택 → 액션 `link_alias` 등록
+2. **금액 차이** — `[ ] 시스템 금액 → 정산표 금액으로 수정` 체크박스 행
+3. **시스템 누락** (정산표에 있는데 시스템엔 없음) — `[ ] 시스템에 매입 추가` 체크박스 행
+4. **정산표 누락** (시스템에 있는데 정산표엔 없음) — `[ ] 무시(반품/오입력 가능)` 또는 `[ ] 시스템에서 삭제 표시`
+5. **정상** (참고용 접힘)
 
 각 행에 OCR원본 / 시스템값 / 차액 표시. 하단 "선택 항목 적용" 버튼 → `applySelectedActions` 호출.
+- 1번(매칭) 액션은 다른 액션과 동일 트랜잭션에서 먼저 처리되어 alias 학습 후 라인 매칭이 갱신된다.
 
 ### 4.3 신규 매입 추가 시 처리
 - "시스템에 매입 추가" 액션 선택 시:
@@ -296,8 +350,9 @@ function compareWithSystem(
 | `server/routers/settlementStatements.ts` | **신규** tRPC 라우터 (5개 프로시저) |
 | `server/routers/index.ts` | `settlementStatements` 등록 |
 | `server/routers/counterparties.ts` | `settlementBasis`/`settlementMatchTolerance` 입력 필드 추가 |
+| `client/src/lib/spreadsheetToText.ts` | **신규** Excel/CSV → 마크다운 표 텍스트 유틸 (SheetJS) |
 | `client/src/pages/MonthlySettlementPage.tsx` | 매입 섹션에 "정산표 대조" 버튼 |
-| `client/src/components/SettlementStatementCompareModal.tsx` | **신규** 모달 |
+| `client/src/components/SettlementStatementCompareModal.tsx` | **신규** 모달 (이미지/PDF/Excel/CSV 업로드 분기, alias 매핑 UI 포함) |
 | `client/src/pages/CounterpartiesPage.tsx` | 거래처 편집에 정산 기준 필드 |
 
 ---
@@ -308,21 +363,22 @@ function compareWithSystem(
 
 ### Phase A — 스키마 + 백엔드 골격
 1. schema.ts + 자동 마이그레이션. **완료 조건**: `pnpm run build` 통과 + 로컬에서 ALTER 문 idempotent 확인.
-2. `extract-statement` OCR 엔드포인트. **완료 조건**: 첨부 PDF 2종으로 curl 호출 시 정규화된 JSON 응답 (수동 검증).
-3. `settlementStatements` 라우터 5개 프로시저. **완료 조건**: tRPC 타입 빌드 통과.
+2. `extract-statement` OCR 엔드포인트 (이미지+텍스트 분기). **완료 조건**: 첨부 PDF 2종 + Excel 1종으로 동일 출력 스키마 응답 (수동 검증).
+3. `settlementStatements` 라우터 5개 프로시저 (link_alias 포함). **완료 조건**: tRPC 타입 빌드 통과.
 
 ### Phase B — 비교 로직
-4. `compareWithSystem` 알고리즘 + 단위테스트(있으면) 또는 임시 스크립트 검증.
-   **완료 조건**: 첨부 (주)331컴퍼니 정산표를 임의 매입 데이터와 비교해 3-level 결과가 나오는지 확인.
+4. `compareWithSystem` 알고리즘 + 매칭 우선순위 5단계 + 임시 스크립트 검증.
+   **완료 조건**: 첨부 (주)331컴퍼니 정산표를 임의 매입 데이터와 비교해 3-level 결과 + 미매칭 라인 식별 확인.
 
 ### Phase C — UI
-5. `SettlementStatementCompareModal` 컴포넌트.
-6. MonthlySettlementPage 매입 섹션 진입점.
-7. CounterpartiesPage 정산 기준 필드.
-   **완료 조건**: 빌드 통과 + 천호점(restaurantId=2) Tutorial 데이터로 수동 시나리오 1회 통과.
+5. `spreadsheetToText` 유틸 + 단위 검증.
+6. `SettlementStatementCompareModal` 컴포넌트 (확장자 분기, alias 매핑 드롭다운 포함).
+7. MonthlySettlementPage 매입 섹션 진입점.
+8. CounterpartiesPage 정산 기준 필드.
+   **완료 조건**: 빌드 통과 + 천호점(restaurantId=2) Tutorial 데이터로 ① 이미지 ② Excel 두 시나리오 수동 통과 + alias 학습 후 2회차 자동 매칭 확인.
 
 ### Phase D — 배포
-8. §4 5항 보고 → 사용자 승인 → push.
+9. §4 5항 보고 → 사용자 승인 → push.
 
 ---
 
@@ -333,6 +389,8 @@ function compareWithSystem(
 - **수금 대조**: `monthlySummary.paymentTotal`은 저장만. 시스템에 거래처 수금 입력 기능이 없음 — 이건 별도 기획.
 - **PDF 다페이지**: PDF.js로 페이지별 이미지화 후 다중 OCR. 1차는 사용자가 페이지별 캡처 업로드 권장.
 - **중복 적용 방지**: 같은 yearMonth+counterpartyId의 audit이 `applied` 상태면 새 업로드 시 경고.
+- **Excel 거대 파일**: SheetJS dump 결과가 50k 토큰 초과 시 시트 단위 분할. 1차는 첫 시트만 처리하고 사용자에게 알림. 다중 시트 자동 통합은 후속.
+- **Alias 충돌**: 동일 supplierItemName이 매장 간 다른 itemId에 매핑돼야 하는 경우 (예: 같은 거래처가 매장별로 다른 품목 코드 사용)는 `(restaurantId, counterpartyId, supplierItemName)` 단위로 격리됨 — 현 스키마가 restaurantId 포함이라 OK. 단 한 거래처가 같은 supplierItemName을 다른 itemId에 동시 매핑하려 하면 사용자 알림 후 거부.
 
 ---
 
