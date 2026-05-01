@@ -237,8 +237,8 @@ export default function ContractSignPage({ token }: { token: string }) {
                   value={contract.payMethod === "bank_transfer" ? "계좌이체" : "현금"}
                 />
                 <ContractRow
-                  label="10. 4대보험"
-                  value={contract.socialInsurance ? "가입" : "미가입"}
+                  label="10. 세무처리"
+                  value={contract.taxMode === "biz_income_3_3" ? "사업소득 3.3% 원천공제" : "4대보험 가입"}
                 />
                 {contract.mealProvided && (
                   <ContractRow
@@ -347,8 +347,8 @@ export default function ContractSignPage({ token }: { token: string }) {
               <p>본 계약서의 전자 서명은 전자서명법에 따라 법적 효력을 가집니다.</p>
             </div>
 
-            {/* ═══ 부속서류 1: 비밀유지서약서 ═══ */}
-            {contract.includeNda && (
+            {/* ═══ 부속서류 1: 비밀유지서약서 — 재설계 2026-05-02: 항상 첨부 ═══ */}
+            {true && (
               <div className="pt-6 space-y-3" style={{ borderTop: "2px solid #111827" }}>
                 <h2 className="text-lg font-bold text-center tracking-wide" style={{ color: "#111827" }}>비밀유지서약서</h2>
                 <div className="text-[13px] leading-relaxed space-y-3" style={{ color: "#374151" }}>
@@ -369,8 +369,8 @@ export default function ContractSignPage({ token }: { token: string }) {
               </div>
             )}
 
-            {/* ═══ 부속서류 2: 개인정보 수집·이용 동의서 ═══ */}
-            {contract.includePrivacyConsent && (
+            {/* ═══ 부속서류 2: 개인정보 수집·이용 동의서 — 재설계 2026-05-02: 항상 첨부 ═══ */}
+            {true && (
               <div className="pt-6 space-y-3" style={{ borderTop: "2px solid #111827" }}>
                 <h2 className="text-lg font-bold text-center tracking-wide" style={{ color: "#111827" }}>개인정보 수집·이용 동의서</h2>
                 <div className="text-[13px] leading-relaxed space-y-3" style={{ color: "#374151" }}>

@@ -25,6 +25,7 @@ import {
   employmentElectronicContracts,
   auditLogs,
   restaurantInvites,
+  affiliatedCompanies,
 } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
@@ -79,13 +80,24 @@ function computeMismatchedFields(
     snapshotWeeklyHours?: string | number | null;
     snapshotWageType?: string | null;
     snapshotWage?: string | number | null;
+    snapshotHireDate?: string | Date | null;
+    snapshotOver5Employees?: boolean | null;
   } | null,
+  effectiveOver5?: boolean | null,
 ): string[] {
   if (!snapshot) return [];
   const diff: string[] = [];
   const numEq = (a: any, b: any): boolean => {
     if ((a == null || a === "") && (b == null || b === "")) return true;
     return Number(a) === Number(b);
+  };
+  const dateEq = (a: any, b: any): boolean => {
+    const toIso = (x: any) => {
+      if (x == null || x === "") return "";
+      const d = x instanceof Date ? x : new Date(x);
+      return Number.isNaN(d.getTime()) ? "" : d.toISOString().substring(0, 10);
+    };
+    return toIso(a) === toIso(b);
   };
   // 임금: wageType + wageAmount 결합 비교 (한 쪽이라도 다르면 wage 라벨)
   const wageMismatch =
@@ -112,6 +124,14 @@ function computeMismatchedFields(
   // 주근로시간 (decimal): 숫자 비교
   if (current.weeklyHours != null || snapshot.snapshotWeeklyHours != null) {
     if (!numEq(current.weeklyHours, snapshot.snapshotWeeklyHours)) diff.push("weeklyHours");
+  }
+  // 입사일: SSOT(restaurant_users.hireDate) ↔ snapshotHireDate
+  if (current.hireDate != null || snapshot.snapshotHireDate != null) {
+    if (!dateEq(current.hireDate, snapshot.snapshotHireDate)) diff.push("hireDate");
+  }
+  // 5인 여부: 소속회사 마스터 effectiveOver5 ↔ snapshotOver5Employees
+  if (effectiveOver5 != null && snapshot.snapshotOver5Employees != null) {
+    if (Boolean(effectiveOver5) !== Boolean(snapshot.snapshotOver5Employees)) diff.push("over5Employees");
   }
   return diff;
 }
@@ -152,7 +172,6 @@ export const staffRouter = router({
           contractEnd: employeeContracts.contractEnd,
           weeklyHours: employeeContracts.weeklyHours,
           weeklyOffDays: employeeContracts.weeklyOffDays,
-          socialInsurance: employeeContracts.socialInsurance,
           bankName: employeeContracts.bankName,
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
@@ -191,6 +210,10 @@ export const staffRouter = router({
             snapshotWeeklyHours: employmentElectronicContracts.snapshotWeeklyHours,
             snapshotWageType: employmentElectronicContracts.snapshotWageType,
             snapshotWage: employmentElectronicContracts.snapshotWage,
+            // 재설계 2026-05-02 신규 박제
+            snapshotHireDate: employmentElectronicContracts.snapshotHireDate,
+            snapshotOver5Employees: employmentElectronicContracts.snapshotOver5Employees,
+            snapshotTaxMode: employmentElectronicContracts.snapshotTaxMode,
           })
           .from(employmentElectronicContracts)
           .where(and(
@@ -205,6 +228,17 @@ export const staffRouter = router({
           }
         }
       }
+
+      // 매장의 affiliated_companies 마스터 미리 조회 → 직원별 effectiveOver5 매핑
+      const ac = await db
+        .select({
+          companyName: affiliatedCompanies.companyName,
+          over5Employees: affiliatedCompanies.over5Employees,
+        })
+        .from(affiliatedCompanies)
+        .where(eq(affiliatedCompanies.restaurantId, input.restaurantId));
+      const over5Map = new Map<string, boolean>();
+      for (const c of ac) over5Map.set(c.companyName, Boolean(c.over5Employees));
 
       // 매니져(supervisor) 호출 시 급여 필드 drop — 민감정보 방어
       const isOwnerLevel =
@@ -237,6 +271,7 @@ export const staffRouter = router({
 
       return rows.map((r) => {
         const snap = snapshotsMap.get(r.userId) ?? null;
+        const effectiveOver5 = r.affiliatedCompany ? over5Map.get(r.affiliatedCompany) ?? false : false;
         const mismatchedFields = computeMismatchedFields(
           {
             name: r.name,
@@ -252,12 +287,20 @@ export const staffRouter = router({
             wageAmount: r.wageAmount,
           },
           snap,
+          effectiveOver5,
         );
         const out: any = {
           ...r,
+          effectiveOver5,
           mismatchedFields,
           hasActiveContract: !!snap,
           latestContractSignedAt: snap?.signedAt ?? null,
+          // 박제값 직접 노출 — 클라이언트 갱신 배너 / 분기 표시용
+          snapshotHireDate: snap?.snapshotHireDate ?? null,
+          snapshotOver5Employees: snap?.snapshotOver5Employees ?? null,
+          snapshotTaxMode: snap?.snapshotTaxMode ?? null,
+          snapshotAffiliatedCompany: snap?.snapshotAffiliatedCompany ?? null,
+          snapshotWeeklyOffDays: snap?.snapshotWeeklyOffDays ?? null,
         };
         if (!canSeeWage) {
           delete out.wageType;

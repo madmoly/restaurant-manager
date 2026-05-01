@@ -15,15 +15,20 @@ import {
   restaurantShiftPresets,
   leaveTransactions,
   employmentElectronicContracts,
+  affiliatedCompanies,
 } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 import { getHolidayName } from "@shared/holidays";
 import {
-  computeMonthlyStandardHours,
   computeWageForShift,
   computeGuideWage,
   type WageType,
 } from "../helpers/wage";
+import {
+  computeMonthlyStandardHours,
+  groupHoursByWeek,
+  computeWeeklyHolidayPay,
+} from "../helpers/labor";
 import { computeAnnualAccrual } from "../helpers/leave";
 
 // ─── 헬퍼 함수 ──────────────────────────────────────────────────────────────
@@ -917,13 +922,15 @@ export const schedulesRouter = router({
           contractEnd: employeeContracts.contractEnd,
           weeklyOffDays: employeeContracts.weeklyOffDays,
           weeklyHours: employeeContracts.weeklyHours,
-          socialInsurance: employeeContracts.socialInsurance,
           bankName: employeeContracts.bankName,
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
           contractIsActive: employeeContracts.isActive,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
-          over5Employees: employmentElectronicContracts.over5Employees,
+          // 시급제 + 주휴포함 여부 (latest signed contract 박제)
+          hourlyWageIncludesHolidayPay: employmentElectronicContracts.hourlyWageIncludesHolidayPay,
+          // taxMode (signed contract 박제) — 표시용
+          taxMode: employmentElectronicContracts.snapshotTaxMode,
         })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
@@ -969,19 +976,19 @@ export const schedulesRouter = router({
       }
       const rows = Array.from(seenSchedules.values());
 
-      // noWeeklyHolidayPay 별도 조회 (컬럼 미존재 시 안전 fallback)
-      let noHolidayPayMap = new Map<number, boolean>();
-      try {
-        const nhpRows = await db.select({
-          userId: employeeContracts.userId,
-          noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
-        }).from(employeeContracts).where(eq(employeeContracts.restaurantId, input.restaurantId));
-        for (const r of nhpRows) {
-          if (r.userId) noHolidayPayMap.set(r.userId, !!r.noWeeklyHolidayPay);
-        }
-      } catch {
-        console.log(`[laborCost] noWeeklyHolidayPay column not available, defaulting to false`);
-      }
+      // 재설계 2026-05-02: noWeeklyHolidayPay 폐기. 시급제 + 주휴별도(hourlyWageIncludesHolidayPay=false)는
+      // 별도 카드 분리하지 않고 같은 카드에서 주별 가산 라인으로 처리.
+
+      // 매장의 affiliated_companies 마스터 → 회사명별 5인 여부
+      const acRows = await db
+        .select({
+          companyName: affiliatedCompanies.companyName,
+          over5Employees: affiliatedCompanies.over5Employees,
+        })
+        .from(affiliatedCompanies)
+        .where(eq(affiliatedCompanies.restaurantId, input.restaurantId));
+      const over5ByCompany = new Map<string, boolean>();
+      for (const c of acRows) over5ByCompany.set(c.companyName, Boolean(c.over5Employees));
 
       console.log(`[laborCost] rows found: ${rows.length} (raw: ${rawRows.length})`);
 
@@ -1033,13 +1040,16 @@ export const schedulesRouter = router({
           hireDate: string | null;
           userId: number | null;
           recheckRequired: boolean;
-          socialInsurance: boolean;
           bankName: string | null;
           bankAccount: string | null;
           residentNumber: string | null;
           phone: string | null;
           over5Employees: boolean;
+          // 재설계 2026-05-02: 시급제 + 주휴별도(hourlyWageIncludesHolidayPay=false) 직원의 주별 시간 누적
+          hourlyWageIncludesHolidayPay: boolean;
+          taxMode: string | null;
           dateSet: Set<string>;
+          shiftsForWeek: Array<{ startDate: string; hours: number }>;
         }>;
         totalHours: number;
         totalWage: number;
@@ -1048,9 +1058,9 @@ export const schedulesRouter = router({
       for (const r of rows) {
         const company = (r.affiliatedCompany ?? "미지정").trim() || "미지정";
         const name = r.userName ?? r.tempWorkerName ?? "미지정";
-        // 주휴수당 미제공 정규직원 → 임시근로자 취급 (empKey에 temp_ 접두사)
-        const treatAsTemp = !!(r.userId && noHolidayPayMap.get(r.userId));
-        const empKey = (!r.userId || treatAsTemp) ? `temp_${r.userId ?? name}` : String(r.userId);
+        // 재설계 2026-05-02: treatAsTemp(noWeeklyHolidayPay 분리) 폐기. 정규직은 항상 같은 카드.
+        const empKey = !r.userId ? `temp_${name}` : String(r.userId);
+        const over5 = over5ByCompany.get(company) ?? false;
 
         if (!companyMap[company]) {
           companyMap[company] = { company, operatingDays, employees: {}, totalHours: 0, totalWage: 0 };
@@ -1066,18 +1076,20 @@ export const schedulesRouter = router({
             contractStart: r.contractStart ? String(r.contractStart) : null,
             contractEnd: r.contractEnd ? String(r.contractEnd) : null,
             daysOff: 0, // 아래에서 최종 계산
-            contractDaysOff: treatAsTemp ? 0 : Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
+            contractDaysOff: Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
             recheckRequired: false,
-            // 4대보험·원천세는 시스템 미계산 — 별도 계산 안내만 표기
-            socialInsurance: (r.userId && !treatAsTemp && r.socialInsurance != null) ? r.socialInsurance : false,
             bankName: r.bankName ?? null,
             bankAccount: r.bankAccount ?? r.tempBankAccount ?? null,
             residentNumber: r.residentNumber ?? null,
             phone: r.tempPhone ?? null,
-            over5Employees: !!r.over5Employees,
+            over5Employees: over5,
+            // 시급제 + 주휴포함 여부 (latest signed contract). null 시 true 폴백 (보수적)
+            hourlyWageIncludesHolidayPay: r.hourlyWageIncludesHolidayPay ?? true,
+            taxMode: r.taxMode ?? null,
             dateSet: new Set<string>(),
+            shiftsForWeek: [],
           };
         }
 
@@ -1087,19 +1099,21 @@ export const schedulesRouter = router({
         const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
         const hours = netMin / 60; // 분 단위 정밀 계산
 
-        // ── 시급 결정 (server/helpers/wage.ts:computeWageForShift 통일) ──
-        // 임시근로자: tempWageType/Amount 사용. 정규직: wage_history 기준.
-        // 월급제 분모는 직원의 weeklyHours에서 자동 산출 (noWeeklyHolidayPay=true 면 주휴 미포함)
+        // ── 시급 결정 (재설계 2026-05-02 §2.4 분기) ──
+        //   시급 + 주휴포함  → 시간 × 시급 (현행)
+        //   시급 + 주휴별도  → 시간 × 시급 + 주15h 이상 주별 8h × 시급 (월말 일괄, 아래 가산)
+        //   월급 + 5인 이상  → 시간 × (월급 / 209)
+        //   월급 + 5인 미만  → 시간 × (월급 / monthlyContractHours_no_annual)
         let shiftWageType: WageType = null;
         let shiftWageAmount: number | null = null;
-        let stdHours = computeMonthlyStandardHours(null, false); // 폴백 209h
+        let stdHours = computeMonthlyStandardHours(null, true); // 폴백 209h (over5=true)
         if (r.tempWageType && r.tempWageAmount) {
           shiftWageType = r.tempWageType as WageType;
           shiftWageAmount = Number(r.tempWageAmount);
         } else if (r.wageType && r.wageAmount) {
           shiftWageType = r.wageType as WageType;
           shiftWageAmount = Number(r.wageAmount);
-          stdHours = computeMonthlyStandardHours(r.weeklyHours, treatAsTemp);
+          stdHours = computeMonthlyStandardHours(r.weeklyHours, over5);
         }
         const wage = computeWageForShift({
           wageType: shiftWageType,
@@ -1116,9 +1130,25 @@ export const schedulesRouter = router({
         companyMap[company].employees[empKey].totalWage += wage;
         companyMap[company].employees[empKey].shifts++;
         companyMap[company].employees[empKey].dateSet.add(dateStr);
+        // 시급제 + 주휴별도 직원의 주별 가산용 시프트 누적
+        companyMap[company].employees[empKey].shiftsForWeek.push({ startDate: dateStr, hours });
         if (r.payrollRecheckRequired) companyMap[company].employees[empKey].recheckRequired = true;
         companyMap[company].totalHours += hours;
         companyMap[company].totalWage += wage;
+      }
+
+      // 시급제 + 주휴별도 직원 → 주별 8h × 시급 가산 (월말 일괄)
+      for (const c of Object.values(companyMap)) {
+        for (const emp of Object.values(c.employees)) {
+          if (emp.wageType !== "hourly") continue;
+          if (emp.hourlyWageIncludesHolidayPay) continue;
+          const hourly = Number(emp.wageAmount);
+          if (!isFinite(hourly) || hourly <= 0) continue;
+          const weekMap = groupHoursByWeek(emp.shiftsForWeek);
+          const bonus = computeWeeklyHolidayPay(weekMap, hourly);
+          emp.totalWage += bonus;
+          c.totalWage += bonus;
+        }
       }
 
       // ── 5인 이상 사업장 직원의 대체휴무/연차 잔여 조회 ──
@@ -1184,11 +1214,11 @@ export const schedulesRouter = router({
             }
           }
 
-          // 주휴수당 미제공 정규직 → isTemp이지만 userId 보유 (temp_{userId} 키)
-          const isNoHolidayPayWorker = isTemp && emp.userId != null;
+          // 재설계 2026-05-02: noWeeklyHolidayPay 분리 폐기. 정규직은 항상 isNoHolidayPayWorker=false.
+          const isNoHolidayPayWorker = false;
 
-          // 가이드 환산: 직원의 monthlyStandardHours 기준 (단시간근로자 자동 분모 보정)
-          const empStdHours = computeMonthlyStandardHours(emp.weeklyHours, isNoHolidayPayWorker);
+          // 가이드 환산: 시급제는 가이드 비표시(클라이언트 측 분기). 월급제는 5인 여부 기준 분모.
+          const empStdHours = computeMonthlyStandardHours(emp.weeklyHours, emp.over5Employees);
           const guide = computeGuideWage({
             wageType: emp.wageType as WageType,
             wageAmount: emp.wageAmount,
@@ -1228,8 +1258,11 @@ export const schedulesRouter = router({
             // 입사일 기준 연차 발생 일정 (5인이상만)
             annualAccrual: emp.over5Employees ? computeAnnualAccrual(emp.hireDate) : null,
             over5Employees: emp.over5Employees,
+            hourlyWageIncludesHolidayPay: emp.hourlyWageIncludesHolidayPay,
+            taxMode: emp.taxMode,
             userId: undefined, // 클라이언트에 노출하지 않음
             dateSet: undefined, // 내부 집계용
+            shiftsForWeek: undefined, // 내부 집계용
           };
         }),
       }));
@@ -1474,17 +1507,7 @@ export const schedulesRouter = router({
       }
       const rows = Array.from(seen.values());
 
-      // 주휴미제공 정규직 판별
-      let noHolidayPayMap = new Map<number, boolean>();
-      try {
-        const nhpRows = await db.select({
-          userId: employeeContracts.userId,
-          noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
-        }).from(employeeContracts).where(eq(employeeContracts.restaurantId, input.restaurantId));
-        for (const r of nhpRows) {
-          if (r.userId) noHolidayPayMap.set(r.userId, !!r.noWeeklyHolidayPay);
-        }
-      } catch {}
+      // 재설계 2026-05-02: noWeeklyHolidayPay 폐기. 정규직은 항상 정규직 카드.
 
       // 영업일수 계산
       const weeklyClosureRows = await db.select().from(storeWeeklyClosures)
@@ -1534,8 +1557,8 @@ export const schedulesRouter = router({
       for (const r of rows) {
         const company = (r.affiliatedCompany ?? "미지정").trim() || "미지정";
         const name = r.userName ?? r.tempWorkerName ?? "미지정";
-        const treatAsTemp = !!(r.userId && noHolidayPayMap.get(r.userId));
-        const empKey = (!r.userId || treatAsTemp) ? `temp_${r.userId ?? name}` : String(r.userId);
+        // 재설계 2026-05-02: treatAsTemp 폐기
+        const empKey = !r.userId ? `temp_${name}` : String(r.userId);
 
         if (!companyMap[company]) {
           companyMap[company] = { company, operatingDays, totalHours: 0, employees: {} };
@@ -1549,9 +1572,9 @@ export const schedulesRouter = router({
             shifts: 0,
             totalHours: 0,
             daysOff: 0,
-            contractDaysOff: treatAsTemp ? 0 : Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
+            contractDaysOff: Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
             recheckRequired: false,
-            isNoHolidayPayWorker: treatAsTemp,
+            isNoHolidayPayWorker: false,
             dailyMap: new Map<string, { hours: number; shifts: number }>(),
           };
         }

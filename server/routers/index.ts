@@ -37,6 +37,8 @@ import { staffRouter } from "./staff";
 import { posRouter } from "./pos";
 // 정산표 OCR 대조 (2026-05-01)
 import { settlementStatementsRouter } from "./settlementStatements";
+// 계약·인건비 재설계 (2026-05-02)
+import { affiliatedCompaniesRouter } from "./affiliatedCompanies";
 
 export const appRouter = router({
   auth: authRouter,
@@ -77,6 +79,8 @@ export const appRouter = router({
   pos: posRouter,
   // 정산표 OCR 대조
   settlementStatements: settlementStatementsRouter,
+  // 계약·인건비 재설계
+  affiliatedCompanies: affiliatedCompaniesRouter,
 });
 
 export type AppRouter = typeof appRouter;

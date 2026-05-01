@@ -16,12 +16,12 @@ import { db } from "../db";
 import {
   leaveTransactions,
   employeeLeaves,
-  employmentElectronicContracts,
   schedules,
   users,
   restaurantUsers,
 } from "../../drizzle/schema";
 import { getHolidayName, isHoliday, getHolidaysForYear } from "@shared/holidays";
+import { getOver5ForEmployee } from "../helpers/labor";
 
 export const leaveBalanceRouter = router({
   /**
@@ -374,22 +374,9 @@ export const leaveBalanceRouter = router({
 
 // ─── 헬퍼 함수 ─────────────────────────────────────────────────────────────
 
-/** 직원이 5인 이상 사업장 계약인지 확인 */
+/** 직원이 5인 이상 사업장 소속인지 확인 (재설계 2026-05-02: 소속회사 마스터 기준) */
 async function check5PlusEmployee(userId: number, restaurantId: number): Promise<boolean> {
-  // 유효한(signed) 계약에서 over5Employees 확인
-  const [contract] = await db.select({
-    over5Employees: employmentElectronicContracts.over5Employees,
-  })
-    .from(employmentElectronicContracts)
-    .where(and(
-      eq(employmentElectronicContracts.employeeId, userId),
-      eq(employmentElectronicContracts.restaurantId, restaurantId),
-      eq(employmentElectronicContracts.status, "signed"),
-    ))
-    .orderBy(sql`${employmentElectronicContracts.createdAt} DESC`)
-    .limit(1);
-
-  return !!contract?.over5Employees;
+  return getOver5ForEmployee(restaurantId, userId);
 }
 
 /** 대체휴무/연차 잔여일수 계산 */

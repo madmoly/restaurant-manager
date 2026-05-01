@@ -1,35 +1,17 @@
 /**
- * 인건비 계산 공통 헬퍼
+ * 인건비 계산 공통 헬퍼 (시프트 임금 / 가이드 환산만 담당)
  *
- * 통일 원칙:
- * - 월급제 시급 환산은 직원의 weeklyHours 기준으로 분모 자동 산출
- * - noWeeklyHolidayPay=true 시 주휴 미포함 분모, false 시 주휴 포함 분모
- * - weeklyHours 결측 시 209h 풀타임 표준으로 폴백
+ * 재설계 2026-05-02:
+ * - computeMonthlyStandardHours는 helpers/labor.ts로 이동 (5인 미만/이상 분기 위해 DB 의존)
+ * - 본 파일은 순수 함수만 유지 (시프트 임금 합산, 가이드 시급 환산)
  *
  * 사용처:
- * - server/routers/schedules.ts:laborCostByCompany (월 인건비 집계)
- * - server/routers/dailyClosings.ts:estimate (일마감 자동계산)
- * - server/routers/monthlyClosings.ts:sumLaborByCompany (월정산 합계)
+ * - server/routers/schedules.ts:laborCostByCompany / workSummaryByEmployee
+ * - server/routers/dailyClosings.ts:estimate
+ * - server/routers/monthlyClosings.ts:sumLaborByCompany
  */
 
-const WEEKS_PER_MONTH = 365 / 12 / 7; // ≈ 4.345
-const FULLTIME_STANDARD_HOURS = 209;   // 주40h × 4.345 + 주휴8h × 4.345 ≈ 209
-
-/**
- * 월 통상임금 산정시간 (직원별).
- * @param weeklyHours 주 소정근로시간 (단시간근로자 기준 실 근무시간)
- * @param noWeeklyHolidayPay true면 주휴 미포함 분모, false면 주휴 포함
- * @returns 월 통상임금 산정시간 (시간 단위)
- */
-export function computeMonthlyStandardHours(
-  weeklyHours: number | string | null | undefined,
-  noWeeklyHolidayPay: boolean = false,
-): number {
-  const wh = Number(weeklyHours);
-  if (!isFinite(wh) || wh <= 0) return FULLTIME_STANDARD_HOURS;
-  const weeklyHoliday = noWeeklyHolidayPay ? 0 : wh / 5; // 주휴 = 주근로/5 (주5일 환산)
-  return (wh + weeklyHoliday) * WEEKS_PER_MONTH;
-}
+const FULLTIME_STANDARD_HOURS = 209; // 풀타임 표준 분모 폴백
 
 export type WageType = "hourly" | "monthly" | "daily" | null | undefined;
 

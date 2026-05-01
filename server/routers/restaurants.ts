@@ -314,7 +314,6 @@ export const restaurantsRouter = router({
           contractStart: employeeContracts.contractStart,
           contractEnd: employeeContracts.contractEnd,
           weeklyOffDays: employeeContracts.weeklyOffDays,
-          socialInsurance: employeeContracts.socialInsurance,
           bankAccount: employeeContracts.bankAccount,
           residentNumber: employeeContracts.residentNumber,
         })

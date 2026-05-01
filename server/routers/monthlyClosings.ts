@@ -3,7 +3,8 @@ import { eq, and, gte, sql, sum, count, between } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { verifyStoreAccess } from "../middleware/storeAuth";
-import { computeMonthlyStandardHours, computeWageForShift, type WageType } from "../helpers/wage";
+import { computeWageForShift, type WageType } from "../helpers/wage";
+import { computeMonthlyStandardHours } from "../helpers/labor";
 import {
   monthlyClosings,
   purchaseOrdersV2,
@@ -20,6 +21,7 @@ import {
   storeWeeklyClosures,
   settlementImages,
   dailyExpenses,
+  affiliatedCompanies,
 } from "../../drizzle/schema";
 import { calcMonthlyFixedCosts } from "../helpers/fixedCostCalc";
 
@@ -173,7 +175,6 @@ async function sumLaborByCompany(
     wageType: employeeWageHistory.wageType,
     wageAmount: employeeWageHistory.wageAmount,
     weeklyHours: employeeContracts.weeklyHours,
-    noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
     contractIsActive: employeeContracts.isActive,
   }).from(schedules)
     .leftJoin(employeeContracts, and(
@@ -203,7 +204,7 @@ async function sumLaborByCompany(
   }
   const rows = Array.from(dedup.values());
 
-  // 소속회사 조회
+  // 소속회사 조회 + 회사명별 5인 여부 (재설계 2026-05-02)
   const userIds = [...new Set(rows.map(r => r.userId).filter(Boolean))] as number[];
   const affMap = new Map<number, string>();
   if (userIds.length > 0) {
@@ -216,6 +217,12 @@ async function sumLaborByCompany(
     ));
     for (const r of ruRows) affMap.set(r.userId, r.affiliatedCompany ?? "기본");
   }
+  const acRows = await db.select({
+    companyName: affiliatedCompanies.companyName,
+    over5Employees: affiliatedCompanies.over5Employees,
+  }).from(affiliatedCompanies).where(eq(affiliatedCompanies.restaurantId, restaurantId));
+  const over5ByCompany = new Map<string, boolean>();
+  for (const c of acRows) over5ByCompany.set(c.companyName, Boolean(c.over5Employees));
 
   const byCompanyMap = new Map<string, { headcount: Set<number | string>; hours: number; amount: number }>();
   let totalCost = 0;
@@ -227,22 +234,25 @@ async function sumLaborByCompany(
     const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
     const hours = netMin / 60;
 
-    // 시급 결정 (server/helpers/wage.ts:computeWageForShift 통일)
+    const empCompany = r.userId ? affMap.get(r.userId) ?? null : null;
+    const over5 = empCompany ? over5ByCompany.get(empCompany) ?? false : false;
+
+    // 시급 결정 (재설계 2026-05-02 §2.4)
     let wt: WageType = null;
     let wa: number | null = null;
-    let stdHours = computeMonthlyStandardHours(null, false); // 폴백 209h
+    let stdHours = computeMonthlyStandardHours(null, true); // 폴백 209h
     if (r.tempWageType && r.tempWageAmount) {
       wt = r.tempWageType as WageType;
       wa = Number(r.tempWageAmount);
     } else if (r.wageType && r.wageAmount) {
       wt = r.wageType as WageType;
       wa = Number(r.wageAmount);
-      stdHours = computeMonthlyStandardHours(r.weeklyHours, !!r.noWeeklyHolidayPay);
+      stdHours = computeMonthlyStandardHours(r.weeklyHours, over5);
     }
     const pay = computeWageForShift({ wageType: wt, wageAmount: wa, hoursWorked: hours, monthlyStandardHours: stdHours });
     totalCost += pay;
 
-    const company = r.tempWorkerName ? "임시근로" : (r.userId ? affMap.get(r.userId) ?? "기본" : "기본");
+    const company = r.tempWorkerName ? "임시근로" : (empCompany ?? "기본");
     const key = r.tempWorkerName ? `임시-${r.tempWorkerName}` : (r.userId ? String(r.userId) : "unknown");
     const existing = byCompanyMap.get(company);
     if (existing) { existing.headcount.add(key); existing.hours += hours; existing.amount += pay; }

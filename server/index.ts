@@ -101,8 +101,7 @@ app.use(express.json({ limit: "10mb" }));
     await addColumnIfNotExists("employment_electronic_contracts", "annualLeavePay", "DECIMAL(12,2) DEFAULT NULL");
     await addColumnIfNotExists("employment_electronic_contracts", "hourlyWage", "DECIMAL(10,2) DEFAULT NULL");
     await addColumnIfNotExists("employment_electronic_contracts", "monthlyContractHours", "DECIMAL(6,2) DEFAULT NULL");
-    await addColumnIfNotExists("employment_electronic_contracts", "includeNda", "BOOLEAN NOT NULL DEFAULT FALSE");
-    await addColumnIfNotExists("employment_electronic_contracts", "includePrivacyConsent", "BOOLEAN NOT NULL DEFAULT FALSE");
+    // includeNda, includePrivacyConsent: 재설계 2026-05-02에서 폐기 (항상 첨부). ADD 호출 제거 — 매 부팅 ADD→DROP 사이클 방지.
 
     // 계좌이체 입금자명
     await addColumnIfNotExists("daily_sales_detail", "transferDepositor", "VARCHAR(100) DEFAULT NULL");
@@ -463,13 +462,7 @@ app.use(express.json({ limit: "10mb" }));
     await conn.query(`
       ALTER TABLE business_groups ADD COLUMN color VARCHAR(7) DEFAULT NULL
     `).catch(() => {});
-    // 주휴수당 미제공 플래그 — true이면 인건비 정산에서 임시근로자 경로로 처리
-    await conn.query(`
-      ALTER TABLE employee_contracts ADD COLUMN noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
-    `).catch(() => {});
-    await conn.query(`
-      ALTER TABLE employment_electronic_contracts ADD COLUMN noWeeklyHolidayPay BOOLEAN NOT NULL DEFAULT FALSE
-    `).catch(() => {});
+    // noWeeklyHolidayPay: 재설계 2026-05-02에서 폐기 (주15h 자동 분기). ADD 호출 제거 — 매 부팅 ADD→DROP 사이클 방지.
     // 은행/계좌 분리: bankName 컬럼 신규. bankAccount는 계좌번호만 보관.
     await conn.query(`
       ALTER TABLE employee_contracts ADD COLUMN bankName VARCHAR(50) DEFAULT NULL
@@ -691,8 +684,7 @@ app.use(express.json({ limit: "10mb" }));
     await addColumnIfNotExists("counterparties", "phone", "VARCHAR(30) DEFAULT NULL");
     await addColumnIfNotExists("counterparties", "address", "VARCHAR(200) DEFAULT NULL");
 
-    // employee_contracts에 socialInsurance, bankAccount, residentNumber 추가
-    await addColumnIfNotExists("employee_contracts", "socialInsurance", "BOOLEAN DEFAULT TRUE");
+    // employee_contracts: bankAccount/residentNumber. socialInsurance는 재설계 2026-05-02에서 폐기 (taxMode로 대체) — ADD 호출 제거.
     await addColumnIfNotExists("employee_contracts", "bankAccount", "VARCHAR(100) DEFAULT NULL");
     await addColumnIfNotExists("employee_contracts", "residentNumber", "VARCHAR(20) DEFAULT NULL");
 
@@ -1188,6 +1180,123 @@ app.use(express.json({ limit: "10mb" }));
         INDEX idx_settlement_counterparty (counterpartyId)
       )
     `).catch(() => {});
+
+    // ─── 재설계 2026-05-02: 계약·직원·인건비 데이터 모델 일괄 재구성 ─────────────
+    //   사양: docs/redesign_2026-05-02_계약_직원_인건비.md §6
+    //   원칙: DELETE 5건은 테스트 단계 1회 한정. 운영 진입 후 절대 재실행 금지.
+    //   가드: system_settings 키로 1회 적용 박제 → 키 존재 시 DELETE/시드 skip.
+    //         CREATE/ALTER는 idempotent하므로 항상 실행.
+    const REDESIGN_KEY = "redesign_2026_05_02_applied";
+    let redesignApplied = false;
+    try {
+      const [appliedRows] = (await conn.query(
+        `SELECT settingValue FROM system_settings WHERE settingKey = ?`,
+        [REDESIGN_KEY]
+      )) as any[];
+      redesignApplied = appliedRows.length > 0;
+    } catch {
+      redesignApplied = false;
+    }
+
+    // 1) affiliated_companies 신규 테이블 (idempotent)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS affiliated_companies (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        companyName VARCHAR(100) NOT NULL,
+        businessNumber VARCHAR(20),
+        over5Employees BOOLEAN NOT NULL DEFAULT FALSE,
+        isDefault BOOLEAN NOT NULL DEFAULT FALSE,
+        createdBy INT NOT NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_restaurant_company (restaurantId, companyName)
+      )
+    `).catch(() => {});
+
+    // 2) employment_electronic_contracts ALTER (신규 컬럼 추가 — idempotent)
+    await addColumnIfNotExists("employment_electronic_contracts", "hireDate", "DATE NULL");
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "hourlyWageIncludesHolidayPay",
+      "BOOLEAN NOT NULL DEFAULT TRUE"
+    );
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "taxMode",
+      "VARCHAR(30) NOT NULL DEFAULT 'social_insurance'"
+    );
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotHireDate", "DATE NULL");
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "snapshotOver5Employees",
+      "BOOLEAN NULL"
+    );
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "snapshotTaxMode",
+      "VARCHAR(30) NULL"
+    );
+
+    // 3) payDay default 25 → 20 (신규 INSERT만 영향, 기존 row는 박제값 유지)
+    await conn.query(
+      `ALTER TABLE employment_electronic_contracts ALTER COLUMN payDay SET DEFAULT 20`
+    ).catch(() => {});
+
+    // 4) 폐기 컬럼 DROP — IF EXISTS로 idempotent
+    //    employment_electronic_contracts: socialInsurance, noWeeklyHolidayPay, includeNda, includePrivacyConsent
+    //    employee_contracts: socialInsurance, noWeeklyHolidayPay
+    for (const col of ["socialInsurance", "noWeeklyHolidayPay", "includeNda", "includePrivacyConsent"]) {
+      await conn
+        .query(`ALTER TABLE employment_electronic_contracts DROP COLUMN \`${col}\``)
+        .catch(() => {});
+    }
+    for (const col of ["socialInsurance", "noWeeklyHolidayPay"]) {
+      await conn.query(`ALTER TABLE employee_contracts DROP COLUMN \`${col}\``).catch(() => {});
+    }
+
+    // 5) users.hireDate DROP (이미 없을 수 있음 — IF EXISTS 효과로 catch)
+    await conn.query(`ALTER TABLE users DROP COLUMN hireDate`).catch(() => {});
+
+    // 6) DELETE 5건 + 시드 — 1회 한정. 가드 키 존재 시 skip.
+    if (!redesignApplied) {
+      console.log("[migrate:redesign-2026-05-02] applying one-shot DELETE + seed...");
+      try {
+        await conn.query(`DELETE FROM employment_electronic_contracts`);
+        await conn.query(`DELETE FROM employee_contracts`);
+        await conn.query(`DELETE FROM employee_wage_history`);
+        await conn.query(`DELETE FROM leave_transactions`);
+        await conn.query(`DELETE FROM employee_leaves`);
+
+        // employer_presets → affiliated_companies 시드 (over5Employees=false 기본)
+        // createdBy NOT NULL 보호: COALESCE로 master fallback
+        await conn.query(`
+          INSERT IGNORE INTO affiliated_companies
+            (restaurantId, companyName, businessNumber, over5Employees, isDefault, createdBy)
+          SELECT
+            ep.restaurantId,
+            ep.companyName,
+            ep.businessNumber,
+            FALSE,
+            ep.isDefault,
+            COALESCE(ep.createdBy, (SELECT id FROM users WHERE role='master' ORDER BY id LIMIT 1))
+          FROM employer_presets ep
+        `);
+
+        // 가드 키 박제
+        await conn.query(
+          `INSERT INTO system_settings (settingKey, settingValue, description)
+           VALUES (?, ?, '재설계 2026-05-02 마이그레이션 1회 적용 표시 — 절대 삭제 금지')
+           ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)`,
+          [REDESIGN_KEY, JSON.stringify({ appliedAt: new Date().toISOString() })]
+        );
+        console.log("[migrate:redesign-2026-05-02] DELETE + seed complete");
+      } catch (e: any) {
+        console.error("[migrate:redesign-2026-05-02] one-shot block failed:", e.message);
+      }
+    } else {
+      console.log("[migrate:redesign-2026-05-02] already applied (skip DELETE + seed)");
+    }
 
     await conn.end();
     console.log("[migrate] all migrations complete");

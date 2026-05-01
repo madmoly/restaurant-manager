@@ -295,11 +295,9 @@ export const employeeContracts = mysqlTable("employee_contracts", {
   contractNote: text("contractNote"),
   weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }),
   weeklyOffDays: int("weeklyOffDays").default(1),
-  socialInsurance: boolean("socialInsurance").default(true),
   bankName: varchar("bankName", { length: 50 }),
   bankAccount: varchar("bankAccount", { length: 100 }),
   residentNumber: varchar("residentNumber", { length: 20 }),
-  noWeeklyHolidayPay: boolean("noWeeklyHolidayPay").default(false).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -743,12 +741,17 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   breakMinutes: int("breakMinutes").default(60),
   weeklyHoliday: varchar("weeklyHoliday", { length: 20 }).default("일요일"),
   weeklyOffDays: int("weeklyOffDays").default(1), // 주당 휴무일수
-  payDay: int("payDay").default(25),
+  payDay: int("payDay").default(20),
   payMethod: mysqlEnum("payMethod", ["bank_transfer", "cash"]).default("bank_transfer"),
   mealProvided: boolean("mealProvided").default(false).notNull(),
   mealAllowance: decimal("mealAllowance", { precision: 10, scale: 2 }).default("0"),
-  socialInsurance: boolean("socialInsurance").default(true).notNull(),
-  noWeeklyHolidayPay: boolean("noWeeklyHolidayPay").default(false).notNull(),
+  // 4대보험(social_insurance) / 사업소득 3.3%(biz_income_3_3) — 둘 중 하나 필수
+  taxMode: varchar("taxMode", { length: 30 }).default("social_insurance").notNull(),
+  // 시급제일 때만 의미: true=시급에 주휴포함, false=주휴 별도(주15h 이상이면 자동가산)
+  hourlyWageIncludesHolidayPay: boolean("hourlyWageIncludesHolidayPay").default(true).notNull(),
+  // 입사일 (계약서 박제용 — SSOT는 restaurant_users.hireDate)
+  hireDate: date("hireDate"),
+  // 5인 미만/이상은 소속회사(affiliated_companies) 마스터에서 자동 산정. 폼 입력 X. 서명 시점 박제용
   over5Employees: boolean("over5Employees").default(false).notNull(),
   affiliatedCompany: varchar("affiliatedCompany", { length: 100 }),
   employerBusinessNumber: varchar("employerBusinessNumber", { length: 20 }),
@@ -763,9 +766,7 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   annualLeavePay: decimal("annualLeavePay", { precision: 12, scale: 2 }),       // 포괄연차수당
   hourlyWage: decimal("hourlyWage", { precision: 10, scale: 2 }),               // 통상시급
   monthlyContractHours: decimal("monthlyContractHours", { precision: 6, scale: 2 }), // 월소정+주휴시간
-  // ── 부속서류 ──
-  includeNda: boolean("includeNda").default(false).notNull(),           // 비밀유지서약서 포함
-  includePrivacyConsent: boolean("includePrivacyConsent").default(false).notNull(), // 개인정보수집동의서 포함
+  // 부속서류(NDA, 개인정보수집동의서)는 서명 시 항상 첨부. 컬럼 폐기됨.
   nightShiftConsent: boolean("nightShiftConsent").default(false).notNull(),
   specialTerms: text("specialTerms"),
   status: mysqlEnum("status", ["draft", "sent", "signed", "expired", "cancelled", "superseded"]).notNull().default("draft"),
@@ -792,6 +793,10 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   snapshotContractStart: date("snapshotContractStart"),
   snapshotContractEnd: date("snapshotContractEnd"),
   snapshotAffiliatedCompany: varchar("snapshotAffiliatedCompany", { length: 100 }),
+  // 신규 박제 (재설계 2026-05-02)
+  snapshotHireDate: date("snapshotHireDate"),
+  snapshotOver5Employees: boolean("snapshotOver5Employees"),
+  snapshotTaxMode: varchar("snapshotTaxMode", { length: 30 }),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -1109,6 +1114,28 @@ export const employerPresets = mysqlTable("employer_presets", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type EmployerPreset = typeof employerPresets.$inferSelect;
+
+// ─── 소속회사 마스터 (5인 미만/이상 + 사업장 단위 박제 — 재설계 2026-05-02) ───
+// employer_presets 후속. 한 매장에 여러 소속회사 등록 가능, 회사별로 5인 미만/이상 토글.
+// 계약서 작성 시 affiliated_companies에서 선택 → over5Employees 자동 결정 → 서명 시점 박제.
+// 시드: server/index.ts 마이그레이션이 employer_presets에서 over5Employees=false 로 복제.
+export const affiliatedCompanies = mysqlTable(
+  "affiliated_companies",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    restaurantId: int("restaurantId").notNull(),
+    companyName: varchar("companyName", { length: 100 }).notNull(),
+    businessNumber: varchar("businessNumber", { length: 20 }),
+    over5Employees: boolean("over5Employees").default(false).notNull(),
+    isDefault: boolean("isDefault").default(false).notNull(),
+    createdBy: int("createdBy").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [uniqueIndex("uniq_restaurant_company").on(t.restaurantId, t.companyName)]
+);
+export type AffiliatedCompany = typeof affiliatedCompanies.$inferSelect;
+export type InsertAffiliatedCompany = typeof affiliatedCompanies.$inferInsert;
 
 // ─── 즉시지출 카테고리 ────────────────────────────────────────────────────────
 export const expenseCategories = mysqlTable("expense_categories", {

@@ -2,10 +2,11 @@ import { z } from "zod";
 import { eq, and, between, sql, desc, inArray } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
-import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures, schedules, employeeContracts, employeeWageHistory } from "../../drizzle/schema";
+import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures, schedules, employeeContracts, employeeWageHistory, restaurantUsers, affiliatedCompanies } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 import { verifyOperatingDay } from "../middleware/operatingDayGuard";
-import { computeMonthlyStandardHours, computeWageForShift, type WageType } from "../helpers/wage";
+import { computeWageForShift, type WageType } from "../helpers/wage";
+import { computeMonthlyStandardHours } from "../helpers/labor";
 
 export const dailyClosingsRouter = router({
   // ─── Sales Types (매출 항목 유형 관리) ──────────────────────────────────────
@@ -103,8 +104,10 @@ export const dailyClosingsRouter = router({
       const toUtc = kstNext.toISOString().slice(0, 19).replace("T", " ");
 
       // wage_history 시점 매칭으로 정합성 확보 (월정산과 동일 출처)
+      // 재설계 2026-05-02: 5인 여부는 직원의 affiliated_companies 마스터 매칭 결정
       const schedRows = await db
         .select({
+          userId: schedules.userId,
           startTime: schedules.startTime,
           endTime: schedules.endTime,
           breakMinutes: schedules.breakMinutes,
@@ -113,9 +116,13 @@ export const dailyClosingsRouter = router({
           wageType: employeeWageHistory.wageType,
           wageAmount: employeeWageHistory.wageAmount,
           weeklyHours: employeeContracts.weeklyHours,
-          noWeeklyHolidayPay: employeeContracts.noWeeklyHolidayPay,
+          affiliatedCompany: restaurantUsers.affiliatedCompany,
         })
         .from(schedules)
+        .leftJoin(restaurantUsers, and(
+          eq(restaurantUsers.userId, schedules.userId),
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+        ))
         .leftJoin(employeeContracts, and(
           eq(employeeContracts.userId, schedules.userId),
           eq(employeeContracts.restaurantId, input.restaurantId),
@@ -134,6 +141,14 @@ export const dailyClosingsRouter = router({
           sql`${schedules.status} IN ('confirmed','completed')`,
         ));
 
+      // 회사명별 5인 여부 batch lookup
+      const acRows = await db.select({
+        companyName: affiliatedCompanies.companyName,
+        over5Employees: affiliatedCompanies.over5Employees,
+      }).from(affiliatedCompanies).where(eq(affiliatedCompanies.restaurantId, input.restaurantId));
+      const over5ByCompany = new Map<string, boolean>();
+      for (const c of acRows) over5ByCompany.set(c.companyName, Boolean(c.over5Employees));
+
       let laborCostCalc = 0;
       for (const r of schedRows) {
         const sDt = new Date(r.startTime);
@@ -141,17 +156,18 @@ export const dailyClosingsRouter = router({
         const gMin = (eDt.getTime() - sDt.getTime()) / 60000;
         const nMin = Math.max(0, gMin - (r.breakMinutes ?? 0));
         const hrs = nMin / 60;
+        const over5 = r.affiliatedCompany ? over5ByCompany.get(r.affiliatedCompany) ?? false : false;
 
         let wt: WageType = null;
         let wa: number | null = null;
-        let stdHours = computeMonthlyStandardHours(null, false); // 폴백
+        let stdHours = computeMonthlyStandardHours(null, true); // 폴백 209h
         if (r.tempWageType && r.tempWageAmount) {
           wt = r.tempWageType as WageType;
           wa = Number(r.tempWageAmount);
         } else if (r.wageType && r.wageAmount) {
           wt = r.wageType as WageType;
           wa = Number(r.wageAmount);
-          stdHours = computeMonthlyStandardHours(r.weeklyHours, !!r.noWeeklyHolidayPay);
+          stdHours = computeMonthlyStandardHours(r.weeklyHours, over5);
         }
         laborCostCalc += computeWageForShift({ wageType: wt, wageAmount: wa, hoursWorked: hrs, monthlyStandardHours: stdHours });
       }

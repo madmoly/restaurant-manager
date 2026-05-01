@@ -718,13 +718,11 @@ export default function StaffPage() {
                                 <span className="text-xs font-medium text-foreground">
                                   {contract.wageType === "hourly" ? "시급" : "월급"} {formatKRW(Number(contract.wageAmount))}
                                 </span>
-                                {contract.socialInsurance ? (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">4대보험</span>
-                                ) : (
+                                {/* 재설계 2026-05-02: socialInsurance 폐기 → snapshotTaxMode 사용. noWeeklyHolidayPay 폐기 */}
+                                {(staff as any).snapshotTaxMode === "biz_income_3_3" ? (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">3.3%</span>
-                                )}
-                                {contract.noWeeklyHolidayPay && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">주휴미제공</span>
+                                ) : (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">4대보험</span>
                                 )}
                                 {!activeContract && draftContract && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300">초안</span>
@@ -1233,11 +1231,13 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     workStartTime: ec?.workStartTime ?? "09:00",
     workEndTime: ec?.workEndTime ?? "18:00",
     breakMinutes: ec?.breakMinutes ?? 60,
-    payDay: ec?.payDay ?? 25,
+    payDay: ec?.payDay ?? 20,
     payMethod: (ec?.payMethod ?? "bank_transfer") as "bank_transfer" | "cash",
-    over5Employees: ec?.over5Employees ?? false,
-    socialInsurance: ec?.socialInsurance ?? true,
-    noWeeklyHolidayPay: ec?.noWeeklyHolidayPay ?? false,
+    over5Employees: (ec as any)?.over5Employees ?? false, // 표시 전용 (서버가 소속회사 마스터에서 자동 결정)
+    // 재설계 2026-05-02 신규
+    taxMode: ((ec as any)?.taxMode ?? "social_insurance") as "social_insurance" | "biz_income_3_3",
+    hourlyWageIncludesHolidayPay: (ec as any)?.hourlyWageIncludesHolidayPay ?? true,
+    hireDate: "" as string,
     hasProbation: false,
     probationMonths: 0,
     mealProvided: ec?.mealProvided ?? false,
@@ -1249,8 +1249,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     employerBusinessNumber: ec?.employerBusinessNumber ?? "",
     weeklyHoliday: ec?.weeklyHoliday ?? "일요일",
     weeklyOffDays: ec?.weeklyOffDays ?? 1,
-    includeNda: ec?.includeNda ?? true,
-    includePrivacyConsent: ec?.includePrivacyConsent ?? true,
   });
 
   // ── 최근 계약서 템플릿 자동 적용 (새 계약서 + 첫 로드 시 1회) ──
@@ -1271,8 +1269,9 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         payDay: latestTemplate.payDay ?? prev.payDay,
         payMethod: (latestTemplate.payMethod as any) || prev.payMethod,
         over5Employees: latestTemplate.over5Employees ?? prev.over5Employees,
-        socialInsurance: latestTemplate.socialInsurance ?? prev.socialInsurance,
-        noWeeklyHolidayPay: (latestTemplate as any).noWeeklyHolidayPay ?? prev.noWeeklyHolidayPay,
+        // 재설계 2026-05-02 신규
+        taxMode: ((latestTemplate as any).taxMode ?? prev.taxMode) as "social_insurance" | "biz_income_3_3",
+        hourlyWageIncludesHolidayPay: (latestTemplate as any).hourlyWageIncludesHolidayPay ?? prev.hourlyWageIncludesHolidayPay,
         hasProbation: latestTemplate.hasProbation ?? prev.hasProbation,
         probationMonths: latestTemplate.probationMonths ?? prev.probationMonths,
         mealProvided: latestTemplate.mealProvided ?? prev.mealProvided,
@@ -1283,8 +1282,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         affiliatedCompany: latestTemplate.affiliatedCompany || prev.affiliatedCompany,
         employerBusinessNumber: (latestTemplate as any).employerBusinessNumber || prev.employerBusinessNumber,
         workPlaceAddress: (latestTemplate as any).workPlaceAddress || prev.workPlaceAddress,
-        includeNda: (latestTemplate as any).includeNda ?? prev.includeNda,
-        includePrivacyConsent: (latestTemplate as any).includePrivacyConsent ?? prev.includePrivacyConsent,
       }));
       // 포괄임금 시간 값도 템플릿에서 복원
       // 고정연장/휴일 시간 필드 제거됨
@@ -1702,32 +1699,54 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             </div>
           </div>
 
-          {/* ═══ 4대보험 / 식사제공 ═══ */}
+          {/* ═══ 세무처리 (4대보험 / 3.3% 사업소득) — 재설계 2026-05-02: 라디오 필수 ═══ */}
           <div className="space-y-2 py-1">
-            <div className="flex items-center gap-4">
+            <label className={labelCls}>세무처리</label>
+            <div className="flex items-center gap-4 pl-1">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.socialInsurance}
-                  onChange={(e) => setForm({ ...form, socialInsurance: e.target.checked })}
-                  className="rounded border-input" disabled={isUnder15Hours} />
+                <input type="radio" name="taxMode" checked={form.taxMode === "social_insurance"}
+                  onChange={() => setForm({ ...form, taxMode: "social_insurance" })}
+                  className="rounded border-input" />
                 <span className="text-sm text-foreground">4대보험 가입</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.noWeeklyHolidayPay}
-                  onChange={(e) => setForm({ ...form, noWeeklyHolidayPay: e.target.checked })}
+                <input type="radio" name="taxMode" checked={form.taxMode === "biz_income_3_3"}
+                  onChange={() => setForm({ ...form, taxMode: "biz_income_3_3" })}
                   className="rounded border-input" />
-                <span className="text-sm text-foreground">주휴수당 미제공</span>
+                <span className="text-sm text-foreground">사업소득 3.3% 원천공제</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-2 cursor-pointer ml-auto">
                 <input type="checkbox" checked={form.mealProvided}
                   onChange={(e) => setForm({ ...form, mealProvided: e.target.checked })}
                   className="rounded border-input" />
                 <span className="text-sm text-foreground">식사 제공</span>
               </label>
             </div>
-            {isUnder15Hours && form.socialInsurance && (
+            {isUnder15Hours && form.taxMode === "social_insurance" && (
               <p className="text-[10px] text-amber-500 pl-6">주 15시간 미만 시 4대보험 의무가입 대상 아님</p>
             )}
           </div>
+
+          {/* ═══ 시급제 + 주휴포함 여부 — 재설계 2026-05-02 ═══ */}
+          {form.wageType === "hourly" && (
+            <div className="space-y-2 py-1">
+              <label className={labelCls}>주휴수당 처리</label>
+              <div className="flex items-center gap-4 pl-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="hourlyWageHoliday" checked={form.hourlyWageIncludesHolidayPay}
+                    onChange={() => setForm({ ...form, hourlyWageIncludesHolidayPay: true })}
+                    className="rounded border-input" />
+                  <span className="text-sm text-foreground">시급에 주휴수당 포함</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="hourlyWageHoliday" checked={!form.hourlyWageIncludesHolidayPay}
+                    onChange={() => setForm({ ...form, hourlyWageIncludesHolidayPay: false })}
+                    className="rounded border-input" />
+                  <span className="text-sm text-foreground">주휴수당 별도 산정</span>
+                </label>
+              </div>
+            </div>
+          )}
 
           {/* ═══ 특약사항 ═══ */}
           <div>
@@ -1737,24 +1756,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               placeholder="추가 약정사항이 있으면 기재" />
           </div>
 
-          {/* ═══ 부속서류 ═══ */}
-          <div className="space-y-2 pt-1">
-            <label className={labelCls}>부속서류 (계약서와 함께 서명)</label>
-            <div className="flex flex-col gap-1.5 pl-1">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.includeNda}
-                  onChange={(e) => setForm({ ...form, includeNda: e.target.checked })}
-                  className="rounded border-input" />
-                <span className="text-sm text-foreground">비밀유지서약서</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.includePrivacyConsent}
-                  onChange={(e) => setForm({ ...form, includePrivacyConsent: e.target.checked })}
-                  className="rounded border-input" />
-                <span className="text-sm text-foreground">개인정보 수집·이용 동의서</span>
-              </label>
-            </div>
-          </div>
+          {/* 재설계 2026-05-02: 비밀유지서약서·개인정보 동의서는 항상 첨부 (체크박스 폐기) */}
         </div>
 
         <div className="flex gap-2 pt-4 justify-end">
@@ -1778,9 +1780,10 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 weeklyOffDays: form.weeklyOffDays,
                 payDay: form.payDay,
                 payMethod: form.payMethod,
-                over5Employees: form.over5Employees,
-                socialInsurance: form.socialInsurance,
-                noWeeklyHolidayPay: form.noWeeklyHolidayPay,
+                // 재설계 2026-05-02: socialInsurance/noWeeklyHolidayPay/over5Employees/includeNda/includePrivacyConsent 폐기
+                taxMode: form.taxMode,
+                hourlyWageIncludesHolidayPay: form.hourlyWageIncludesHolidayPay,
+                hireDate: form.hireDate || undefined,
                 mealProvided: form.mealProvided,
                 workPlace: form.workPlace || undefined,
                 jobDescription: form.jobDescription || undefined,
@@ -1788,8 +1791,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 affiliatedCompany: form.affiliatedCompany || undefined,
                 employerBusinessNumber: form.employerBusinessNumber || undefined,
                 workPlaceAddress: form.workPlaceAddress || undefined,
-                includeNda: form.includeNda,
-                includePrivacyConsent: form.includePrivacyConsent,
                 ...(form.wageType === "monthly" && wageNum > 0 ? {
                   annualSalary: String(annualSalaryCalc),
                   basePay: String(basePayCalc),

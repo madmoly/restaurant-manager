@@ -101,7 +101,8 @@ export default function LaborCostPage() {
         const annUsed = emp.annualLeave ? emp.annualLeave.used : 0;
         const nameLabel = emp.isNoHolidayPayWorker ? `${emp.name} (주휴미제공)` : emp.isTemp ? `${emp.name} (임시)` : emp.name;
         const wageTypeLabel = emp.wageType === "hourly" ? "시급" : emp.wageType === "monthly" ? "월급" : emp.wageType === "daily" ? "일급" : "-";
-        const insuranceLabel = emp.socialInsurance ? "4대보험" : "3.3%공제";
+        // 재설계 2026-05-02: socialInsurance 폐기 → taxMode 박제 사용
+        const insuranceLabel = emp.taxMode === "biz_income_3_3" ? "3.3%공제" : "4대보험";
         const contractStartStr = emp.contractStart ? fmtDate(emp.contractStart) : "-";
         const contractEndStr = emp.contractEnd ? fmtDate(emp.contractEnd) : "-";
 

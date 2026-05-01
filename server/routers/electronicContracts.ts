@@ -3,14 +3,12 @@ import { eq, and, desc, sql, isNotNull, isNull, ne } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { router, publicProcedure, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
-import { employmentElectronicContracts, employeeContracts, employeeWageHistory, employerPresets, restaurantContracts, restaurants, restaurantUsers, users } from "../../drizzle/schema";
+import { affiliatedCompanies, employmentElectronicContracts, employeeWageHistory, employerPresets, restaurantContracts, restaurantUsers } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+import { getOver5FromCompany } from "../helpers/labor";
 
-function normalizePhone(phone: string | null | undefined): string {
-  if (!phone) return "";
-  return phone.replace(/[^0-9]/g, "");
-}
+const TAX_MODE_VALUES = ["social_insurance", "biz_income_3_3"] as const;
 
 export const electronicContractsRouter = router({
   // ═══ 매장 계약 조건 (임대/수수료/로열티 등) ═══
@@ -266,8 +264,9 @@ export const electronicContractsRouter = router({
           weeklyHoliday: employmentElectronicContracts.weeklyHoliday,
           payDay: employmentElectronicContracts.payDay,
           payMethod: employmentElectronicContracts.payMethod,
-          socialInsurance: employmentElectronicContracts.socialInsurance,
-          noWeeklyHolidayPay: employmentElectronicContracts.noWeeklyHolidayPay,
+          taxMode: employmentElectronicContracts.taxMode,
+          hireDate: employmentElectronicContracts.hireDate,
+          hourlyWageIncludesHolidayPay: employmentElectronicContracts.hourlyWageIncludesHolidayPay,
           over5Employees: employmentElectronicContracts.over5Employees,
           hasProbation: employmentElectronicContracts.hasProbation,
           probationMonths: employmentElectronicContracts.probationMonths,
@@ -288,8 +287,6 @@ export const electronicContractsRouter = router({
           annualLeavePay: employmentElectronicContracts.annualLeavePay,
           hourlyWage: employmentElectronicContracts.hourlyWage,
           monthlyContractHours: employmentElectronicContracts.monthlyContractHours,
-          includeNda: employmentElectronicContracts.includeNda,
-          includePrivacyConsent: employmentElectronicContracts.includePrivacyConsent,
         })
         .from(employmentElectronicContracts)
         .where(eq(employmentElectronicContracts.restaurantId, input.restaurantId))
@@ -317,10 +314,14 @@ export const electronicContractsRouter = router({
         workEndTime: z.string().default("18:00"),
         breakMinutes: z.number().default(60),
         weeklyHoliday: z.string().default("일요일"),
-        payDay: z.number().default(25),
-        socialInsurance: z.boolean().default(true),
-        noWeeklyHolidayPay: z.boolean().default(false),
-        over5Employees: z.boolean().default(false),
+        weeklyOffDays: z.number().int().min(1).max(3).default(1),
+        payDay: z.number().default(20),
+        // 4대보험 / 3.3% 사업소득 — 둘 중 하나 필수 (라디오)
+        taxMode: z.enum(TAX_MODE_VALUES),
+        // 시급제일 때만 의미. 월급제는 무시
+        hourlyWageIncludesHolidayPay: z.boolean().default(true),
+        // 입사일 (계약서 박제용)
+        hireDate: z.string().optional(),
         hasProbation: z.boolean().default(false),
         probationMonths: z.number().default(0),
         mealProvided: z.boolean().default(false),
@@ -343,13 +344,14 @@ export const electronicContractsRouter = router({
         annualLeavePay: z.string().optional(),
         hourlyWage: z.string().optional(),
         monthlyContractHours: z.string().optional(),
-        includeNda: z.boolean().optional(),
-        includePrivacyConsent: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       // 매장 접근권 검증
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
+      // over5Employees 자동 결정 — 소속회사 마스터 매칭 (없으면 false 보수적 기본)
+      const over5 = await getOver5FromCompany(input.restaurantId, input.affiliatedCompany);
 
       // 동일 직원의 기존 활성 계약서 자동 만료 처리 (직원 1명당 1계약)
       if (input.employeeId) {
@@ -383,10 +385,13 @@ export const electronicContractsRouter = router({
           workEndTime: input.workEndTime,
           breakMinutes: input.breakMinutes,
           weeklyHoliday: input.weeklyHoliday,
+          weeklyOffDays: input.weeklyOffDays,
           payDay: input.payDay,
-          socialInsurance: input.socialInsurance,
-          noWeeklyHolidayPay: input.noWeeklyHolidayPay,
-          over5Employees: input.over5Employees,
+          taxMode: input.taxMode,
+          hourlyWageIncludesHolidayPay: input.hourlyWageIncludesHolidayPay,
+          hireDate: input.hireDate ? new Date(input.hireDate) : null,
+          // 소속회사 마스터에서 자동 결정 (폼 입력 X)
+          over5Employees: over5,
           hasProbation: input.hasProbation,
           probationMonths: input.probationMonths,
           mealProvided: input.mealProvided,
@@ -408,41 +413,13 @@ export const electronicContractsRouter = router({
           annualLeavePay: input.annualLeavePay,
           hourlyWage: input.hourlyWage,
           monthlyContractHours: input.monthlyContractHours,
-          includeNda: input.includeNda ?? false,
-          includePrivacyConsent: input.includePrivacyConsent ?? false,
           status: "draft",
           createdBy: ctx.user.userId,
         })
         .$returningId();
 
-      // ── 초안 생성 시 employee_contracts에 비활성 레코드 생성 (인건비 정산 반영용) ──
-      if (input.employeeId) {
-        try {
-          // 기존 비활성(초안) 계약 정리: 같은 직원의 기존 비활성 레코드 삭제 후 재생성
-          await db.delete(employeeContracts).where(and(
-            eq(employeeContracts.userId, input.employeeId),
-            eq(employeeContracts.restaurantId, input.restaurantId),
-            eq(employeeContracts.isActive, false),
-          ));
-          await db.insert(employeeContracts).values({
-            userId: input.employeeId,
-            restaurantId: input.restaurantId,
-            wageType: input.wageType,
-            wageAmount: input.wageAmount,
-            position: input.position ?? null,
-            contractStart: input.contractStart ? new Date(input.contractStart) : null,
-            contractEnd: input.contractEnd ? new Date(input.contractEnd) : null,
-            weeklyHours: input.weeklyHours ?? null,
-            weeklyOffDays: 1,
-            socialInsurance: input.socialInsurance ?? true,
-            noWeeklyHolidayPay: input.noWeeklyHolidayPay ?? false,
-            isActive: false, // 초안 상태 → 서명 완료 시 active로 전환
-          } as any);
-          console.log(`[createContract] draft employee_contracts created for userId=${input.employeeId}`);
-        } catch (e: any) {
-          console.error(`[createContract] employee_contracts draft sync error:`, e.message);
-        }
-      }
+      // employee_contracts 초안 sync는 폐기 (SSOT 역전 — 계약서는 박제, 운영 데이터는 SSOT 직접).
+      // 인건비 정산은 employee_wage_history (서명 시 생성)와 SSOT를 사용.
 
       return { id: result.id, token };
     }),
@@ -465,10 +442,11 @@ export const electronicContractsRouter = router({
         workEndTime: z.string().optional(),
         breakMinutes: z.number().optional(),
         weeklyHoliday: z.string().optional(),
+        weeklyOffDays: z.number().int().min(1).max(3).optional(),
         payDay: z.number().optional(),
-        socialInsurance: z.boolean().optional(),
-        noWeeklyHolidayPay: z.boolean().optional(),
-        over5Employees: z.boolean().optional(),
+        taxMode: z.enum(TAX_MODE_VALUES).optional(),
+        hourlyWageIncludesHolidayPay: z.boolean().optional(),
+        hireDate: z.string().nullable().optional(),
         mealProvided: z.boolean().optional(),
         payMethod: z.enum(["bank_transfer", "cash"]).optional(),
         workPlace: z.string().optional(),
@@ -482,8 +460,6 @@ export const electronicContractsRouter = router({
         annualLeavePay: z.string().optional(),
         hourlyWage: z.string().optional(),
         monthlyContractHours: z.string().optional(),
-        includeNda: z.boolean().optional(),
-        includePrivacyConsent: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -503,8 +479,18 @@ export const electronicContractsRouter = router({
         if (v === undefined) continue;
         if (k === "contractStart" && v) setData[k] = new Date(v as string);
         else if (k === "contractEnd") setData[k] = v ? new Date(v as string) : null;
+        else if (k === "hireDate") setData[k] = v ? new Date(v as string) : null;
         else setData[k] = v;
       }
+
+      // affiliatedCompany 변경 시 over5Employees도 마스터 매칭으로 자동 갱신
+      if (updates.affiliatedCompany !== undefined) {
+        setData.over5Employees = await getOver5FromCompany(
+          contract.restaurantId,
+          updates.affiliatedCompany,
+        );
+      }
+
       if (Object.keys(setData).length > 0) {
         await db.update(employmentElectronicContracts).set(setData).where(eq(employmentElectronicContracts.id, id));
       }
@@ -589,14 +575,19 @@ export const electronicContractsRouter = router({
 
   /** 계약서 서명 (상태 → signed, 비로그인 접근 가능)
    *
+   * 재설계 2026-05-02: SSOT 역전 — 계약서는 박제만, 운영 데이터(users/restaurant_users/employee_contracts)는 SSOT 직접 수정.
+   *
    * 트랜잭션으로 다음을 한 번에 처리:
-   *  1) 계약서 status='signed' + signedAt + employeeSignature + 12개 snapshot 필드 박제
+   *  1) 계약서 status='signed' + signedAt + employeeSignature + 스냅샷 박제 (snapshotName ~ snapshotTaxMode)
    *  2) 같은 (employeeId, restaurantId)의 이전 active 계약서(signed/sent/draft) → status='superseded'
-   *  3) C군 필드를 적재 대상 테이블로 분배:
-   *     - users: name, phone, phoneNormalized, address, (email은 제외)
-   *     - restaurant_users: affiliatedCompany, hireDate, weeklyOffDays
-   *     - employee_contracts: 기존 active 비활성화 + 새 active INSERT
-   *       (wage/wageType/weeklyHours + bankAccount + residentNumber + weeklyOffDays 포함)
+   *  3) employee_wage_history 신규 row INSERT (Phase 2 단일 경로 — 인건비 정산용 급여 단가)
+   *  4) restaurant_users.contractMigrated = true (Phase 2 전환 플래그)
+   *
+   * 폐기됨 (단방향 sync):
+   *  - users.name/phone/address 자동 갱신
+   *  - restaurant_users.affiliatedCompany 자동 갱신
+   *  - employee_contracts INSERT
+   *  → SSOT(직원정보)는 점장이 직접 수정. 어긋나면 "갱신 필요" 배너만 표시.
    */
   signContract: publicProcedure
     .input(
@@ -663,6 +654,10 @@ export const electronicContractsRouter = router({
               snapshotContractStart: toDateString(contract.contractStart),
               snapshotContractEnd: toDateString(contract.contractEnd),
               snapshotAffiliatedCompany: finalAffiliatedCompany,
+              // 재설계 2026-05-02 신규 박제
+              snapshotHireDate: toDateString(contract.hireDate),
+              snapshotOver5Employees: contract.over5Employees ?? false,
+              snapshotTaxMode: contract.taxMode ?? "social_insurance",
             } as any)
             .where(eq(employmentElectronicContracts.id, contract.id));
 
@@ -677,59 +672,9 @@ export const electronicContractsRouter = router({
                 sql`${employmentElectronicContracts.status} IN ('draft','sent','signed')`,
               ));
 
-            // ── 3. C군 단방향 sync ──
-
-            // 3-1. users (name / phone / phoneNormalized / address)
-            const usersUpdate: Record<string, any> = {};
-            if (finalName) usersUpdate.name = finalName;
-            if (finalPhone) {
-              usersUpdate.phone = finalPhone;
-              usersUpdate.phoneNormalized = normalizePhone(finalPhone);
-            }
-            if (finalAddress) usersUpdate.address = finalAddress;
-            if (Object.keys(usersUpdate).length > 0) {
-              await tx.update(users).set(usersUpdate).where(eq(users.id, contract.employeeId));
-            }
-
-            // 3-2. restaurant_users (affiliatedCompany — hireDate는 기존 유지)
-            const ruUpdate: Record<string, any> = {};
-            if (finalAffiliatedCompany !== null) ruUpdate.affiliatedCompany = finalAffiliatedCompany;
-            if (Object.keys(ruUpdate).length > 0) {
-              await tx.update(restaurantUsers)
-                .set(ruUpdate)
-                .where(and(
-                  eq(restaurantUsers.userId, contract.employeeId),
-                  eq(restaurantUsers.restaurantId, contract.restaurantId),
-                ));
-            }
-
-            // 3-3. employee_contracts (민감영역 현재상태)
-            //      기존 active 비활성 → 새 active INSERT
-            await tx.update(employeeContracts)
-              .set({ isActive: false })
-              .where(and(
-                eq(employeeContracts.userId, contract.employeeId),
-                eq(employeeContracts.restaurantId, contract.restaurantId),
-                eq(employeeContracts.isActive, true),
-              ));
-
-            await tx.insert(employeeContracts).values({
-              userId: contract.employeeId,
-              restaurantId: contract.restaurantId,
-              wageType: (contract.wageType as "hourly" | "monthly") ?? "hourly",
-              wageAmount: contract.wageAmount ?? "0",
-              position: contract.position ?? null,
-              contractStart: contract.contractStart ? new Date(contract.contractStart) : null,
-              contractEnd: contract.contractEnd ? new Date(contract.contractEnd) : null,
-              weeklyHours: contract.weeklyHours ?? null,
-              weeklyOffDays: contract.weeklyOffDays ?? 1,
-              socialInsurance: contract.socialInsurance ?? true,
-              noWeeklyHolidayPay: contract.noWeeklyHolidayPay ?? false,
-              bankName: finalBankName,
-              bankAccount: finalBankAccount,
-              residentNumber: finalResidentNumber,
-              isActive: true,
-            } as any);
+            // ── 3. C군 단방향 sync 폐기 (SSOT 역전) ──
+            // users.name/phone/address, restaurant_users.affiliatedCompany,
+            // employee_contracts INSERT 모두 제거. 박제는 위 1번 스냅샷이 보존.
 
             // ── 4. employee_wage_history (Phase 2 — 급여이력 단일 경로) ──
             // 신 계약서 contractStart의 월 1일을 effectiveFrom 으로 사용.
