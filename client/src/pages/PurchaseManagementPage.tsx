@@ -20,16 +20,16 @@ type TabId = "master" | "analysis" | "history";
 export default function PurchaseManagementPage() {
   const { selectedRestaurant: current } = useRestaurant();
   const restaurantId = current?.id ?? 0;
-  const [activeTab, setActiveTab] = useState<TabId>("master");
+  const [activeTab, setActiveTab] = useState<TabId>("history");
 
   if (!restaurantId) {
     return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
   }
 
   const tabs: { id: TabId; label: string; icon: any }[] = [
+    { id: "history", label: "매입현황", icon: CalendarRange },
     { id: "master", label: "품목마스터", icon: Package },
     { id: "analysis", label: "가격분석", icon: ArrowUpDown },
-    { id: "history", label: "매입현황", icon: CalendarRange },
   ];
 
   return (
@@ -1288,7 +1288,7 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">
-              즉시지출 · 카테고리 {expBreakdown.length}개 · 항목 {expItemCount}건
+              즉시지출 · 항목 {expItemCount}건
             </span>
             <span className="text-sm font-semibold text-foreground tabular-nums">
               ₩{expenseTotal.toLocaleString()}
@@ -1338,53 +1338,81 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
             }}
           />
 
-          {expBreakdown.length > 0 && (
-            <>
-              <div className="text-xs font-medium text-muted-foreground px-1 pt-3">즉시지출 (카테고리별)</div>
-              {expBreakdown.map((cat) => {
-                const catKey = String(cat.categoryId ?? cat.categoryName);
-                const isExpanded = expandedCat === catKey;
-                const pct = expenseTotal > 0 ? ((cat.amount / expenseTotal) * 100).toFixed(1) : "0";
-                return (
-                  <Card key={catKey} className="overflow-hidden">
-                    <button
-                      onClick={() => setExpandedCat(isExpanded ? null : catKey)}
-                      className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-medium text-foreground text-sm truncate">{cat.categoryName}</span>
-                        <span className="text-xs text-muted-foreground shrink-0">{cat.items.length}건</span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="text-right">
-                          <span className="text-sm font-bold text-foreground tabular-nums">
-                            ₩{cat.amount.toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground ml-1">({pct}%)</span>
-                        </div>
-                        {isExpanded ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
-                      </div>
-                    </button>
-                    {isExpanded && (
-                      <div className="border-t border-border divide-y divide-border">
-                        {cat.items.map((it, idx) => (
-                          <div key={idx} className="px-4 py-2 flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs text-muted-foreground tabular-nums">{it.date}</span>
-                              <span className="text-foreground truncate">{it.title}</span>
-                            </div>
-                            <span className="text-sm font-semibold tabular-nums text-foreground shrink-0">
-                              ₩{it.amount.toLocaleString()}
-                            </span>
+          {expBreakdown.length > 0 && (() => {
+            type Row = {
+              title: string;
+              categoryName: string;
+              total: number;
+              entries: { date: string; amount: number }[];
+            };
+            const map = new Map<string, Row>();
+            for (const cat of expBreakdown) {
+              for (const it of cat.items) {
+                const key = `${it.title}__${cat.categoryName}`;
+                if (!map.has(key)) {
+                  map.set(key, { title: it.title, categoryName: cat.categoryName, total: 0, entries: [] });
+                }
+                const row = map.get(key)!;
+                row.total += it.amount;
+                row.entries.push({ date: it.date, amount: it.amount });
+              }
+            }
+            const rows = Array.from(map.values()).sort((a, b) => b.total - a.total);
+            const fmtKor = (d: string) => {
+              const [, m, day] = d.split("-");
+              return `${Number(m)}월 ${Number(day)}일`;
+            };
+            return (
+              <>
+                <div className="text-xs font-medium text-muted-foreground px-1 pt-3">즉시지출</div>
+                <Card className="divide-y divide-border">
+                  {rows.map((row) => {
+                    const key = `${row.title}__${row.categoryName}`;
+                    const isExpanded = expandedCat === key;
+                    const pct = expenseTotal > 0 ? ((row.total / expenseTotal) * 100).toFixed(1) : "0";
+                    return (
+                      <div key={key}>
+                        <button
+                          onClick={() => setExpandedCat(isExpanded ? null : key)}
+                          className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-muted/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-medium text-foreground text-sm truncate">{row.title}</span>
+                            <span className="text-xs text-muted-foreground shrink-0">({row.entries.length})</span>
+                            <span className="text-[10px] text-muted-foreground shrink-0 truncate">· {row.categoryName}</span>
                           </div>
-                        ))}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="text-right">
+                              <span className="text-sm font-bold text-foreground tabular-nums">
+                                ₩{row.total.toLocaleString()}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground ml-1">({pct}%)</span>
+                            </div>
+                            {isExpanded ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
+                          </div>
+                        </button>
+                        {isExpanded && (
+                          <div className="bg-muted/20 divide-y divide-border">
+                            {row.entries
+                              .slice()
+                              .sort((a, b) => b.date.localeCompare(a.date))
+                              .map((e, i) => (
+                                <div key={i} className="px-6 py-1.5 flex items-center justify-between text-sm">
+                                  <span className="text-xs text-muted-foreground tabular-nums">{fmtKor(e.date)}</span>
+                                  <span className="text-sm font-semibold tabular-nums text-foreground">
+                                    ₩{e.amount.toLocaleString()}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </Card>
-                );
-              })}
-            </>
-          )}
+                    );
+                  })}
+                </Card>
+              </>
+            );
+          })()}
 
           {/* 발주중 — 메모 수준 평면 리스트 */}
           {orderedFlat.length > 0 && (
