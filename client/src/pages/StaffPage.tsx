@@ -1222,9 +1222,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
   const utils = trpc.useUtils();
 
   // ── 최근 계약서 템플릿 + 스케줄 프리셋 + 소속회사 마스터 조회 ──
+  // 갱신(defaultEmployee) 시에도 활성화 + 해당 직원의 기존 계약서 우선 prefill (사용자 요청 2026-05-02)
+  const templateEmployeeId = defaultEmployee?.userId ?? undefined;
   const { data: latestTemplate } = trpc.electronicContracts.getLatestTemplate.useQuery(
-    { restaurantId },
-    { enabled: !defaultEmployee }, // 새 계약서일 때만 조회 (갱신/재계약 시 불필요)
+    { restaurantId, employeeId: templateEmployeeId },
+    { enabled: restaurantId > 0 && !editingContract },
   );
   const { data: shiftPresets = [] } = trpc.restaurants.getShiftPresets.useQuery(
     { restaurantId },
@@ -1279,9 +1281,9 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     })(),
   });
 
-  // ── 최근 계약서 템플릿 자동 적용 (새 계약서 + 첫 로드 시 1회) ──
+  // ── 최근 계약서 템플릿 자동 적용 (새 계약서 + 갱신 시, 첫 로드 1회) ──
   useEffect(() => {
-    if (!defaultEmployee && !editingContract && latestTemplate && !templateApplied) {
+    if (!editingContract && latestTemplate && !templateApplied) {
       setForm((prev) => {
         const company = latestTemplate.affiliatedCompany || prev.affiliatedCompany;
         const sel = affiliatedCompaniesMaster.find((c: any) => c.companyName === company);
@@ -1306,6 +1308,8 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           over5Employees: sel ? !!sel.over5Employees : (latestTemplate.over5Employees ?? prev.over5Employees),
           taxMode: ((latestTemplate as any).taxMode ?? prev.taxMode) as "social_insurance" | "biz_income_3_3",
           hourlyWageIncludesHolidayPay: (latestTemplate as any).hourlyWageIncludesHolidayPay ?? prev.hourlyWageIncludesHolidayPay,
+          // 갱신/재계약 시 기존 hireDate 박제값을 폼에 prefill (사용자 요청 2026-05-02)
+          hireDate: prev.hireDate || ((latestTemplate as any).hireDate ? String((latestTemplate as any).hireDate).slice(0, 10) : ""),
           hasProbation: latestTemplate.hasProbation ?? prev.hasProbation,
           probationMonths: latestTemplate.probationMonths ?? prev.probationMonths,
           mealProvided: latestTemplate.mealProvided ?? prev.mealProvided,

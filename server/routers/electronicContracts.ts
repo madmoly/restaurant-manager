@@ -246,13 +246,15 @@ export const electronicContractsRouter = router({
       return { ok: true };
     }),
 
-  /** 매장의 가장 최근 계약서 내용 반환 (새 계약서 작성 시 기본값으로 사용) */
+  /**
+   * 가장 최근 계약서 내용 반환 (새 계약서 작성 / 갱신 시 기본값으로 사용)
+   * employeeId 주어지면 해당 직원의 최신 계약서 우선. 없으면 매장 최근 계약서로 폴백.
+   */
   getLatestTemplate: managerProcedure
-    .input(z.object({ restaurantId: z.number() }))
+    .input(z.object({ restaurantId: z.number(), employeeId: z.number().optional() }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
-      const [latest] = await db
-        .select({
+      const cols = {
           position: employmentElectronicContracts.position,
           contractType: employmentElectronicContracts.contractType,
           wageType: employmentElectronicContracts.wageType,
@@ -287,7 +289,25 @@ export const electronicContractsRouter = router({
           annualLeavePay: employmentElectronicContracts.annualLeavePay,
           hourlyWage: employmentElectronicContracts.hourlyWage,
           monthlyContractHours: employmentElectronicContracts.monthlyContractHours,
-        })
+      };
+
+      // 1) employeeId 우선 — 해당 직원의 최신 계약서 (signed/sent/draft 모두 포함)
+      if (input.employeeId) {
+        const [perEmp] = await db
+          .select(cols)
+          .from(employmentElectronicContracts)
+          .where(and(
+            eq(employmentElectronicContracts.restaurantId, input.restaurantId),
+            eq(employmentElectronicContracts.employeeId, input.employeeId),
+          ))
+          .orderBy(desc(employmentElectronicContracts.createdAt))
+          .limit(1);
+        if (perEmp) return perEmp;
+      }
+
+      // 2) 폴백 — 매장의 가장 최근 계약서
+      const [latest] = await db
+        .select(cols)
         .from(employmentElectronicContracts)
         .where(eq(employmentElectronicContracts.restaurantId, input.restaurantId))
         .orderBy(desc(employmentElectronicContracts.createdAt))
@@ -424,6 +444,24 @@ export const electronicContractsRouter = router({
       // employee_contracts 초안 sync는 폐기 (SSOT 역전 — 계약서는 박제, 운영 데이터는 SSOT 직접).
       // 인건비 정산은 employee_wage_history (서명 시 생성)와 SSOT를 사용.
 
+      // 사용자 요청 2026-05-02: 계약서 작성 시 SSOT(restaurant_users) 자동 동기화
+      // 점장 입장에서 계약서를 작성/갱신하면 직원정보 카드도 즉시 따라가는 게 자연스러움
+      if (input.employeeId) {
+        const ruUpdate: Record<string, any> = {};
+        if (input.affiliatedCompany !== undefined) ruUpdate.affiliatedCompany = input.affiliatedCompany || null;
+        if (input.hireDate) ruUpdate.hireDate = input.hireDate;
+        if (input.weeklyOffDays !== undefined) ruUpdate.weeklyOffDays = input.weeklyOffDays;
+        if (Object.keys(ruUpdate).length > 0) {
+          await db
+            .update(restaurantUsers)
+            .set(ruUpdate)
+            .where(and(
+              eq(restaurantUsers.userId, input.employeeId),
+              eq(restaurantUsers.restaurantId, input.restaurantId),
+            ));
+        }
+      }
+
       return { id: result.id, token };
     }),
 
@@ -500,6 +538,32 @@ export const electronicContractsRouter = router({
       if (Object.keys(setData).length > 0) {
         await db.update(employmentElectronicContracts).set(setData).where(eq(employmentElectronicContracts.id, id));
       }
+
+      // 사용자 요청 2026-05-02: 계약서 수정 시 SSOT(restaurant_users) 자동 동기화
+      const [contractAfter] = await db
+        .select({
+          employeeId: employmentElectronicContracts.employeeId,
+          restaurantId: employmentElectronicContracts.restaurantId,
+        })
+        .from(employmentElectronicContracts)
+        .where(eq(employmentElectronicContracts.id, id))
+        .limit(1);
+      if (contractAfter?.employeeId) {
+        const ruUpdate: Record<string, any> = {};
+        if (updates.affiliatedCompany !== undefined) ruUpdate.affiliatedCompany = updates.affiliatedCompany || null;
+        if (updates.hireDate) ruUpdate.hireDate = updates.hireDate;
+        if (updates.weeklyOffDays !== undefined) ruUpdate.weeklyOffDays = updates.weeklyOffDays;
+        if (Object.keys(ruUpdate).length > 0) {
+          await db
+            .update(restaurantUsers)
+            .set(ruUpdate)
+            .where(and(
+              eq(restaurantUsers.userId, contractAfter.employeeId),
+              eq(restaurantUsers.restaurantId, contractAfter.restaurantId),
+            ));
+        }
+      }
+
       return { ok: true };
     }),
 
@@ -678,9 +742,13 @@ export const electronicContractsRouter = router({
                 sql`${employmentElectronicContracts.status} IN ('draft','sent','signed')`,
               ));
 
-            // ── 3. C군 단방향 sync 폐기 (SSOT 역전) ──
-            // users.name/phone/address, restaurant_users.affiliatedCompany,
-            // employee_contracts INSERT 모두 제거. 박제는 위 1번 스냅샷이 보존.
+            // ── 3. SSOT 동기화 (사용자 요청 2026-05-02 — 양방향 sync 부활) ──
+            // 계약서 서명 완료 시 직원정보(restaurant_users) 자동 갱신.
+            // 점장이 별도로 직원정보를 손대지 않아도 박제와 SSOT가 일치하도록 보장.
+            const ruSync: Record<string, any> = {};
+            if (contract.affiliatedCompany != null) ruSync.affiliatedCompany = contract.affiliatedCompany;
+            if (contract.hireDate != null) ruSync.hireDate = toDateString(contract.hireDate);
+            if (contract.weeklyOffDays != null) ruSync.weeklyOffDays = contract.weeklyOffDays;
 
             // ── 4. employee_wage_history (Phase 2 — 급여이력 단일 경로) ──
             // 신 계약서 contractStart의 월 1일을 effectiveFrom 으로 사용.
@@ -719,9 +787,9 @@ export const electronicContractsRouter = router({
               },
             });
 
-            // 4-3. restaurant_users.contractMigrated = true (Phase 2 전환 플래그)
+            // 4-3. restaurant_users.contractMigrated = true + SSOT sync (#3 위에서 모은 ruSync 병합)
             await tx.update(restaurantUsers)
-              .set({ contractMigrated: true } as any)
+              .set({ contractMigrated: true, ...ruSync } as any)
               .where(and(
                 eq(restaurantUsers.userId, contract.employeeId),
                 eq(restaurantUsers.restaurantId, contract.restaurantId),
