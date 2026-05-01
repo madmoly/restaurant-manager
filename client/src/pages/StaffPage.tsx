@@ -674,9 +674,9 @@ export default function StaffPage() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-foreground">{s.hireDate || "(미설정)"}</span>
+                          <span className="text-xs text-foreground">{s.hireDate ? formatKoreanDate(s.hireDate) : "(미설정)"}</span>
                           <button
-                            onClick={() => setEditingHireDate({ userId: s.userId, value: s.hireDate || "" })}
+                            onClick={() => setEditingHireDate({ userId: s.userId, value: String(s.hireDate || "").slice(0, 10) })}
                             className="p-1 rounded hover:bg-accent text-muted-foreground"
                           ><Edit3 className="w-3 h-3" /></button>
                         </div>
@@ -1221,8 +1221,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
 }) {
   const utils = trpc.useUtils();
 
-  // ── 기존 회사 목록 + 최근 계약서 템플릿 + 스케줄 프리셋 조회 ──
-  const { data: companies } = trpc.electronicContracts.listCompanies.useQuery({ restaurantId });
+  // ── 최근 계약서 템플릿 + 스케줄 프리셋 + 소속회사 마스터 조회 ──
   const { data: latestTemplate } = trpc.electronicContracts.getLatestTemplate.useQuery(
     { restaurantId },
     { enabled: !defaultEmployee }, // 새 계약서일 때만 조회 (갱신/재계약 시 불필요)
@@ -1230,8 +1229,12 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
   const { data: shiftPresets = [] } = trpc.restaurants.getShiftPresets.useQuery(
     { restaurantId },
   );
+  // 재설계 2026-05-02: 소속회사 마스터 (TDZ 회피 위해 useEffect 위에 선언 필수)
+  const { data: affiliatedCompaniesMaster = [] } = trpc.affiliatedCompanies.list.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
   const [templateApplied, setTemplateApplied] = useState(false);
-  // showCompanyList removed — replaced by employer presets tags
 
   const ec = editingContract; // 수정 모드 시 기존 데이터
   const [form, setForm] = useState({
@@ -1350,17 +1353,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     onSuccess() { toast.success("계약서 수정됨"); utils.electronicContracts.listEmploymentContracts.invalidate(); onClose(); },
     onError(err) { toast.error(err.message); },
   });
-
-  const removeCompany = trpc.electronicContracts.removeCompany.useMutation({
-    onSuccess() { toast.success("사업주 삭제됨"); utils.electronicContracts.listCompanies.invalidate(); },
-    onError(err) { toast.error(err.message); },
-  });
-
-  // 재설계 2026-05-02: 소속회사는 affiliated_companies 마스터에서 select. employer_presets 폐기
-  const { data: affiliatedCompaniesMaster = [] } = trpc.affiliatedCompanies.list.useQuery(
-    { restaurantId },
-    { enabled: restaurantId > 0 },
-  );
 
   const selectStaff = (userId: number) => {
     const staff = staffList.find((s: any) => s.userId === userId);
