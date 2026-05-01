@@ -11,6 +11,8 @@ import {
   Package,
   Link2,
   X,
+  Receipt,
+  Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -129,13 +131,21 @@ export default function CounterpartiesPage() {
                 </button>
               </div>
 
-              {/* 품목 매핑 패널 */}
+              {/* 펼쳐진 상세 패널 */}
               {expandedId === c.id && (
-                <CounterpartyItemsPanel
-                  restaurantId={restaurantId}
-                  counterpartyId={c.id}
-                  counterpartyName={c.name}
-                />
+                <>
+                  <SettlementBasisPanel
+                    restaurantId={restaurantId}
+                    counterpartyId={c.id}
+                    initialBasis={c.settlementBasis ?? "supply"}
+                    initialTolerance={c.settlementMatchTolerance ?? 100}
+                  />
+                  <CounterpartyItemsPanel
+                    restaurantId={restaurantId}
+                    counterpartyId={c.id}
+                    counterpartyName={c.name}
+                  />
+                </>
               )}
             </div>
           ))}
@@ -438,6 +448,114 @@ function LinkItemForm({
         >
           {linkItem.isPending || createItem.isPending ? "연결 중..." : "연결"}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── 정산 기준 패널 (정산표 OCR 대조용) ───────────────────────────────────────
+
+const BASIS_OPTIONS = [
+  { value: "supply", label: "공급가 (부가세 별도)", desc: "시스템 매입 = 공급가, 정산표도 공급가 기준" },
+  { value: "total", label: "공급가+부가세 (포함)", desc: "정산표가 부가세 포함 금액. 시스템 매입은 ×1.1로 비교" },
+  { value: "mixed", label: "혼합 (과세/면세 혼재)", desc: "거래 항목별 자동판정 — 1차 정확도 낮음" },
+];
+
+function SettlementBasisPanel({
+  restaurantId,
+  counterpartyId,
+  initialBasis,
+  initialTolerance,
+}: {
+  restaurantId: number;
+  counterpartyId: number;
+  initialBasis: "supply" | "total" | "mixed";
+  initialTolerance: number;
+}) {
+  const [basis, setBasis] = useState<"supply" | "total" | "mixed">(initialBasis);
+  const [tolerance, setTolerance] = useState<string>(String(initialTolerance));
+  const utils = trpc.useUtils();
+
+  const update = trpc.counterparties.update.useMutation({
+    onSuccess() {
+      toast.success("정산 기준 저장됨");
+      utils.counterparties.list.invalidate();
+    },
+    onError(err) {
+      toast.error(err.message);
+    },
+  });
+
+  const isDirty = basis !== initialBasis || Number(tolerance) !== initialTolerance;
+
+  const handleSave = () => {
+    const tolNum = parseInt(tolerance) || 0;
+    if (tolNum < 0) {
+      toast.error("허용 오차는 0 이상이어야 합니다");
+      return;
+    }
+    update.mutate({
+      id: counterpartyId,
+      restaurantId,
+      settlementBasis: basis,
+      settlementMatchTolerance: tolNum,
+    });
+  };
+
+  return (
+    <div className="border-t border-border px-4 py-3 bg-muted/20">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+          <Receipt className="w-3 h-3" /> 정산표 OCR 대조 기준
+        </span>
+        {isDirty && (
+          <button
+            onClick={handleSave}
+            disabled={update.isPending}
+            className="text-xs text-primary hover:underline flex items-center gap-1"
+          >
+            <Save className="w-3 h-3" /> {update.isPending ? "저장 중..." : "저장"}
+          </button>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <div>
+          <label className="text-[11px] text-muted-foreground">비교 기준</label>
+          <div className="mt-1 space-y-1">
+            {BASIS_OPTIONS.map((opt) => (
+              <label key={opt.value} className="flex items-start gap-2 cursor-pointer p-1.5 rounded hover:bg-muted/40">
+                <input
+                  type="radio"
+                  name={`basis-${counterpartyId}`}
+                  value={opt.value}
+                  checked={basis === opt.value}
+                  onChange={() => setBasis(opt.value as any)}
+                  className="mt-0.5"
+                />
+                <div className="text-xs">
+                  <div className="font-medium text-foreground">{opt.label}</div>
+                  <div className="text-[10px] text-muted-foreground">{opt.desc}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] text-muted-foreground">합계 비교 허용 오차 (원)</label>
+          <input
+            type="number"
+            className="mt-1 w-32 rounded-md border border-input bg-background px-2 py-1 text-xs"
+            value={tolerance}
+            onChange={(e) => setTolerance(e.target.value)}
+            min={0}
+            placeholder="100"
+          />
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            원단위 절상/절사 흡수용. 기본 100원.
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -6,12 +6,13 @@ import {
   CheckCircle2, Circle, AlertTriangle, TrendingUp, TrendingDown,
   ChevronDown, ChevronUp, Lock, Loader2, ArrowUpRight, ArrowDownRight,
   Calendar, CreditCard, Banknote, Gift, ArrowRightLeft, MoreHorizontal,
-  Camera, X, Info, Download, FileText,
+  Camera, X, Info, Download, FileText, FileSearch,
 } from "lucide-react";
 import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { exportSettlementExcel, exportSettlementPDF } from "@/lib/settlementExport";
+import SettlementStatementCompareModal from "@/components/SettlementStatementCompareModal";
 
 type IncomeExpand = "sales" | "purchases" | "labor" | "fixed" | "expenses" | null;
 
@@ -76,6 +77,8 @@ export default function MonthlySettlementPage() {
   const [viewImage, setViewImage] = useState<string | null>(null);
   const [editingAmountId, setEditingAmountId] = useState<number | null>(null);
   const [amountInput, setAmountInput] = useState("");
+  // 정산표 OCR 대조 모달
+  const [compareModalCp, setCompareModalCp] = useState<{ id: number | null; name: string } | null>(null);
 
   const handleImageUpload = async (cpId: number | null, file: File) => {
     setUploadingCpId(cpId);
@@ -386,21 +389,34 @@ export default function MonthlySettlementPage() {
                   <div key={cp.id} className="rounded-lg border border-border/50 p-2.5 space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-foreground">{cp.name} <span className="text-muted-foreground">({cp.count}건)</span></span>
-                      {isPrivileged && (
-                        <label className="cursor-pointer text-muted-foreground hover:text-primary transition-colors">
-                          {uploadingCpId === cp.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (f) handleImageUpload(cp.id, f);
-                              e.target.value = "";
-                            }}
-                          />
-                        </label>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {isPrivileged && (
+                          <button
+                            type="button"
+                            onClick={() => setCompareModalCp({ id: cp.id, name: cp.name })}
+                            className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-primary hover:border-primary transition-colors flex items-center gap-1"
+                            title="OCR로 정산표를 읽어 시스템 매입과 대조"
+                          >
+                            <FileSearch className="w-3 h-3" />
+                            정산표 대조
+                          </button>
+                        )}
+                        {isPrivileged && (
+                          <label className="cursor-pointer text-muted-foreground hover:text-primary transition-colors">
+                            {uploadingCpId === cp.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) handleImageUpload(cp.id, f);
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-1 text-[11px]">
                       <div>
@@ -721,6 +737,18 @@ export default function MonthlySettlementPage() {
             onClick={(e) => e.stopPropagation()}
           />
         </div>
+      )}
+
+      {/* 정산표 OCR 대조 모달 */}
+      {compareModalCp && (
+        <SettlementStatementCompareModal
+          restaurantId={restaurantId}
+          initialCounterpartyId={compareModalCp.id}
+          initialCounterpartyName={compareModalCp.name}
+          yearMonth={`${year}-${String(month).padStart(2, "0")}`}
+          onClose={() => setCompareModalCp(null)}
+          onApplied={() => refetch()}
+        />
       )}
     </div>
   );
