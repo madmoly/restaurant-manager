@@ -522,24 +522,40 @@ function UploadStep({
         {/* 이미지/PDF 미리보기 */}
         {uploadedUrls.length > 0 && (
           <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
-            {uploadedUrls.map((url, idx) => (
-              <div key={idx} className="relative group">
-                <img
-                  src={url}
-                  alt={`정산표 ${idx + 1}`}
-                  className="w-full h-24 object-cover rounded border border-border"
-                />
-                <button
-                  onClick={() => onRemoveImage(idx)}
-                  className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <Trash2 className="w-2.5 h-2.5" />
-                </button>
-                <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 rounded">
-                  {idx + 1}/{uploadedUrls.length}
-                </span>
-              </div>
-            ))}
+            {uploadedUrls.map((url, idx) => {
+              const isPdf = url.toLowerCase().endsWith(".pdf");
+              return (
+                <div key={idx} className="relative group">
+                  {isPdf ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full h-24 rounded border border-border bg-muted/30 flex flex-col items-center justify-center gap-1 hover:bg-muted/50"
+                      title="새 탭에서 열기"
+                    >
+                      <FileText className="w-7 h-7 text-muted-foreground" />
+                      <span className="text-[10px] font-medium text-muted-foreground">PDF</span>
+                    </a>
+                  ) : (
+                    <img
+                      src={url}
+                      alt={`정산표 ${idx + 1}`}
+                      className="w-full h-24 object-cover rounded border border-border"
+                    />
+                  )}
+                  <button
+                    onClick={() => onRemoveImage(idx)}
+                    className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Trash2 className="w-2.5 h-2.5" />
+                  </button>
+                  <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 rounded">
+                    {idx + 1}/{uploadedUrls.length}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
 
