@@ -24,6 +24,7 @@ import {
   computeGuideWage,
   type WageType,
 } from "../helpers/wage";
+import { computeAnnualAccrual } from "../helpers/leave";
 
 // ─── 헬퍼 함수 ──────────────────────────────────────────────────────────────
 
@@ -922,12 +923,18 @@ export const schedulesRouter = router({
           residentNumber: employeeContracts.residentNumber,
           contractIsActive: employeeContracts.isActive,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
+          over5Employees: employmentElectronicContracts.over5Employees,
         })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
         .leftJoin(restaurantUsers, and(
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, schedules.userId)
+        ))
+        .leftJoin(employmentElectronicContracts, and(
+          eq(employmentElectronicContracts.employeeId, schedules.userId),
+          eq(employmentElectronicContracts.restaurantId, input.restaurantId),
+          eq(employmentElectronicContracts.status, "signed"),
         ))
         .leftJoin(employeeContracts, and(
           eq(employeeContracts.userId, schedules.userId),
@@ -1031,6 +1038,7 @@ export const schedulesRouter = router({
           bankAccount: string | null;
           residentNumber: string | null;
           phone: string | null;
+          over5Employees: boolean;
           dateSet: Set<string>;
         }>;
         totalHours: number;
@@ -1068,6 +1076,7 @@ export const schedulesRouter = router({
             bankAccount: r.bankAccount ?? r.tempBankAccount ?? null,
             residentNumber: r.residentNumber ?? null,
             phone: r.tempPhone ?? null,
+            over5Employees: !!r.over5Employees,
             dateSet: new Set<string>(),
           };
         }
@@ -1213,8 +1222,12 @@ export const schedulesRouter = router({
             effectiveDaily,
             effectiveMonthly,
             wageBreakdown,
-            substituteLeave: lb ? { earned: lb.substitute.earned, used: lb.substitute.used, remaining: lb.substitute.earned - lb.substitute.used } : null,
-            annualLeave: lb ? { earned: lb.annual.earned, used: lb.annual.used, remaining: lb.annual.earned - lb.annual.used } : null,
+            // 휴가 정보 — 5인이상 사업장 직원에게만 의미 있음 (5인미만은 법적 의무 없음)
+            substituteLeave: emp.over5Employees && lb ? { earned: lb.substitute.earned, used: lb.substitute.used, remaining: lb.substitute.earned - lb.substitute.used } : null,
+            annualLeave: emp.over5Employees && lb ? { earned: lb.annual.earned, used: lb.annual.used, remaining: lb.annual.earned - lb.annual.used } : null,
+            // 입사일 기준 연차 발생 일정 (5인이상만)
+            annualAccrual: emp.over5Employees ? computeAnnualAccrual(emp.hireDate) : null,
+            over5Employees: emp.over5Employees,
             userId: undefined, // 클라이언트에 노출하지 않음
             dateSet: undefined, // 내부 집계용
           };
