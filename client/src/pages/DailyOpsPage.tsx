@@ -2749,13 +2749,8 @@ function MiddayTab({
         return ` -${t ? t + ' ' : ''}${m.note}`;
       });
 
-    // 현재 근무자: 체크시간 기준 근무 중
-    const schedules = (daySchedulesQuery.data ?? []).filter((s: any) => s.status !== 'canceled');
-    const currentWorkers = schedules.filter((s: any) => {
-      const st = new Date(s.startTime).getTime();
-      const et = new Date(s.endTime).getTime();
-      return st <= checkpointMs && checkpointMs <= et;
-    });
+    // 금일 근무자: 당일 전체 스케줄 (마감 보고와 동일)
+    const todaySchedules = (daySchedulesQuery.data ?? []).filter((s: any) => s.status !== 'canceled');
 
     const lines: string[] = [];
     lines.push(`[${restName}] ${dateStr}`);
@@ -2770,9 +2765,9 @@ function MiddayTab({
       lines.push(' -없음');
     }
     lines.push('');
-    lines.push(`* 현재 근무자`);
-    if (currentWorkers.length > 0) {
-      for (const s of currentWorkers) {
+    lines.push(`* 금일 근무자`);
+    if (todaySchedules.length > 0) {
+      for (const s of todaySchedules) {
         const name = s.userName ?? s.tempWorkerName ?? '미배정';
         const w = calcHeadcountWeight(
           s.startTime,
