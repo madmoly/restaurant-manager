@@ -7,6 +7,7 @@ import { Card, MonthNav, PageHeader, EmptyState } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { ProfitPageSkeleton } from "@/components/ui/skeletons";
 import { loadKoreanFont } from "@/lib/pdfKoreanFont";
+import { formatKRW } from "@/lib/utils";
 
 type CostCategory = "sales" | "purchases" | "labor" | "fixed" | null;
 
@@ -274,7 +275,7 @@ export default function ProfitPage() {
               headers={["날짜", "금액", "비고"]}
               rows={salesList.map(s => [
                 fmtDate(s.saleDate),
-                `₩${Number(s.amount).toLocaleString()}`,
+                formatKRW(Number(s.amount)),
                 s.note ?? "",
               ])}
             />
@@ -295,7 +296,7 @@ export default function ProfitPage() {
               rows={purchaseList.map(p => [
                 fmtDate(p.purchaseDate),
                 (p as any).counterpartyName ?? "-",
-                `₩${Number(p.totalAmount).toLocaleString()}`,
+                formatKRW(Number(p.totalAmount)),
               ])}
             />
           ) : (
@@ -316,7 +317,7 @@ export default function ProfitPage() {
                 .filter(c => Number(c.laborCost) > 0)
                 .map(c => [
                   fmtDate(c.closingDate),
-                  `₩${Number(c.laborCost).toLocaleString()}`,
+                  formatKRW(Number(c.laborCost)),
                 ])}
             />
           ) : (
@@ -337,12 +338,12 @@ export default function ProfitPage() {
                 ...fixedBreakdown.map(b => [
                   b.name,
                   b.type === "monthly" ? "월납" : b.type === "yearly" ? "연납(÷12)" : b.type === "quarterly" ? "분기(÷3)" : "일시",
-                  `₩${b.amount.toLocaleString()}`,
+                  formatKRW(b.amount),
                 ]),
                 ...ratioItems.map((r: any) => [
                   r.name,
                   `매출의 ${r.ratio}%`,
-                  `₩${Math.round(closedSales * r.ratio / 100).toLocaleString()}`,
+                  formatKRW(Math.round(closedSales * r.ratio / 100)),
                 ]),
               ]}
             />

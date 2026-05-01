@@ -11,6 +11,7 @@ import { Card, StatCard, PageHeader } from "@/components/ui/compat";
 import { Button } from "@/components/ui/button";
 import { DashboardSkeleton } from "@/components/ui/skeletons";
 import { ROLE_LABELS } from "@shared/permissions";
+import { formatKoreanDate } from "@/lib/utils";
 
 // ─── 포맷 헬퍼 ─────────────────────────────────────────────────────────────
 const fmtShort = (n: number) => {
@@ -174,12 +175,7 @@ export default function MasterDashboard() {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {login.lastSignedIn
-                    ? new Date(login.lastSignedIn).toLocaleDateString("ko-KR", {
-                        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                      })
-                    : "—"
-                  }
+                  {login.lastSignedIn ? formatKoreanDate(login.lastSignedIn, "withTime") : "—"}
                 </p>
               </div>
             ))}
@@ -258,7 +254,7 @@ export default function MasterDashboard() {
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-foreground truncate">{n.title}</p>
                       <p className="text-[10px] text-muted-foreground mt-1">
-                        {new Date(n.createdAt).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        {formatKoreanDate(n.createdAt, "withTime")}
                       </p>
                     </div>
                   </div>

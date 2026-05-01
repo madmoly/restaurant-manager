@@ -102,8 +102,8 @@ export default function LaborCostPage() {
         const nameLabel = emp.isNoHolidayPayWorker ? `${emp.name} (주휴미제공)` : emp.isTemp ? `${emp.name} (임시)` : emp.name;
         const wageTypeLabel = emp.wageType === "hourly" ? "시급" : emp.wageType === "monthly" ? "월급" : emp.wageType === "daily" ? "일급" : "-";
         const insuranceLabel = emp.socialInsurance ? "4대보험" : "3.3%공제";
-        const contractStartStr = emp.contractStart ? new Date(emp.contractStart).toLocaleDateString("ko-KR") : "-";
-        const contractEndStr = emp.contractEnd ? new Date(emp.contractEnd).toLocaleDateString("ko-KR") : "-";
+        const contractStartStr = emp.contractStart ? fmtDate(emp.contractStart) : "-";
+        const contractEndStr = emp.contractEnd ? fmtDate(emp.contractEnd) : "-";
 
         if (consultant) {
           // 노무사전송용: 시스템 계산 급여 제외, 계약·근무·신원 raw data만

@@ -15,7 +15,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { cn, formatKoreanDate } from "@/lib/utils";
 import { ROLE_LABELS, type EffectiveRole } from "@shared/permissions";
 import { 
   UtensilsCrossed, LogOut, Menu, X, Sun, Moon, MoreHorizontal,
@@ -855,12 +855,7 @@ function NotificationBell() {
                             {NOTIF_TYPE_LABELS[n.type] ?? n.type}
                           </span>
                           <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
-                            {new Date(n.createdAt).toLocaleDateString("ko-KR", {
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            {formatKoreanDate(n.createdAt, "withTime")}
                           </span>
                         </div>
                         <p className="text-sm text-foreground mt-0.5 truncate">{n.title}</p>

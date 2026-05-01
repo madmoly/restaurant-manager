@@ -15,6 +15,7 @@ import {
   Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatKRW } from "@/lib/utils";
 
 const TYPE_OPTIONS = [
   { value: "supplier", label: "공급업체" },
@@ -224,7 +225,7 @@ function CounterpartyItemsPanel({
               <div className="flex items-center gap-2 shrink-0">
                 {ci.lastPrice && (
                   <span className="text-muted-foreground tabular-nums">
-                    ₩{Number(ci.lastPrice).toLocaleString()}
+                    {formatKRW(Number(ci.lastPrice))}
                   </span>
                 )}
                 {ci.isPreferred && (

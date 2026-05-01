@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { exportSettlementExcel, exportSettlementPDF } from "@/lib/settlementExport";
 import SettlementStatementCompareModal from "@/components/SettlementStatementCompareModal";
+import { formatKoreanDate } from "@/lib/utils";
 
 type IncomeExpand = "sales" | "purchases" | "labor" | "fixed" | "expenses" | null;
 
@@ -661,7 +662,7 @@ export default function MonthlySettlementPage() {
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               {closing?.closedByName && `${closing.closedByName} · `}
-              {closing?.closedAt && new Date(closing.closedAt).toLocaleDateString("ko-KR")}
+              {closing?.closedAt && formatKoreanDate(closing.closedAt)}
             </p>
             {isPrivileged && (
               <Button

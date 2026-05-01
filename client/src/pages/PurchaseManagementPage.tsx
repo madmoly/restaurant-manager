@@ -13,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { formatKRW } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 
 type TabId = "master" | "analysis" | "history";
@@ -421,7 +422,7 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
                       </div>
                       <span className="text-xs text-muted-foreground">
                         거래처 {item.counterpartyCount}곳
-                      {item.minBasePrice != null && <> · 최저 ₩{item.minBasePrice.toLocaleString()}/{item.baseUnit || '개'}</>}
+                      {item.minBasePrice != null && <> · 최저 {formatKRW(item.minBasePrice)}/{item.baseUnit || '개'}</>}
                     </span>
                     </div>
                   </div>
@@ -437,7 +438,7 @@ function ItemMasterTab({ restaurantId }: { restaurantId: number }) {
                         </div>
                         <div className="flex items-center gap-2 shrink-0 tabular-nums">
                           {m.basePricePerUnit != null && (
-                            <span className="font-medium text-foreground">₩{m.basePricePerUnit.toLocaleString()}/{item.baseUnit || '개'}</span>
+                            <span className="font-medium text-foreground">{formatKRW(m.basePricePerUnit)}/{item.baseUnit || '개'}</span>
                           )}
                           {m.lastReceivedDate && (
                             <span className="text-[10px] text-muted-foreground">
@@ -716,7 +717,7 @@ function PriceCompareTab({ restaurantId }: { restaurantId: number }) {
                       </div>
                       {maxPrice > minPrice && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300">
-                          차이 ₩{(maxPrice - minPrice).toLocaleString()}/{unit}
+                          차이 {formatKRW(maxPrice - minPrice)}/{unit}
                         </span>
                       )}
                     </div>
@@ -736,7 +737,7 @@ function PriceCompareTab({ restaurantId }: { restaurantId: number }) {
                                 <span className={`font-medium tabular-nums ${
                                   isCheapest ? "text-green-600 dark:text-green-400" : isMostExpensive ? "text-red-500" : "text-foreground"
                                 }`}>
-                                  ₩{price.toLocaleString()}/{unit}
+                                  {formatKRW(price)}/{unit}
                                 </span>
                                 {s.conversionNote && <span className="text-[9px] text-muted-foreground">{s.conversionNote}</span>}
                                 {isCheapest && <span className="text-[9px] text-green-600 dark:text-green-400">최저</span>}
@@ -764,7 +765,7 @@ function PriceCompareTab({ restaurantId }: { restaurantId: number }) {
                   <div key={item.itemName} className="flex items-center justify-between px-3 py-2 bg-muted/20 rounded text-xs">
                     <span className="text-foreground">{item.itemName}</span>
                     <span className="text-muted-foreground">
-                      {s?.counterpartyName} · ₩{price.toLocaleString()}/{unit}
+                      {s?.counterpartyName} · {formatKRW(price)}/{unit}
                     </span>
                   </div>
                 );
@@ -835,10 +836,10 @@ function PriceTrendTab({ restaurantId }: { restaurantId: number }) {
                     <span className="font-medium text-foreground text-sm">{item.itemName}</span>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs text-muted-foreground">
-                        현재 ₩{item.latestPrice.toLocaleString()}
+                        현재 {formatKRW(item.latestPrice)}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        (₩{item.minPrice.toLocaleString()} ~ ₩{item.maxPrice.toLocaleString()})
+                        ({formatKRW(item.minPrice)} ~ {formatKRW(item.maxPrice)})
                       </span>
                     </div>
                   </div>
@@ -871,7 +872,7 @@ function PriceTrendTab({ restaurantId }: { restaurantId: number }) {
                             <span className="text-muted-foreground">{p.counterpartyName}</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="font-medium text-foreground tabular-nums">₩{p.unitPrice.toLocaleString()}</span>
+                            <span className="font-medium text-foreground tabular-nums">{formatKRW(p.unitPrice)}</span>
                             {diff !== 0 && (
                               <span className={`text-[10px] ${diff > 0 ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
                                 {diff > 0 ? "▲" : "▼"}{Math.abs(diff).toLocaleString()}
@@ -981,7 +982,7 @@ function ReceivedSection({
               <div className="flex items-center gap-2 shrink-0">
                 <div className="text-right">
                   <span className="text-sm font-bold text-foreground tabular-nums">
-                    ₩{cp.totalAmount.toLocaleString()}
+                    {formatKRW(cp.totalAmount)}
                   </span>
                   <span className="text-[10px] text-muted-foreground ml-1">({pct}%)</span>
                 </div>
@@ -1056,7 +1057,7 @@ function ReceivedSection({
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span className="text-sm font-semibold tabular-nums text-foreground">
-                            ₩{order.totalAmount.toLocaleString()}
+                            {formatKRW(order.totalAmount)}
                           </span>
                           {order.items.length > 0 && (
                             isOrderExpanded
@@ -1073,8 +1074,8 @@ function ReceivedSection({
                               <span className="text-foreground truncate max-w-[45%]">{item.itemName}</span>
                               <div className="flex items-center gap-2 text-muted-foreground tabular-nums">
                                 {item.quantity && <span>{item.quantity}{item.unitName || ""}</span>}
-                                {item.unitPrice && <span>@₩{Number(item.unitPrice).toLocaleString()}</span>}
-                                <span className="font-medium text-foreground">₩{Number(item.lineTotal || 0).toLocaleString()}</span>
+                                {item.unitPrice && <span>@{formatKRW(Number(item.unitPrice))}</span>}
+                                <span className="font-medium text-foreground">{formatKRW(Number(item.lineTotal || 0))}</span>
                               </div>
                             </div>
                           ))}
@@ -1139,7 +1140,7 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
   });
 
   const handleDeleteOrder = (order: MonthlyOrder, cpName: string) => {
-    if (confirm(`${order.purchaseDate} ${cpName} 전표(₩${order.totalAmount.toLocaleString()})를 삭제할까요?`)) {
+    if (confirm(`${order.purchaseDate} ${cpName} 전표(${formatKRW(order.totalAmount)})를 삭제할까요?`)) {
       deleteOrder.mutate({ restaurantId, id: order.orderId });
     }
   };
@@ -1281,7 +1282,7 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
               입고 · 거래처 {receivedCpList.length}곳 · 전표 {receivedOrderCount}건
             </span>
             <span className="text-sm font-semibold text-foreground tabular-nums">
-              ₩{receivedTotal.toLocaleString()}
+              {formatKRW(receivedTotal)}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -1289,19 +1290,19 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
               즉시지출 · 항목 {expItemCount}건
             </span>
             <span className="text-sm font-semibold text-foreground tabular-nums">
-              ₩{expenseTotal.toLocaleString()}
+              {formatKRW(expenseTotal)}
             </span>
           </div>
           <div className="flex items-center justify-between border-t border-border pt-1.5">
             <span className="text-sm font-medium text-foreground">합계</span>
             <span className="text-base font-bold text-primary tabular-nums">
-              ₩{combinedTotal.toLocaleString()}
+              {formatKRW(combinedTotal)}
             </span>
           </div>
           {orderedFlat.length > 0 && (
             <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1">
               <span>※ 발주중 {orderedFlat.length}건 (참고)</span>
-              <span className="tabular-nums">₩{orderedTotal.toLocaleString()}</span>
+              <span className="tabular-nums">{formatKRW(orderedTotal)}</span>
             </div>
           )}
         </Card>
@@ -1377,7 +1378,7 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
                         </div>
                         <div className="text-right shrink-0">
                           <span className="text-sm font-bold text-foreground tabular-nums">
-                            ₩{row.total.toLocaleString()}
+                            {formatKRW(row.total)}
                           </span>
                           <span className="text-[10px] text-muted-foreground ml-1">({pct}%)</span>
                         </div>
@@ -1387,7 +1388,7 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
                   <div className="px-4 py-2.5 flex items-center justify-between bg-muted/30">
                     <span className="text-sm font-semibold text-foreground">총합계</span>
                     <span className="text-sm font-bold text-primary tabular-nums">
-                      ₩{expenseTotal.toLocaleString()}
+                      {formatKRW(expenseTotal)}
                     </span>
                   </div>
                 </Card>
@@ -1410,7 +1411,7 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
                       {o.note && <span className="text-xs text-muted-foreground truncate max-w-[120px]">{o.note}</span>}
                     </div>
                     <span className="text-sm font-semibold tabular-nums text-foreground shrink-0">
-                      ₩{o.totalAmount.toLocaleString()}
+                      {formatKRW(o.totalAmount)}
                     </span>
                   </div>
                 ))}

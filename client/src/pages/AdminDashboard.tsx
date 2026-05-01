@@ -13,14 +13,15 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from "recharts";
+import { formatKoreanDate } from "@/lib/utils";
 
 // ─── 포맷 헬퍼 ─────────────────────────────────────────────────────────────
 const fmt = (n: number) => n.toLocaleString("ko-KR");
-const fmtW = (n: number) => `₩${fmt(n)}`;
+const fmtW = (n: number) => `${fmt(n)}원`;
 const fmtShort = (n: number) => {
-  if (n >= 100_000_000) return `${Math.round(n / 100_000_000)}억`;
-  if (n >= 10_000) return `${Math.round(n / 10_000)}만`;
-  return fmt(n);
+  if (n >= 100_000_000) return `${Math.round(n / 100_000_000)}억원`;
+  if (n >= 10_000) return `${Math.round(n / 10_000)}만원`;
+  return `${fmt(n)}원`;
 };
 
 // ─── 메인: 대표(admin) 대시보드 ──────────────────────────────────────────────
@@ -225,14 +226,14 @@ export default function AdminDashboard() {
                 <div className="text-right shrink-0 ml-3">
                   {s.midSalesTotal > 0 ? (
                     <>
-                      <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(s.midSalesTotal)}원</p>
+                      <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(s.midSalesTotal)}</p>
                       <p className="text-[10px] text-muted-foreground">
                         {s.midSalesReceipts > 0 && `${s.midSalesReceipts}건 · `}
                         {s.lastMidSalesTime && new Date(s.lastMidSalesTime).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </>
                   ) : s.isCloseDone && s.closingTotal != null ? (
-                    <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(s.closingTotal)}원</p>
+                    <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(s.closingTotal)}</p>
                   ) : (
                     <p className="text-xs text-muted-foreground">매출 미입력</p>
                   )}
@@ -392,7 +393,7 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                   <div className="text-right shrink-0 ml-3">
-                    <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(s.salesTotal)}원</p>
+                    <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(s.salesTotal)}</p>
                     <p className={`text-xs tabular-nums ${s.profit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
                       {s.profit >= 0 ? "+" : ""}{s.profitRate.toFixed(1)}%
                     </p>
@@ -432,7 +433,7 @@ export default function AdminDashboard() {
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-foreground truncate">{n.title}</p>                      {n.content && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.content}</p>}
                       <p className="text-[10px] text-muted-foreground mt-1">
-                        {new Date(n.createdAt).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        {formatKoreanDate(n.createdAt, "withTime")}
                       </p>
                     </div>
                   </div>

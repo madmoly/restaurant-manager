@@ -9,15 +9,17 @@ import {
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
+import { formatKRW } from "@/lib/utils";
 import {
   Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription,
 } from "@/components/ui/drawer";
 
 const DAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
+/** 캘린더 셀용 단축형: 1만 이상은 "X만원", 미만은 "X원" */
 function fmtWon(n: number): string {
-  if (n >= 10000) return `${Math.round(n / 10000)}만`;
-  return n.toLocaleString();
+  if (n >= 10000) return `${Math.round(n / 10000)}만원`;
+  return `${n.toLocaleString()}원`;
 }
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate();
@@ -168,7 +170,7 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
           <div className="bg-muted/50 rounded-lg p-3 space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">총 매출</span>
-              <span className="text-sm font-bold text-foreground">₩{data.sales.totalAmount.toLocaleString()}</span>
+              <span className="text-sm font-bold text-foreground">{formatKRW(data.sales.totalAmount)}</span>
             </div>
             <div className="grid grid-cols-2 gap-1 pt-1 border-t border-border/50">
               {data.sales.cashAmount > 0 && (
@@ -186,7 +188,7 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
             </div>
             {data.midSalesTotal > 0 && (
               <div className="text-[11px] pt-1 border-t border-border/50">
-                <span className="text-muted-foreground">중간매출 합계</span> <span className="font-medium text-foreground">₩{data.midSalesTotal.toLocaleString()}</span>
+                <span className="text-muted-foreground">중간매출 합계</span> <span className="font-medium text-foreground">{formatKRW(data.midSalesTotal)}</span>
               </div>
             )}
           </div>
@@ -205,12 +207,12 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
             {data.purchases.map((p: any) => (
               <div key={p.id} className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
                 <span className="text-xs font-medium text-foreground">{p.counterparty}</span>
-                <span className="text-xs text-foreground font-medium">₩{p.amount.toLocaleString()}</span>
+                <span className="text-xs text-foreground font-medium">{formatKRW(p.amount)}</span>
               </div>
             ))}
             <div className="flex items-center justify-between px-3 pt-1">
               <span className="text-xs text-muted-foreground font-medium">매입 합계</span>
-              <span className="text-xs font-bold text-foreground">₩{data.purchaseTotal.toLocaleString()}</span>
+              <span className="text-xs font-bold text-foreground">{formatKRW(data.purchaseTotal)}</span>
             </div>
           </div>
         )}
@@ -222,7 +224,7 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-muted-foreground">일일 매출 - 매입</span>
             <span className={`text-sm font-bold ${data.sales.totalAmount - data.purchaseTotal >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
-              ₩{(data.sales.totalAmount - data.purchaseTotal).toLocaleString()}
+              {formatKRW(data.sales.totalAmount - data.purchaseTotal)}
             </span>
           </div>
         </section>
@@ -354,21 +356,21 @@ export default function OpsCalendarPage() {
             <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">매출</div>
-                <div className="text-sm font-bold text-foreground">{closedSales > 0 ? `₩${fmtWon(closedSales)}` : "-"}</div>
+                <div className="text-sm font-bold text-foreground">{closedSales > 0 ? fmtWon(closedSales) : "-"}</div>
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">매입</div>
-                <div className="text-sm font-bold text-foreground">{closedPurchases > 0 ? `₩${fmtWon(closedPurchases)}` : "-"}</div>
+                <div className="text-sm font-bold text-foreground">{closedPurchases > 0 ? fmtWon(closedPurchases) : "-"}</div>
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">고정비</div>
-                <div className="text-sm font-bold text-foreground">{fixed > 0 ? `₩${fmtWon(fixed)}` : "-"}</div>
+                <div className="text-sm font-bold text-foreground">{fixed > 0 ? fmtWon(fixed) : "-"}</div>
               </div>
             </div>
             <div className="border-t border-border/50 pt-2 grid grid-cols-3 gap-2">
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">인건비</div>
-                <div className="text-sm font-bold text-foreground">{labor > 0 ? `₩${fmtWon(labor)}` : "-"}</div>
+                <div className="text-sm font-bold text-foreground">{labor > 0 ? fmtWon(labor) : "-"}</div>
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">마감</div>

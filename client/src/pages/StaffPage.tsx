@@ -10,6 +10,7 @@ import {
   Phone, CalendarDays, Briefcase, Info, Download, RefreshCw, Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatKRW, formatKoreanDate } from "@/lib/utils";
 
 const STORE_ROLE_LABELS: Record<string, string> = {
   owner: "점장",
@@ -697,7 +698,7 @@ export default function StaffPage() {
                             <div className="flex-1 space-y-1">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-medium text-foreground">
-                                  {contract.wageType === "hourly" ? "시급" : "월급"} ₩{Number(contract.wageAmount).toLocaleString()}
+                                  {contract.wageType === "hourly" ? "시급" : "월급"} {formatKRW(Number(contract.wageAmount))}
                                 </span>
                                 {contract.socialInsurance ? (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">4대보험</span>

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { trpc } from "../lib/trpc";
 import { CheckCircle, AlertTriangle, Pen, RotateCcw, Download } from "lucide-react";
+import { formatKoreanDate } from "@/lib/utils";
 
 // ─── 계약서 서명 페이지 (/sign/:token) ────────────────────────────────────────
 // 비로그인 접근 가능. 직원이 링크를 받아서 계약 내용 확인 + 서명
@@ -406,7 +407,7 @@ export default function ContractSignPage({ token }: { token: string }) {
                 위와 같이 근로계약을 체결하고 이를 성실히 이행할 것을 약정합니다.
               </p>
               <p className="text-center text-sm mb-6" style={{ color: "#6b7280" }}>
-                {new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" })}
+                {formatKoreanDate(new Date())}
               </p>
 
               <div className="grid grid-cols-2 gap-4">

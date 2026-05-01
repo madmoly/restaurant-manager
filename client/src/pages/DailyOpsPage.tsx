@@ -6,6 +6,7 @@ import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
 import { resizeImage, OCR_HIGH } from '@/lib/imageResize';
 import { formatDateWithHoliday, getHolidayName } from '@/lib/koreanHolidays';
+import { formatKRW } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
   Camera,
@@ -629,7 +630,7 @@ function YesterdayClosingCard({
       <h4 className="text-sm font-semibold text-foreground mb-2">어제 마감 요약</h4>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span>마감 {fmtTs(data.closeCheckedAt)}</span>
-        <span className="font-medium text-foreground">₩{(data.totalSales || 0).toLocaleString()}</span>
+        <span className="font-medium text-foreground">{formatKRW(data.totalSales || 0)}</span>
       </div>
       {data.closeNote && <p className="text-xs text-muted-foreground mt-1">메모: {data.closeNote}</p>}
     </Card>
@@ -790,7 +791,7 @@ function WeekdayAvgSalesCard({
     <Card className="bg-card border-border p-4">
       <h4 className="text-sm font-semibold text-foreground mb-2">요일 평균 매출</h4>
       <p className="text-sm text-muted-foreground">
-        최근 8주 {dayName}요일 평균: <span className="font-bold text-foreground">₩{(data.avg ?? 0).toLocaleString()}</span>
+        최근 8주 {dayName}요일 평균: <span className="font-bold text-foreground">{formatKRW(data.avg ?? 0)}</span>
       </p>
       <p className="text-xs text-muted-foreground mt-1">({data.count}주 기준)</p>
     </Card>
@@ -1808,7 +1809,7 @@ function PurchaseTab({
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-foreground">즉시지출</h3>
           {expenses.length > 0 && (
-            <span className="text-sm font-bold text-foreground">₩{totalExpenses.toLocaleString()}</span>
+            <span className="text-sm font-bold text-foreground">{formatKRW(totalExpenses)}</span>
           )}
         </div>
 
@@ -1824,7 +1825,7 @@ function PurchaseTab({
                   {exp.note && <p className="text-xs text-muted-foreground mt-0.5 truncate">{exp.note}</p>}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="font-medium tabular-nums">₩{Number(exp.amount).toLocaleString()}</span>
+                  <span className="font-medium tabular-nums">{formatKRW(Number(exp.amount))}</span>
                   {exp.attachmentUrl && (
                     <button onClick={() => setViewerImage(exp.attachmentUrl)} className="text-violet-500">
                       <Camera className="w-3.5 h-3.5" />
@@ -1931,7 +1932,7 @@ function PurchaseTab({
               disabled={createExpenseMut.isPending}
               className="w-full py-3 rounded-lg text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white transition-colors disabled:opacity-50"
             >
-              {createExpenseMut.isPending ? '등록 중...' : `즉시지출 등록${expAmount ? ` (₩${expAmount})` : ''}`}
+              {createExpenseMut.isPending ? '등록 중...' : `즉시지출 등록${expAmount ? ` (${expAmount}원)` : ''}`}
             </button>
           </div>
         ) : (
@@ -1959,7 +1960,7 @@ function PurchaseTab({
           </div>
           <div className="flex items-center gap-2">
             {totalAmount > 0 && (
-              <span className="text-sm font-bold text-foreground">₩{totalAmount.toLocaleString()}</span>
+              <span className="text-sm font-bold text-foreground">{formatKRW(totalAmount)}</span>
             )}
             <svg className={`w-4 h-4 text-muted-foreground transition-transform ${showOcrSection ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
           </div>
@@ -1981,7 +1982,7 @@ function PurchaseTab({
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 font-medium">입고</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-foreground tabular-nums">₩{Number(order.totalAmount).toLocaleString()}</span>
+                    <span className="font-medium text-foreground tabular-nums">{formatKRW(Number(order.totalAmount))}</span>
                     <svg className={`w-4 h-4 text-muted-foreground transition-transform ${expandedId === order.id ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                   </div>
                 </button>
@@ -1994,7 +1995,7 @@ function PurchaseTab({
                         <span className="text-foreground">{item.rawItemName || item.itemName || '품목'}</span>
                         <span className="text-muted-foreground tabular-nums">
                           {item.quantity && `${parseFloat(Number(item.quantity).toFixed(2))}${item.unitName ? item.unitName : ''} × `}
-                          ₩{Number(item.lineTotal).toLocaleString()}
+                          {formatKRW(Number(item.lineTotal))}
                         </span>
                       </div>
                     ))}
@@ -2305,7 +2306,7 @@ function PurchaseTab({
               <div className="bg-blue-500/5 p-2.5 rounded flex justify-between items-center">
                 <span className="text-xs text-muted-foreground">{purchaseItems.filter(i => i.rawItemName.trim()).length}개 항목</span>
                 <span className="text-sm font-bold text-blue-600 tabular-nums">
-                  합계 ₩{formTotal.toLocaleString()}
+                  합계 {formatKRW(formTotal)}
                 </span>
               </div>
             )}
@@ -2396,7 +2397,7 @@ function PurchaseTab({
                                     )}
                                   </span>
                                   {ci.lastPrice && (
-                                    <span className="text-xs text-muted-foreground ml-2 shrink-0">₩{Number(ci.lastPrice).toLocaleString()}</span>
+                                    <span className="text-xs text-muted-foreground ml-2 shrink-0">{formatKRW(Number(ci.lastPrice))}</span>
                                   )}
                                 </button>
                               ))}
@@ -2529,7 +2530,7 @@ function PurchaseTab({
             <div className="bg-blue-500/5 p-3 rounded flex justify-between items-center">
               <span className="text-sm font-medium text-foreground">합계:</span>
               <span className="font-bold text-blue-600 tabular-nums">
-                ₩{formTotal.toLocaleString()}
+                {formatKRW(formTotal)}
               </span>
             </div>
 
@@ -2865,7 +2866,7 @@ function MiddayTab({
                 >
                   <div>
                     <div className="font-medium text-foreground">
-                      ₩{Number(sale.amount).toLocaleString()}
+                      {formatKRW(Number(sale.amount))}
                       {sale.receiptCount > 0 && <span className="text-xs text-muted-foreground ml-1">({sale.receiptCount}건)</span>}
                     </div>
                     {sale.note && (
@@ -3270,7 +3271,7 @@ function CloseTab({
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">중간 매출:</span>
-            <span className="text-foreground">₩{midSalesTotal.toLocaleString()}</span>
+            <span className="text-foreground">{formatKRW(midSalesTotal)}</span>
           </div>
         </div>
       </Card>

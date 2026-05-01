@@ -13,6 +13,7 @@ import {
   AlertOctagon, FileWarning, BarChart3,
 } from "lucide-react";
 import { toast } from "sonner";
+import { formatKoreanDate } from "@/lib/utils";
 
 // ─── 상수 ───────────────────────────────────────────────────────────────────
 const ERROR_TYPE_LABELS: Record<string, string> = {
@@ -50,9 +51,9 @@ const STATUS_COLORS: Record<string, string> = {
   ignored: "bg-muted text-muted-foreground",
 };
 const fmtShort = (n: number) => {
-  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}억`;
-  if (n >= 10_000) return `${(n / 10_000).toFixed(0)}만`;
-  return n.toLocaleString("ko-KR");
+  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}억원`;
+  if (n >= 10_000) return `${(n / 10_000).toFixed(0)}만원`;
+  return `${n.toLocaleString("ko-KR")}원`;
 };
 const fmtDate = (d: string | Date) => {
   const date = typeof d === "string" ? new Date(d) : d;
@@ -236,7 +237,7 @@ function SystemStatusTab() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard icon={<Users size={14} />} label="전체 사용자" value={String(u?.total ?? 0)} unit="명" trend={{ value: u?.active ?? 0, label: "활성" }} />
         <StatCard icon={<Store size={14} />} label="매장" value={String(s?.active ?? 0)} unit="개" />
-        <StatCard icon={<DollarSign size={14} />} label="이번 달 총매출" value={fmtShort(biz?.salesTotal ?? 0)} unit="원" />
+        <StatCard icon={<DollarSign size={14} />} label="이번 달 총매출" value={fmtShort(biz?.salesTotal ?? 0)} />
         <StatCard icon={<TrendingUp size={14} />} label="영업이익률" value={(biz?.profitRate ?? 0).toFixed(1)} unit="%" className={(biz?.profit ?? 0) >= 0 ? "border-emerald-500/20" : "border-red-500/20"} />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -256,7 +257,7 @@ function SystemStatusTab() {
                   <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center"><UserCheck size={12} className="text-primary" /></div>
                   <div><p className="text-sm font-medium text-foreground">{login.name}</p><p className="text-xs text-muted-foreground">{ROLE_LABELS[login.role] ?? login.role}</p></div>
                 </div>
-                <p className="text-xs text-muted-foreground">{login.lastSignedIn ? new Date(login.lastSignedIn).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</p>
+                <p className="text-xs text-muted-foreground">{login.lastSignedIn ? formatKoreanDate(login.lastSignedIn, "withTime") : "—"}</p>
               </div>
             ))}
           </div>
@@ -276,7 +277,7 @@ function SystemStatusTab() {
                       <div className="min-w-0"><p className="text-sm font-medium text-foreground truncate">{store.restaurantName}</p><p className="text-xs text-muted-foreground">직원 {staffCount}명 · 일마감 {store.closedDays}/{store.daysInMonth}일</p></div>
                     </div>
                     <div className="text-right shrink-0 ml-3">
-                      <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(store.salesTotal)}원</p>
+                      <p className="text-sm font-semibold text-foreground tabular-nums">{fmtShort(store.salesTotal)}</p>
                       <p className={`text-xs tabular-nums ${store.profit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>{store.profit >= 0 ? "+" : ""}{store.profitRate.toFixed(1)}%</p>
                     </div>
                   </div>
@@ -292,7 +293,7 @@ function SystemStatusTab() {
               <div key={n.id} className={`p-2.5 rounded-lg border text-sm ${!n.isRead ? "border-primary/20 bg-primary/5" : "border-border"}`}>
                 <div className="flex items-start gap-2">
                   {n.type === "cost_exceeded" ? <AlertCircle size={14} className="text-amber-500 shrink-0 mt-0.5" /> : <CheckCircle2 size={14} className="text-emerald-500 shrink-0 mt-0.5" />}
-                  <div className="min-w-0 flex-1"><p className="text-xs font-medium text-foreground truncate">{n.title}</p><p className="text-[10px] text-muted-foreground mt-1">{new Date(n.createdAt).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p></div>
+                  <div className="min-w-0 flex-1"><p className="text-xs font-medium text-foreground truncate">{n.title}</p><p className="text-[10px] text-muted-foreground mt-1">{formatKoreanDate(n.createdAt, "withTime")}</p></div>
                 </div>
               </div>
             ))}

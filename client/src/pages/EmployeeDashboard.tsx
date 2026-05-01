@@ -5,6 +5,7 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { formatKoreanDate } from "@/lib/utils";
 import {
   ClipboardList, CalendarDays, Clock, CheckCircle2,
   AlertCircle, ChevronRight, Loader2,
@@ -99,7 +100,7 @@ export default function EmployeeDashboard() {
           {user?.name}님, 안녕하세요
         </h1>
         <p className="text-xs text-muted-foreground mt-0.5">
-          {selectedRestaurant?.name} &middot; {new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" })}
+          {selectedRestaurant?.name} &middot; {formatKoreanDate(new Date(), "shortWithDow")}
         </p>
       </div>
 
@@ -211,7 +212,7 @@ export default function EmployeeDashboard() {
             <div className="space-y-1.5">
               {mySchedules.map((s: any) => {
                 const d = new Date(s.startTime);
-                const dayStr = d.toLocaleDateString("ko-KR", { month: "numeric", day: "numeric", weekday: "short" });
+                const dayStr = formatKoreanDate(d, "shortWithDow");
                 const isToday = fmtDate(d) === today;
                 return (
                   <div key={s.id} className={`flex items-center justify-between text-sm px-2 py-1.5 rounded ${isToday ? "bg-primary/10 font-medium" : ""}`}>
