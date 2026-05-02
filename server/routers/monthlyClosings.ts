@@ -144,18 +144,22 @@ async function sumPurchasesByCP(
 
 // ── 인건비 합산 (소속회사별) ─────────────────────────────────────────────
 //
-// 월급제 정산 정책 재설계 2026-05-02 §3.4 (Phase 5):
+// 월급제 정산 정책 재설계 2026-05-02 §3.4 (Phase 5) + §3.7 (Phase 8):
 //   1. 시프트 누적: 시급/일급/임시근로자만. 정규 월급제 시프트는 임금 누적 제외.
 //   2. 정규 월급제 직원: 월말 일괄 합산 (computeMonthlyOnlyWage). 분모 209h 통일,
 //      입퇴사월 일할 보정, 미근무차감 적용.
-//   3. closedDateStrs 있을 때(confirmedLabor): 시프트 부분만 daily_closings.laborCost
-//      SUM으로 교체 + 비율 보정. 월급제 일괄은 분배 보정 없이 그대로 가산.
-//      → "일별 박제 SUM + 월말 월급제 일괄 합산" 정합.
-//   4. closedDateStrs 미지정(allLabor): 시프트 즉시 합산 + 월급제 일괄.
+//   3. 산식: totalCost = shiftTotalCost + monthlyTotalCost
+//      (시프트 실시간 합산 + 월말 일괄 합산 — 항상 동일 산식, daily_closings.laborCost
+//      SUM 안 함).
+//   4. closedDateStrs는 schedules JOIN 날짜 필터로만 사용 (해당 일자 시프트만 합산).
 //
-// Phase E (2026-05-02) 박제 안전망 유지:
-//   schedules JOIN의 weeklyHours·taxMode 등 비임금 SSOT는 즉시 영향. 임금은 wage_history
-//   시점별. 박제된 일자도 시프트 합산은 비율 보정으로 박제값과 정합.
+// 이력 노트 — Phase E 박제 안전망(ratio 보정)은 §3.7 (Phase 8)에서 폐기:
+//   ratio = snapshotTotal / shiftTotalCost 보정이 cda02e6 이전 옛 박제(월급제 시간
+//   비례 포함)와 신 산식(월급제 제외)을 동시에 합산해 월급제 이중 계산 발생.
+//   천호점 4월 미확정 정산 인건비가 17.56M(정상치 11~12M, +590만 부풀림)으로 표시.
+//   → daily_closings.laborCost는 일마감 화면 표시용으로 격하. 월정산은 시프트 + 월말
+//   일괄로만 산출. Phase 5.5에서 5월 1건 박제값을 신 산식으로 재산출했으므로 일마감
+//   화면도 정합. 과거 박제(2025~2026-04)는 옛 산식 그대로 일마감 화면에 잔존.
 async function sumLaborByCompany(
   restaurantId: number,
   year: number,
@@ -319,28 +323,8 @@ async function sumLaborByCompany(
     if (c) c.amountMonthly += result.finalWage;
   }
 
-  // 박제 안전망: closedDateStrs 있으면 시프트 부분만 daily_closings.laborCost SUM으로 교체.
-  //   월급제 일괄은 분배 보정 없이 그대로 가산 (월 단위 운영이라 비율 분배 부적절).
-  if (closedDateStrs && closedDateStrs.length > 0) {
-    const [snapRow] = await db.select({
-      total: sql<string>`COALESCE(SUM(${dailyClosings.laborCost}), 0)`,
-    })
-      .from(dailyClosings)
-      .where(and(
-        eq(dailyClosings.restaurantId, restaurantId),
-        sql`DATE(${dailyClosings.closingDate}) IN (${sql.join(closedDateStrs.map(d => sql`${d}`), sql`, `)})`,
-      ));
-    const snapshotTotal = Number(snapRow?.total ?? 0);
-    if (snapshotTotal > 0 || shiftTotalCost > 0) {
-      const ratio = shiftTotalCost > 0 ? snapshotTotal / shiftTotalCost : 0;
-      // byCompany 시프트 amount만 비율 보정 (월급제 amount는 그대로 유지)
-      for (const v of byCompanyMap.values()) {
-        v.amountShifts = v.amountShifts * ratio;
-      }
-      shiftTotalCost = snapshotTotal;
-    }
-  }
-
+  // §3.7 (Phase 8): 박제 안전망 폐기. 항상 시프트 실시간 + 월말 일괄로만 산출.
+  //   daily_closings.laborCost SUM 조회 + ratio 보정 블록 제거.
   const totalCost = Math.round(shiftTotalCost + monthlyTotalCost);
 
   return {
