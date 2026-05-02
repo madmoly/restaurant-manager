@@ -449,7 +449,7 @@ export const electronicContractsRouter = router({
       return { id: result.id, token };
     }),
 
-  /** 초안 계약서 수정 (draft 상태만) */
+  /** 계약서 수정 (draft / sent 상태 허용 — 서명 전이면 박제값에 반영됨) */
   updateEmploymentContract: ownerProcedure
     .input(
       z.object({
@@ -498,7 +498,9 @@ export const electronicContractsRouter = router({
         .where(eq(employmentElectronicContracts.id, id))
         .limit(1);
       if (!contract) throw new TRPCError({ code: "NOT_FOUND", message: "계약서를 찾을 수 없습니다" });
-      if (contract.status !== "draft") throw new TRPCError({ code: "BAD_REQUEST", message: "초안 상태에서만 수정할 수 있습니다" });
+      if (contract.status !== "draft" && contract.status !== "sent") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "초안 또는 서명 대기중인 계약서만 수정할 수 있습니다" });
+      }
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, contract.restaurantId, true);
 
       // 날짜 필드 변환

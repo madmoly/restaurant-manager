@@ -1354,12 +1354,26 @@ export default function StaffPage() {
                       </button>
                     )}
                     {c.status === "sent" && (
-                      <button
-                        onClick={copyLink}
-                        className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 px-2.5 py-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
-                      >
-                        <Link className="w-3.5 h-3.5" /> 서명 링크 복사
-                      </button>
+                      <>
+                        <button
+                          onClick={copyLink}
+                          className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 px-2.5 py-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                        >
+                          <Link className="w-3.5 h-3.5" /> 서명 링크 복사
+                        </button>
+                        {!isResigned && (
+                          <button
+                            onClick={() => {
+                              if (confirm("서명 대기중인 계약서를 수정합니다. 직원이 보는 내용이 즉시 변경되니, 이미 링크를 안내했다면 다시 안내해 주세요.")) {
+                                setEditingDraftContract(c);
+                              }
+                            }}
+                            className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 px-2.5 py-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" /> 수정
+                          </button>
+                        )}
+                      </>
                     )}
                     {c.status === "expired" && (
                       <button
@@ -1812,7 +1826,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto pb-20 lg:pb-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-foreground">{defaultEmployee ? "서명갱신/재계약" : "근로계약서 작성"}</h2>
+          <h2 className="text-lg font-semibold text-foreground">{
+            editingContract
+              ? (editingContract.status === "sent" ? "서명 대기 계약서 수정" : "초안 계약서 수정")
+              : defaultEmployee ? "서명갱신/재계약" : "근로계약서 작성"
+          }</h2>
           <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-5 h-5" /></button>
         </div>
 
