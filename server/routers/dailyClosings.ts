@@ -145,6 +145,11 @@ export const dailyClosingsRouter = router({
       const over5ByCompany = new Map<string, boolean>();
       for (const c of acRows) over5ByCompany.set(c.companyName, Boolean(c.over5Employees));
 
+      // 월급제 정산 정책 재설계 2026-05-02 §3.4 (Phase 5):
+      //   일마감 인건비 추정값에는 시급/일급/임시근로자 시프트만 누적.
+      //   정규 월급제 시프트는 wage=0 (월말 monthlyClosings에서 일괄 합산).
+      //   사유: 월급제는 일할 보정 + 미근무차감을 월말에만 정확히 계산할 수 있음.
+      //         일별로 분배하면 입퇴사월/결근 시 정합 깨짐.
       let laborCostCalc = 0;
       for (const r of schedRows) {
         const sDt = new Date(r.startTime);
@@ -157,6 +162,7 @@ export const dailyClosingsRouter = router({
         let wt: WageType = null;
         let wa: number | null = null;
         let stdHours = computeMonthlyStandardHours(null, true); // 폴백 209h
+        const isRegularMonthly = !r.tempWageType && r.wageType === "monthly";
         if (r.tempWageType && r.tempWageAmount) {
           wt = r.tempWageType as WageType;
           wa = Number(r.tempWageAmount);
@@ -165,6 +171,7 @@ export const dailyClosingsRouter = router({
           wa = Number(r.wageAmount);
           stdHours = computeMonthlyStandardHours(r.weeklyHours, over5);
         }
+        if (isRegularMonthly) continue; // 월급제 정규직은 일별 누적 제외
         laborCostCalc += computeWageForShift({ wageType: wt, wageAmount: wa, hoursWorked: hrs, monthlyStandardHours: stdHours });
       }
 

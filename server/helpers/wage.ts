@@ -7,11 +7,12 @@
  *
  * 월급제 정산 정책 재설계 2026-05-02:
  * - computeProration 추가 (입사·퇴사 월 일할 보정, 달력일수 기준)
+ * - computeMonthlyOnlyWage 추가 (월급제 직원 월말 일괄 합산: 일할 × 월급 - 미근무차감)
  *
  * 사용처:
  * - server/routers/schedules.ts:laborCostByCompany / workSummaryByEmployee
- * - server/routers/dailyClosings.ts:estimate
- * - server/routers/monthlyClosings.ts:sumLaborByCompany
+ * - server/routers/dailyClosings.ts:calculateDay (월급제 시프트 wage=0)
+ * - server/routers/monthlyClosings.ts:sumLaborByCompany (일별 박제 SUM + 월말 월급제 일괄)
  */
 
 const FULLTIME_STANDARD_HOURS = 209; // 풀타임 표준 분모 폴백
@@ -155,5 +156,91 @@ export function computeProration(args: {
     ratio: clampedRatio,
     proratedMonthlyWage: safeWage * clampedRatio,
     proratedStdHours: stdHours * clampedRatio,
+  };
+}
+
+/**
+ * 월급제 직원의 월말 일괄 임금 합산 (정책 §2.2 / §2.3 / §3.4).
+ *
+ * 산식 (분모 209h 통일):
+ *   expectedHours      = proratedStdHours = 209 × proration.ratio
+ *   shortfall          = max(0, expectedHours - actualHours)
+ *   shortfallDeduction = shortfall × (monthlyWage / 209)
+ *   finalWage          = max(0, proratedMonthlyWage - shortfallDeduction)
+ *
+ * 입력:
+ *   monthlyWage  계약월급 (원). 0 이하/유효하지 않으면 0 반환.
+ *   actualHours  해당 월 실제 근무한 시프트 시간 합 (시급 환산용).
+ *   hireDate     입사일 (YYYY-MM-DD). 일할 보정에 사용.
+ *   resignDate   퇴사일 (YYYY-MM-DD). 일할 보정에 사용.
+ *   year, month  대상 월.
+ *   stdHours     기본 209. 계약서 박제값과 동일한 분모 사용.
+ *
+ * 반환:
+ *   ratio                  proration 비율 (0~1)
+ *   proratedMonthlyWage    일할 보정된 계약월급
+ *   proratedStdHours       일할 보정된 소정근로시간 (= expectedHours)
+ *   shortfallHours         미근무 시간 (max(0, expected - actual))
+ *   shortfallDeduction     미근무 차감액
+ *   finalWage              최종 월급 (0 이하 가드 적용)
+ *
+ * 사용처:
+ * - server/routers/schedules.ts:laborCostByCompany (소속회사별 카드)
+ * - server/routers/monthlyClosings.ts:sumLaborByCompany (월정산 합계)
+ */
+export function computeMonthlyOnlyWage(args: {
+  monthlyWage: number | string | null | undefined;
+  actualHours: number;
+  hireDate: string | null | undefined;
+  resignDate: string | null | undefined;
+  year: number;
+  month: number;
+  stdHours?: number;
+}): {
+  ratio: number;
+  proratedMonthlyWage: number;
+  proratedStdHours: number;
+  shortfallHours: number;
+  shortfallDeduction: number;
+  finalWage: number;
+} {
+  const stdHours = args.stdHours && args.stdHours > 0 ? args.stdHours : FULLTIME_STANDARD_HOURS;
+  const monthlyWage = Number(args.monthlyWage);
+  const safeWage = isFinite(monthlyWage) && monthlyWage > 0 ? monthlyWage : 0;
+  const actualHours = Number(args.actualHours);
+  const safeActual = isFinite(actualHours) && actualHours > 0 ? actualHours : 0;
+
+  if (safeWage <= 0) {
+    return {
+      ratio: 0,
+      proratedMonthlyWage: 0,
+      proratedStdHours: 0,
+      shortfallHours: 0,
+      shortfallDeduction: 0,
+      finalWage: 0,
+    };
+  }
+
+  const proration = computeProration({
+    hireDate: args.hireDate,
+    resignDate: args.resignDate,
+    year: args.year,
+    month: args.month,
+    monthlyWage: safeWage,
+    stdHours,
+  });
+
+  const expectedHours = proration.proratedStdHours;
+  const shortfallHours = Math.max(0, expectedHours - safeActual);
+  const shortfallDeduction = shortfallHours * (safeWage / stdHours);
+  const finalWage = Math.max(0, proration.proratedMonthlyWage - shortfallDeduction);
+
+  return {
+    ratio: proration.ratio,
+    proratedMonthlyWage: proration.proratedMonthlyWage,
+    proratedStdHours: expectedHours,
+    shortfallHours,
+    shortfallDeduction,
+    finalWage,
   };
 }

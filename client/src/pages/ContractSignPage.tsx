@@ -254,26 +254,59 @@ export default function ContractSignPage({ token }: { token: string }) {
                                 </td>
                               </tr>
                             )}
-                            <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                              <td style={{ padding: "5px 12px", color: "#6b7280" }}>기본급{contract.monthlyContractHours ? ` (${Number(contract.monthlyContractHours)}h)` : ""}</td>
-                              <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
-                                {Math.round(Number(contract.basePay)).toLocaleString()}원
-                              </td>
-                            </tr>
-                            {effectiveOver5 && contract.annualLeavePay && Number(contract.annualLeavePay) > 0 && (
-                              <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                                <td style={{ padding: "5px 12px", color: "#6b7280" }}>포괄연차수당 (8h)</td>
-                                <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
-                                  {Math.round(Number(contract.annualLeavePay)).toLocaleString()}원
-                                </td>
-                              </tr>
+                            {/* 월급제 정산 정책 재설계 2026-05-02 §3.5 (Phase 6):
+                                  monthlyContractHours == 209 박제는 기본급 = 월급.
+                                  포괄연차수당은 보조 행 "안내 (월급에 포함)"으로만 노출 (합계 미가산).
+                                  201h 등 legacy 박제는 기존 합계 산식 유지. */}
+                            {Number(contract.monthlyContractHours) === 209 ? (
+                              <>
+                                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                                  <td style={{ padding: "5px 12px", color: "#6b7280" }}>기본급 (209h × 통상시급)</td>
+                                  <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
+                                    {Math.round(Number(contract.basePay)).toLocaleString()}원
+                                  </td>
+                                </tr>
+                                <tr style={{ background: "#f9fafb" }}>
+                                  <td style={{ padding: "6px 12px", fontWeight: 600 }}>합계 (월급)</td>
+                                  <td style={{ padding: "6px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>
+                                    {Math.round(Number(contract.wageAmount)).toLocaleString()}원
+                                  </td>
+                                </tr>
+                                {effectiveOver5 && contract.annualLeavePay && Number(contract.annualLeavePay) > 0 && (
+                                  <tr>
+                                    <td style={{ padding: "5px 12px", color: "#6b7280", fontSize: "11px" }}>
+                                      포괄연차수당 안내 (8h × 통상시급, 월급에 포함)
+                                    </td>
+                                    <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontSize: "11px", color: "#6b7280" }}>
+                                      {Math.round(Number(contract.annualLeavePay)).toLocaleString()}원
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                                  <td style={{ padding: "5px 12px", color: "#6b7280" }}>기본급{contract.monthlyContractHours ? ` (${Number(contract.monthlyContractHours)}h)` : ""}</td>
+                                  <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
+                                    {Math.round(Number(contract.basePay)).toLocaleString()}원
+                                  </td>
+                                </tr>
+                                {effectiveOver5 && contract.annualLeavePay && Number(contract.annualLeavePay) > 0 && (
+                                  <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                                    <td style={{ padding: "5px 12px", color: "#6b7280" }}>포괄연차수당 (8h)</td>
+                                    <td style={{ padding: "5px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 500 }}>
+                                      {Math.round(Number(contract.annualLeavePay)).toLocaleString()}원
+                                    </td>
+                                  </tr>
+                                )}
+                                <tr style={{ background: "#f9fafb" }}>
+                                  <td style={{ padding: "6px 12px", fontWeight: 600 }}>합계 (월급)</td>
+                                  <td style={{ padding: "6px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>
+                                    {Math.round(Number(contract.wageAmount)).toLocaleString()}원
+                                  </td>
+                                </tr>
+                              </>
                             )}
-                            <tr style={{ background: "#f9fafb" }}>
-                              <td style={{ padding: "6px 12px", fontWeight: 600 }}>합계 (월급)</td>
-                              <td style={{ padding: "6px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>
-                                {Math.round(Number(contract.wageAmount)).toLocaleString()}원
-                              </td>
-                            </tr>
                           </tbody>
                         </table>
                       </div>

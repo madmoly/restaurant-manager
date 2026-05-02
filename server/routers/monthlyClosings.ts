@@ -3,7 +3,7 @@ import { eq, and, gte, sql, sum, count, between } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { verifyStoreAccess } from "../middleware/storeAuth";
-import { computeWageForShift, type WageType } from "../helpers/wage";
+import { computeWageForShift, computeMonthlyOnlyWage, type WageType } from "../helpers/wage";
 import { computeMonthlyStandardHours } from "../helpers/labor";
 import {
   monthlyClosings,
@@ -144,17 +144,18 @@ async function sumPurchasesByCP(
 
 // ── 인건비 합산 (소속회사별) ─────────────────────────────────────────────
 //
-// Phase E (2026-05-02) 박제 안전망:
-//   직전 Phase E 변경에서 schedules JOIN 출처를 employee_contracts(시계열) →
-//   restaurant_users(현재값) + employee_wage_history(시계열)로 분리. 임금은 시계열
-//   유지되나 weeklyHours·taxMode 등 비임금 운영값은 SSOT 즉시 영향.
-//   → 박제된 일자에 대해서도 schedules 즉시 합산하면 사양 §10.1 ("monthly_closings.confirm
-//   후 박제된 월은 박제값 유지") 위반.
+// 월급제 정산 정책 재설계 2026-05-02 §3.4 (Phase 5):
+//   1. 시프트 누적: 시급/일급/임시근로자만. 정규 월급제 시프트는 임금 누적 제외.
+//   2. 정규 월급제 직원: 월말 일괄 합산 (computeMonthlyOnlyWage). 분모 209h 통일,
+//      입퇴사월 일할 보정, 미근무차감 적용.
+//   3. closedDateStrs 있을 때(confirmedLabor): 시프트 부분만 daily_closings.laborCost
+//      SUM으로 교체 + 비율 보정. 월급제 일괄은 분배 보정 없이 그대로 가산.
+//      → "일별 박제 SUM + 월말 월급제 일괄 합산" 정합.
+//   4. closedDateStrs 미지정(allLabor): 시프트 즉시 합산 + 월급제 일괄.
 //
-// 보강: closedDateStrs(일마감 박제된 날짜) 있을 때, totalCost는 daily_closings.laborCost
-//   SUM으로 박제값 사용. byCompany 분해는 schedules 즉시 합산 비율을 유지하되 박제
-//   총합과 같도록 비율 보정. 미박제 일자(allLabor 호출, closedDateStrs=undefined)는
-//   기존 동작(즉시 합산) 유지.
+// Phase E (2026-05-02) 박제 안전망 유지:
+//   schedules JOIN의 weeklyHours·taxMode 등 비임금 SSOT는 즉시 영향. 임금은 wage_history
+//   시점별. 박제된 일자도 시프트 합산은 비율 보정으로 박제값과 정합.
 async function sumLaborByCompany(
   restaurantId: number,
   year: number,
@@ -174,8 +175,8 @@ async function sumLaborByCompany(
     ? sql`DATE(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00')) IN (${sql.join(closedDateStrs.map(d => sql`${d}`), sql`, `)})`
     : undefined;
 
+  // Phase 5 (2026-05-02): hireDate, contractEnd 추가 — 월급제 일괄 일할 보정용.
   // Phase E (2026-05-02): weeklyHours 출처를 restaurant_users로 변경.
-  //   employee_contracts JOIN 제거 (테이블 폐기됨).
   const rows = await db.select({
     scheduleId: schedules.id,
     userId: schedules.userId,
@@ -188,6 +189,8 @@ async function sumLaborByCompany(
     wageType: employeeWageHistory.wageType,
     wageAmount: employeeWageHistory.wageAmount,
     weeklyHours: restaurantUsers.weeklyHours,
+    hireDate: restaurantUsers.hireDate,
+    contractEnd: restaurantUsers.contractEnd,
   }).from(schedules)
     .leftJoin(restaurantUsers, and(
       eq(restaurantUsers.restaurantId, restaurantId),
@@ -227,8 +230,23 @@ async function sumLaborByCompany(
   const over5ByCompany = new Map<string, boolean>();
   for (const c of acRows) over5ByCompany.set(c.companyName, Boolean(c.over5Employees));
 
-  const byCompanyMap = new Map<string, { headcount: Set<number | string>; hours: number; amount: number }>();
-  let totalCost = 0;
+  // amountShifts: 시급/일급/임시 시프트 누적, amountMonthly: 월급제 일괄 (분리 보관 → 박제 보정 분리)
+  const byCompanyMap = new Map<string, {
+    headcount: Set<number | string>;
+    hours: number;
+    amountShifts: number;
+    amountMonthly: number;
+  }>();
+  let shiftTotalCost = 0;
+
+  // 월급제 정규직 직원별 actualHours 누적 (월말 일괄 합산용)
+  const monthlyEmpMap = new Map<number, {
+    actualHours: number;
+    wageAmount: string;
+    hireDate: string | null;
+    contractEnd: string | null;
+    company: string;
+  }>();
 
   for (const r of rows) {
     const startDt = new Date(r.startTime);
@@ -241,6 +259,7 @@ async function sumLaborByCompany(
     const over5 = empCompany ? over5ByCompany.get(empCompany) ?? false : false;
 
     // 시급 결정 (재설계 2026-05-02 §2.4)
+    const isRegularMonthly = !r.tempWageType && r.wageType === "monthly";
     let wt: WageType = null;
     let wa: number | null = null;
     let stdHours = computeMonthlyStandardHours(null, true); // 폴백 209h
@@ -252,18 +271,56 @@ async function sumLaborByCompany(
       wa = Number(r.wageAmount);
       stdHours = computeMonthlyStandardHours(r.weeklyHours, over5);
     }
-    const pay = computeWageForShift({ wageType: wt, wageAmount: wa, hoursWorked: hours, monthlyStandardHours: stdHours });
-    totalCost += pay;
 
     const company = r.tempWorkerName ? "임시근로" : (empCompany ?? "기본");
     const key = r.tempWorkerName ? `임시-${r.tempWorkerName}` : (r.userId ? String(r.userId) : "unknown");
+
+    if (isRegularMonthly && r.userId) {
+      // 월급제 정규직: 시프트 임금 누적 X. 직원별 actualHours만 모아 월말 일괄 합산.
+      if (!monthlyEmpMap.has(r.userId)) {
+        monthlyEmpMap.set(r.userId, {
+          actualHours: 0,
+          wageAmount: String(r.wageAmount ?? "0"),
+          hireDate: r.hireDate ? String(r.hireDate) : null,
+          contractEnd: r.contractEnd ? String(r.contractEnd) : null,
+          company,
+        });
+      }
+      monthlyEmpMap.get(r.userId)!.actualHours += hours;
+      // headcount/hours는 누적 (amountShifts는 0)
+      const existing = byCompanyMap.get(company);
+      if (existing) { existing.headcount.add(key); existing.hours += hours; }
+      else { byCompanyMap.set(company, { headcount: new Set([key]), hours, amountShifts: 0, amountMonthly: 0 }); }
+      continue;
+    }
+
+    const pay = computeWageForShift({ wageType: wt, wageAmount: wa, hoursWorked: hours, monthlyStandardHours: stdHours });
+    shiftTotalCost += pay;
+
     const existing = byCompanyMap.get(company);
-    if (existing) { existing.headcount.add(key); existing.hours += hours; existing.amount += pay; }
-    else { byCompanyMap.set(company, { headcount: new Set([key]), hours, amount: pay }); }
+    if (existing) { existing.headcount.add(key); existing.hours += hours; existing.amountShifts += pay; }
+    else { byCompanyMap.set(company, { headcount: new Set([key]), hours, amountShifts: pay, amountMonthly: 0 }); }
   }
 
-  // Phase E 박제 안전망: closedDateStrs 있으면 daily_closings.laborCost SUM으로 totalCost 교체.
-  //   schedules 즉시 합산을 byCompany 비율 산출용으로만 사용하고, 비율 보정해 박제 총합과 정합.
+  // 월급제 정규직 월말 일괄 합산 (정책 §2.2 / §3.4)
+  let monthlyTotalCost = 0;
+  for (const [_userId, data] of monthlyEmpMap) {
+    const result = computeMonthlyOnlyWage({
+      monthlyWage: data.wageAmount,
+      actualHours: data.actualHours,
+      hireDate: data.hireDate,
+      resignDate: data.contractEnd,
+      year,
+      month,
+      stdHours: 209,
+    });
+    monthlyTotalCost += result.finalWage;
+    const c = byCompanyMap.get(data.company);
+    if (c) c.amountMonthly += result.finalWage;
+  }
+
+  // 박제 안전망: closedDateStrs 있으면 시프트 부분만 daily_closings.laborCost SUM으로 교체.
+  //   월급제 일괄은 분배 보정 없이 그대로 가산 (월 단위 운영이라 비율 분배 부적절).
   if (closedDateStrs && closedDateStrs.length > 0) {
     const [snapRow] = await db.select({
       total: sql<string>`COALESCE(SUM(${dailyClosings.laborCost}), 0)`,
@@ -274,17 +331,17 @@ async function sumLaborByCompany(
         sql`DATE(${dailyClosings.closingDate}) IN (${sql.join(closedDateStrs.map(d => sql`${d}`), sql`, `)})`,
       ));
     const snapshotTotal = Number(snapRow?.total ?? 0);
-    if (snapshotTotal > 0 || totalCost > 0) {
-      const ratio = totalCost > 0 ? snapshotTotal / totalCost : 0;
-      // byCompany 비율 보정 — schedules 분배 비율을 유지하되 합이 박제값과 같도록
+    if (snapshotTotal > 0 || shiftTotalCost > 0) {
+      const ratio = shiftTotalCost > 0 ? snapshotTotal / shiftTotalCost : 0;
+      // byCompany 시프트 amount만 비율 보정 (월급제 amount는 그대로 유지)
       for (const v of byCompanyMap.values()) {
-        v.amount = v.amount * ratio;
+        v.amountShifts = v.amountShifts * ratio;
       }
-      totalCost = snapshotTotal;
+      shiftTotalCost = snapshotTotal;
     }
   }
 
-  totalCost = Math.round(totalCost);
+  const totalCost = Math.round(shiftTotalCost + monthlyTotalCost);
 
   return {
     totalCost,
@@ -293,7 +350,7 @@ async function sumLaborByCompany(
         company,
         headcount: v.headcount.size,
         hours: Math.round(v.hours * 10) / 10,
-        amount: Math.round(v.amount),
+        amount: Math.round(v.amountShifts + v.amountMonthly),
       }))
       .sort((a, b) => b.amount - a.amount),
   };

@@ -1767,14 +1767,15 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
   const wageNum = Number(form.wageAmount) || 0;
 
   // ── 포괄임금 역산 (월급제 전용) ──
-  // 월급제 정산 정책 재설계 2026-05-02 §2.1: 통상시급 분모 209h 고정 (5인 여부 무관).
-  // 기본급 표시 분모: 5인↑ 201h (포괄연차 8h 분리), 5인↓ 209h (연차 미발생 → 전부 기본급).
+  // 월급제 정산 정책 재설계 2026-05-02 §3.5 (Phase 6): 박제값 분모 209h 단일화.
+  // 기본급 = 209h × 통상시급 = 월급 그 자체. 연차수당은 표시 전용(분모 미가산, 월급에 포함됨).
+  // 5인↑ 사업장은 보조 행으로 "포괄연차수당 안내 (8h × 통상시급, 월급에 포함)"만 표시.
   const divisor = 209;
   const hourlyWageCalc = divisor > 0 ? wageNum / divisor : 0;
-  const monthlyContractHours = form.over5Employees ? 201 : 209;
+  const monthlyContractHours = 209;
   const basePayCalc = Math.round(hourlyWageCalc * monthlyContractHours);
   const annualLeavePayCalc = form.over5Employees ? Math.round(hourlyWageCalc * 8) : 0;
-  const wageCheckSum = basePayCalc + annualLeavePayCalc;
+  const wageCheckSum = basePayCalc;
   const annualSalaryCalc = wageNum * 12;
 
   const inputCls = "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
@@ -2048,19 +2049,19 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                   <span className="font-mono font-medium">{Math.round(hourlyWageCalc).toLocaleString()}원</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span style={{ color: "#6b7280" }}>기본급 ({monthlyContractHours}h × 통상시급)</span>
+                  <span style={{ color: "#6b7280" }}>기본급 (209h × 통상시급)</span>
                   <span className="font-mono font-medium">{basePayCalc.toLocaleString()}원</span>
                 </div>
-                {form.over5Employees && (
-                  <div className="flex justify-between items-center">
-                    <span style={{ color: "#6b7280" }}>포괄연차수당 (8h × 통상시급)</span>
-                    <span className="font-mono font-medium">{annualLeavePayCalc.toLocaleString()}원</span>
-                  </div>
-                )}
                 <div className="flex justify-between items-center pt-1.5" style={{ borderTop: "1px solid #e5e7eb" }}>
                   <span className="font-semibold">합계</span>
                   <span className="font-mono font-semibold">{wageCheckSum.toLocaleString()}원</span>
                 </div>
+                {form.over5Employees && (
+                  <div className="flex justify-between items-center pt-1 text-[11px]" style={{ color: "#6b7280" }}>
+                    <span>포괄연차수당 안내 (8h × 통상시급, 월급에 포함)</span>
+                    <span className="font-mono">{annualLeavePayCalc.toLocaleString()}원</span>
+                  </div>
+                )}
                 {Math.abs(wageCheckSum - wageNum) > 10 && (
                   <p className="text-[10px] text-amber-600">※ 단수 차이 {(wageCheckSum - wageNum).toLocaleString()}원 — 반올림에 의한 차이입니다</p>
                 )}

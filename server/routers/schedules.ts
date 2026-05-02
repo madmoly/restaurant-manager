@@ -20,7 +20,7 @@ import { getHolidayName } from "@shared/holidays";
 import {
   computeWageForShift,
   computeGuideWage,
-  computeProration,
+  computeMonthlyOnlyWage,
   type WageType,
 } from "../helpers/wage";
 import {
@@ -1121,30 +1121,26 @@ export const schedulesRouter = router({
         companyMap[company].totalWage += wage;
       }
 
-      // ── 월급제 정규직 합계 산출 (월말 일괄, 정책 §2.2) ──
+      // ── 월급제 정규직 합계 산출 (월말 일괄, 정책 §2.2 / §3.4) ──
       // 합계 = max(0, 계약월급 × proration비율 - 미근무시간 × (월급/209))
+      // computeMonthlyOnlyWage(helpers/wage.ts)로 일원화 — Phase 5 (2026-05-02).
       // 임시근로자는 위에서 시프트 단위로 누적 완료 (이 단계 적용 X).
       for (const c of Object.values(companyMap)) {
         for (const [empKey, emp] of Object.entries(c.employees)) {
           if (empKey.startsWith("temp_")) continue;
           if (emp.wageType !== "monthly") continue;
-          const monthlyWage = Number(emp.wageAmount);
-          if (!isFinite(monthlyWage) || monthlyWage <= 0) continue;
-          const proration = computeProration({
+          const result = computeMonthlyOnlyWage({
+            monthlyWage: emp.wageAmount,
+            actualHours: emp.totalHours,
             hireDate: emp.hireDate,
             resignDate: emp.contractEnd,
             year: input.year,
             month: input.month,
-            monthlyWage,
             stdHours: 209,
           });
-          const expectedHours = proration.proratedStdHours;
-          const shortfall = Math.max(0, expectedHours - emp.totalHours);
-          const shortfallDeduction = shortfall * (monthlyWage / 209);
-          const finalWage = Math.max(0, proration.proratedMonthlyWage - shortfallDeduction);
           // companyMap의 totalWage(회사 누적)는 시프트 단계에서 wage=0으로 누적됐으므로 finalWage만 가산
-          c.totalWage += finalWage;
-          emp.totalWage = finalWage;
+          c.totalWage += result.finalWage;
+          emp.totalWage = result.finalWage;
         }
       }
 
