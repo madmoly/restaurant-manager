@@ -14,6 +14,7 @@ import {
   restaurantShiftPresets,
   leaveTransactions,
   affiliatedCompanies,
+  employmentElectronicContracts,
 } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 import { getHolidayName } from "@shared/holidays";
@@ -965,7 +966,50 @@ export const schedulesRouter = router({
       const over5ByCompany = new Map<string, boolean>();
       for (const c of acRows) over5ByCompany.set(c.companyName, Boolean(c.over5Employees));
 
-      console.log(`[laborCost] rows found: ${rows.length}`);
+      // 박제 계약서 batch fetch (2026-05-02 노무사전송 누락 보완):
+      //   restaurant_users.position이 NULL인 직원의 직위 / 직원 신원(주민·계좌)을 박제 계약서에서 채움.
+      //   매칭: restaurantId + employeeId + status='signed' 중 가장 최근 signedAt.
+      //   snapshot* 컬럼 우선 (서명 시점 박제), NULL이면 본 컬럼 fallback (Phase E 박제 전 서명분).
+      const empIds = [...new Set(rows.map(r => r.userId).filter((v): v is number => Boolean(v)))];
+      const contractMap = new Map<number, {
+        position: string | null;
+        bankName: string | null;
+        bankAccount: string | null;
+        residentNumber: string | null;
+      }>();
+      if (empIds.length > 0) {
+        const ecRows = await db
+          .select({
+            employeeId: employmentElectronicContracts.employeeId,
+            position: employmentElectronicContracts.position,
+            snapshotPosition: employmentElectronicContracts.snapshotPosition,
+            bankName: employmentElectronicContracts.bankName,
+            snapshotBankName: employmentElectronicContracts.snapshotBankName,
+            employeeBankAccount: employmentElectronicContracts.employeeBankAccount,
+            snapshotBankAccount: employmentElectronicContracts.snapshotBankAccount,
+            employeeResidentNumber: employmentElectronicContracts.employeeResidentNumber,
+            snapshotResidentNumber: employmentElectronicContracts.snapshotResidentNumber,
+            signedAt: employmentElectronicContracts.signedAt,
+          })
+          .from(employmentElectronicContracts)
+          .where(and(
+            eq(employmentElectronicContracts.restaurantId, input.restaurantId),
+            eq(employmentElectronicContracts.status, "signed"),
+            sql`${employmentElectronicContracts.employeeId} IN (${sql.join(empIds.map(id => sql`${id}`), sql`, `)})`,
+          ))
+          .orderBy(desc(employmentElectronicContracts.signedAt));
+        for (const c of ecRows) {
+          if (!c.employeeId || contractMap.has(c.employeeId)) continue;
+          contractMap.set(c.employeeId, {
+            position: c.snapshotPosition ?? c.position ?? null,
+            bankName: c.snapshotBankName ?? c.bankName ?? null,
+            bankAccount: c.snapshotBankAccount ?? c.employeeBankAccount ?? null,
+            residentNumber: c.snapshotResidentNumber ?? c.employeeResidentNumber ?? null,
+          });
+        }
+      }
+
+      console.log(`[laborCost] rows found: ${rows.length}, contracts mapped: ${contractMap.size}`);
 
       // ── 영업일수 계산 ──
       // 1) 정기 휴무 요일 조회
@@ -1044,12 +1088,14 @@ export const schedulesRouter = router({
         }
         if (!companyMap[company].employees[empKey]) {
           const uid = r.userId ? Number(r.userId) : null;
+          // 박제 계약서 fallback (정규 직원만, 임시근로자는 schedule.tempBankAccount/tempPhone)
+          const ec = uid ? contractMap.get(uid) ?? null : null;
           companyMap[company].employees[empKey] = {
             name, totalHours: 0, totalWage: 0, shifts: 0,
             wageType: r.wageType ?? (r.tempWageType ?? null),
             wageAmount: r.wageAmount ?? (r.tempWageAmount ?? null),
             weeklyHours: r.weeklyHours != null ? String(r.weeklyHours) : null,
-            position: r.position ?? null,
+            position: r.position ?? ec?.position ?? null,
             contractStart: r.contractStart ? String(r.contractStart) : null,
             contractEnd: r.contractEnd ? String(r.contractEnd) : null,
             daysOff: 0, // 아래에서 최종 계산
@@ -1057,11 +1103,10 @@ export const schedulesRouter = router({
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
             recheckRequired: false,
-            // Phase E (2026-05-02): bankName/bankAccount/residentNumber는 박제 계약서로 이동.
-            //   인건비 정산 응답에서는 임시근로자의 tempBankAccount만 노출. 박제 정보는 직원 카드 응답 사용.
-            bankName: null,
-            bankAccount: r.tempBankAccount ?? null,
-            residentNumber: null,
+            // 노무사전송 누락 보완 (2026-05-02): 정규 직원은 박제 계약서에서, 임시는 schedule.tempBankAccount.
+            bankName: uid ? ec?.bankName ?? null : null,
+            bankAccount: uid ? ec?.bankAccount ?? null : (r.tempBankAccount ?? null),
+            residentNumber: uid ? ec?.residentNumber ?? null : null,
             phone: r.tempPhone ?? null,
             over5Employees: over5,
             // 시급제 + 주휴포함 여부 (latest signed contract). null 시 true 폴백 (보수적)
