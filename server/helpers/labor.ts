@@ -20,8 +20,7 @@ import {
   employeeWageHistory,
 } from "../../drizzle/schema";
 
-const WEEKS_PER_MONTH = 365 / 12 / 7; // ≈ 4.345
-const FULLTIME_STANDARD_HOURS = 209; // 5인 이상 풀타임 표준 분모
+const FULLTIME_STANDARD_HOURS = 209; // 풀타임 표준 분모 (월급제 정산 정책 재설계 2026-05-02 §2.1: 5인 무관 209h 통일)
 
 /**
  * 소속회사 마스터에서 5인 이상 여부 조회.
@@ -69,21 +68,16 @@ export async function getOver5ForEmployee(
 
 /**
  * 월 통상임금 산정시간.
- * 사양 §2.4:
- * - 5인 이상: 209h 고정 (풀타임 표준)
- * - 5인 미만: 직원의 weeklyHours 비례 (월소정 + 주휴, 연차 8h 제외)
  *
- * weeklyHours 결측·0 이하 → 209h 폴백 (분모 0 방지).
+ * 월급제 정산 정책 재설계 2026-05-02 (§2.1):
+ * - 5인 여부와 무관하게 209h 고정.
+ * - 시그니처는 호환성 위해 유지 (인자는 무시). 호출부 정리 후 향후 deprecate 예정.
  */
 export function computeMonthlyStandardHours(
-  weeklyHours: number | string | null | undefined,
-  over5: boolean,
+  _weeklyHours?: number | string | null | undefined,
+  _over5?: boolean,
 ): number {
-  if (over5) return FULLTIME_STANDARD_HOURS;
-  const wh = Number(weeklyHours);
-  if (!isFinite(wh) || wh <= 0) return FULLTIME_STANDARD_HOURS;
-  const weeklyHoliday = wh / 5; // 주휴 = 주근로 / 5 (주5일 환산)
-  return (wh + weeklyHoliday) * WEEKS_PER_MONTH;
+  return FULLTIME_STANDARD_HOURS;
 }
 
 /**

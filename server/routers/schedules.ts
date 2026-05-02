@@ -20,6 +20,7 @@ import { getHolidayName } from "@shared/holidays";
 import {
   computeWageForShift,
   computeGuideWage,
+  computeProration,
   type WageType,
 } from "../helpers/wage";
 import {
@@ -1078,28 +1079,32 @@ export const schedulesRouter = router({
         const netMin = Math.max(0, grossMin - (r.breakMinutes ?? 0));
         const hours = netMin / 60; // 분 단위 정밀 계산
 
-        // ── 시급 결정 (재설계 2026-05-02 §2.4 분기) ──
+        // ── 시급 결정 (월급제 정산 정책 재설계 2026-05-02) ──
         //   시급 + 주휴포함  → 시간 × 시급 (현행)
         //   시급 + 주휴별도  → 시간 × 시급 + 주15h 이상 주별 8h × 시급 (월말 일괄, 아래 가산)
-        //   월급 + 5인 이상  → 시간 × (월급 / 209)
-        //   월급 + 5인 미만  → 시간 × (월급 / monthlyContractHours_no_annual)
+        //   월급            → 시프트마다 누적 안 함. 월말 일괄 (계약월급 - 미근무차감)
+        //   임시근로자(시급/일급/월급) → 현행 누적 유지 (시프트 단위 정산)
         let shiftWageType: WageType = null;
         let shiftWageAmount: number | null = null;
-        let stdHours = computeMonthlyStandardHours(null, true); // 폴백 209h (over5=true)
+        const stdHours = 209; // 분모 통일 (정책 §2.1)
         if (r.tempWageType && r.tempWageAmount) {
           shiftWageType = r.tempWageType as WageType;
           shiftWageAmount = Number(r.tempWageAmount);
         } else if (r.wageType && r.wageAmount) {
           shiftWageType = r.wageType as WageType;
           shiftWageAmount = Number(r.wageAmount);
-          stdHours = computeMonthlyStandardHours(r.weeklyHours, over5);
         }
-        const wage = computeWageForShift({
-          wageType: shiftWageType,
-          wageAmount: shiftWageAmount,
-          hoursWorked: hours,
-          monthlyStandardHours: stdHours,
-        });
+
+        // 월급제 정규직: 임금 누적 제외 (월말 일괄). 임시근로자는 현행 누적 유지.
+        const isRegularMonthly = !r.tempWageType && r.wageType === "monthly";
+        const wage = isRegularMonthly
+          ? 0
+          : computeWageForShift({
+              wageType: shiftWageType,
+              wageAmount: shiftWageAmount,
+              hoursWorked: hours,
+              monthlyStandardHours: stdHours,
+            });
 
         // KST 날짜 기준 출근일수 집계 (같은 날 다중 시프트도 1일)
         const kstStartDt = new Date(startDt.getTime() + 9 * 60 * 60 * 1000);
@@ -1114,6 +1119,33 @@ export const schedulesRouter = router({
         if (r.payrollRecheckRequired) companyMap[company].employees[empKey].recheckRequired = true;
         companyMap[company].totalHours += hours;
         companyMap[company].totalWage += wage;
+      }
+
+      // ── 월급제 정규직 합계 산출 (월말 일괄, 정책 §2.2) ──
+      // 합계 = max(0, 계약월급 × proration비율 - 미근무시간 × (월급/209))
+      // 임시근로자는 위에서 시프트 단위로 누적 완료 (이 단계 적용 X).
+      for (const c of Object.values(companyMap)) {
+        for (const [empKey, emp] of Object.entries(c.employees)) {
+          if (empKey.startsWith("temp_")) continue;
+          if (emp.wageType !== "monthly") continue;
+          const monthlyWage = Number(emp.wageAmount);
+          if (!isFinite(monthlyWage) || monthlyWage <= 0) continue;
+          const proration = computeProration({
+            hireDate: emp.hireDate,
+            resignDate: emp.contractEnd,
+            year: input.year,
+            month: input.month,
+            monthlyWage,
+            stdHours: 209,
+          });
+          const expectedHours = proration.proratedStdHours;
+          const shortfall = Math.max(0, expectedHours - emp.totalHours);
+          const shortfallDeduction = shortfall * (monthlyWage / 209);
+          const finalWage = Math.max(0, proration.proratedMonthlyWage - shortfallDeduction);
+          // companyMap의 totalWage(회사 누적)는 시프트 단계에서 wage=0으로 누적됐으므로 finalWage만 가산
+          c.totalWage += finalWage;
+          emp.totalWage = finalWage;
+        }
       }
 
       // 시급제 + 주휴별도 직원 → 주별 8h × 시급 가산 (월말 일괄). bonus는 별도 필드로 보관해 wageBreakdown 분리 표시

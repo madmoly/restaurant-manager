@@ -483,9 +483,6 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
         <>
           <div className="text-[11px]">
             <span className="text-muted-foreground">가이드</span>
-            {!emp.over5Employees && (
-              <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400">5인 미만 — 연차 분모 제외</span>
-            )}
             <div className="text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
               <span>시급 <b>{fmtWon(emp.guideHourly)}</b></span>
               <span>일급 <b>{fmtWon(emp.guideDaily)}</b></span>

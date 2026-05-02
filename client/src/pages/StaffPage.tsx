@@ -1767,13 +1767,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
   const wageNum = Number(form.wageAmount) || 0;
 
   // ── 포괄임금 역산 (월급제 전용) ──
-  // 표준: 40h → 주휴 8h → 월소정 209h
-  const monthlyContractHours = Math.round((weeklyHoursNum + (weeklyHoursNum >= 15 ? 8 : 0)) * (365 / 12 / 7));
-
-  // 재설계 2026-05-02: 5인 미만이면 연차 8h를 분모에서 제외 (포괄연차수당 없음)
-  // form.over5Employees는 사업주 select 시 마스터에서 자동 채움 (표시 전용)
-  const divisor = monthlyContractHours + (form.over5Employees ? 8 : 0);
+  // 월급제 정산 정책 재설계 2026-05-02 §2.1: 통상시급 분모 209h 고정 (5인 여부 무관).
+  // 기본급 표시 분모: 5인↑ 201h (포괄연차 8h 분리), 5인↓ 209h (연차 미발생 → 전부 기본급).
+  const divisor = 209;
   const hourlyWageCalc = divisor > 0 ? wageNum / divisor : 0;
+  const monthlyContractHours = form.over5Employees ? 201 : 209;
   const basePayCalc = Math.round(hourlyWageCalc * monthlyContractHours);
   const annualLeavePayCalc = form.over5Employees ? Math.round(hourlyWageCalc * 8) : 0;
   const wageCheckSum = basePayCalc + annualLeavePayCalc;
@@ -2040,7 +2038,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">임금 구성항목 (근기법 제17조)</p>
                 <p className="text-[10px] text-blue-500">
-                  월소정근로 {monthlyContractHours}h{form.over5Employees ? " + 연차 8h" : " (5인 미만 — 연차 분모 제외)"}
+                  월소정근로 209h
                 </p>
               </div>
 
