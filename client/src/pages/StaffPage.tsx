@@ -1624,8 +1624,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     hireDate: "" as string,
     hasProbation: false,
     probationMonths: 0,
-    mealProvided: ec?.mealProvided ?? false,
-    mealAllowance: "",
     workPlace: ec?.workPlace ?? restaurantInfo?.name ?? "",
     workPlaceAddress: ec?.workPlaceAddress ?? restaurantInfo?.address ?? "",
     jobDescription: ec?.jobDescription ?? "",
@@ -1700,8 +1698,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           hireDate: prev.hireDate || ((latestTemplate as any).hireDate ? String((latestTemplate as any).hireDate).slice(0, 10) : ""),
           hasProbation: latestTemplate.hasProbation ?? prev.hasProbation,
           probationMonths: latestTemplate.probationMonths ?? prev.probationMonths,
-          mealProvided: latestTemplate.mealProvided ?? prev.mealProvided,
-          mealAllowance: latestTemplate.mealAllowance || prev.mealAllowance,
           workPlace: latestTemplate.workPlace || prev.workPlace,
           jobDescription: latestTemplate.jobDescription || prev.jobDescription,
           specialTerms: latestTemplate.specialTerms || prev.specialTerms,
@@ -1810,7 +1806,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           {/* Phase E (2026-05-02 사양 §3.7): 박제 ↔ 운영 SSOT 분리 안내 */}
           <div className="rounded-lg bg-amber-500/10 border border-amber-200 dark:border-amber-800 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
             <strong>박제 안내:</strong> 본 폼의 입력값은 <strong>서명 시점 박제(법적 증거)</strong>로만 사용됩니다.
-            정산에 즉시 반영되는 운영값(임금·근무시간·식대 등)은 <strong>직원 카드</strong>에서 직접 수정해야 합니다.
+            정산에 즉시 반영되는 운영값(임금·근무시간 등)은 <strong>직원 카드</strong>에서 직접 수정해야 합니다.
             여기서 변경한 값은 SSOT에 자동 반영되지 않으므로, 박제와 SSOT가 어긋나면 갱신 필요 배너가 출현합니다.
           </div>
 
@@ -2173,25 +2169,9 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                   className="rounded border-input" />
                 <span className="text-sm text-foreground">사업소득 3.3% 원천공제</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer ml-auto">
-                <input type="checkbox" checked={form.mealProvided}
-                  onChange={(e) => setForm({ ...form, mealProvided: e.target.checked })}
-                  className="rounded border-input" />
-                <span className="text-sm text-foreground">식사 제공</span>
-              </label>
             </div>
             {isUnder15Hours && form.taxMode === "social_insurance" && (
               <p className="text-[10px] text-amber-500 pl-6">주 15시간 미만 시 4대보험 의무가입 대상 아님</p>
-            )}
-            {/* Phase E (2026-05-02): 식대 input + 야간동의 체크박스 — 17 박제 항목 입력 일원화 */}
-            {form.mealProvided && (
-              <div className="flex items-center gap-2 mt-2">
-                <label className={`${subLabelCls} w-20`}>식대(원)</label>
-                <input type="number" min="0" className={inputCls + " max-w-[160px]"}
-                  value={form.mealAllowance}
-                  onChange={(e) => setForm({ ...form, mealAllowance: e.target.value })}
-                  placeholder="0" />
-              </div>
             )}
           </div>
 
@@ -2243,8 +2223,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 taxMode: form.taxMode,
                 hourlyWageIncludesHolidayPay: form.hourlyWageIncludesHolidayPay,
                 hireDate: form.hireDate || undefined,
-                mealProvided: form.mealProvided,
-                mealAllowance: form.mealAllowance || undefined,
                 workPlace: form.workPlace || undefined,
                 jobDescription: form.jobDescription || undefined,
                 specialTerms: form.specialTerms || undefined,

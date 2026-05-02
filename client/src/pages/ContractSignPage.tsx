@@ -123,8 +123,6 @@ export default function ContractSignPage({ token }: { token: string }) {
   const displayWorkStartTime: string = pickSnap(c.snapshotWorkStartTime, c.workStartTime) ?? "09:00";
   const displayWorkEndTime: string = pickSnap(c.snapshotWorkEndTime, c.workEndTime) ?? "18:00";
   const displayBreakMinutes: number = Number(pickSnap(c.snapshotBreakMinutes, c.breakMinutes) ?? 60);
-  const displayMealProvided: boolean = Boolean(pickSnap(c.snapshotMealProvided, c.mealProvided));
-  const displayMealAllowance: number = Number(pickSnap(c.snapshotMealAllowance, c.mealAllowance) ?? 0);
   const displaySpecialTerms: string = pickSnap(c.snapshotSpecialTerms, c.specialTerms) ?? "";
   const displayHourlyWageIncludesHolidayPay: boolean = Boolean(
     isSigned
@@ -291,14 +289,6 @@ export default function ContractSignPage({ token }: { token: string }) {
                   label="10. 세무처리"
                   value={is3_3 ? "사업소득 3.3% 원천공제" : "4대보험 가입"}
                 />
-                {displayMealProvided && (
-                  <ContractRow
-                    label="11. 식사제공"
-                    value={displayMealAllowance > 0
-                      ? `제공 (식대 ${displayMealAllowance.toLocaleString()}원)`
-                      : "제공"}
-                  />
-                )}
               </tbody>
             </table>
 

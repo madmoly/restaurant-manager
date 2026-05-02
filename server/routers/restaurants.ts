@@ -404,20 +404,6 @@ export const restaurantsRouter = router({
               AND ec.status = 'signed'
             ORDER BY ec.signedAt DESC LIMIT 1
           )`.as("snapshotWeeklyHours"),
-          snapshotMealProvided: sql<boolean | null>`(
-            SELECT ec.snapshotMealProvided FROM employment_electronic_contracts ec
-            WHERE ec.employeeId = ${restaurantUsers.userId}
-              AND ec.restaurantId = ${restaurantUsers.restaurantId}
-              AND ec.status = 'signed'
-            ORDER BY ec.signedAt DESC LIMIT 1
-          )`.as("snapshotMealProvided"),
-          snapshotMealAllowance: sql<string | null>`(
-            SELECT ec.snapshotMealAllowance FROM employment_electronic_contracts ec
-            WHERE ec.employeeId = ${restaurantUsers.userId}
-              AND ec.restaurantId = ${restaurantUsers.restaurantId}
-              AND ec.status = 'signed'
-            ORDER BY ec.signedAt DESC LIMIT 1
-          )`.as("snapshotMealAllowance"),
           snapshotSpecialTerms: sql<string | null>`(
             SELECT ec.snapshotSpecialTerms FROM employment_electronic_contracts ec
             WHERE ec.employeeId = ${restaurantUsers.userId}

@@ -65,7 +65,7 @@ function generateInviteCode(): string {
  *  임금 1: wage (wageType + wageAmount 결합)
  *  기타 1: specialTerms
  *
- *  폐기: position(역할로 대체), weeklyHoliday/nightShiftConsent(양쪽), mealProvided/mealAllowance(SSOT만 — 박제는 유지).
+ *  폐기 (양쪽): position(역할로 대체), weeklyHoliday, nightShiftConsent, mealProvided, mealAllowance.
  */
 function computeNeedsRenewal(
   current: {
@@ -314,8 +314,6 @@ export const staffRouter = router({
             snapshotWorkStartTime: employmentElectronicContracts.snapshotWorkStartTime,
             snapshotWorkEndTime: employmentElectronicContracts.snapshotWorkEndTime,
             snapshotBreakMinutes: employmentElectronicContracts.snapshotBreakMinutes,
-            snapshotMealProvided: employmentElectronicContracts.snapshotMealProvided,
-            snapshotMealAllowance: employmentElectronicContracts.snapshotMealAllowance,
             snapshotSpecialTerms: employmentElectronicContracts.snapshotSpecialTerms,
             snapshotHourlyWageIncludesHolidayPay:
               employmentElectronicContracts.snapshotHourlyWageIncludesHolidayPay,
@@ -423,8 +421,6 @@ export const staffRouter = router({
           snapshotWorkEndTime: snap?.snapshotWorkEndTime ?? null,
           snapshotBreakMinutes: snap?.snapshotBreakMinutes ?? null,
           snapshotWeeklyHours: snap?.snapshotWeeklyHours ?? null,
-          snapshotMealProvided: snap?.snapshotMealProvided ?? null,
-          snapshotMealAllowance: snap?.snapshotMealAllowance ?? null,
           snapshotSpecialTerms: snap?.snapshotSpecialTerms ?? null,
           snapshotHourlyWageIncludesHolidayPay:
             snap?.snapshotHourlyWageIncludesHolidayPay ?? null,
