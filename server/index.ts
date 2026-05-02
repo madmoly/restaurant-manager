@@ -1300,6 +1300,113 @@ app.use(express.json({ limit: "10mb" }));
       console.log("[migrate:redesign-2026-05-02] already applied (skip DELETE + seed)");
     }
 
+    // ─── 재설계 2026-05-02 Phase E: 운영 데이터 SSOT 확장 ─────────────────────
+    //   사양: docs/redesign_2026-05-02_운영데이터_SSOT_확장.md §6
+    //   - restaurant_users에 운영 데이터 15 컬럼 추가 (idempotent ALTER)
+    //   - employment_electronic_contracts에 신규 박제 11 컬럼 추가 (idempotent ALTER)
+    //   - employee_contracts 테이블 DROP (1회 한정, 가드 키 보호)
+    const REDESIGN_E_KEY = "redesign_2026_05_02_extended_applied";
+    let redesignEApplied = false;
+    try {
+      const [appliedRows] = (await conn.query(
+        `SELECT settingValue FROM system_settings WHERE settingKey = ?`,
+        [REDESIGN_E_KEY]
+      )) as any[];
+      redesignEApplied = appliedRows.length > 0;
+    } catch {
+      redesignEApplied = false;
+    }
+
+    // 1) restaurant_users 운영 데이터 15 컬럼 (idempotent)
+    await addColumnIfNotExists("restaurant_users", "position", "VARCHAR(50) NULL");
+    await addColumnIfNotExists("restaurant_users", "contractType", "VARCHAR(20) NULL DEFAULT 'part_time'");
+    await addColumnIfNotExists("restaurant_users", "contractStart", "DATE NULL");
+    await addColumnIfNotExists("restaurant_users", "contractEnd", "DATE NULL");
+    await addColumnIfNotExists("restaurant_users", "workStartTime", "VARCHAR(5) DEFAULT '09:00'");
+    await addColumnIfNotExists("restaurant_users", "workEndTime", "VARCHAR(5) DEFAULT '18:00'");
+    await addColumnIfNotExists("restaurant_users", "breakMinutes", "INT DEFAULT 60");
+    await addColumnIfNotExists("restaurant_users", "weeklyHoliday", "VARCHAR(20) DEFAULT '일요일'");
+    await addColumnIfNotExists("restaurant_users", "weeklyHours", "DECIMAL(5,2) DEFAULT 40");
+    await addColumnIfNotExists(
+      "restaurant_users",
+      "taxMode",
+      "VARCHAR(30) NOT NULL DEFAULT 'social_insurance'"
+    );
+    await addColumnIfNotExists(
+      "restaurant_users",
+      "hourlyWageIncludesHolidayPay",
+      "BOOLEAN NOT NULL DEFAULT TRUE"
+    );
+    await addColumnIfNotExists("restaurant_users", "mealProvided", "BOOLEAN NOT NULL DEFAULT FALSE");
+    await addColumnIfNotExists("restaurant_users", "mealAllowance", "DECIMAL(10,2) DEFAULT 0");
+    await addColumnIfNotExists(
+      "restaurant_users",
+      "nightShiftConsent",
+      "BOOLEAN NOT NULL DEFAULT FALSE"
+    );
+    await addColumnIfNotExists("restaurant_users", "specialTerms", "TEXT NULL");
+
+    // 2) employment_electronic_contracts 신규 박제 11 컬럼 (idempotent)
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotPosition", "VARCHAR(50) NULL");
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "snapshotContractType",
+      "VARCHAR(20) NULL"
+    );
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "snapshotWorkStartTime",
+      "VARCHAR(5) NULL"
+    );
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "snapshotWorkEndTime",
+      "VARCHAR(5) NULL"
+    );
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotBreakMinutes", "INT NULL");
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "snapshotWeeklyHoliday",
+      "VARCHAR(20) NULL"
+    );
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotMealProvided", "BOOLEAN NULL");
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "snapshotMealAllowance",
+      "DECIMAL(10,2) NULL"
+    );
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "snapshotNightShiftConsent",
+      "BOOLEAN NULL"
+    );
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotSpecialTerms", "TEXT NULL");
+    await addColumnIfNotExists(
+      "employment_electronic_contracts",
+      "snapshotHourlyWageIncludesHolidayPay",
+      "BOOLEAN NULL"
+    );
+
+    // 3) employee_contracts DROP — 가드 키 보호. 1회 한정.
+    //   사양 §6: 테스트 단계라 데이터 손실 무관. 운영 진입 후 절대 재실행 금지.
+    if (!redesignEApplied) {
+      console.log("[migrate:redesign-2026-05-02-E] applying one-shot DROP TABLE + guard key...");
+      try {
+        await conn.query(`DROP TABLE IF EXISTS employee_contracts`);
+        await conn.query(
+          `INSERT INTO system_settings (settingKey, settingValue, description)
+           VALUES (?, ?, '재설계 2026-05-02 Phase E (운영 SSOT 확장) 마이그레이션 1회 적용 표시 — 절대 삭제 금지')
+           ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)`,
+          [REDESIGN_E_KEY, JSON.stringify({ appliedAt: new Date().toISOString() })]
+        );
+        console.log("[migrate:redesign-2026-05-02-E] DROP TABLE complete");
+      } catch (e: any) {
+        console.error("[migrate:redesign-2026-05-02-E] one-shot block failed:", e.message);
+      }
+    } else {
+      console.log("[migrate:redesign-2026-05-02-E] already applied (skip DROP TABLE)");
+    }
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

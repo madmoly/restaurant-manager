@@ -14,15 +14,15 @@
  */
 
 import { z } from "zod";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, inArray } from "drizzle-orm";
 import crypto from "crypto";
 import { router, managerProcedure, ownerProcedure } from "../trpc";
 import { db } from "../db";
 import {
   users,
   restaurantUsers,
-  employeeContracts,
   employmentElectronicContracts,
+  employeeWageHistory,
   auditLogs,
   restaurantInvites,
   affiliatedCompanies,
@@ -30,6 +30,7 @@ import {
 import { TRPCError } from "@trpc/server";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 import { hashPassword } from "../auth";
+import { getLatestWage } from "../helpers/labor";
 
 // ─── 헬퍼 ───────────────────────────────────────────────────────────────────
 function normalizePhone(phone: string | null | undefined): string {
@@ -54,34 +55,64 @@ function generateInviteCode(): string {
   return crypto.randomBytes(4).toString("base64url").slice(0, 6).toUpperCase();
 }
 
-/** 계약서와 직원정보 C군 필드 비교 — 불일치 필드명 반환 */
-function computeMismatchedFields(
+/**
+ * 운영 SSOT vs 가장 최근 박제 비교 (Phase E, 2026-05-02).
+ * 17개 항목 비교 후 불일치 필드명 배열 반환. 차단 없음 — UI 배너 표시용.
+ *
+ * 항목:
+ *  기본 4: affiliatedCompany, hireDate, weeklyOffDays, over5Employees
+ *  직위·계약 4: position, contractType, contractStart, contractEnd
+ *  근무 5: workStartTime, workEndTime, breakMinutes, weeklyHoliday, weeklyHours
+ *  세무 2: taxMode, hourlyWageIncludesHolidayPay
+ *  임금 1: wage (wageType + wageAmount 결합)
+ *  기타 4: mealProvided, mealAllowance, nightShiftConsent, specialTerms
+ *  → 최대 20개 비교. "17개"는 초기 시점 값이며, 실 노출은 비어있지 않은 항목만.
+ */
+function computeNeedsRenewal(
   current: {
-    name?: string | null;
-    phone?: string | null;
-    address?: string | null;
-    residentNumber?: string | null;
-    bankAccount?: string | null;
     affiliatedCompany?: string | null;
     hireDate?: string | Date | null;
     weeklyOffDays?: number | null;
+    position?: string | null;
+    contractType?: string | null;
+    contractStart?: string | Date | null;
+    contractEnd?: string | Date | null;
+    workStartTime?: string | null;
+    workEndTime?: string | null;
+    breakMinutes?: number | null;
+    weeklyHoliday?: string | null;
     weeklyHours?: string | number | null;
+    taxMode?: string | null;
+    hourlyWageIncludesHolidayPay?: boolean | null;
+    mealProvided?: boolean | null;
+    mealAllowance?: string | number | null;
+    nightShiftConsent?: boolean | null;
+    specialTerms?: string | null;
     wageType?: string | null;
     wageAmount?: string | number | null;
   },
   snapshot: {
-    snapshotName?: string | null;
-    snapshotPhone?: string | null;
-    snapshotAddress?: string | null;
-    snapshotResidentNumber?: string | null;
-    snapshotBankAccount?: string | null;
     snapshotAffiliatedCompany?: string | null;
+    snapshotHireDate?: string | Date | null;
     snapshotWeeklyOffDays?: number | null;
+    snapshotOver5Employees?: boolean | null;
+    snapshotPosition?: string | null;
+    snapshotContractType?: string | null;
+    snapshotContractStart?: string | Date | null;
+    snapshotContractEnd?: string | Date | null;
+    snapshotWorkStartTime?: string | null;
+    snapshotWorkEndTime?: string | null;
+    snapshotBreakMinutes?: number | null;
+    snapshotWeeklyHoliday?: string | null;
     snapshotWeeklyHours?: string | number | null;
+    snapshotTaxMode?: string | null;
+    snapshotHourlyWageIncludesHolidayPay?: boolean | null;
+    snapshotMealProvided?: boolean | null;
+    snapshotMealAllowance?: string | number | null;
+    snapshotNightShiftConsent?: boolean | null;
+    snapshotSpecialTerms?: string | null;
     snapshotWageType?: string | null;
     snapshotWage?: string | number | null;
-    snapshotHireDate?: string | Date | null;
-    snapshotOver5Employees?: boolean | null;
   } | null,
   effectiveOver5?: boolean | null,
 ): string[] {
@@ -99,40 +130,105 @@ function computeMismatchedFields(
     };
     return toIso(a) === toIso(b);
   };
-  // 임금: wageType + wageAmount 결합 비교 (한 쪽이라도 다르면 wage 라벨)
-  const wageMismatch =
-    (current.wageType ?? "") !== (snapshot.snapshotWageType ?? "") ||
-    !numEq(current.wageAmount, snapshot.snapshotWage);
-  if (current.wageType || snapshot.snapshotWageType || current.wageAmount || snapshot.snapshotWage) {
+  const boolEq = (a: any, b: any): boolean => Boolean(a) === Boolean(b);
+  const strEq = (a: any, b: any): boolean => {
+    const sa = String(a ?? "").trim();
+    const sb = String(b ?? "").trim();
+    return sa === sb;
+  };
+
+  // 임금: wageType + wageAmount 결합 (한 쪽이라도 다르면 wage)
+  const hasWage =
+    current.wageType || snapshot.snapshotWageType || current.wageAmount || snapshot.snapshotWage;
+  if (hasWage) {
+    const wageMismatch =
+      (current.wageType ?? "") !== (snapshot.snapshotWageType ?? "") ||
+      !numEq(current.wageAmount, snapshot.snapshotWage);
     if (wageMismatch) diff.push("wage");
   }
-  const pairs: Array<[string, any, any]> = [
-    ["name", current.name, snapshot.snapshotName],
-    ["phone", normalizePhone(current.phone), normalizePhone(snapshot.snapshotPhone)],
-    ["address", (current.address ?? "").trim(), (snapshot.snapshotAddress ?? "").trim()],
-    ["residentNumber", current.residentNumber, snapshot.snapshotResidentNumber],
-    ["bankAccount", current.bankAccount, snapshot.snapshotBankAccount],
-    ["affiliatedCompany", current.affiliatedCompany ?? "", snapshot.snapshotAffiliatedCompany ?? ""],
-    ["weeklyOffDays", current.weeklyOffDays ?? null, snapshot.snapshotWeeklyOffDays ?? null],
-  ];
-  for (const [field, a, b] of pairs) {
-    const isEmptyA = a === null || a === undefined || a === "";
-    const isEmptyB = b === null || b === undefined || b === "";
-    if (isEmptyA && isEmptyB) continue;
-    if (String(a ?? "") !== String(b ?? "")) diff.push(field);
+
+  // 기본
+  if (
+    (current.affiliatedCompany ?? "") !== "" ||
+    (snapshot.snapshotAffiliatedCompany ?? "") !== ""
+  ) {
+    if (!strEq(current.affiliatedCompany, snapshot.snapshotAffiliatedCompany))
+      diff.push("affiliatedCompany");
   }
-  // 주근로시간 (decimal): 숫자 비교
-  if (current.weeklyHours != null || snapshot.snapshotWeeklyHours != null) {
-    if (!numEq(current.weeklyHours, snapshot.snapshotWeeklyHours)) diff.push("weeklyHours");
-  }
-  // 입사일: SSOT(restaurant_users.hireDate) ↔ snapshotHireDate
   if (current.hireDate != null || snapshot.snapshotHireDate != null) {
     if (!dateEq(current.hireDate, snapshot.snapshotHireDate)) diff.push("hireDate");
   }
-  // 5인 여부: 소속회사 마스터 effectiveOver5 ↔ snapshotOver5Employees
-  if (effectiveOver5 != null && snapshot.snapshotOver5Employees != null) {
-    if (Boolean(effectiveOver5) !== Boolean(snapshot.snapshotOver5Employees)) diff.push("over5Employees");
+  if (current.weeklyOffDays != null || snapshot.snapshotWeeklyOffDays != null) {
+    if (!numEq(current.weeklyOffDays, snapshot.snapshotWeeklyOffDays))
+      diff.push("weeklyOffDays");
   }
+  if (effectiveOver5 != null && snapshot.snapshotOver5Employees != null) {
+    if (!boolEq(effectiveOver5, snapshot.snapshotOver5Employees)) diff.push("over5Employees");
+  }
+
+  // 직위·계약
+  if (current.position != null || snapshot.snapshotPosition != null) {
+    if (!strEq(current.position, snapshot.snapshotPosition)) diff.push("position");
+  }
+  if (current.contractType != null || snapshot.snapshotContractType != null) {
+    if (!strEq(current.contractType, snapshot.snapshotContractType)) diff.push("contractType");
+  }
+  if (current.contractStart != null || snapshot.snapshotContractStart != null) {
+    if (!dateEq(current.contractStart, snapshot.snapshotContractStart))
+      diff.push("contractStart");
+  }
+  if (current.contractEnd != null || snapshot.snapshotContractEnd != null) {
+    if (!dateEq(current.contractEnd, snapshot.snapshotContractEnd)) diff.push("contractEnd");
+  }
+
+  // 근무
+  if (current.workStartTime != null || snapshot.snapshotWorkStartTime != null) {
+    if (!strEq(current.workStartTime, snapshot.snapshotWorkStartTime))
+      diff.push("workStartTime");
+  }
+  if (current.workEndTime != null || snapshot.snapshotWorkEndTime != null) {
+    if (!strEq(current.workEndTime, snapshot.snapshotWorkEndTime)) diff.push("workEndTime");
+  }
+  if (current.breakMinutes != null || snapshot.snapshotBreakMinutes != null) {
+    if (!numEq(current.breakMinutes, snapshot.snapshotBreakMinutes))
+      diff.push("breakMinutes");
+  }
+  if (current.weeklyHoliday != null || snapshot.snapshotWeeklyHoliday != null) {
+    if (!strEq(current.weeklyHoliday, snapshot.snapshotWeeklyHoliday))
+      diff.push("weeklyHoliday");
+  }
+  if (current.weeklyHours != null || snapshot.snapshotWeeklyHours != null) {
+    if (!numEq(current.weeklyHours, snapshot.snapshotWeeklyHours)) diff.push("weeklyHours");
+  }
+
+  // 세무
+  if (current.taxMode != null || snapshot.snapshotTaxMode != null) {
+    if (!strEq(current.taxMode, snapshot.snapshotTaxMode)) diff.push("taxMode");
+  }
+  if (
+    current.hourlyWageIncludesHolidayPay != null ||
+    snapshot.snapshotHourlyWageIncludesHolidayPay != null
+  ) {
+    if (!boolEq(current.hourlyWageIncludesHolidayPay, snapshot.snapshotHourlyWageIncludesHolidayPay))
+      diff.push("hourlyWageIncludesHolidayPay");
+  }
+
+  // 기타
+  if (current.mealProvided != null || snapshot.snapshotMealProvided != null) {
+    if (!boolEq(current.mealProvided, snapshot.snapshotMealProvided)) diff.push("mealProvided");
+  }
+  if (current.mealAllowance != null || snapshot.snapshotMealAllowance != null) {
+    if (!numEq(current.mealAllowance, snapshot.snapshotMealAllowance))
+      diff.push("mealAllowance");
+  }
+  if (current.nightShiftConsent != null || snapshot.snapshotNightShiftConsent != null) {
+    if (!boolEq(current.nightShiftConsent, snapshot.snapshotNightShiftConsent))
+      diff.push("nightShiftConsent");
+  }
+  if (current.specialTerms != null || snapshot.snapshotSpecialTerms != null) {
+    if (!strEq(current.specialTerms, snapshot.snapshotSpecialTerms)) diff.push("specialTerms");
+  }
+
   return diff;
 }
 
@@ -141,7 +237,10 @@ export const staffRouter = router({
   // 읽기: listActive / listRecentlyResigned / checkPhone
   // ═══════════════════════════════════════════════════════════════════════
 
-  /** 현직 직원 목록 (읽기는 매니져 가능) + 계약서 mismatchedFields 동봉 */
+  /**
+   * 현직 직원 목록 (Phase E 확장: 운영 SSOT 17 항목 + 11 신규 박제 + 임금이력 동봉)
+   * 매니져(supervisor) 이상 호출 가능. 매니져는 임금 필드 drop.
+   */
   listActive: managerProcedure
     .input(z.object({ restaurantId: z.number() }))
     .query(async ({ input, ctx }) => {
@@ -159,62 +258,104 @@ export const staffRouter = router({
           healthCertExpiry: users.healthCertExpiry,
           bankBookUrl: users.bankBookUrl,
           mustChangePassword: users.mustChangePassword,
-          // restaurant_users
+          // restaurant_users (운영 SSOT)
           storeRole: restaurantUsers.role,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
-          // 재설계 2026-05-02 (Phase B): weeklyOffDays SSOT는 restaurant_users
           weeklyOffDays: restaurantUsers.weeklyOffDays,
           rehiredAt: restaurantUsers.rehiredAt,
-          // 활성 employeeContracts (민감영역 현재상태)
-          wageType: employeeContracts.wageType,
-          wageAmount: employeeContracts.wageAmount,
-          position: employeeContracts.position,
-          contractStart: employeeContracts.contractStart,
-          contractEnd: employeeContracts.contractEnd,
-          weeklyHours: employeeContracts.weeklyHours,
-          bankName: employeeContracts.bankName,
-          bankAccount: employeeContracts.bankAccount,
-          residentNumber: employeeContracts.residentNumber,
+          // Phase E 운영 데이터 15 컬럼
+          position: restaurantUsers.position,
+          contractType: restaurantUsers.contractType,
+          contractStart: restaurantUsers.contractStart,
+          contractEnd: restaurantUsers.contractEnd,
+          workStartTime: restaurantUsers.workStartTime,
+          workEndTime: restaurantUsers.workEndTime,
+          breakMinutes: restaurantUsers.breakMinutes,
+          weeklyHoliday: restaurantUsers.weeklyHoliday,
+          weeklyHours: restaurantUsers.weeklyHours,
+          taxMode: restaurantUsers.taxMode,
+          hourlyWageIncludesHolidayPay: restaurantUsers.hourlyWageIncludesHolidayPay,
+          mealProvided: restaurantUsers.mealProvided,
+          mealAllowance: restaurantUsers.mealAllowance,
+          nightShiftConsent: restaurantUsers.nightShiftConsent,
+          specialTerms: restaurantUsers.specialTerms,
         })
         .from(restaurantUsers)
         .innerJoin(users, eq(users.id, restaurantUsers.userId))
-        .leftJoin(
-          employeeContracts,
-          and(
-            eq(employeeContracts.userId, restaurantUsers.userId),
-            eq(employeeContracts.restaurantId, restaurantUsers.restaurantId),
-            eq(employeeContracts.isActive, true),
-          ),
-        )
         .where(and(
           eq(restaurantUsers.restaurantId, input.restaurantId),
           isNull(restaurantUsers.resignedAt),
           eq(users.isActive, true),
         ));
 
-      // 각 직원별로 최신 signed 계약서 스냅샷 조회 → mismatchedFields 계산
       const userIds = rows.map((r) => r.userId);
+
+      // 가장 최근 wage_history row (직원별)
+      const wageMap = new Map<number, { wageType: string; wageAmount: string; effectiveFrom: string }>();
+      if (userIds.length > 0) {
+        const wages = await db
+          .select({
+            userId: employeeWageHistory.userId,
+            wageType: employeeWageHistory.wageType,
+            wageAmount: employeeWageHistory.wageAmount,
+            effectiveFrom: employeeWageHistory.effectiveFrom,
+          })
+          .from(employeeWageHistory)
+          .where(and(
+            eq(employeeWageHistory.restaurantId, input.restaurantId),
+            inArray(employeeWageHistory.userId, userIds),
+          ))
+          .orderBy(desc(employeeWageHistory.effectiveFrom));
+        for (const w of wages) {
+          if (!wageMap.has(w.userId)) {
+            wageMap.set(w.userId, {
+              wageType: w.wageType,
+              wageAmount: String(w.wageAmount),
+              effectiveFrom: w.effectiveFrom as any,
+            });
+          }
+        }
+      }
+
+      // 가장 최근 signed 계약서 박제 (직원별)
       const snapshotsMap = new Map<number, any>();
       if (userIds.length > 0) {
         const snaps = await db
           .select({
             employeeId: employmentElectronicContracts.employeeId,
             signedAt: employmentElectronicContracts.signedAt,
+            // 기존 박제
             snapshotName: employmentElectronicContracts.snapshotName,
             snapshotPhone: employmentElectronicContracts.snapshotPhone,
             snapshotAddress: employmentElectronicContracts.snapshotAddress,
             snapshotResidentNumber: employmentElectronicContracts.snapshotResidentNumber,
             snapshotBankAccount: employmentElectronicContracts.snapshotBankAccount,
+            snapshotBankName: employmentElectronicContracts.snapshotBankName,
             snapshotAffiliatedCompany: employmentElectronicContracts.snapshotAffiliatedCompany,
             snapshotWeeklyOffDays: employmentElectronicContracts.snapshotWeeklyOffDays,
             snapshotWeeklyHours: employmentElectronicContracts.snapshotWeeklyHours,
             snapshotWageType: employmentElectronicContracts.snapshotWageType,
             snapshotWage: employmentElectronicContracts.snapshotWage,
-            // 재설계 2026-05-02 신규 박제
+            snapshotContractStart: employmentElectronicContracts.snapshotContractStart,
+            snapshotContractEnd: employmentElectronicContracts.snapshotContractEnd,
+            // Phase D 박제 (선행)
             snapshotHireDate: employmentElectronicContracts.snapshotHireDate,
             snapshotOver5Employees: employmentElectronicContracts.snapshotOver5Employees,
             snapshotTaxMode: employmentElectronicContracts.snapshotTaxMode,
+            // Phase E 신규 박제 11개
+            snapshotPosition: employmentElectronicContracts.snapshotPosition,
+            snapshotContractType: employmentElectronicContracts.snapshotContractType,
+            snapshotWorkStartTime: employmentElectronicContracts.snapshotWorkStartTime,
+            snapshotWorkEndTime: employmentElectronicContracts.snapshotWorkEndTime,
+            snapshotBreakMinutes: employmentElectronicContracts.snapshotBreakMinutes,
+            snapshotWeeklyHoliday: employmentElectronicContracts.snapshotWeeklyHoliday,
+            snapshotMealProvided: employmentElectronicContracts.snapshotMealProvided,
+            snapshotMealAllowance: employmentElectronicContracts.snapshotMealAllowance,
+            snapshotNightShiftConsent: employmentElectronicContracts.snapshotNightShiftConsent,
+            snapshotSpecialTerms: employmentElectronicContracts.snapshotSpecialTerms,
+            snapshotHourlyWageIncludesHolidayPay:
+              employmentElectronicContracts.snapshotHourlyWageIncludesHolidayPay,
           })
           .from(employmentElectronicContracts)
           .where(and(
@@ -222,7 +363,6 @@ export const staffRouter = router({
             eq(employmentElectronicContracts.status, "signed"),
           ))
           .orderBy(desc(employmentElectronicContracts.signedAt));
-        // 각 employeeId의 가장 최근 것만
         for (const s of snaps) {
           if (s.employeeId && !snapshotsMap.has(s.employeeId)) {
             snapshotsMap.set(s.employeeId, s);
@@ -230,7 +370,7 @@ export const staffRouter = router({
         }
       }
 
-      // 매장의 affiliated_companies 마스터 미리 조회 → 직원별 effectiveOver5 매핑
+      // affiliated_companies 마스터 → 직원별 effectiveOver5 매핑
       const ac = await db
         .select({
           companyName: affiliatedCompanies.companyName,
@@ -243,15 +383,8 @@ export const staffRouter = router({
 
       // 매니져(supervisor) 호출 시 급여 필드 drop — 민감정보 방어
       const isOwnerLevel =
-        ctx.user.role === "master" ||
-        ctx.user.role === "admin" ||
-        (() => {
-          // user 레벨은 managerProcedure에서 허용됐으므로 supervisor일 수 있음
-          // listActive는 supervisor도 호출 가능 → 서버측에서 필드 drop
-          return false;
-        })();
+        ctx.user.role === "master" || ctx.user.role === "admin";
 
-      // user 레벨인 경우 store role 확인
       let viewerStoreRole: string | null = null;
       if (!isOwnerLevel) {
         const [ru] = await db
@@ -272,20 +405,32 @@ export const staffRouter = router({
 
       return rows.map((r) => {
         const snap = snapshotsMap.get(r.userId) ?? null;
-        const effectiveOver5 = r.affiliatedCompany ? over5Map.get(r.affiliatedCompany) ?? false : false;
-        const mismatchedFields = computeMismatchedFields(
+        const wage = wageMap.get(r.userId) ?? null;
+        const effectiveOver5 = r.affiliatedCompany
+          ? over5Map.get(r.affiliatedCompany) ?? false
+          : false;
+        const needsRenewal = computeNeedsRenewal(
           {
-            name: r.name,
-            phone: r.phone,
-            address: r.address,
-            residentNumber: r.residentNumber,
-            bankAccount: r.bankAccount,
             affiliatedCompany: r.affiliatedCompany,
             hireDate: r.hireDate,
             weeklyOffDays: r.weeklyOffDays,
+            position: r.position,
+            contractType: r.contractType,
+            contractStart: r.contractStart,
+            contractEnd: r.contractEnd,
+            workStartTime: r.workStartTime,
+            workEndTime: r.workEndTime,
+            breakMinutes: r.breakMinutes,
+            weeklyHoliday: r.weeklyHoliday,
             weeklyHours: r.weeklyHours,
-            wageType: r.wageType,
-            wageAmount: r.wageAmount,
+            taxMode: r.taxMode,
+            hourlyWageIncludesHolidayPay: r.hourlyWageIncludesHolidayPay,
+            mealProvided: r.mealProvided,
+            mealAllowance: r.mealAllowance,
+            nightShiftConsent: r.nightShiftConsent,
+            specialTerms: r.specialTerms,
+            wageType: wage?.wageType ?? null,
+            wageAmount: wage?.wageAmount ?? null,
           },
           snap,
           effectiveOver5,
@@ -293,23 +438,52 @@ export const staffRouter = router({
         const out: any = {
           ...r,
           effectiveOver5,
-          mismatchedFields,
+          // 임금 (wage_history 가장 최근)
+          wageType: wage?.wageType ?? null,
+          wageAmount: wage?.wageAmount ?? null,
+          wageEffectiveFrom: wage?.effectiveFrom ?? null,
+          // 박제(계좌·주민번호) 노출 — 직원 카드 표시용
+          bankName: snap?.snapshotBankName ?? null,
+          bankAccount: snap?.snapshotBankAccount ?? null,
+          residentNumber: snap?.snapshotResidentNumber ?? null,
+          // 갱신 필요 항목 + 박제 메타
+          needsRenewal,
+          mismatchedFields: needsRenewal, // 호환성 유지 (기존 클라이언트가 mismatchedFields 사용)
           hasActiveContract: !!snap,
           latestContractSignedAt: snap?.signedAt ?? null,
-          // 박제값 직접 노출 — 클라이언트 갱신 배너 / 분기 표시용
           snapshotHireDate: snap?.snapshotHireDate ?? null,
           snapshotOver5Employees: snap?.snapshotOver5Employees ?? null,
           snapshotTaxMode: snap?.snapshotTaxMode ?? null,
           snapshotAffiliatedCompany: snap?.snapshotAffiliatedCompany ?? null,
           snapshotWeeklyOffDays: snap?.snapshotWeeklyOffDays ?? null,
+          snapshotWageType: snap?.snapshotWageType ?? null,
+          snapshotWage: snap?.snapshotWage ?? null,
+          snapshotPosition: snap?.snapshotPosition ?? null,
+          snapshotContractType: snap?.snapshotContractType ?? null,
+          snapshotContractStart: snap?.snapshotContractStart ?? null,
+          snapshotContractEnd: snap?.snapshotContractEnd ?? null,
+          snapshotWorkStartTime: snap?.snapshotWorkStartTime ?? null,
+          snapshotWorkEndTime: snap?.snapshotWorkEndTime ?? null,
+          snapshotBreakMinutes: snap?.snapshotBreakMinutes ?? null,
+          snapshotWeeklyHoliday: snap?.snapshotWeeklyHoliday ?? null,
+          snapshotWeeklyHours: snap?.snapshotWeeklyHours ?? null,
+          snapshotMealProvided: snap?.snapshotMealProvided ?? null,
+          snapshotMealAllowance: snap?.snapshotMealAllowance ?? null,
+          snapshotNightShiftConsent: snap?.snapshotNightShiftConsent ?? null,
+          snapshotSpecialTerms: snap?.snapshotSpecialTerms ?? null,
+          snapshotHourlyWageIncludesHolidayPay:
+            snap?.snapshotHourlyWageIncludesHolidayPay ?? null,
         };
         if (!canSeeWage) {
           delete out.wageType;
           delete out.wageAmount;
+          delete out.wageEffectiveFrom;
           delete out.weeklyHours;
           delete out.position;
           delete out.contractStart;
           delete out.contractEnd;
+          delete out.snapshotWage;
+          delete out.snapshotWageType;
         }
         return out;
       });
@@ -754,7 +928,11 @@ export const staffRouter = router({
       return { ok: true };
     }),
 
-  /** C군/B군 직원정보 수동 편집 — 감사 로그 남김 (불일치 허용) */
+  /**
+   * 기본 직원정보 편집 — Phase E (2026-05-02):
+   * employee_contracts DROP되어 민감영역(bankName/bankAccount/residentNumber)은
+   * 박제 계약서로만 갱신. 본 mutation은 user 기본정보 + restaurant_users SSOT 4개만.
+   */
   updateInfo: ownerProcedure
     .input(z.object({
       restaurantId: z.number(),
@@ -763,9 +941,6 @@ export const staffRouter = router({
       phone: z.string().optional(),
       address: z.string().optional(),
       email: z.string().email().optional().or(z.literal("")),
-      bankName: z.string().optional(),
-      bankAccount: z.string().optional(),
-      residentNumber: z.string().optional(),
       affiliatedCompany: z.string().nullable().optional(),
       hireDate: z.string().nullable().optional(),
       weeklyOffDays: z.number().int().min(1).max(3).optional(),
@@ -785,7 +960,6 @@ export const staffRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "이 매장의 직원이 아닙니다" });
       }
 
-      // users 업데이트
       const usersUpdate: Record<string, any> = {};
       if (input.name !== undefined) usersUpdate.name = input.name;
       if (input.phone !== undefined) {
@@ -798,7 +972,6 @@ export const staffRouter = router({
         await db.update(users).set(usersUpdate).where(eq(users.id, input.userId));
       }
 
-      // restaurant_users 업데이트 (재설계 2026-05-02: weeklyOffDays SSOT 포함)
       const ruUpdate: Record<string, any> = {};
       if (input.affiliatedCompany !== undefined) ruUpdate.affiliatedCompany = input.affiliatedCompany;
       if (input.hireDate !== undefined) ruUpdate.hireDate = input.hireDate;
@@ -807,40 +980,6 @@ export const staffRouter = router({
         await db.update(restaurantUsers).set(ruUpdate).where(eq(restaurantUsers.id, ru.id));
       }
 
-      // employee_contracts (민감영역 현재상태) 업데이트
-      if (
-        input.bankName !== undefined ||
-        input.bankAccount !== undefined ||
-        input.residentNumber !== undefined
-      ) {
-        const [ec] = await db
-          .select({ id: employeeContracts.id })
-          .from(employeeContracts)
-          .where(and(
-            eq(employeeContracts.userId, input.userId),
-            eq(employeeContracts.restaurantId, input.restaurantId),
-            eq(employeeContracts.isActive, true),
-          ))
-          .limit(1);
-        const ecUpdate: Record<string, any> = {};
-        if (input.bankName !== undefined) ecUpdate.bankName = input.bankName;
-        if (input.bankAccount !== undefined) ecUpdate.bankAccount = input.bankAccount;
-        if (input.residentNumber !== undefined) ecUpdate.residentNumber = input.residentNumber;
-        if (ec) {
-          await db.update(employeeContracts).set(ecUpdate).where(eq(employeeContracts.id, ec.id));
-        } else {
-          await db.insert(employeeContracts).values({
-            userId: input.userId,
-            restaurantId: input.restaurantId,
-            bankName: ecUpdate.bankName ?? null,
-            bankAccount: ecUpdate.bankAccount ?? null,
-            residentNumber: ecUpdate.residentNumber ?? null,
-            isActive: true,
-          } as any);
-        }
-      }
-
-      // audit — 수동 C군 편집 표시
       await db.insert(auditLogs).values({
         userId: ctx.user.userId,
         userName: ctx.user.name || ctx.user.username,
@@ -848,9 +987,240 @@ export const staffRouter = router({
         action: "update",
         target: "staff_info",
         targetId: input.userId,
-        details: { kind: "manual_c_edit", fields: Object.keys(input).filter((k) => !["restaurantId", "userId"].includes(k)) },
+        details: { kind: "manual_basic_edit", fields: Object.keys(input).filter((k) => !["restaurantId", "userId"].includes(k)) },
       });
 
       return { ok: true };
+    }),
+
+  /**
+   * Phase E (2026-05-02): 운영 SSOT 통합 update.
+   * 직원 카드에서 12 항목 직접 편집. wage_history는 별도(updateWage).
+   */
+  updateEmployment: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      userId: z.number(),
+      position: z.string().nullable().optional(),
+      contractType: z.enum(["permanent", "fixed_term", "part_time", "daily"]).optional(),
+      contractStart: z.string().nullable().optional(),
+      contractEnd: z.string().nullable().optional(),
+      workStartTime: z.string().optional(),
+      workEndTime: z.string().optional(),
+      breakMinutes: z.number().int().min(0).max(480).optional(),
+      weeklyHoliday: z.string().optional(),
+      weeklyHours: z.string().optional(),
+      taxMode: z.enum(["social_insurance", "biz_income_3_3"]).optional(),
+      hourlyWageIncludesHolidayPay: z.boolean().optional(),
+      mealProvided: z.boolean().optional(),
+      mealAllowance: z.string().optional(),
+      nightShiftConsent: z.boolean().optional(),
+      specialTerms: z.string().nullable().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
+      const [ru] = await db
+        .select({ id: restaurantUsers.id })
+        .from(restaurantUsers)
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId),
+        ))
+        .limit(1);
+      if (!ru) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "이 매장의 직원이 아닙니다" });
+      }
+
+      const ruUpdate: Record<string, any> = {};
+      const fields = [
+        "position",
+        "contractType",
+        "contractStart",
+        "contractEnd",
+        "workStartTime",
+        "workEndTime",
+        "breakMinutes",
+        "weeklyHoliday",
+        "weeklyHours",
+        "taxMode",
+        "hourlyWageIncludesHolidayPay",
+        "mealProvided",
+        "mealAllowance",
+        "nightShiftConsent",
+        "specialTerms",
+      ] as const;
+      for (const f of fields) {
+        if ((input as any)[f] !== undefined) ruUpdate[f] = (input as any)[f];
+      }
+      if (Object.keys(ruUpdate).length === 0) return { ok: true };
+
+      await db.update(restaurantUsers).set(ruUpdate).where(eq(restaurantUsers.id, ru.id));
+
+      await db.insert(auditLogs).values({
+        userId: ctx.user.userId,
+        userName: ctx.user.name || ctx.user.username,
+        restaurantId: input.restaurantId,
+        action: "update",
+        target: "staff_employment",
+        targetId: input.userId,
+        details: { fields: Object.keys(ruUpdate) },
+      });
+
+      return { ok: true };
+    }),
+
+  /**
+   * Phase E (2026-05-02): 임금 SSOT 갱신.
+   * wage_history에 새 row INSERT + 기존 open row(effectiveTo NULL)는 effectiveFrom으로 닫음.
+   * 동일 effectiveFrom row 존재 시 덮어쓰기 (UPDATE).
+   */
+  updateWage: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      userId: z.number(),
+      wageType: z.enum(["hourly", "monthly"]),
+      wageAmount: z.string(),
+      effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
+      const amt = Number(input.wageAmount);
+      if (!isFinite(amt) || amt < 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "임금 금액이 올바르지 않습니다" });
+      }
+
+      const [ru] = await db
+        .select({ id: restaurantUsers.id })
+        .from(restaurantUsers)
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId),
+        ))
+        .limit(1);
+      if (!ru) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "이 매장의 직원이 아닙니다" });
+      }
+
+      // 동일 effectiveFrom row가 있으면 덮어쓰기. 없으면 INSERT + 기존 open row close.
+      const [existing] = await db
+        .select({ id: employeeWageHistory.id })
+        .from(employeeWageHistory)
+        .where(and(
+          eq(employeeWageHistory.userId, input.userId),
+          eq(employeeWageHistory.restaurantId, input.restaurantId),
+          sql`${employeeWageHistory.effectiveFrom} = ${input.effectiveFrom}`,
+        ))
+        .limit(1);
+
+      if (existing) {
+        await db
+          .update(employeeWageHistory)
+          .set({
+            wageType: input.wageType,
+            wageAmount: input.wageAmount,
+          })
+          .where(eq(employeeWageHistory.id, existing.id));
+      } else {
+        // 가장 최근 open row 닫기 (effectiveTo = effectiveFrom)
+        await db.execute(sql`
+          UPDATE employee_wage_history
+          SET effectiveTo = ${input.effectiveFrom}
+          WHERE userId = ${input.userId}
+            AND restaurantId = ${input.restaurantId}
+            AND effectiveTo IS NULL
+            AND effectiveFrom < ${input.effectiveFrom}
+        `);
+        await db.insert(employeeWageHistory).values({
+          userId: input.userId,
+          restaurantId: input.restaurantId,
+          wageType: input.wageType,
+          wageAmount: input.wageAmount,
+          effectiveFrom: input.effectiveFrom,
+          effectiveTo: null,
+          sourceContractId: null,
+        } as any);
+        // contractMigrated 플래그 → wage_history가 한 번이라도 생기면 true
+        await db
+          .update(restaurantUsers)
+          .set({ contractMigrated: true })
+          .where(eq(restaurantUsers.id, ru.id));
+      }
+
+      await db.insert(auditLogs).values({
+        userId: ctx.user.userId,
+        userName: ctx.user.name || ctx.user.username,
+        restaurantId: input.restaurantId,
+        action: "update",
+        target: "staff_wage",
+        targetId: input.userId,
+        details: {
+          wageType: input.wageType,
+          wageAmount: input.wageAmount,
+          effectiveFrom: input.effectiveFrom,
+        },
+      });
+
+      return { ok: true };
+    }),
+
+  /**
+   * Phase E (2026-05-02): 운영 SSOT 일괄 fetch.
+   * 계약서 모달 폼 기본값(신규 모드) 또는 직원 카드 reload용.
+   */
+  getEmployment: managerProcedure
+    .input(z.object({ restaurantId: z.number(), userId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+
+      const [r] = await db
+        .select({
+          // restaurant_users
+          affiliatedCompany: restaurantUsers.affiliatedCompany,
+          hireDate: restaurantUsers.hireDate,
+          weeklyOffDays: restaurantUsers.weeklyOffDays,
+          position: restaurantUsers.position,
+          contractType: restaurantUsers.contractType,
+          contractStart: restaurantUsers.contractStart,
+          contractEnd: restaurantUsers.contractEnd,
+          workStartTime: restaurantUsers.workStartTime,
+          workEndTime: restaurantUsers.workEndTime,
+          breakMinutes: restaurantUsers.breakMinutes,
+          weeklyHoliday: restaurantUsers.weeklyHoliday,
+          weeklyHours: restaurantUsers.weeklyHours,
+          taxMode: restaurantUsers.taxMode,
+          hourlyWageIncludesHolidayPay: restaurantUsers.hourlyWageIncludesHolidayPay,
+          mealProvided: restaurantUsers.mealProvided,
+          mealAllowance: restaurantUsers.mealAllowance,
+          nightShiftConsent: restaurantUsers.nightShiftConsent,
+          specialTerms: restaurantUsers.specialTerms,
+          storeRole: restaurantUsers.role,
+          // user 기본정보
+          name: users.name,
+          phone: users.phone,
+          address: users.address,
+          email: users.email,
+        })
+        .from(restaurantUsers)
+        .innerJoin(users, eq(users.id, restaurantUsers.userId))
+        .where(and(
+          eq(restaurantUsers.restaurantId, input.restaurantId),
+          eq(restaurantUsers.userId, input.userId),
+        ))
+        .limit(1);
+
+      if (!r) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "이 매장의 직원이 아닙니다" });
+      }
+
+      const wage = await getLatestWage(input.userId, input.restaurantId);
+
+      return {
+        ...r,
+        wageType: wage?.wageType ?? null,
+        wageAmount: wage?.wageAmount ?? null,
+        wageEffectiveFrom: wage?.effectiveFrom ?? null,
+      };
     }),
 });

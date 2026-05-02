@@ -12,7 +12,6 @@ import {
   restaurants,
   users,
   restaurantUsers,
-  employeeContracts,
   employeeWageHistory,
   dailyClosings,
   dailySalesDetail,
@@ -144,6 +143,18 @@ async function sumPurchasesByCP(
 }
 
 // ── 인건비 합산 (소속회사별) ─────────────────────────────────────────────
+//
+// Phase E (2026-05-02) 박제 안전망:
+//   직전 Phase E 변경에서 schedules JOIN 출처를 employee_contracts(시계열) →
+//   restaurant_users(현재값) + employee_wage_history(시계열)로 분리. 임금은 시계열
+//   유지되나 weeklyHours·taxMode 등 비임금 운영값은 SSOT 즉시 영향.
+//   → 박제된 일자에 대해서도 schedules 즉시 합산하면 사양 §10.1 ("monthly_closings.confirm
+//   후 박제된 월은 박제값 유지") 위반.
+//
+// 보강: closedDateStrs(일마감 박제된 날짜) 있을 때, totalCost는 daily_closings.laborCost
+//   SUM으로 박제값 사용. byCompany 분해는 schedules 즉시 합산 비율을 유지하되 박제
+//   총합과 같도록 비율 보정. 미박제 일자(allLabor 호출, closedDateStrs=undefined)는
+//   기존 동작(즉시 합산) 유지.
 async function sumLaborByCompany(
   restaurantId: number,
   year: number,
@@ -163,7 +174,9 @@ async function sumLaborByCompany(
     ? sql`DATE(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00')) IN (${sql.join(closedDateStrs.map(d => sql`${d}`), sql`, `)})`
     : undefined;
 
-  const rawRows = await db.select({
+  // Phase E (2026-05-02): weeklyHours 출처를 restaurant_users로 변경.
+  //   employee_contracts JOIN 제거 (테이블 폐기됨).
+  const rows = await db.select({
     scheduleId: schedules.id,
     userId: schedules.userId,
     startTime: schedules.startTime,
@@ -174,12 +187,11 @@ async function sumLaborByCompany(
     tempWageAmount: schedules.tempWageAmount,
     wageType: employeeWageHistory.wageType,
     wageAmount: employeeWageHistory.wageAmount,
-    weeklyHours: employeeContracts.weeklyHours,
-    contractIsActive: employeeContracts.isActive,
+    weeklyHours: restaurantUsers.weeklyHours,
   }).from(schedules)
-    .leftJoin(employeeContracts, and(
-      eq(employeeContracts.userId, schedules.userId),
-      eq(employeeContracts.restaurantId, restaurantId),
+    .leftJoin(restaurantUsers, and(
+      eq(restaurantUsers.restaurantId, restaurantId),
+      eq(restaurantUsers.userId, schedules.userId),
     ))
     .leftJoin(employeeWageHistory, and(
       eq(employeeWageHistory.userId, schedules.userId),
@@ -194,15 +206,6 @@ async function sumLaborByCompany(
       sql`${schedules.status} = 'completed'`,
       ...(dateCondition ? [dateCondition] : []),
     ));
-
-  // 복수 계약 중복 제거: active 우선
-  const dedup = new Map<number, typeof rawRows[0]>();
-  for (const r of rawRows) {
-    const existing = dedup.get(r.scheduleId);
-    if (!existing) { dedup.set(r.scheduleId, r); }
-    else if (!existing.contractIsActive && r.contractIsActive) { dedup.set(r.scheduleId, r); }
-  }
-  const rows = Array.from(dedup.values());
 
   // 소속회사 조회 + 회사명별 5인 여부 (재설계 2026-05-02)
   const userIds = [...new Set(rows.map(r => r.userId).filter(Boolean))] as number[];
@@ -258,6 +261,29 @@ async function sumLaborByCompany(
     if (existing) { existing.headcount.add(key); existing.hours += hours; existing.amount += pay; }
     else { byCompanyMap.set(company, { headcount: new Set([key]), hours, amount: pay }); }
   }
+
+  // Phase E 박제 안전망: closedDateStrs 있으면 daily_closings.laborCost SUM으로 totalCost 교체.
+  //   schedules 즉시 합산을 byCompany 비율 산출용으로만 사용하고, 비율 보정해 박제 총합과 정합.
+  if (closedDateStrs && closedDateStrs.length > 0) {
+    const [snapRow] = await db.select({
+      total: sql<string>`COALESCE(SUM(${dailyClosings.laborCost}), 0)`,
+    })
+      .from(dailyClosings)
+      .where(and(
+        eq(dailyClosings.restaurantId, restaurantId),
+        sql`DATE(${dailyClosings.closingDate}) IN (${sql.join(closedDateStrs.map(d => sql`${d}`), sql`, `)})`,
+      ));
+    const snapshotTotal = Number(snapRow?.total ?? 0);
+    if (snapshotTotal > 0 || totalCost > 0) {
+      const ratio = totalCost > 0 ? snapshotTotal / totalCost : 0;
+      // byCompany 비율 보정 — schedules 분배 비율을 유지하되 합이 박제값과 같도록
+      for (const v of byCompanyMap.values()) {
+        v.amount = v.amount * ratio;
+      }
+      totalCost = snapshotTotal;
+    }
+  }
+
   totalCost = Math.round(totalCost);
 
   return {

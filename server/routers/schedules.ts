@@ -10,11 +10,9 @@ import {
   storeClosedDays,
   storeWeeklyClosures,
   restaurantUsers,
-  employeeContracts,
   employeeWageHistory,
   restaurantShiftPresets,
   leaveTransactions,
-  employmentElectronicContracts,
   affiliatedCompanies,
 } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
@@ -897,9 +895,11 @@ export const schedulesRouter = router({
       const toStr = kstTo.toISOString().slice(0, 19).replace("T", " ");
 
       // 전체 스케줄 + 직원 정보 + 소속회사 + 시급 조인
-      // 계약서 isActive 필터 제거 → 초안(비활성) 계약도 급여 반영
-      // 복수 계약 존재 시 중복 방지를 위해 scheduleId로 dedup
-      const rawRows = await db
+      // Phase E (2026-05-02): 운영 데이터(taxMode, weeklyHours, hourlyWageIncludesHolidayPay,
+      //   position, contractStart, contractEnd) 출처를 restaurant_users로 변경.
+      //   employee_contracts JOIN 제거 (테이블 폐기됨).
+      //   wage는 wage_history 그대로.
+      const rows = await db
         .select({
           scheduleId: schedules.id,
           userId: schedules.userId,
@@ -915,38 +915,24 @@ export const schedulesRouter = router({
           tempPhone: schedules.tempPhone,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
-          // 재설계 2026-05-02 (Phase B): weeklyOffDays SSOT는 restaurant_users
           weeklyOffDays: restaurantUsers.weeklyOffDays,
+          // Phase E: 운영 SSOT
+          position: restaurantUsers.position,
+          contractStart: restaurantUsers.contractStart,
+          contractEnd: restaurantUsers.contractEnd,
+          weeklyHours: restaurantUsers.weeklyHours,
+          taxMode: restaurantUsers.taxMode,
+          hourlyWageIncludesHolidayPay: restaurantUsers.hourlyWageIncludesHolidayPay,
+          // 임금 (wage_history 시점별)
           wageType: employeeWageHistory.wageType,
           wageAmount: employeeWageHistory.wageAmount,
-          position: employeeContracts.position,
-          contractStart: employeeContracts.contractStart,
-          contractEnd: employeeContracts.contractEnd,
-          weeklyHours: employeeContracts.weeklyHours,
-          bankName: employeeContracts.bankName,
-          bankAccount: employeeContracts.bankAccount,
-          residentNumber: employeeContracts.residentNumber,
-          contractIsActive: employeeContracts.isActive,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
-          // 시급제 + 주휴포함 여부 (latest signed contract 박제)
-          hourlyWageIncludesHolidayPay: employmentElectronicContracts.hourlyWageIncludesHolidayPay,
-          // taxMode (signed contract 박제) — 표시용
-          taxMode: employmentElectronicContracts.snapshotTaxMode,
         })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
         .leftJoin(restaurantUsers, and(
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, schedules.userId)
-        ))
-        .leftJoin(employmentElectronicContracts, and(
-          eq(employmentElectronicContracts.employeeId, schedules.userId),
-          eq(employmentElectronicContracts.restaurantId, input.restaurantId),
-          eq(employmentElectronicContracts.status, "signed"),
-        ))
-        .leftJoin(employeeContracts, and(
-          eq(employeeContracts.userId, schedules.userId),
-          eq(employeeContracts.restaurantId, input.restaurantId),
         ))
         .leftJoin(employeeWageHistory, and(
           eq(employeeWageHistory.userId, schedules.userId),
@@ -964,19 +950,6 @@ export const schedulesRouter = router({
         )
         .orderBy(schedules.startTime);
 
-      // 복수 계약 중복 제거: 같은 scheduleId → active 계약 우선, 없으면 비활성 계약 사용
-      const seenSchedules = new Map<number, typeof rawRows[0]>();
-      for (const r of rawRows) {
-        const existing = seenSchedules.get(r.scheduleId);
-        if (!existing) {
-          seenSchedules.set(r.scheduleId, r);
-        } else if (!existing.contractIsActive && r.contractIsActive) {
-          // 기존이 비활성이고 현재가 활성이면 교체
-          seenSchedules.set(r.scheduleId, r);
-        }
-      }
-      const rows = Array.from(seenSchedules.values());
-
       // 재설계 2026-05-02: noWeeklyHolidayPay 폐기. 시급제 + 주휴별도(hourlyWageIncludesHolidayPay=false)는
       // 별도 카드 분리하지 않고 같은 카드에서 주별 가산 라인으로 처리.
 
@@ -991,7 +964,7 @@ export const schedulesRouter = router({
       const over5ByCompany = new Map<string, boolean>();
       for (const c of acRows) over5ByCompany.set(c.companyName, Boolean(c.over5Employees));
 
-      console.log(`[laborCost] rows found: ${rows.length} (raw: ${rawRows.length})`);
+      console.log(`[laborCost] rows found: ${rows.length}`);
 
       // ── 영업일수 계산 ──
       // 1) 정기 휴무 요일 조회
@@ -1083,9 +1056,11 @@ export const schedulesRouter = router({
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
             recheckRequired: false,
-            bankName: r.bankName ?? null,
-            bankAccount: r.bankAccount ?? r.tempBankAccount ?? null,
-            residentNumber: r.residentNumber ?? null,
+            // Phase E (2026-05-02): bankName/bankAccount/residentNumber는 박제 계약서로 이동.
+            //   인건비 정산 응답에서는 임시근로자의 tempBankAccount만 노출. 박제 정보는 직원 카드 응답 사용.
+            bankName: null,
+            bankAccount: r.tempBankAccount ?? null,
+            residentNumber: null,
             phone: r.tempPhone ?? null,
             over5Employees: over5,
             // 시급제 + 주휴포함 여부 (latest signed contract). null 시 true 폴백 (보수적)
@@ -1466,8 +1441,8 @@ export const schedulesRouter = router({
       const fromStr = kstFrom.toISOString().slice(0, 19).replace("T", " ");
       const toStr = kstTo.toISOString().slice(0, 19).replace("T", " ");
 
-      // 스케줄 + 직원 + 소속회사 (급여 필드 미조회)
-      const rawRows = await db
+      // Phase E (2026-05-02): position 출처를 restaurant_users로 변경.
+      const rows = await db
         .select({
           scheduleId: schedules.id,
           userId: schedules.userId,
@@ -1479,10 +1454,8 @@ export const schedulesRouter = router({
           tempWorkerName: schedules.tempWorkerName,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
-          // 재설계 2026-05-02 (Phase B): weeklyOffDays SSOT는 restaurant_users
           weeklyOffDays: restaurantUsers.weeklyOffDays,
-          position: employeeContracts.position,
-          contractIsActive: employeeContracts.isActive,
+          position: restaurantUsers.position,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
         })
         .from(schedules)
@@ -1490,10 +1463,6 @@ export const schedulesRouter = router({
         .leftJoin(restaurantUsers, and(
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, schedules.userId),
-        ))
-        .leftJoin(employeeContracts, and(
-          eq(employeeContracts.userId, schedules.userId),
-          eq(employeeContracts.restaurantId, input.restaurantId),
         ))
         .where(
           and(
@@ -1504,15 +1473,6 @@ export const schedulesRouter = router({
           ),
         )
         .orderBy(schedules.startTime);
-
-      // scheduleId dedup — active 계약 우선
-      const seen = new Map<number, typeof rawRows[0]>();
-      for (const r of rawRows) {
-        const ex = seen.get(r.scheduleId);
-        if (!ex) seen.set(r.scheduleId, r);
-        else if (!ex.contractIsActive && r.contractIsActive) seen.set(r.scheduleId, r);
-      }
-      const rows = Array.from(seen.values());
 
       // 재설계 2026-05-02: noWeeklyHolidayPay 폐기. 정규직은 항상 정규직 카드.
 

@@ -11,12 +11,13 @@
  * - server/routers/staff.ts: 직원 응답에 effectiveOver5 포함
  */
 
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, sql, isNull, or } from "drizzle-orm";
 import { db } from "../db";
 import {
   affiliatedCompanies,
   restaurantUsers,
   employmentElectronicContracts,
+  employeeWageHistory,
 } from "../../drizzle/schema";
 
 const WEEKS_PER_MONTH = 365 / 12 / 7; // ≈ 4.345
@@ -155,4 +156,175 @@ export function computeWeeklyHolidayPay(
     if (hours >= 15) bonus += 8 * hourlyWage;
   }
   return bonus;
+}
+
+/**
+ * Phase E (2026-05-02): 운영 SSOT 통합 조회
+ *
+ * 직원의 운영 데이터(restaurant_users)를 일괄 fetch.
+ * 정산·UI·계약서 폼 기본값 등에 공통 사용.
+ *
+ * 반환: restaurant_users row 또는 null (매칭 없음).
+ */
+export async function getEffectiveOperationalData(
+  userId: number,
+  restaurantId: number,
+): Promise<{
+  position: string | null;
+  contractType: string | null;
+  contractStart: string | null;
+  contractEnd: string | null;
+  workStartTime: string | null;
+  workEndTime: string | null;
+  breakMinutes: number | null;
+  weeklyHoliday: string | null;
+  weeklyHours: string | null;
+  taxMode: string;
+  hourlyWageIncludesHolidayPay: boolean;
+  mealProvided: boolean;
+  mealAllowance: string | null;
+  nightShiftConsent: boolean;
+  specialTerms: string | null;
+  affiliatedCompany: string | null;
+  hireDate: string | null;
+  weeklyOffDays: number;
+} | null> {
+  const rows = await db
+    .select({
+      position: restaurantUsers.position,
+      contractType: restaurantUsers.contractType,
+      contractStart: restaurantUsers.contractStart,
+      contractEnd: restaurantUsers.contractEnd,
+      workStartTime: restaurantUsers.workStartTime,
+      workEndTime: restaurantUsers.workEndTime,
+      breakMinutes: restaurantUsers.breakMinutes,
+      weeklyHoliday: restaurantUsers.weeklyHoliday,
+      weeklyHours: restaurantUsers.weeklyHours,
+      taxMode: restaurantUsers.taxMode,
+      hourlyWageIncludesHolidayPay: restaurantUsers.hourlyWageIncludesHolidayPay,
+      mealProvided: restaurantUsers.mealProvided,
+      mealAllowance: restaurantUsers.mealAllowance,
+      nightShiftConsent: restaurantUsers.nightShiftConsent,
+      specialTerms: restaurantUsers.specialTerms,
+      affiliatedCompany: restaurantUsers.affiliatedCompany,
+      hireDate: restaurantUsers.hireDate,
+      weeklyOffDays: restaurantUsers.weeklyOffDays,
+    })
+    .from(restaurantUsers)
+    .where(
+      and(
+        eq(restaurantUsers.userId, userId),
+        eq(restaurantUsers.restaurantId, restaurantId),
+      ),
+    )
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0] as any;
+  return {
+    position: r.position ?? null,
+    contractType: r.contractType ?? null,
+    contractStart: r.contractStart ?? null,
+    contractEnd: r.contractEnd ?? null,
+    workStartTime: r.workStartTime ?? null,
+    workEndTime: r.workEndTime ?? null,
+    breakMinutes: r.breakMinutes ?? null,
+    weeklyHoliday: r.weeklyHoliday ?? null,
+    weeklyHours: r.weeklyHours ?? null,
+    taxMode: r.taxMode ?? "social_insurance",
+    hourlyWageIncludesHolidayPay: Boolean(r.hourlyWageIncludesHolidayPay),
+    mealProvided: Boolean(r.mealProvided),
+    mealAllowance: r.mealAllowance ?? null,
+    nightShiftConsent: Boolean(r.nightShiftConsent),
+    specialTerms: r.specialTerms ?? null,
+    affiliatedCompany: r.affiliatedCompany ?? null,
+    hireDate: r.hireDate ?? null,
+    weeklyOffDays: r.weeklyOffDays ?? 1,
+  };
+}
+
+/**
+ * Phase E (2026-05-02): 시점별 임금 조회
+ *
+ * employee_wage_history에서 지정 시점에 유효한 wage row 조회.
+ * asOf default = 오늘. effectiveFrom <= asOf < effectiveTo (또는 effectiveTo NULL).
+ */
+export async function getEffectiveWage(
+  userId: number,
+  restaurantId: number,
+  asOf?: string, // YYYY-MM-DD
+): Promise<{
+  wageType: "hourly" | "monthly";
+  wageAmount: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+} | null> {
+  const targetDate = asOf || new Date().toISOString().slice(0, 10);
+  const rows = await db
+    .select({
+      wageType: employeeWageHistory.wageType,
+      wageAmount: employeeWageHistory.wageAmount,
+      effectiveFrom: employeeWageHistory.effectiveFrom,
+      effectiveTo: employeeWageHistory.effectiveTo,
+    })
+    .from(employeeWageHistory)
+    .where(
+      and(
+        eq(employeeWageHistory.userId, userId),
+        eq(employeeWageHistory.restaurantId, restaurantId),
+        sql`${employeeWageHistory.effectiveFrom} <= ${targetDate}`,
+        or(
+          isNull(employeeWageHistory.effectiveTo),
+          sql`${targetDate} < ${employeeWageHistory.effectiveTo}`,
+        ),
+      ),
+    )
+    .orderBy(desc(employeeWageHistory.effectiveFrom))
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0] as any;
+  return {
+    wageType: r.wageType,
+    wageAmount: String(r.wageAmount),
+    effectiveFrom: r.effectiveFrom,
+    effectiveTo: r.effectiveTo ?? null,
+  };
+}
+
+/**
+ * Phase E (2026-05-02): 가장 최근 wage_history row 조회 (effectiveTo NULL이거나 가장 최신).
+ * 직원 카드 표시용. wage_history 부재 시 null.
+ */
+export async function getLatestWage(
+  userId: number,
+  restaurantId: number,
+): Promise<{
+  wageType: "hourly" | "monthly";
+  wageAmount: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+} | null> {
+  const rows = await db
+    .select({
+      wageType: employeeWageHistory.wageType,
+      wageAmount: employeeWageHistory.wageAmount,
+      effectiveFrom: employeeWageHistory.effectiveFrom,
+      effectiveTo: employeeWageHistory.effectiveTo,
+    })
+    .from(employeeWageHistory)
+    .where(
+      and(
+        eq(employeeWageHistory.userId, userId),
+        eq(employeeWageHistory.restaurantId, restaurantId),
+      ),
+    )
+    .orderBy(desc(employeeWageHistory.effectiveFrom))
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0] as any;
+  return {
+    wageType: r.wageType,
+    wageAmount: String(r.wageAmount),
+    effectiveFrom: r.effectiveFrom,
+    effectiveTo: r.effectiveTo ?? null,
+  };
 }

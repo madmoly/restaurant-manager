@@ -112,10 +112,35 @@ export default function ContractSignPage({ token }: { token: string }) {
     ? ((contract as any).snapshotTaxMode || (contract as any).taxMode || "social_insurance")
     : ((contract as any).taxMode || (contract as any).snapshotTaxMode || "social_insurance");
   const is3_3 = effectiveTaxMode === "biz_income_3_3";
-  const isHourly = contract.wageType === "hourly";
-  const isMonthly = contract.wageType === "monthly";
-  const includesHoliday = Boolean((contract as any).hourlyWageIncludesHolidayPay);
-  const weeklyHoursNum = Number(contract.weeklyHours) || 0;
+
+  // Phase E (2026-05-02): 본문 출력 시 11개 신규 박제 우선 사용 (서명된 경우).
+  //   미서명(draft/sent)은 본 컬럼 사용. 박제와 본 컬럼이 다를 수 있어 일관 fallback.
+  const c: any = contract;
+  const pickSnap = (snap: any, base: any): any =>
+    isSigned ? (snap ?? base) : (base ?? snap);
+
+  const displayPosition: string = pickSnap(c.snapshotPosition, c.position) ?? "";
+  const displayContractType: string = pickSnap(c.snapshotContractType, c.contractType) ?? c.contractType;
+  const displayWorkStartTime: string = pickSnap(c.snapshotWorkStartTime, c.workStartTime) ?? "09:00";
+  const displayWorkEndTime: string = pickSnap(c.snapshotWorkEndTime, c.workEndTime) ?? "18:00";
+  const displayBreakMinutes: number = Number(pickSnap(c.snapshotBreakMinutes, c.breakMinutes) ?? 60);
+  const displayWeeklyHoliday: string = pickSnap(c.snapshotWeeklyHoliday, c.weeklyHoliday) ?? "일요일";
+  const displayMealProvided: boolean = Boolean(pickSnap(c.snapshotMealProvided, c.mealProvided));
+  const displayMealAllowance: number = Number(pickSnap(c.snapshotMealAllowance, c.mealAllowance) ?? 0);
+  const displayNightShiftConsent: boolean = Boolean(
+    pickSnap(c.snapshotNightShiftConsent, c.nightShiftConsent),
+  );
+  const displaySpecialTerms: string = pickSnap(c.snapshotSpecialTerms, c.specialTerms) ?? "";
+  const displayHourlyWageIncludesHolidayPay: boolean = Boolean(
+    isSigned
+      ? c.snapshotHourlyWageIncludesHolidayPay ?? c.hourlyWageIncludesHolidayPay
+      : c.hourlyWageIncludesHolidayPay,
+  );
+
+  const isHourly = (pickSnap(c.snapshotWageType, c.wageType) ?? c.wageType) === "hourly";
+  const isMonthly = (pickSnap(c.snapshotWageType, c.wageType) ?? c.wageType) === "monthly";
+  const includesHoliday = displayHourlyWageIncludesHolidayPay;
+  const weeklyHoursNum = Number(pickSnap(c.snapshotWeeklyHours, c.weeklyHours) ?? 0);
   const isUnder15Hours = weeklyHoursNum < 15;
   const displayHireDate: string | null =
     (contract as any).snapshotHireDate || (contract as any).hireDate || null;
@@ -178,14 +203,17 @@ export default function ContractSignPage({ token }: { token: string }) {
             {/* 조항 테이블 */}
             <table className="w-full border-collapse">
               <tbody>
-                <ContractRow label="1. 계약유형" value={typeLabels[contract.contractType] ?? contract.contractType} />
+                <ContractRow label="1. 계약유형" value={typeLabels[displayContractType] ?? displayContractType} />
+                {displayPosition && (
+                  <ContractRow label="1-1. 직위" value={displayPosition} />
+                )}
                 <ContractRow
                   label="2. 계약기간"
-                  value={
-                    contract.contractEnd
-                      ? `${fmt(contract.contractStart)} ~ ${fmt(contract.contractEnd)}`
-                      : `${fmt(contract.contractStart)} ~ (기간의 정함 없음)`
-                  }
+                  value={(() => {
+                    const cs = pickSnap((contract as any).snapshotContractStart, contract.contractStart);
+                    const ce = pickSnap((contract as any).snapshotContractEnd, contract.contractEnd);
+                    return ce ? `${fmt(cs)} ~ ${fmt(ce)}` : `${fmt(cs)} ~ (기간의 정함 없음)`;
+                  })()}
                 />
                 <ContractRow
                   label="3. 근무장소"
@@ -198,11 +226,11 @@ export default function ContractSignPage({ token }: { token: string }) {
                 <ContractRow label="4. 업무내용" value={contract.jobDescription || "(사업주 지시에 따름)"} />
                 <ContractRow
                   label="5. 근무시간"
-                  value={`${contract.workStartTime} ~ ${contract.workEndTime} (${weeklyHoursNum > 0 ? `주 ${weeklyHoursNum}시간` : "주 근무시간 미정 (시급제 변동근무)"}, 휴게 ${contract.breakMinutes ?? 60}분)`}
+                  value={`${displayWorkStartTime} ~ ${displayWorkEndTime} (${weeklyHoursNum > 0 ? `주 ${weeklyHoursNum}시간` : "주 근무시간 미정 (시급제 변동근무)"}, 휴게 ${displayBreakMinutes}분)`}
                 />
                 <ContractRow
                   label="6. 주휴일"
-                  value="스케줄상 지정일 또는 당사자 간 협의에 따름"
+                  value={`매주 ${displayWeeklyHoliday} (스케줄상 지정일 또는 당사자 간 협의에 따름)`}
                 />
                 <ContractRow
                   label="7. 임금"
@@ -271,10 +299,18 @@ export default function ContractSignPage({ token }: { token: string }) {
                   label="10. 세무처리"
                   value={is3_3 ? "사업소득 3.3% 원천공제" : "4대보험 가입"}
                 />
-                {contract.mealProvided && (
+                {displayMealProvided && (
                   <ContractRow
                     label="11. 식사제공"
-                    value="제공"
+                    value={displayMealAllowance > 0
+                      ? `제공 (식대 ${displayMealAllowance.toLocaleString()}원)`
+                      : "제공"}
+                  />
+                )}
+                {displayNightShiftConsent && (
+                  <ContractRow
+                    label="12. 야간근로 동의"
+                    value="22시~06시 야간근로에 동의함 (근기법 제70조)"
                   />
                 )}
               </tbody>
@@ -395,13 +431,13 @@ export default function ContractSignPage({ token }: { token: string }) {
               </div>
             </div>
 
-            {/* 특약사항 */}
-            {contract.specialTerms && (
+            {/* 특약사항 (Phase E: snapshotSpecialTerms 박제 우선) */}
+            {displaySpecialTerms && (
               <div>
                 <h3 className="font-semibold mb-2" style={{ color: "#111827" }}>특약사항</h3>
                 <div className="rounded-md p-3 text-sm whitespace-pre-wrap"
                   style={{ background: "#f9fafb" }}>
-                  {contract.specialTerms}
+                  {displaySpecialTerms}
                 </div>
               </div>
             )}

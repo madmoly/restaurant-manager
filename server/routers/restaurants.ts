@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, sql, count, inArray } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure, adminProcedure, ownerProcedure, masterProcedure } from "../trpc";
 import { db, rawPool } from "../db";
-import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets, auditLogs, employeeContracts, employmentElectronicContracts, businessGroups } from "../../drizzle/schema";
+import { restaurants, restaurantUsers, users, sales, apiUsageLogs, restaurantShiftPresets, auditLogs, businessGroups } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
 import { activeRealStoreCondition, getOwnedRestaurants } from "../helpers/restaurantScope";
 import { verifyStoreAccess } from "../middleware/storeAuth";
@@ -343,22 +343,173 @@ export const restaurantsRouter = router({
               AND ac.companyName = ${restaurantUsers.affiliatedCompany}
             LIMIT 1
           ), FALSE)`.as("effectiveOver5"),
-          // employeeContracts (현재 활성 계약)
-          wageType: employeeContracts.wageType,
-          wageAmount: employeeContracts.wageAmount,
-          position: employeeContracts.position,
-          contractStart: employeeContracts.contractStart,
-          contractEnd: employeeContracts.contractEnd,
-          bankAccount: employeeContracts.bankAccount,
-          residentNumber: employeeContracts.residentNumber,
+          // Phase E (2026-05-02): 운영 SSOT 12 항목 (restaurant_users) + wage_history
+          position: restaurantUsers.position,
+          contractType: restaurantUsers.contractType,
+          contractStart: restaurantUsers.contractStart,
+          contractEnd: restaurantUsers.contractEnd,
+          workStartTime: restaurantUsers.workStartTime,
+          workEndTime: restaurantUsers.workEndTime,
+          breakMinutes: restaurantUsers.breakMinutes,
+          weeklyHoliday: restaurantUsers.weeklyHoliday,
+          weeklyHours: restaurantUsers.weeklyHours,
+          taxMode: restaurantUsers.taxMode,
+          hourlyWageIncludesHolidayPay: restaurantUsers.hourlyWageIncludesHolidayPay,
+          mealProvided: restaurantUsers.mealProvided,
+          mealAllowance: restaurantUsers.mealAllowance,
+          nightShiftConsent: restaurantUsers.nightShiftConsent,
+          specialTerms: restaurantUsers.specialTerms,
+          // Phase E 신규 박제 11개 (snapshot)
+          snapshotPosition: sql<string | null>`(
+            SELECT ec.snapshotPosition FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotPosition"),
+          snapshotContractType: sql<string | null>`(
+            SELECT ec.snapshotContractType FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotContractType"),
+          snapshotContractStart: sql<string | null>`(
+            SELECT ec.snapshotContractStart FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotContractStart"),
+          snapshotContractEnd: sql<string | null>`(
+            SELECT ec.snapshotContractEnd FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotContractEnd"),
+          snapshotWorkStartTime: sql<string | null>`(
+            SELECT ec.snapshotWorkStartTime FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotWorkStartTime"),
+          snapshotWorkEndTime: sql<string | null>`(
+            SELECT ec.snapshotWorkEndTime FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotWorkEndTime"),
+          snapshotBreakMinutes: sql<number | null>`(
+            SELECT ec.snapshotBreakMinutes FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotBreakMinutes"),
+          snapshotWeeklyHoliday: sql<string | null>`(
+            SELECT ec.snapshotWeeklyHoliday FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotWeeklyHoliday"),
+          snapshotWeeklyHours: sql<string | null>`(
+            SELECT ec.snapshotWeeklyHours FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotWeeklyHours"),
+          snapshotMealProvided: sql<boolean | null>`(
+            SELECT ec.snapshotMealProvided FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotMealProvided"),
+          snapshotMealAllowance: sql<string | null>`(
+            SELECT ec.snapshotMealAllowance FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotMealAllowance"),
+          snapshotNightShiftConsent: sql<boolean | null>`(
+            SELECT ec.snapshotNightShiftConsent FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotNightShiftConsent"),
+          snapshotSpecialTerms: sql<string | null>`(
+            SELECT ec.snapshotSpecialTerms FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotSpecialTerms"),
+          snapshotHourlyWageIncludesHolidayPay: sql<boolean | null>`(
+            SELECT ec.snapshotHourlyWageIncludesHolidayPay FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotHourlyWageIncludesHolidayPay"),
+          snapshotWageType: sql<string | null>`(
+            SELECT ec.snapshotWageType FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotWageType"),
+          snapshotWage: sql<string | null>`(
+            SELECT ec.snapshotWage FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("snapshotWage"),
+          // 가장 최근 wage_history (effectiveFrom DESC) — 직원 카드 표시 + 갱신 배너 비교용
+          wageEffectiveFrom: sql<string | null>`(
+            SELECT wh.effectiveFrom FROM employee_wage_history wh
+            WHERE wh.userId = ${restaurantUsers.userId}
+              AND wh.restaurantId = ${restaurantUsers.restaurantId}
+            ORDER BY wh.effectiveFrom DESC LIMIT 1
+          )`.as("wageEffectiveFrom"),
+          // 임금 — 가장 최근 wage_history row (effectiveTo NULL 우선)
+          wageType: sql<string | null>`(
+            SELECT wh.wageType FROM employee_wage_history wh
+            WHERE wh.userId = ${restaurantUsers.userId}
+              AND wh.restaurantId = ${restaurantUsers.restaurantId}
+            ORDER BY wh.effectiveFrom DESC LIMIT 1
+          )`.as("wageType"),
+          wageAmount: sql<string | null>`(
+            SELECT wh.wageAmount FROM employee_wage_history wh
+            WHERE wh.userId = ${restaurantUsers.userId}
+              AND wh.restaurantId = ${restaurantUsers.restaurantId}
+            ORDER BY wh.effectiveFrom DESC LIMIT 1
+          )`.as("wageAmount"),
+          // 민감영역 (계좌·주민번호)는 박제 계약서에서 노출
+          bankAccount: sql<string | null>`(
+            SELECT ec.snapshotBankAccount FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("bankAccount"),
+          residentNumber: sql<string | null>`(
+            SELECT ec.snapshotResidentNumber FROM employment_electronic_contracts ec
+            WHERE ec.employeeId = ${restaurantUsers.userId}
+              AND ec.restaurantId = ${restaurantUsers.restaurantId}
+              AND ec.status = 'signed'
+            ORDER BY ec.signedAt DESC LIMIT 1
+          )`.as("residentNumber"),
         })
         .from(restaurantUsers)
         .innerJoin(users, eq(users.id, restaurantUsers.userId))
-        .leftJoin(employeeContracts, and(
-          eq(employeeContracts.userId, restaurantUsers.userId),
-          eq(employeeContracts.restaurantId, restaurantUsers.restaurantId),
-          eq(employeeContracts.isActive, true)
-        ))
         .where(and(...conditions));
     }),
 

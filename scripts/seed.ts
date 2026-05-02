@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { drizzle } from "drizzle-orm/mysql2";
+import { and, eq } from "drizzle-orm";
 import mysql from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import * as schema from "../drizzle/schema";
@@ -220,7 +221,8 @@ console.log("  ✅ FixedCosts(7)");
 // ═══════════════════════════════════════════════════════════════════
 console.log("── Phase 2: Schedules / DailyOps / Contracts ──");
 
-// 근로계약
+// Phase E (2026-05-02): employee_contracts 폐기.
+// 임금은 wage_history에 시드. 운영 데이터(position, weeklyHours)는 restaurant_users에 직접.
 const contracts = [
   { userId: 3, restaurantId: 1, wageType: "monthly" as const, wageAmount: "3000000", position: "점장", weeklyHours: "48" },
   { userId: 4, restaurantId: 1, wageType: "monthly" as const, wageAmount: "2500000", position: "매니져", weeklyHours: "44" },
@@ -228,9 +230,30 @@ const contracts = [
   { userId: 6, restaurantId: 1, wageType: "hourly" as const, wageAmount: "10030", position: "주방보조", weeklyHours: "24" },
 ];
 for (const c of contracts) {
-  await db.insert(schema.employeeContracts).values({ ...c, contractStart: "2026-01-01" });
+  // wage_history (임금 SSOT)
+  await db.insert(schema.employeeWageHistory).values({
+    userId: c.userId,
+    restaurantId: c.restaurantId,
+    wageType: c.wageType,
+    wageAmount: c.wageAmount,
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    sourceContractId: null,
+  } as any);
+  // restaurant_users 운영 데이터
+  await db
+    .update(schema.restaurantUsers)
+    .set({
+      position: c.position,
+      weeklyHours: c.weeklyHours,
+      contractStart: "2026-01-01",
+    })
+    .where(and(
+      eq(schema.restaurantUsers.userId, c.userId),
+      eq(schema.restaurantUsers.restaurantId, c.restaurantId),
+    ));
 }
-console.log("  ✅ EmployeeContracts(4)");
+console.log("  ✅ Wage History + Operational Data (4)");
 
 // 스케줄 (이번주 + 다음주)
 const getMonday = (off: number) => {

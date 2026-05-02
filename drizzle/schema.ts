@@ -139,6 +139,26 @@ export const restaurantUsers = mysqlTable(
     roleChangedBy: int("roleChangedBy"),
     // Phase 2 급여이력 전환 플래그: 전자계약서 서명으로 wage_history가 생성되면 true
     contractMigrated: boolean("contractMigrated").default(false).notNull(),
+    // ── Phase E (2026-05-02): 운영 데이터 SSOT 확장 (15 컬럼) ──
+    // 직위·계약
+    position: varchar("position", { length: 50 }),
+    contractType: mysqlEnum("contractType", ["permanent", "fixed_term", "part_time", "daily"]).default("part_time"),
+    contractStart: date("contractStart"),
+    contractEnd: date("contractEnd"),
+    // 근무
+    workStartTime: varchar("workStartTime", { length: 5 }).default("09:00"),
+    workEndTime: varchar("workEndTime", { length: 5 }).default("18:00"),
+    breakMinutes: int("breakMinutes").default(60),
+    weeklyHoliday: varchar("weeklyHoliday", { length: 20 }).default("일요일"),
+    weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }).default("40"),
+    // 세무
+    taxMode: varchar("taxMode", { length: 30 }).default("social_insurance").notNull(),
+    hourlyWageIncludesHolidayPay: boolean("hourlyWageIncludesHolidayPay").default(true).notNull(),
+    // 기타
+    mealProvided: boolean("mealProvided").default(false).notNull(),
+    mealAllowance: decimal("mealAllowance", { precision: 10, scale: 2 }).default("0"),
+    nightShiftConsent: boolean("nightShiftConsent").default(false).notNull(),
+    specialTerms: text("specialTerms"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (t) => [uniqueIndex("uniq_rest_user").on(t.restaurantId, t.userId)]
@@ -282,30 +302,9 @@ export type DailyClosing = typeof dailyClosings.$inferSelect;
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─── Employee Contracts (직원 계약 정보) ──────────────────────────────────────
-// 직원의 "현재 유효한" 민감영역(급여/근무조건/계좌/주민번호)의 최신값.
-// 역사적 증거(서명된 계약서 스냅샷)는 employment_electronic_contracts 사용.
-// 이 테이블은 직원정보 화면 및 인건비 정산이 참조하며, 계약서 서명 이벤트로만 갱신된다.
-export const employeeContracts = mysqlTable("employee_contracts", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  restaurantId: int("restaurantId").notNull(),
-  wageType: mysqlEnum("wageType", ["hourly", "monthly"]).notNull().default("hourly"),
-  wageAmount: decimal("wageAmount", { precision: 12, scale: 2 }).notNull().default("0"),
-  position: varchar("position", { length: 50 }),
-  contractStart: date("contractStart"),
-  contractEnd: date("contractEnd"),
-  contractNote: text("contractNote"),
-  weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }),
-  weeklyOffDays: int("weeklyOffDays").default(1),
-  bankName: varchar("bankName", { length: 50 }),
-  bankAccount: varchar("bankAccount", { length: 100 }),
-  residentNumber: varchar("residentNumber", { length: 20 }),
-  isActive: boolean("isActive").default(true).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export type EmployeeContract = typeof employeeContracts.$inferSelect;
+// employee_contracts 폐기됨 (재설계 2026-05-02 Phase E):
+// SSOT는 restaurant_users + wage_history로 일원화.
+// 의미 중복 해소 차원에서 테이블 자체 DROP. 자동 마이그레이션은 server/index.ts.
 
 // ─── Employee Wage History (급여이력) ────────────────────────────────────────
 // 시점별 급여 단가. 월 1일 기준 [effectiveFrom, effectiveTo) 구간으로 유효.
@@ -799,6 +798,18 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   snapshotHireDate: date("snapshotHireDate"),
   snapshotOver5Employees: boolean("snapshotOver5Employees"),
   snapshotTaxMode: varchar("snapshotTaxMode", { length: 30 }),
+  // ── Phase E (2026-05-02): 운영 SSOT 확장 박제 11 컬럼 ──
+  snapshotPosition: varchar("snapshotPosition", { length: 50 }),
+  snapshotContractType: varchar("snapshotContractType", { length: 20 }),
+  snapshotWorkStartTime: varchar("snapshotWorkStartTime", { length: 5 }),
+  snapshotWorkEndTime: varchar("snapshotWorkEndTime", { length: 5 }),
+  snapshotBreakMinutes: int("snapshotBreakMinutes"),
+  snapshotWeeklyHoliday: varchar("snapshotWeeklyHoliday", { length: 20 }),
+  snapshotMealProvided: boolean("snapshotMealProvided"),
+  snapshotMealAllowance: decimal("snapshotMealAllowance", { precision: 10, scale: 2 }),
+  snapshotNightShiftConsent: boolean("snapshotNightShiftConsent"),
+  snapshotSpecialTerms: text("snapshotSpecialTerms"),
+  snapshotHourlyWageIncludesHolidayPay: boolean("snapshotHourlyWageIncludesHolidayPay"),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

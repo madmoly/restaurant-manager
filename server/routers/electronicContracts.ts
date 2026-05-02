@@ -441,26 +441,10 @@ export const electronicContractsRouter = router({
         })
         .$returningId();
 
-      // employee_contracts 초안 sync는 폐기 (SSOT 역전 — 계약서는 박제, 운영 데이터는 SSOT 직접).
-      // 인건비 정산은 employee_wage_history (서명 시 생성)와 SSOT를 사용.
-
-      // 사용자 요청 2026-05-02: 계약서 작성 시 SSOT(restaurant_users) 자동 동기화
-      // 점장 입장에서 계약서를 작성/갱신하면 직원정보 카드도 즉시 따라가는 게 자연스러움
-      if (input.employeeId) {
-        const ruUpdate: Record<string, any> = {};
-        if (input.affiliatedCompany !== undefined) ruUpdate.affiliatedCompany = input.affiliatedCompany || null;
-        if (input.hireDate) ruUpdate.hireDate = input.hireDate;
-        if (input.weeklyOffDays !== undefined) ruUpdate.weeklyOffDays = input.weeklyOffDays;
-        if (Object.keys(ruUpdate).length > 0) {
-          await db
-            .update(restaurantUsers)
-            .set(ruUpdate)
-            .where(and(
-              eq(restaurantUsers.userId, input.employeeId),
-              eq(restaurantUsers.restaurantId, input.restaurantId),
-            ));
-        }
-      }
+      // Phase E (2026-05-02 — 사양 §3.7):
+      // 계약서 작성 시 운영 SSOT(restaurant_users) 자동 갱신 안 함.
+      // 운영 데이터는 점장이 직원 카드에서 직접 수정.
+      // 박제와 어긋나면 갱신 필요 배너만 표시 (차단 없음).
 
       return { id: result.id, token };
     }),
@@ -728,10 +712,26 @@ export const electronicContractsRouter = router({
               snapshotHireDate: toDateString(contract.hireDate),
               snapshotOver5Employees: contract.over5Employees ?? false,
               snapshotTaxMode: contract.taxMode ?? "social_insurance",
+              // Phase E (2026-05-02) 신규 박제 11개
+              snapshotPosition: contract.position ?? null,
+              snapshotContractType: contract.contractType ?? null,
+              snapshotWorkStartTime: contract.workStartTime ?? null,
+              snapshotWorkEndTime: contract.workEndTime ?? null,
+              snapshotBreakMinutes: contract.breakMinutes ?? null,
+              snapshotWeeklyHoliday: contract.weeklyHoliday ?? null,
+              snapshotMealProvided: contract.mealProvided ?? null,
+              snapshotMealAllowance: contract.mealAllowance ?? null,
+              snapshotNightShiftConsent: contract.nightShiftConsent ?? null,
+              snapshotSpecialTerms: contract.specialTerms ?? null,
+              snapshotHourlyWageIncludesHolidayPay:
+                contract.hourlyWageIncludesHolidayPay ?? null,
             } as any)
             .where(eq(employmentElectronicContracts.id, contract.id));
 
           // ── 2. 이전 active 계약서 supersede ──
+          //   Phase E (2026-05-02): 운영 SSOT(restaurant_users) 자동 갱신 제거.
+          //   사양 §3.7: 박제 후 운영 데이터는 점장이 직원 카드에서 직접 수정.
+          //   wage_history는 첫 서명 시 한 번만 백필 (없으면 정산 불가). 이미 있으면 INSERT 안 함.
           if (contract.employeeId && contract.restaurantId) {
             await tx.update(employmentElectronicContracts)
               .set({ status: "superseded" })
@@ -742,58 +742,41 @@ export const electronicContractsRouter = router({
                 sql`${employmentElectronicContracts.status} IN ('draft','sent','signed')`,
               ));
 
-            // ── 3. SSOT 동기화 (사용자 요청 2026-05-02 — 양방향 sync 부활) ──
-            // 계약서 서명 완료 시 직원정보(restaurant_users) 자동 갱신.
-            // 점장이 별도로 직원정보를 손대지 않아도 박제와 SSOT가 일치하도록 보장.
-            const ruSync: Record<string, any> = {};
-            if (contract.affiliatedCompany != null) ruSync.affiliatedCompany = contract.affiliatedCompany;
-            if (contract.hireDate != null) ruSync.hireDate = toDateString(contract.hireDate);
-            if (contract.weeklyOffDays != null) ruSync.weeklyOffDays = contract.weeklyOffDays;
-
-            // ── 4. employee_wage_history (Phase 2 — 급여이력 단일 경로) ──
-            // 신 계약서 contractStart의 월 1일을 effectiveFrom 으로 사용.
-            // 월 중 시작이어도 해당 월 1일로 잘라 저장 → 전월 급여 소급 효과 (의도된 동작).
-            const csDate = contract.contractStart
-              ? (contract.contractStart instanceof Date
-                  ? contract.contractStart
-                  : new Date(contract.contractStart as any))
-              : new Date();
-            const ymFirst = `${csDate.getFullYear()}-${String(csDate.getMonth() + 1).padStart(2, "0")}-01`;
-
-            // 4-1. 기존 open row 닫기 (effectiveTo = 신 계약 시작 월 1일)
-            await tx.update(employeeWageHistory)
-              .set({ effectiveTo: ymFirst })
+            // wage_history 백필: 직원 카드(updateWage)에서 이미 입력했으면 그것 우선.
+            //   여기서는 row 부재 시에만 contractStart 월 1일 기준으로 1회 INSERT.
+            const [wageRow] = await tx
+              .select({ id: employeeWageHistory.id })
+              .from(employeeWageHistory)
               .where(and(
                 eq(employeeWageHistory.userId, contract.employeeId),
                 eq(employeeWageHistory.restaurantId, contract.restaurantId),
-                isNull(employeeWageHistory.effectiveTo),
-              ));
+              ))
+              .limit(1);
 
-            // 4-2. 신 row 생성 — 같은 월 재서명 시 (uniq 충돌) update로 갱신
-            await tx.insert(employeeWageHistory).values({
-              userId: contract.employeeId,
-              restaurantId: contract.restaurantId,
-              wageType: (contract.wageType as "hourly" | "monthly") ?? "hourly",
-              wageAmount: contract.wageAmount ?? "0",
-              effectiveFrom: ymFirst,
-              effectiveTo: null,
-              sourceContractId: contract.id,
-            } as any).onDuplicateKeyUpdate({
-              set: {
+            if (!wageRow) {
+              const csDate = contract.contractStart
+                ? (contract.contractStart instanceof Date
+                    ? contract.contractStart
+                    : new Date(contract.contractStart as any))
+                : new Date();
+              const ymFirst = `${csDate.getFullYear()}-${String(csDate.getMonth() + 1).padStart(2, "0")}-01`;
+              await tx.insert(employeeWageHistory).values({
+                userId: contract.employeeId,
+                restaurantId: contract.restaurantId,
                 wageType: (contract.wageType as "hourly" | "monthly") ?? "hourly",
                 wageAmount: contract.wageAmount ?? "0",
-                sourceContractId: contract.id,
+                effectiveFrom: ymFirst,
                 effectiveTo: null,
-              },
-            });
-
-            // 4-3. restaurant_users.contractMigrated = true + SSOT sync (#3 위에서 모은 ruSync 병합)
-            await tx.update(restaurantUsers)
-              .set({ contractMigrated: true, ...ruSync } as any)
-              .where(and(
-                eq(restaurantUsers.userId, contract.employeeId),
-                eq(restaurantUsers.restaurantId, contract.restaurantId),
-              ));
+                sourceContractId: contract.id,
+              } as any);
+              await tx
+                .update(restaurantUsers)
+                .set({ contractMigrated: true })
+                .where(and(
+                  eq(restaurantUsers.userId, contract.employeeId),
+                  eq(restaurantUsers.restaurantId, contract.restaurantId),
+                ));
+            }
           }
         });
         console.log(`[signContract] tx complete for contract ${contract.id}`);

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, between, sql, desc, inArray } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
-import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures, schedules, employeeContracts, employeeWageHistory, restaurantUsers, affiliatedCompanies } from "../../drizzle/schema";
+import { dailyClosings, dailyClosingSalesTypes, sales, purchaseOrders, dailySalesDetail, purchaseOrdersV2, storeClosedDays, storeWeeklyClosures, schedules, employeeWageHistory, restaurantUsers, affiliatedCompanies } from "../../drizzle/schema";
 import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 import { verifyOperatingDay } from "../middleware/operatingDayGuard";
 import { computeWageForShift, type WageType } from "../helpers/wage";
@@ -105,6 +105,7 @@ export const dailyClosingsRouter = router({
 
       // wage_history 시점 매칭으로 정합성 확보 (월정산과 동일 출처)
       // 재설계 2026-05-02: 5인 여부는 직원의 affiliated_companies 마스터 매칭 결정
+      // Phase E (2026-05-02): weeklyHours 출처를 restaurant_users로 변경.
       const schedRows = await db
         .select({
           userId: schedules.userId,
@@ -115,18 +116,13 @@ export const dailyClosingsRouter = router({
           tempWageAmount: schedules.tempWageAmount,
           wageType: employeeWageHistory.wageType,
           wageAmount: employeeWageHistory.wageAmount,
-          weeklyHours: employeeContracts.weeklyHours,
+          weeklyHours: restaurantUsers.weeklyHours,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
         })
         .from(schedules)
         .leftJoin(restaurantUsers, and(
           eq(restaurantUsers.userId, schedules.userId),
           eq(restaurantUsers.restaurantId, input.restaurantId),
-        ))
-        .leftJoin(employeeContracts, and(
-          eq(employeeContracts.userId, schedules.userId),
-          eq(employeeContracts.restaurantId, input.restaurantId),
-          eq(employeeContracts.isActive, true),
         ))
         .leftJoin(employeeWageHistory, and(
           eq(employeeWageHistory.userId, schedules.userId),
