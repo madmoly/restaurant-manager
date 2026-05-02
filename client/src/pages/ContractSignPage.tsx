@@ -119,17 +119,12 @@ export default function ContractSignPage({ token }: { token: string }) {
   const pickSnap = (snap: any, base: any): any =>
     isSigned ? (snap ?? base) : (base ?? snap);
 
-  const displayPosition: string = pickSnap(c.snapshotPosition, c.position) ?? "";
   const displayContractType: string = pickSnap(c.snapshotContractType, c.contractType) ?? c.contractType;
   const displayWorkStartTime: string = pickSnap(c.snapshotWorkStartTime, c.workStartTime) ?? "09:00";
   const displayWorkEndTime: string = pickSnap(c.snapshotWorkEndTime, c.workEndTime) ?? "18:00";
   const displayBreakMinutes: number = Number(pickSnap(c.snapshotBreakMinutes, c.breakMinutes) ?? 60);
-  const displayWeeklyHoliday: string = pickSnap(c.snapshotWeeklyHoliday, c.weeklyHoliday) ?? "일요일";
   const displayMealProvided: boolean = Boolean(pickSnap(c.snapshotMealProvided, c.mealProvided));
   const displayMealAllowance: number = Number(pickSnap(c.snapshotMealAllowance, c.mealAllowance) ?? 0);
-  const displayNightShiftConsent: boolean = Boolean(
-    pickSnap(c.snapshotNightShiftConsent, c.nightShiftConsent),
-  );
   const displaySpecialTerms: string = pickSnap(c.snapshotSpecialTerms, c.specialTerms) ?? "";
   const displayHourlyWageIncludesHolidayPay: boolean = Boolean(
     isSigned
@@ -204,9 +199,6 @@ export default function ContractSignPage({ token }: { token: string }) {
             <table className="w-full border-collapse">
               <tbody>
                 <ContractRow label="1. 계약유형" value={typeLabels[displayContractType] ?? displayContractType} />
-                {displayPosition && (
-                  <ContractRow label="1-1. 직위" value={displayPosition} />
-                )}
                 <ContractRow
                   label="2. 계약기간"
                   value={(() => {
@@ -230,7 +222,7 @@ export default function ContractSignPage({ token }: { token: string }) {
                 />
                 <ContractRow
                   label="6. 주휴일"
-                  value={`매주 ${displayWeeklyHoliday} (스케줄상 지정일 또는 당사자 간 협의에 따름)`}
+                  value="스케줄상 지정일 또는 당사자 간 협의에 따름"
                 />
                 <ContractRow
                   label="7. 임금"
@@ -305,12 +297,6 @@ export default function ContractSignPage({ token }: { token: string }) {
                     value={displayMealAllowance > 0
                       ? `제공 (식대 ${displayMealAllowance.toLocaleString()}원)`
                       : "제공"}
-                  />
-                )}
-                {displayNightShiftConsent && (
-                  <ContractRow
-                    label="12. 야간근로 동의"
-                    value="22시~06시 야간근로에 동의함 (근기법 제70조)"
                   />
                 )}
               </tbody>

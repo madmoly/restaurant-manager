@@ -198,6 +198,14 @@ export default function StaffPage() {
     onError(err) { toast.error(err.message); },
   });
 
+  const applyContractSnapshot = trpc.staff.applyContractSnapshot.useMutation({
+    onSuccess(r) {
+      toast.success(`계약서 값 ${r.fields}건이 직원정보에 반영됨`);
+      utils.restaurants.getStaff.invalidate();
+    },
+    onError(err) { toast.error(err.message); },
+  });
+
   const resignStaff = trpc.restaurants.resignStaff.useMutation({
     onSuccess() { toast.success("퇴사 처리 완료"); setResignTarget(null); setResignReason(""); utils.restaurants.getStaff.invalidate(); },
     onError(err) { toast.error(err.message); },
@@ -324,10 +332,7 @@ export default function StaffPage() {
     if (s.snapshotHireDate != null && !dateEq(s.snapshotHireDate, s.hireDate)) f.push("입사일");
     if ((s.snapshotWeeklyOffDays ?? null) !== (s.weeklyOffDays ?? null)) f.push("주휴무일수");
     if (s.snapshotOver5Employees != null && !boolEq(s.snapshotOver5Employees, s.effectiveOver5)) f.push("5인 여부");
-    // 직위·계약
-    if ((s.snapshotPosition ?? null) != null || (s.position ?? null) != null) {
-      if (!strEq(s.snapshotPosition, s.position)) f.push("직위");
-    }
+    // 계약
     if ((s.snapshotContractType ?? null) != null || (s.contractType ?? null) != null) {
       if (!strEq(s.snapshotContractType, s.contractType)) f.push("계약유형");
     }
@@ -346,9 +351,6 @@ export default function StaffPage() {
     }
     if (s.snapshotBreakMinutes != null || s.breakMinutes != null) {
       if (!numEq(s.snapshotBreakMinutes, s.breakMinutes)) f.push("휴게시간");
-    }
-    if (s.snapshotWeeklyHoliday != null || s.weeklyHoliday != null) {
-      if (!strEq(s.snapshotWeeklyHoliday, s.weeklyHoliday)) f.push("주휴일");
     }
     if (s.snapshotWeeklyHours != null || s.weeklyHours != null) {
       if (!numEq(s.snapshotWeeklyHours, s.weeklyHours)) f.push("주근무시간");
@@ -370,9 +372,6 @@ export default function StaffPage() {
       if (typeMismatch || amtMismatch) f.push("임금");
     }
     // 기타
-    if (s.snapshotMealProvided != null && !boolEq(s.snapshotMealProvided, s.mealProvided)) f.push("식사 제공");
-    if (s.snapshotMealAllowance != null && !numEq(s.snapshotMealAllowance, s.mealAllowance)) f.push("식대");
-    if (s.snapshotNightShiftConsent != null && !boolEq(s.snapshotNightShiftConsent, s.nightShiftConsent)) f.push("야간동의");
     if (s.snapshotSpecialTerms != null || s.specialTerms != null) {
       if (!strEq(s.snapshotSpecialTerms, s.specialTerms)) f.push("특이사항");
     }
@@ -661,12 +660,33 @@ export default function StaffPage() {
                   const renewal = computeNeedsRenewal(s);
                   return (
                   <div className="border-t border-border px-4 py-3 space-y-3 bg-muted/30">
-                    {/* 재설계 2026-05-02: SSOT-스냅샷 어긋날 때 갱신 필요 배너 1개로 통합 */}
+                    {/* 운영 SSOT 안내: 직원정보 필드가 스케줄·인건비 정산의 기준 */}
+                    <div className="text-[11px] rounded-md px-3 py-2 bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20 leading-relaxed">
+                      <Info className="w-3 h-3 inline mr-1" />
+                      <strong>직원 정보 필드가 기준입니다.</strong> 아래 입력값으로 스케줄과 인건비 정산이 계산됩니다. 계약서는 법적 박제용입니다.
+                    </div>
+                    {/* SSOT-스냅샷 어긋날 때 갱신 필요 배너 + [계약서 값으로 채우기] 버튼 */}
                     {renewal.needs && (
                       <div className="text-[11px] rounded-md px-3 py-2 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
-                        <AlertTriangle className="w-3 h-3 inline mr-1" />
-                        계약서 갱신 필요 — 직원정보가 최신 서명 계약서와 다릅니다 ({renewal.fields.join(", ")}).
-                        새 계약서를 작성·서명하면 박제값이 갱신됩니다.
+                        <div className="flex items-start gap-2 flex-wrap">
+                          <div className="flex-1 min-w-0">
+                            <AlertTriangle className="w-3 h-3 inline mr-1" />
+                            계약서 갱신 필요 — 직원정보가 최신 서명 계약서와 다릅니다 ({renewal.fields.join(", ")}).
+                          </div>
+                          {isOwnerOrAdmin && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`최신 서명 계약서의 박제값으로 직원정보를 일괄 덮어씁니다.\n어긋난 항목: ${renewal.fields.join(", ")}\n진행할까요?`)) {
+                                  applyContractSnapshot.mutate({ restaurantId, userId: s.userId });
+                                }
+                              }}
+                              disabled={applyContractSnapshot.isPending}
+                              className="text-[11px] px-2 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 whitespace-nowrap"
+                            >
+                              계약서 값으로 채우기
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
 
@@ -823,27 +843,9 @@ export default function StaffPage() {
 
                       return (
                         <>
-                          {/* [직위·계약] */}
+                          {/* [계약] */}
                           <div className="border-t border-border pt-2 mt-1">
-                            <div className="text-[11px] font-semibold text-muted-foreground mb-2">직위·계약</div>
-                            {/* 직위 */}
-                            <div className="flex items-center gap-3 mb-1">
-                              <label className="text-xs text-muted-foreground w-20">직위</label>
-                              {isField("position") ? (
-                                <div className="flex items-center gap-2 flex-1">
-                                  <input className="text-xs px-2 py-1 rounded border border-input bg-background flex-1 max-w-[180px]"
-                                    value={editingEmpField!.value ?? ""} autoFocus
-                                    onChange={(e) => setEditingEmpField({ ...editingEmpField!, value: e.target.value })} />
-                                  <button onClick={() => saveEmp({ position: editingEmpField!.value || null })} className="p-1 rounded hover:bg-accent text-green-600"><Check className="w-3.5 h-3.5" /></button>
-                                  <button onClick={() => setEditingEmpField(null)} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-foreground">{s.position || "(미설정)"}</span>
-                                  <button onClick={() => startEdit("position", s.position || "")} className="p-1 rounded hover:bg-accent text-muted-foreground"><Edit3 className="w-3 h-3" /></button>
-                                </div>
-                              )}
-                            </div>
+                            <div className="text-[11px] font-semibold text-muted-foreground mb-2">계약</div>
                             {/* 계약유형 */}
                             <div className="flex items-center gap-3 mb-1">
                               <label className="text-xs text-muted-foreground w-20">계약유형</label>
@@ -887,18 +889,40 @@ export default function StaffPage() {
                                 </div>
                               )}
                             </div>
-                            <div className="flex items-center gap-3">
-                              <label className="text-xs text-muted-foreground w-20">계약종료</label>
+                            <div className="flex items-start gap-3">
+                              <label className="text-xs text-muted-foreground w-20 mt-1">계약종료</label>
                               {isField("contractEnd") ? (
-                                <div className="flex items-center gap-2 flex-1">
-                                  <input type="date" className="text-xs px-2 py-1 rounded border border-input bg-background"
-                                    value={editingEmpField!.value ?? ""}
-                                    onChange={(e) => setEditingEmpField({ ...editingEmpField!, value: e.target.value })} />
-                                  <button onClick={() => saveEmp({ contractEnd: editingEmpField!.value || null })} className="p-1 rounded hover:bg-accent text-green-600"><Check className="w-3.5 h-3.5" /></button>
-                                  <button onClick={() => setEditingEmpField(null)} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+                                <div className="flex flex-col gap-1 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <input type="date" className="text-xs px-2 py-1 rounded border border-input bg-background"
+                                      value={editingEmpField!.value ?? ""}
+                                      onChange={(e) => setEditingEmpField({ ...editingEmpField!, value: e.target.value })} />
+                                    <button onClick={() => saveEmp({ contractEnd: editingEmpField!.value || null })} className="p-1 rounded hover:bg-accent text-green-600"><Check className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => setEditingEmpField(null)} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+                                  </div>
+                                  {/* 시작일 기준 빠른 자동완성 */}
+                                  {s.contractStart && (() => {
+                                    const start = new Date(String(s.contractStart).slice(0, 10));
+                                    const addMonthsEnd = (months: number) => {
+                                      const d = new Date(start);
+                                      d.setMonth(d.getMonth() + months);
+                                      d.setDate(d.getDate() - 1);
+                                      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                                    };
+                                    const set = (v: string) => setEditingEmpField({ ...editingEmpField!, value: v });
+                                    return (
+                                      <div className="flex items-center gap-1 flex-wrap text-[10px]">
+                                        <span className="text-muted-foreground">자동:</span>
+                                        <button onClick={() => set(addMonthsEnd(1))} className="px-1.5 py-0.5 rounded border border-border hover:bg-accent">+1개월</button>
+                                        <button onClick={() => set(addMonthsEnd(3))} className="px-1.5 py-0.5 rounded border border-border hover:bg-accent">+3개월</button>
+                                        <button onClick={() => set(addMonthsEnd(12))} className="px-1.5 py-0.5 rounded border border-border hover:bg-accent">+1년</button>
+                                        <button onClick={() => set("")} className="px-1.5 py-0.5 rounded border border-border hover:bg-accent">무기한</button>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               ) : (
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 mt-0.5">
                                   <span className="text-xs text-foreground">{s.contractEnd ? String(s.contractEnd).slice(0, 10) : "(무기한)"}</span>
                                   <button onClick={() => startEdit("contractEnd", s.contractEnd ? String(s.contractEnd).slice(0, 10) : "")} className="p-1 rounded hover:bg-accent text-muted-foreground"><Edit3 className="w-3 h-3" /></button>
                                 </div>
@@ -944,25 +968,6 @@ export default function StaffPage() {
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-foreground">{s.breakMinutes ?? 60}분</span>
                                   <button onClick={() => startEdit("breakMinutes", s.breakMinutes ?? 60)} className="p-1 rounded hover:bg-accent text-muted-foreground"><Edit3 className="w-3 h-3" /></button>
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3 mb-1">
-                              <label className="text-xs text-muted-foreground w-20">주휴일</label>
-                              {isField("weeklyHoliday") ? (
-                                <div className="flex items-center gap-2 flex-1">
-                                  <select className="text-xs px-2 py-1 rounded border border-input bg-background"
-                                    value={editingEmpField!.value ?? "일요일"}
-                                    onChange={(e) => setEditingEmpField({ ...editingEmpField!, value: e.target.value })}>
-                                    {["월요일","화요일","수요일","목요일","금요일","토요일","일요일"].map(d => <option key={d} value={d}>{d}</option>)}
-                                  </select>
-                                  <button onClick={() => saveEmp({ weeklyHoliday: editingEmpField!.value })} className="p-1 rounded hover:bg-accent text-green-600"><Check className="w-3.5 h-3.5" /></button>
-                                  <button onClick={() => setEditingEmpField(null)} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-foreground">{s.weeklyHoliday ?? "일요일"}</span>
-                                  <button onClick={() => startEdit("weeklyHoliday", s.weeklyHoliday ?? "일요일")} className="p-1 rounded hover:bg-accent text-muted-foreground"><Edit3 className="w-3 h-3" /></button>
                                 </div>
                               )}
                             </div>
@@ -1078,35 +1083,6 @@ export default function StaffPage() {
                           {/* [기타] */}
                           <div className="border-t border-border pt-2 mt-1">
                             <div className="text-[11px] font-semibold text-muted-foreground mb-2">기타</div>
-                            <div className="flex items-center gap-3 mb-1">
-                              <label className="text-xs text-muted-foreground w-20">식사 제공</label>
-                              <label className="flex items-center gap-1 text-xs cursor-pointer">
-                                <input type="checkbox" checked={!!s.mealProvided} onChange={(e) => saveEmp({ mealProvided: e.target.checked })} /> 제공
-                              </label>
-                            </div>
-                            <div className="flex items-center gap-3 mb-1">
-                              <label className="text-xs text-muted-foreground w-20">식대</label>
-                              {isField("mealAllowance") ? (
-                                <div className="flex items-center gap-2 flex-1">
-                                  <input type="number" min="0" className="text-xs px-2 py-1 rounded border border-input bg-background w-32"
-                                    value={editingEmpField!.value ?? "0"}
-                                    onChange={(e) => setEditingEmpField({ ...editingEmpField!, value: e.target.value })} />
-                                  <button onClick={() => saveEmp({ mealAllowance: String(editingEmpField!.value || "0") })} className="p-1 rounded hover:bg-accent text-green-600"><Check className="w-3.5 h-3.5" /></button>
-                                  <button onClick={() => setEditingEmpField(null)} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-foreground">{formatKRW(Number(s.mealAllowance ?? 0))}</span>
-                                  <button onClick={() => startEdit("mealAllowance", String(s.mealAllowance ?? "0"))} className="p-1 rounded hover:bg-accent text-muted-foreground"><Edit3 className="w-3 h-3" /></button>
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3 mb-1">
-                              <label className="text-xs text-muted-foreground w-20">야간동의</label>
-                              <label className="flex items-center gap-1 text-xs cursor-pointer">
-                                <input type="checkbox" checked={!!s.nightShiftConsent} onChange={(e) => saveEmp({ nightShiftConsent: e.target.checked })} /> 22시~06시 근무 동의
-                              </label>
-                            </div>
                             <div className="flex items-start gap-3">
                               <label className="text-xs text-muted-foreground w-20 pt-1">특이사항</label>
                               {isField("specialTerms") ? (
@@ -1303,7 +1279,6 @@ export default function StaffPage() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={`text-sm font-semibold ${isResigned ? "text-muted-foreground line-through" : "text-foreground"}`}>{c.employeeName}</span>
                           {isResigned && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-400">퇴사</span>}
-                          <span className="text-xs text-muted-foreground">{c.position}</span>
                           {c.affiliatedCompany && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent text-muted-foreground">{c.affiliatedCompany}</span>
                           )}
@@ -1626,7 +1601,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     employeeId: ec?.employeeId ?? defaultEmployee?.userId ?? 0,
     employeeName: ec?.employeeName ?? defaultEmployee?.name ?? "",
     employeePhone: ec?.employeePhone ?? "",
-    position: ec?.position ?? "직원",
     affiliatedCompany: ec?.affiliatedCompany ?? defaultEmployee?.affiliatedCompany ?? "",
     contractType: (ec?.contractType ?? "fixed_term") as "permanent" | "fixed_term" | "part_time" | "daily",
     contractStart: ec?.contractStart ? String(ec.contractStart).slice(0, 10) : new Date().toISOString().slice(0, 10),
@@ -1652,13 +1626,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     probationMonths: 0,
     mealProvided: ec?.mealProvided ?? false,
     mealAllowance: "",
-    nightShiftConsent: ec?.nightShiftConsent ?? false,
     workPlace: ec?.workPlace ?? restaurantInfo?.name ?? "",
     workPlaceAddress: ec?.workPlaceAddress ?? restaurantInfo?.address ?? "",
     jobDescription: ec?.jobDescription ?? "",
     specialTerms: ec?.specialTerms ?? "",
     employerBusinessNumber: ec?.employerBusinessNumber ?? "",
-    weeklyHoliday: ec?.weeklyHoliday ?? "일요일",
     weeklyOffDays: (() => {
       const v = (ec?.weeklyOffDays ?? 1) as number;
       return v >= 1 && v <= 3 ? v : 1;
@@ -1676,14 +1648,12 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     if (empSSOT && !empSSOTApplied && !editingContract) {
       setForm((prev) => ({
         ...prev,
-        position: empSSOT.position || prev.position,
         contractType: ((empSSOT.contractType as any) || prev.contractType),
         contractStart: empSSOT.contractStart ? String(empSSOT.contractStart).slice(0, 10) : prev.contractStart,
         contractEnd: empSSOT.contractEnd ? String(empSSOT.contractEnd).slice(0, 10) : prev.contractEnd,
         workStartTime: empSSOT.workStartTime || prev.workStartTime,
         workEndTime: empSSOT.workEndTime || prev.workEndTime,
         breakMinutes: empSSOT.breakMinutes ?? prev.breakMinutes,
-        weeklyHoliday: empSSOT.weeklyHoliday || prev.weeklyHoliday,
         weeklyHours: empSSOT.weeklyHours || prev.weeklyHours,
         weeklyOffDays: (() => {
           const v = (empSSOT.weeklyOffDays ?? prev.weeklyOffDays) as number;
@@ -1691,9 +1661,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         })(),
         taxMode: ((empSSOT.taxMode as any) || prev.taxMode),
         hourlyWageIncludesHolidayPay: empSSOT.hourlyWageIncludesHolidayPay ?? prev.hourlyWageIncludesHolidayPay,
-        mealProvided: empSSOT.mealProvided ?? prev.mealProvided,
-        mealAllowance: empSSOT.mealAllowance ? String(empSSOT.mealAllowance) : prev.mealAllowance,
-        nightShiftConsent: empSSOT.nightShiftConsent ?? prev.nightShiftConsent,
         specialTerms: empSSOT.specialTerms ?? prev.specialTerms,
         affiliatedCompany: empSSOT.affiliatedCompany ?? prev.affiliatedCompany,
         hireDate: prev.hireDate || (empSSOT.hireDate ? String(empSSOT.hireDate).slice(0, 10) : ""),
@@ -1712,7 +1679,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         const sel = affiliatedCompaniesMaster.find((c: any) => c.companyName === company);
         return {
           ...prev,
-          position: latestTemplate.position || prev.position,
           contractType: (latestTemplate.contractType as any) || prev.contractType,
           wageType: (latestTemplate.wageType as any) || prev.wageType,
           wageAmount: latestTemplate.wageAmount || prev.wageAmount,
@@ -1720,7 +1686,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           workStartTime: latestTemplate.workStartTime || prev.workStartTime,
           workEndTime: latestTemplate.workEndTime || prev.workEndTime,
           breakMinutes: latestTemplate.breakMinutes ?? prev.breakMinutes,
-          weeklyHoliday: latestTemplate.weeklyHoliday || prev.weeklyHoliday,
           weeklyOffDays: (() => {
             const v = ((latestTemplate as any).weeklyOffDays ?? prev.weeklyOffDays) as number;
             return v >= 1 && v <= 3 ? v : 1;
@@ -1910,14 +1875,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>직위</label>
-              <select className={inputCls} value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}>
-                <option value="점장">점장</option>
-                <option value="매니져">매니져</option>
-                <option value="직원">직원</option>
-              </select>
-            </div>
             <div>
               <label className={labelCls}>계약유형</label>
               <select className={inputCls} value={form.contractType} onChange={(e) => setForm({ ...form, contractType: e.target.value as any })}>
@@ -2236,14 +2193,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                   placeholder="0" />
               </div>
             )}
-            <div className="flex items-center gap-2 mt-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.nightShiftConsent}
-                  onChange={(e) => setForm({ ...form, nightShiftConsent: e.target.checked })}
-                  className="rounded border-input" />
-                <span className="text-sm text-foreground">야간근로 동의 (22시~06시)</span>
-              </label>
-            </div>
           </div>
 
           {/* (주휴수당 처리 라디오는 임금 영역 직후로 이동됨 — 재설계 2026-05-02 위치 변경) */}
@@ -2278,7 +2227,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               const payload = {
                 employeeName: form.employeeName,
                 employeePhone: form.employeePhone || undefined,
-                position: form.position,
                 contractType: form.contractType,
                 contractStart: form.contractStart,
                 contractEnd: form.contractEnd || undefined,
@@ -2288,17 +2236,15 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 workStartTime: form.workStartTime,
                 workEndTime: form.workEndTime,
                 breakMinutes: form.breakMinutes,
-                weeklyHoliday: form.weeklyHoliday || "일요일",
                 weeklyOffDays: form.weeklyOffDays,
                 payDay: form.payDay,
                 payMethod: form.payMethod,
-                // 재설계 2026-05-02: socialInsurance/noWeeklyHolidayPay/over5Employees/includeNda/includePrivacyConsent 폐기
+                // 재설계 2026-05-02 폐기: position·weeklyHoliday·nightShiftConsent (계약서 박제도 제거)
                 taxMode: form.taxMode,
                 hourlyWageIncludesHolidayPay: form.hourlyWageIncludesHolidayPay,
                 hireDate: form.hireDate || undefined,
                 mealProvided: form.mealProvided,
                 mealAllowance: form.mealAllowance || undefined,
-                nightShiftConsent: form.nightShiftConsent,
                 workPlace: form.workPlace || undefined,
                 jobDescription: form.jobDescription || undefined,
                 specialTerms: form.specialTerms || undefined,

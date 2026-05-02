@@ -56,37 +56,31 @@ function generateInviteCode(): string {
 }
 
 /**
- * 운영 SSOT vs 가장 최근 박제 비교 (Phase E, 2026-05-02).
- * 17개 항목 비교 후 불일치 필드명 배열 반환. 차단 없음 — UI 배너 표시용.
- *
- * 항목:
+ * 운영 SSOT vs 가장 최근 박제 비교 (Phase E, 2026-05-02; 2026-05-02 폐기 항목 반영).
+ * 항목 (12):
  *  기본 4: affiliatedCompany, hireDate, weeklyOffDays, over5Employees
- *  직위·계약 4: position, contractType, contractStart, contractEnd
- *  근무 5: workStartTime, workEndTime, breakMinutes, weeklyHoliday, weeklyHours
+ *  계약 3: contractType, contractStart, contractEnd
+ *  근무 4: workStartTime, workEndTime, breakMinutes, weeklyHours
  *  세무 2: taxMode, hourlyWageIncludesHolidayPay
  *  임금 1: wage (wageType + wageAmount 결합)
- *  기타 4: mealProvided, mealAllowance, nightShiftConsent, specialTerms
- *  → 최대 20개 비교. "17개"는 초기 시점 값이며, 실 노출은 비어있지 않은 항목만.
+ *  기타 1: specialTerms
+ *
+ *  폐기: position(역할로 대체), weeklyHoliday/nightShiftConsent(양쪽), mealProvided/mealAllowance(SSOT만 — 박제는 유지).
  */
 function computeNeedsRenewal(
   current: {
     affiliatedCompany?: string | null;
     hireDate?: string | Date | null;
     weeklyOffDays?: number | null;
-    position?: string | null;
     contractType?: string | null;
     contractStart?: string | Date | null;
     contractEnd?: string | Date | null;
     workStartTime?: string | null;
     workEndTime?: string | null;
     breakMinutes?: number | null;
-    weeklyHoliday?: string | null;
     weeklyHours?: string | number | null;
     taxMode?: string | null;
     hourlyWageIncludesHolidayPay?: boolean | null;
-    mealProvided?: boolean | null;
-    mealAllowance?: string | number | null;
-    nightShiftConsent?: boolean | null;
     specialTerms?: string | null;
     wageType?: string | null;
     wageAmount?: string | number | null;
@@ -96,20 +90,15 @@ function computeNeedsRenewal(
     snapshotHireDate?: string | Date | null;
     snapshotWeeklyOffDays?: number | null;
     snapshotOver5Employees?: boolean | null;
-    snapshotPosition?: string | null;
     snapshotContractType?: string | null;
     snapshotContractStart?: string | Date | null;
     snapshotContractEnd?: string | Date | null;
     snapshotWorkStartTime?: string | null;
     snapshotWorkEndTime?: string | null;
     snapshotBreakMinutes?: number | null;
-    snapshotWeeklyHoliday?: string | null;
     snapshotWeeklyHours?: string | number | null;
     snapshotTaxMode?: string | null;
     snapshotHourlyWageIncludesHolidayPay?: boolean | null;
-    snapshotMealProvided?: boolean | null;
-    snapshotMealAllowance?: string | number | null;
-    snapshotNightShiftConsent?: boolean | null;
     snapshotSpecialTerms?: string | null;
     snapshotWageType?: string | null;
     snapshotWage?: string | number | null;
@@ -166,10 +155,7 @@ function computeNeedsRenewal(
     if (!boolEq(effectiveOver5, snapshot.snapshotOver5Employees)) diff.push("over5Employees");
   }
 
-  // 직위·계약
-  if (current.position != null || snapshot.snapshotPosition != null) {
-    if (!strEq(current.position, snapshot.snapshotPosition)) diff.push("position");
-  }
+  // 계약
   if (current.contractType != null || snapshot.snapshotContractType != null) {
     if (!strEq(current.contractType, snapshot.snapshotContractType)) diff.push("contractType");
   }
@@ -193,10 +179,6 @@ function computeNeedsRenewal(
     if (!numEq(current.breakMinutes, snapshot.snapshotBreakMinutes))
       diff.push("breakMinutes");
   }
-  if (current.weeklyHoliday != null || snapshot.snapshotWeeklyHoliday != null) {
-    if (!strEq(current.weeklyHoliday, snapshot.snapshotWeeklyHoliday))
-      diff.push("weeklyHoliday");
-  }
   if (current.weeklyHours != null || snapshot.snapshotWeeklyHours != null) {
     if (!numEq(current.weeklyHours, snapshot.snapshotWeeklyHours)) diff.push("weeklyHours");
   }
@@ -214,17 +196,6 @@ function computeNeedsRenewal(
   }
 
   // 기타
-  if (current.mealProvided != null || snapshot.snapshotMealProvided != null) {
-    if (!boolEq(current.mealProvided, snapshot.snapshotMealProvided)) diff.push("mealProvided");
-  }
-  if (current.mealAllowance != null || snapshot.snapshotMealAllowance != null) {
-    if (!numEq(current.mealAllowance, snapshot.snapshotMealAllowance))
-      diff.push("mealAllowance");
-  }
-  if (current.nightShiftConsent != null || snapshot.snapshotNightShiftConsent != null) {
-    if (!boolEq(current.nightShiftConsent, snapshot.snapshotNightShiftConsent))
-      diff.push("nightShiftConsent");
-  }
   if (current.specialTerms != null || snapshot.snapshotSpecialTerms != null) {
     if (!strEq(current.specialTerms, snapshot.snapshotSpecialTerms)) diff.push("specialTerms");
   }
@@ -264,21 +235,16 @@ export const staffRouter = router({
           hireDate: restaurantUsers.hireDate,
           weeklyOffDays: restaurantUsers.weeklyOffDays,
           rehiredAt: restaurantUsers.rehiredAt,
-          // Phase E 운영 데이터 15 컬럼
-          position: restaurantUsers.position,
+          // Phase E 운영 데이터 (2026-05-02 폐기 5건 제외): contractType, contractStart, contractEnd, workStartTime, workEndTime, breakMinutes, weeklyHours, taxMode, hourlyWageIncludesHolidayPay, specialTerms
           contractType: restaurantUsers.contractType,
           contractStart: restaurantUsers.contractStart,
           contractEnd: restaurantUsers.contractEnd,
           workStartTime: restaurantUsers.workStartTime,
           workEndTime: restaurantUsers.workEndTime,
           breakMinutes: restaurantUsers.breakMinutes,
-          weeklyHoliday: restaurantUsers.weeklyHoliday,
           weeklyHours: restaurantUsers.weeklyHours,
           taxMode: restaurantUsers.taxMode,
           hourlyWageIncludesHolidayPay: restaurantUsers.hourlyWageIncludesHolidayPay,
-          mealProvided: restaurantUsers.mealProvided,
-          mealAllowance: restaurantUsers.mealAllowance,
-          nightShiftConsent: restaurantUsers.nightShiftConsent,
           specialTerms: restaurantUsers.specialTerms,
         })
         .from(restaurantUsers)
@@ -343,16 +309,13 @@ export const staffRouter = router({
             snapshotHireDate: employmentElectronicContracts.snapshotHireDate,
             snapshotOver5Employees: employmentElectronicContracts.snapshotOver5Employees,
             snapshotTaxMode: employmentElectronicContracts.snapshotTaxMode,
-            // Phase E 신규 박제 11개
-            snapshotPosition: employmentElectronicContracts.snapshotPosition,
+            // Phase E 박제 (2026-05-02 폐기 3건 제외: snapshotPosition·snapshotWeeklyHoliday·snapshotNightShiftConsent)
             snapshotContractType: employmentElectronicContracts.snapshotContractType,
             snapshotWorkStartTime: employmentElectronicContracts.snapshotWorkStartTime,
             snapshotWorkEndTime: employmentElectronicContracts.snapshotWorkEndTime,
             snapshotBreakMinutes: employmentElectronicContracts.snapshotBreakMinutes,
-            snapshotWeeklyHoliday: employmentElectronicContracts.snapshotWeeklyHoliday,
             snapshotMealProvided: employmentElectronicContracts.snapshotMealProvided,
             snapshotMealAllowance: employmentElectronicContracts.snapshotMealAllowance,
-            snapshotNightShiftConsent: employmentElectronicContracts.snapshotNightShiftConsent,
             snapshotSpecialTerms: employmentElectronicContracts.snapshotSpecialTerms,
             snapshotHourlyWageIncludesHolidayPay:
               employmentElectronicContracts.snapshotHourlyWageIncludesHolidayPay,
@@ -414,20 +377,15 @@ export const staffRouter = router({
             affiliatedCompany: r.affiliatedCompany,
             hireDate: r.hireDate,
             weeklyOffDays: r.weeklyOffDays,
-            position: r.position,
             contractType: r.contractType,
             contractStart: r.contractStart,
             contractEnd: r.contractEnd,
             workStartTime: r.workStartTime,
             workEndTime: r.workEndTime,
             breakMinutes: r.breakMinutes,
-            weeklyHoliday: r.weeklyHoliday,
             weeklyHours: r.weeklyHours,
             taxMode: r.taxMode,
             hourlyWageIncludesHolidayPay: r.hourlyWageIncludesHolidayPay,
-            mealProvided: r.mealProvided,
-            mealAllowance: r.mealAllowance,
-            nightShiftConsent: r.nightShiftConsent,
             specialTerms: r.specialTerms,
             wageType: wage?.wageType ?? null,
             wageAmount: wage?.wageAmount ?? null,
@@ -458,18 +416,15 @@ export const staffRouter = router({
           snapshotWeeklyOffDays: snap?.snapshotWeeklyOffDays ?? null,
           snapshotWageType: snap?.snapshotWageType ?? null,
           snapshotWage: snap?.snapshotWage ?? null,
-          snapshotPosition: snap?.snapshotPosition ?? null,
           snapshotContractType: snap?.snapshotContractType ?? null,
           snapshotContractStart: snap?.snapshotContractStart ?? null,
           snapshotContractEnd: snap?.snapshotContractEnd ?? null,
           snapshotWorkStartTime: snap?.snapshotWorkStartTime ?? null,
           snapshotWorkEndTime: snap?.snapshotWorkEndTime ?? null,
           snapshotBreakMinutes: snap?.snapshotBreakMinutes ?? null,
-          snapshotWeeklyHoliday: snap?.snapshotWeeklyHoliday ?? null,
           snapshotWeeklyHours: snap?.snapshotWeeklyHours ?? null,
           snapshotMealProvided: snap?.snapshotMealProvided ?? null,
           snapshotMealAllowance: snap?.snapshotMealAllowance ?? null,
-          snapshotNightShiftConsent: snap?.snapshotNightShiftConsent ?? null,
           snapshotSpecialTerms: snap?.snapshotSpecialTerms ?? null,
           snapshotHourlyWageIncludesHolidayPay:
             snap?.snapshotHourlyWageIncludesHolidayPay ?? null,
@@ -479,7 +434,6 @@ export const staffRouter = router({
           delete out.wageAmount;
           delete out.wageEffectiveFrom;
           delete out.weeklyHours;
-          delete out.position;
           delete out.contractStart;
           delete out.contractEnd;
           delete out.snapshotWage;
@@ -1001,20 +955,15 @@ export const staffRouter = router({
     .input(z.object({
       restaurantId: z.number(),
       userId: z.number(),
-      position: z.string().nullable().optional(),
       contractType: z.enum(["permanent", "fixed_term", "part_time", "daily"]).optional(),
       contractStart: z.string().nullable().optional(),
       contractEnd: z.string().nullable().optional(),
       workStartTime: z.string().optional(),
       workEndTime: z.string().optional(),
       breakMinutes: z.number().int().min(0).max(480).optional(),
-      weeklyHoliday: z.string().optional(),
       weeklyHours: z.string().optional(),
       taxMode: z.enum(["social_insurance", "biz_income_3_3"]).optional(),
       hourlyWageIncludesHolidayPay: z.boolean().optional(),
-      mealProvided: z.boolean().optional(),
-      mealAllowance: z.string().optional(),
-      nightShiftConsent: z.boolean().optional(),
       specialTerms: z.string().nullable().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
@@ -1034,20 +983,15 @@ export const staffRouter = router({
 
       const ruUpdate: Record<string, any> = {};
       const fields = [
-        "position",
         "contractType",
         "contractStart",
         "contractEnd",
         "workStartTime",
         "workEndTime",
         "breakMinutes",
-        "weeklyHoliday",
         "weeklyHours",
         "taxMode",
         "hourlyWageIncludesHolidayPay",
-        "mealProvided",
-        "mealAllowance",
-        "nightShiftConsent",
         "specialTerms",
       ] as const;
       for (const f of fields) {
@@ -1180,20 +1124,15 @@ export const staffRouter = router({
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
           weeklyOffDays: restaurantUsers.weeklyOffDays,
-          position: restaurantUsers.position,
           contractType: restaurantUsers.contractType,
           contractStart: restaurantUsers.contractStart,
           contractEnd: restaurantUsers.contractEnd,
           workStartTime: restaurantUsers.workStartTime,
           workEndTime: restaurantUsers.workEndTime,
           breakMinutes: restaurantUsers.breakMinutes,
-          weeklyHoliday: restaurantUsers.weeklyHoliday,
           weeklyHours: restaurantUsers.weeklyHours,
           taxMode: restaurantUsers.taxMode,
           hourlyWageIncludesHolidayPay: restaurantUsers.hourlyWageIncludesHolidayPay,
-          mealProvided: restaurantUsers.mealProvided,
-          mealAllowance: restaurantUsers.mealAllowance,
-          nightShiftConsent: restaurantUsers.nightShiftConsent,
           specialTerms: restaurantUsers.specialTerms,
           storeRole: restaurantUsers.role,
           // user 기본정보
@@ -1221,6 +1160,150 @@ export const staffRouter = router({
         wageType: wage?.wageType ?? null,
         wageAmount: wage?.wageAmount ?? null,
         wageEffectiveFrom: wage?.effectiveFrom ?? null,
+      };
+    }),
+
+  /**
+   * 가장 최근 서명 계약서의 박제값으로 직원 SSOT 일괄 동기화 (점장 전용).
+   * 폐기 항목(position·weeklyHoliday·nightShiftConsent·mealProvided·mealAllowance) 제외.
+   * 임금: 박제값과 현재 wage_history 최신값이 다르면 박제 contractStart 월 1일로 새 row 추가.
+   */
+  applyContractSnapshot: ownerProcedure
+    .input(z.object({ restaurantId: z.number(), userId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
+      const [c] = await db
+        .select()
+        .from(employmentElectronicContracts)
+        .where(and(
+          eq(employmentElectronicContracts.employeeId, input.userId),
+          eq(employmentElectronicContracts.restaurantId, input.restaurantId),
+          eq(employmentElectronicContracts.status, "signed"),
+        ))
+        .orderBy(desc(employmentElectronicContracts.signedAt))
+        .limit(1);
+
+      if (!c) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "서명된 계약서가 없습니다" });
+      }
+
+      const ruUpdate: Record<string, any> = {};
+      if (c.snapshotAffiliatedCompany != null) ruUpdate.affiliatedCompany = c.snapshotAffiliatedCompany;
+      if (c.snapshotHireDate != null) ruUpdate.hireDate = c.snapshotHireDate;
+      if (c.snapshotWeeklyOffDays != null) ruUpdate.weeklyOffDays = c.snapshotWeeklyOffDays;
+      if (c.snapshotContractType != null) ruUpdate.contractType = c.snapshotContractType;
+      if (c.snapshotContractStart != null) ruUpdate.contractStart = c.snapshotContractStart;
+      ruUpdate.contractEnd = c.snapshotContractEnd ?? null;
+      if (c.snapshotWorkStartTime != null) ruUpdate.workStartTime = c.snapshotWorkStartTime;
+      if (c.snapshotWorkEndTime != null) ruUpdate.workEndTime = c.snapshotWorkEndTime;
+      if (c.snapshotBreakMinutes != null) ruUpdate.breakMinutes = c.snapshotBreakMinutes;
+      if (c.snapshotWeeklyHours != null) ruUpdate.weeklyHours = c.snapshotWeeklyHours;
+      if (c.snapshotTaxMode != null) ruUpdate.taxMode = c.snapshotTaxMode;
+      if (c.snapshotHourlyWageIncludesHolidayPay != null)
+        ruUpdate.hourlyWageIncludesHolidayPay = c.snapshotHourlyWageIncludesHolidayPay;
+      if (c.snapshotSpecialTerms != null) ruUpdate.specialTerms = c.snapshotSpecialTerms;
+
+      if (Object.keys(ruUpdate).length > 0) {
+        await db
+          .update(restaurantUsers)
+          .set(ruUpdate)
+          .where(and(
+            eq(restaurantUsers.restaurantId, input.restaurantId),
+            eq(restaurantUsers.userId, input.userId),
+          ));
+      }
+
+      let wageUpdated = false;
+      if (c.snapshotWage != null && c.snapshotWageType != null) {
+        const [latest] = await db
+          .select({
+            wageType: employeeWageHistory.wageType,
+            wageAmount: employeeWageHistory.wageAmount,
+          })
+          .from(employeeWageHistory)
+          .where(and(
+            eq(employeeWageHistory.userId, input.userId),
+            eq(employeeWageHistory.restaurantId, input.restaurantId),
+          ))
+          .orderBy(desc(employeeWageHistory.effectiveFrom))
+          .limit(1);
+
+        const needs =
+          !latest ||
+          latest.wageType !== c.snapshotWageType ||
+          Number(latest.wageAmount) !== Number(c.snapshotWage);
+
+        if (needs) {
+          const csDate = c.snapshotContractStart
+            ? new Date(c.snapshotContractStart as any)
+            : new Date();
+          const ymFirst = `${csDate.getFullYear()}-${String(csDate.getMonth() + 1).padStart(2, "0")}-01`;
+          await db.execute(sql`
+            UPDATE employee_wage_history
+            SET effectiveTo = ${ymFirst}
+            WHERE userId = ${input.userId}
+              AND restaurantId = ${input.restaurantId}
+              AND effectiveTo IS NULL
+              AND effectiveFrom < ${ymFirst}
+          `);
+          const [existing] = await db
+            .select({ id: employeeWageHistory.id })
+            .from(employeeWageHistory)
+            .where(and(
+              eq(employeeWageHistory.userId, input.userId),
+              eq(employeeWageHistory.restaurantId, input.restaurantId),
+              sql`${employeeWageHistory.effectiveFrom} = ${ymFirst}`,
+            ))
+            .limit(1);
+          if (existing) {
+            await db
+              .update(employeeWageHistory)
+              .set({
+                wageType: c.snapshotWageType as any,
+                wageAmount: c.snapshotWage,
+                sourceContractId: c.id,
+              })
+              .where(eq(employeeWageHistory.id, existing.id));
+          } else {
+            await db.insert(employeeWageHistory).values({
+              userId: input.userId,
+              restaurantId: input.restaurantId,
+              wageType: c.snapshotWageType as any,
+              wageAmount: c.snapshotWage,
+              effectiveFrom: ymFirst,
+              effectiveTo: null,
+              sourceContractId: c.id,
+            } as any);
+          }
+          await db
+            .update(restaurantUsers)
+            .set({ contractMigrated: true })
+            .where(and(
+              eq(restaurantUsers.restaurantId, input.restaurantId),
+              eq(restaurantUsers.userId, input.userId),
+            ));
+          wageUpdated = true;
+        }
+      }
+
+      await db.insert(auditLogs).values({
+        userId: ctx.user.userId,
+        userName: ctx.user.name || ctx.user.username,
+        restaurantId: input.restaurantId,
+        action: "update",
+        target: "staff_apply_contract_snapshot",
+        targetId: input.userId,
+        details: {
+          contractId: c.id,
+          fields: Object.keys(ruUpdate),
+          wageUpdated,
+        },
+      });
+
+      return {
+        ok: true,
+        fields: Object.keys(ruUpdate).length + (wageUpdated ? 1 : 0),
       };
     }),
 });

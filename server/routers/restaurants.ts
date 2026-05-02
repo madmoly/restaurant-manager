@@ -343,30 +343,18 @@ export const restaurantsRouter = router({
               AND ac.companyName = ${restaurantUsers.affiliatedCompany}
             LIMIT 1
           ), FALSE)`.as("effectiveOver5"),
-          // Phase E (2026-05-02): 운영 SSOT 12 항목 (restaurant_users) + wage_history
-          position: restaurantUsers.position,
+          // Phase E (2026-05-02 폐기 5건 제외): contractType, contractStart, contractEnd, workStartTime, workEndTime, breakMinutes, weeklyHours, taxMode, hourlyWageIncludesHolidayPay, specialTerms
           contractType: restaurantUsers.contractType,
           contractStart: restaurantUsers.contractStart,
           contractEnd: restaurantUsers.contractEnd,
           workStartTime: restaurantUsers.workStartTime,
           workEndTime: restaurantUsers.workEndTime,
           breakMinutes: restaurantUsers.breakMinutes,
-          weeklyHoliday: restaurantUsers.weeklyHoliday,
           weeklyHours: restaurantUsers.weeklyHours,
           taxMode: restaurantUsers.taxMode,
           hourlyWageIncludesHolidayPay: restaurantUsers.hourlyWageIncludesHolidayPay,
-          mealProvided: restaurantUsers.mealProvided,
-          mealAllowance: restaurantUsers.mealAllowance,
-          nightShiftConsent: restaurantUsers.nightShiftConsent,
           specialTerms: restaurantUsers.specialTerms,
-          // Phase E 신규 박제 11개 (snapshot)
-          snapshotPosition: sql<string | null>`(
-            SELECT ec.snapshotPosition FROM employment_electronic_contracts ec
-            WHERE ec.employeeId = ${restaurantUsers.userId}
-              AND ec.restaurantId = ${restaurantUsers.restaurantId}
-              AND ec.status = 'signed'
-            ORDER BY ec.signedAt DESC LIMIT 1
-          )`.as("snapshotPosition"),
+          // 박제 (2026-05-02 폐기 3건 제외: snapshotPosition·snapshotWeeklyHoliday·snapshotNightShiftConsent)
           snapshotContractType: sql<string | null>`(
             SELECT ec.snapshotContractType FROM employment_electronic_contracts ec
             WHERE ec.employeeId = ${restaurantUsers.userId}
@@ -409,13 +397,6 @@ export const restaurantsRouter = router({
               AND ec.status = 'signed'
             ORDER BY ec.signedAt DESC LIMIT 1
           )`.as("snapshotBreakMinutes"),
-          snapshotWeeklyHoliday: sql<string | null>`(
-            SELECT ec.snapshotWeeklyHoliday FROM employment_electronic_contracts ec
-            WHERE ec.employeeId = ${restaurantUsers.userId}
-              AND ec.restaurantId = ${restaurantUsers.restaurantId}
-              AND ec.status = 'signed'
-            ORDER BY ec.signedAt DESC LIMIT 1
-          )`.as("snapshotWeeklyHoliday"),
           snapshotWeeklyHours: sql<string | null>`(
             SELECT ec.snapshotWeeklyHours FROM employment_electronic_contracts ec
             WHERE ec.employeeId = ${restaurantUsers.userId}
@@ -437,13 +418,6 @@ export const restaurantsRouter = router({
               AND ec.status = 'signed'
             ORDER BY ec.signedAt DESC LIMIT 1
           )`.as("snapshotMealAllowance"),
-          snapshotNightShiftConsent: sql<boolean | null>`(
-            SELECT ec.snapshotNightShiftConsent FROM employment_electronic_contracts ec
-            WHERE ec.employeeId = ${restaurantUsers.userId}
-              AND ec.restaurantId = ${restaurantUsers.restaurantId}
-              AND ec.status = 'signed'
-            ORDER BY ec.signedAt DESC LIMIT 1
-          )`.as("snapshotNightShiftConsent"),
           snapshotSpecialTerms: sql<string | null>`(
             SELECT ec.snapshotSpecialTerms FROM employment_electronic_contracts ec
             WHERE ec.employeeId = ${restaurantUsers.userId}
