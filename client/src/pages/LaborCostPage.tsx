@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from "react";
+import { Fragment, useState, useRef, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   ChevronLeft, ChevronRight, Building2, Wallet,
   ChevronDown, ChevronUp, FileText, Download, CalendarCheck, CalendarDays,
-  AlertTriangle, Check, X, Plus, Minus, Info, UserX, Edit3, Save, Phone, CreditCard,
+  AlertTriangle, Check, X, Plus, Info, UserX, Edit3, Save, Phone, CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
@@ -105,6 +105,8 @@ export default function LaborCostPage() {
         const insuranceLabel = emp.taxMode === "biz_income_3_3" ? "3.3%공제" : "4대보험";
         const contractStartStr = emp.contractStart ? fmtDate(emp.contractStart) : "-";
         const contractEndStr = emp.contractEnd ? fmtDate(emp.contractEnd) : "-";
+        const bankNameStr = emp.bankName ?? "-";
+        const hireDateStr = emp.hireDate ? fmtDate(emp.hireDate) : "-";
 
         if (consultant) {
           // 노무사전송용: 시스템 계산 급여 제외, 계약·근무·신원 raw data만
@@ -122,8 +124,10 @@ export default function LaborCostPage() {
             subRemain,
             annUsed,
             annRemain,
+            bankNameStr,
             emp.bankAccount ?? "-",
             emp.residentNumber ?? "-",
+            hireDateStr,
             contractStartStr,
             contractEndStr,
           ]);
@@ -144,8 +148,10 @@ export default function LaborCostPage() {
             annRemain,
             insuranceLabel,
             wage,
+            bankNameStr,
             emp.bankAccount ?? "-",
             emp.residentNumber ?? "-",
+            hireDateStr,
             contractStartStr,
             contractEndStr,
           ]);
@@ -156,8 +162,8 @@ export default function LaborCostPage() {
   };
 
   // 헤더 (단어 단축으로 1줄 정렬) — 3.3%공제 컬럼 제거(시스템 미계산), 근무시간 컬럼 추가
-  const fullHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "계약휴무", "출근일수", "근무시간", "실휴무일", "대휴잔여", "연차잔여", "보험", "인건비", "계좌번호", "주민번호", "계약시작", "종료"];
-  const consultantHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "보험", "출근일수", "실휴무일", "계약휴무", "대휴사용", "대휴잔여", "연차사용", "연차잔여", "계좌번호", "주민번호", "계약시작", "종료"];
+  const fullHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "계약휴무", "출근일수", "근무시간", "실휴무일", "대휴잔여", "연차잔여", "보험", "인건비", "은행명", "계좌번호", "주민번호", "입사일", "계약시작", "종료"];
+  const consultantHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "보험", "출근일수", "실휴무일", "계약휴무", "대휴사용", "대휴잔여", "연차사용", "연차잔여", "은행명", "계좌번호", "주민번호", "입사일", "계약시작", "종료"];
   const fileName = consultantMode
     ? `노무사전송_${year}년${month}월_${current?.name ?? ""}`
     : `인건비정산_${year}년${month}월_${current?.name ?? ""}`;
@@ -171,10 +177,10 @@ export default function LaborCostPage() {
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     // 컬럼별 폭 (consultantMode·fullMode 동일 패턴, 헤더 단축 반영)
     const colWidths = consultantMode
-      // 소속회사,이름,직위,유형,계약급여,보험,출근,실휴무,계약휴무,대휴사용,대휴잔여,연차사용,연차잔여,계좌,주민,계약시작,종료
-      ? [14, 10, 8, 6, 12, 8, 6, 7, 8, 7, 7, 7, 7, 18, 16, 12, 12]
-      // 소속회사,이름,직위,유형,계약급여,계약휴무,출근,근무시간,실휴무,대휴잔여,연차잔여,보험,인건비,계좌,주민,계약시작,종료
-      : [14, 10, 8, 6, 12, 8, 7, 7, 7, 7, 7, 8, 12, 18, 16, 12, 12];
+      // 소속회사,이름,직위,유형,계약급여,보험,출근,실휴무,계약휴무,대휴사용,대휴잔여,연차사용,연차잔여,은행명,계좌,주민,입사일,계약시작,종료
+      ? [14, 10, 8, 6, 12, 8, 6, 7, 8, 7, 7, 7, 7, 10, 18, 16, 12, 12, 12]
+      // 소속회사,이름,직위,유형,계약급여,계약휴무,출근,근무시간,실휴무,대휴잔여,연차잔여,보험,인건비,은행명,계좌,주민,입사일,계약시작,종료
+      : [14, 10, 8, 6, 12, 8, 7, 7, 7, 7, 7, 8, 12, 10, 18, 16, 12, 12, 12];
     ws["!cols"] = colWidths.map((w) => ({ wch: w }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, consultantMode ? "노무사전송" : "인건비정산");
@@ -220,14 +226,16 @@ export default function LaborCostPage() {
         // 계약급여(4), 출근(6), 실휴무(7), 계약휴무(8), 대휴사용(9), 대휴잔여(10), 연차사용(11), 연차잔여(12)
         [4, 6, 7, 8, 9, 10, 11, 12].forEach(i => { rightAlignCols[i] = { halign: "right" }; });
         // 폭 (mm) — A4 landscape 가용 ~281mm 기준
-        const widths = [22, 16, 12, 12, 22, 14, 12, 12, 14, 14, 14, 12, 12, 30, 24, 18, 18];
+        // 소속회사,이름,직위,유형,계약급여,보험,출근,실휴무,계약휴무,대휴사용,대휴잔여,연차사용,연차잔여,은행명,계좌,주민,입사일,계약시작,종료
+        const widths = [22, 16, 12, 12, 22, 14, 12, 12, 14, 14, 14, 12, 12, 12, 18, 24, 12, 18, 18];
         widths.forEach((w, i) => {
           columnStyles[i] = { ...(rightAlignCols[i] ?? {}), cellWidth: w };
         });
       } else {
         // 계약급여(4), 계약휴무(5), 출근일수(6), 근무시간(7), 실휴무(8), 대휴잔여(9), 연차잔여(10), 인건비(12)
         [4, 5, 6, 7, 8, 9, 10, 12].forEach(i => { rightAlignCols[i] = { halign: "right" }; });
-        const widths = [20, 16, 12, 12, 20, 12, 12, 12, 12, 14, 12, 12, 22, 28, 22, 14, 14];
+        // 소속회사,이름,직위,유형,계약급여,계약휴무,출근,근무시간,실휴무,대휴잔여,연차잔여,보험,인건비,은행명,계좌,주민,입사일,계약시작,종료
+        const widths = [20, 16, 12, 12, 20, 12, 12, 12, 12, 14, 12, 12, 22, 12, 16, 22, 12, 14, 14];
         widths.forEach((w, i) => {
           columnStyles[i] = { ...(rightAlignCols[i] ?? {}), cellWidth: w };
         });
@@ -684,14 +692,23 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
   );
 }
 
-/* ─── 대체휴무/연차 관리 섹션 ─────────────────────────────── */
+/* ─── 대체휴무 관리 섹션 ─────────────────────────────── */
 function LeaveSummarySection({ restaurantId, year, month }: { restaurantId: number; year: number; month: number }) {
   const [open, setOpen] = useState(false);
-  const [useLeaveTarget, setUseLeaveTarget] = useState<{ userId: number; userName: string; leaveType: "substitute" | "annual" } | null>(null);
-  const [useDate, setUseDate] = useState("");
-  const [useDays, setUseDays] = useState<"1" | "0.5">("1");
+  const [adjustTarget, setAdjustTarget] = useState<{ userId: number; userName: string } | null>(null);
+  const [adjType, setAdjType] = useState<"earn" | "use">("earn");
+  const [adjDate, setAdjDate] = useState("");
+  const [adjDays, setAdjDays] = useState("1");
+  const [adjNote, setAdjNote] = useState("");
+  const [historyTarget, setHistoryTarget] = useState<number | null>(null);
 
   const utils = trpc.useUtils();
+
+  const invalidateAll = () => {
+    utils.leaveBalance.detectHolidayWork.invalidate();
+    utils.leaveBalance.storeSummary.invalidate();
+    utils.leaveBalance.storeSubstituteTransactions.invalidate();
+  };
 
   // 공휴일 근무 자동 감지
   const { data: holidayWork, isLoading: hwLoading } = trpc.leaveBalance.detectHolidayWork.useQuery(
@@ -705,31 +722,25 @@ function LeaveSummarySection({ restaurantId, year, month }: { restaurantId: numb
     { enabled: restaurantId > 0 },
   );
 
-  // 대체휴무 반영 mutation
-  const earnMut = trpc.leaveBalance.earnSubstitute.useMutation({
-    onSuccess: () => {
-      utils.leaveBalance.detectHolidayWork.invalidate();
-      utils.leaveBalance.storeSummary.invalidate();
-    },
-  });
+  // 대체휴무 이력 (편집용)
+  const { data: txs } = trpc.leaveBalance.storeSubstituteTransactions.useQuery(
+    { restaurantId, year },
+    { enabled: restaurantId > 0 && open },
+  );
 
-  // 대체휴무 반영 취소 mutation
-  const cancelMut = trpc.leaveBalance.cancelEarnSubstitute.useMutation({
+  const earnMut = trpc.leaveBalance.earnSubstitute.useMutation({ onSuccess: invalidateAll });
+  const cancelMut = trpc.leaveBalance.cancelEarnSubstitute.useMutation({ onSuccess: invalidateAll });
+  const adjustMut = trpc.leaveBalance.adjustSubstitute.useMutation({
     onSuccess: () => {
-      utils.leaveBalance.detectHolidayWork.invalidate();
-      utils.leaveBalance.storeSummary.invalidate();
+      invalidateAll();
+      setAdjustTarget(null);
+      setAdjType("earn");
+      setAdjDate("");
+      setAdjDays("1");
+      setAdjNote("");
     },
   });
-
-  // 휴가 소진 mutation
-  const useMut = trpc.leaveBalance.useLeave.useMutation({
-    onSuccess: () => {
-      utils.leaveBalance.storeSummary.invalidate();
-      setUseLeaveTarget(null);
-      setUseDate("");
-      setUseDays("1");
-    },
-  });
+  const deleteMut = trpc.leaveBalance.deleteSubstituteTransaction.useMutation({ onSuccess: invalidateAll });
 
   const isLoading = hwLoading || sumLoading;
   const hasHolidayWork = holidayWork && holidayWork.length > 0;
@@ -749,7 +760,7 @@ function LeaveSummarySection({ restaurantId, year, month }: { restaurantId: numb
       >
         <CalendarCheck className="w-4 h-4 text-muted-foreground shrink-0" />
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-foreground">대체휴무 / 연차 관리</div>
+          <div className="text-sm font-semibold text-foreground">대체휴무 관리</div>
           <div className="text-xs text-muted-foreground">
             {year}년 {month}월
             {unreflected.length > 0 && (
@@ -843,128 +854,209 @@ function LeaveSummarySection({ restaurantId, year, month }: { restaurantId: numb
             </div>
           )}
 
-          {/* ── 2. 연간 잔여 현황 ── */}
+          {/* ── 2. 연간 잔여 현황 (대체휴무) ── */}
           {hasSummary && (
             <div className={hasHolidayWork ? "border-t border-border" : ""}>
-              <div className="px-3 pt-3 pb-1 text-xs font-semibold text-muted-foreground flex items-center gap-1">
-                <CalendarDays className="w-3 h-3" /> {year}년 잔여 현황
+              <div className="px-3 pt-3 pb-1 text-xs font-semibold text-muted-foreground flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <CalendarDays className="w-3 h-3" /> {year}년 대체휴무 잔여 현황
+                </span>
+                <span className="text-[10px] font-normal text-muted-foreground">점장 임의 편집 가능</span>
               </div>
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-muted/30">
                     <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">이름</th>
-                    <th className="text-center px-1 py-1.5 text-[10px] text-muted-foreground font-normal" colSpan={3}>대체휴무</th>
-                    <th className="text-center px-1 py-1.5 text-[10px] text-muted-foreground font-normal" colSpan={3}>연차</th>
+                    <th className="text-center px-1 py-1.5 text-[10px] text-muted-foreground font-normal">발생</th>
+                    <th className="text-center px-1 py-1.5 text-[10px] text-muted-foreground font-normal">사용</th>
+                    <th className="text-center px-1 py-1.5 text-[10px] text-muted-foreground font-normal">잔여</th>
                     <th className="px-2 py-1.5"></th>
-                  </tr>
-                  <tr className="bg-muted/15">
-                    <th className="px-3 py-0.5"></th>
-                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">발생</th>
-                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">사용</th>
-                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">잔여</th>
-                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">발생</th>
-                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">사용</th>
-                    <th className="text-center px-1 py-0.5 text-[9px] text-muted-foreground font-normal">잔여</th>
-                    <th className="px-2 py-0.5"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {summary!.map((emp) => (
-                    <tr key={emp.userId} className="border-t border-border/50">
-                      <td className="px-3 py-2">
-                        <div className="font-medium text-foreground">{emp.userName}</div>
-                      </td>
-                      <td className="text-center px-1 py-2 text-muted-foreground">{emp.substitute.earned}</td>
-                      <td className="text-center px-1 py-2 text-muted-foreground">{emp.substitute.used}</td>
-                      <td className={`text-center px-1 py-2 font-medium ${emp.substitute.remaining > 0 ? "text-blue-600" : "text-muted-foreground"}`}>
-                        {emp.substitute.remaining}
-                      </td>
-                      <td className="text-center px-1 py-2 text-muted-foreground">{emp.annual.earned}</td>
-                      <td className="text-center px-1 py-2 text-muted-foreground">{emp.annual.used}</td>
-                      <td className={`text-center px-1 py-2 font-medium ${emp.annual.remaining > 0 ? "text-green-600" : "text-muted-foreground"}`}>
-                        {emp.annual.remaining}
-                      </td>
-                      <td className="px-2 py-2">
-                        <div className="flex items-center gap-1">
-                          {emp.substitute.remaining > 0 && (
+                    <Fragment key={emp.userId}>
+                      <tr className="border-t border-border/50">
+                        <td className="px-3 py-2">
+                          <div className="font-medium text-foreground flex items-center gap-1">
+                            {emp.userName}
+                            {!emp.is5Plus && (
+                              <span className="text-[9px] text-muted-foreground bg-muted px-1 rounded">5인↓</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="text-center px-1 py-2 text-muted-foreground">{emp.substitute.earned}</td>
+                        <td className="text-center px-1 py-2 text-muted-foreground">{emp.substitute.used}</td>
+                        <td className={`text-center px-1 py-2 font-medium ${emp.substitute.remaining > 0 ? "text-blue-600" : "text-muted-foreground"}`}>
+                          {emp.substitute.remaining}
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="flex items-center gap-1.5 justify-end">
                             <button
-                              onClick={() => setUseLeaveTarget({ userId: emp.userId, userName: emp.userName, leaveType: "substitute" })}
-                              className="text-[10px] text-blue-600 hover:underline whitespace-nowrap"
-                              title="대체휴무 소진"
+                              onClick={() => {
+                                setAdjustTarget({ userId: emp.userId, userName: emp.userName });
+                                setAdjType("earn");
+                                setAdjDate(`${year}-${String(month).padStart(2, "0")}-01`);
+                                setAdjDays("1");
+                                setAdjNote("");
+                              }}
+                              className="text-[10px] text-blue-600 hover:underline whitespace-nowrap flex items-center gap-0.5"
+                              title="대체휴무 임의 조정"
                             >
-                              <Minus className="w-3 h-3 inline" />대휴
+                              <Edit3 className="w-3 h-3" /> 조정
                             </button>
-                          )}
-                          {emp.annual.remaining > 0 && (
                             <button
-                              onClick={() => setUseLeaveTarget({ userId: emp.userId, userName: emp.userName, leaveType: "annual" })}
-                              className="text-[10px] text-green-600 hover:underline whitespace-nowrap"
-                              title="연차 소진"
+                              onClick={() => setHistoryTarget(historyTarget === emp.userId ? null : emp.userId)}
+                              className="text-[10px] text-muted-foreground hover:text-foreground whitespace-nowrap"
                             >
-                              <Minus className="w-3 h-3 inline" />연차
+                              {historyTarget === emp.userId ? "이력닫기" : "이력"}
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                          </div>
+                        </td>
+                      </tr>
+                      {historyTarget === emp.userId && (
+                        <tr className="bg-muted/10">
+                          <td colSpan={5} className="px-3 py-2">
+                            <SubstituteHistoryRows
+                              txs={(txs ?? []).filter((t) => t.userId === emp.userId)}
+                              onDelete={(transactionId) => {
+                                if (!confirm("이 이력을 삭제하시겠습니까?")) return;
+                                deleteMut.mutate({ transactionId, restaurantId });
+                              }}
+                              isDeleting={deleteMut.isPending}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
 
-          {/* ── 3. 소진 입력 모달 (인라인) ── */}
-          {useLeaveTarget && (
+          {/* ── 3. 임의 조정 입력 (인라인) ── */}
+          {adjustTarget && (
             <div className="border-t border-border p-3 bg-muted/20 space-y-2">
               <div className="text-xs font-semibold text-foreground">
-                {useLeaveTarget.userName} — {useLeaveTarget.leaveType === "substitute" ? "대체휴무" : "연차"} 소진
+                {adjustTarget.userName} — 대체휴무 임의 조정
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="date"
-                  value={useDate}
-                  onChange={(e) => setUseDate(e.target.value)}
-                  className="text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground flex-1"
-                  placeholder="사용일"
-                />
+              <div className="flex items-center gap-2 flex-wrap">
                 <select
-                  value={useDays}
-                  onChange={(e) => setUseDays(e.target.value as "1" | "0.5")}
+                  value={adjType}
+                  onChange={(e) => setAdjType(e.target.value as "earn" | "use")}
                   className="text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground"
                 >
-                  <option value="1">1일</option>
-                  <option value="0.5">반차 (0.5일)</option>
+                  <option value="earn">발생 (+)</option>
+                  <option value="use">사용 (−)</option>
                 </select>
+                <input
+                  type="date"
+                  value={adjDate}
+                  onChange={(e) => setAdjDate(e.target.value)}
+                  className="text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground flex-1 min-w-[130px]"
+                  placeholder="날짜"
+                />
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0.5"
+                  max="31"
+                  value={adjDays}
+                  onChange={(e) => setAdjDays(e.target.value)}
+                  className="text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground w-20"
+                  placeholder="일수"
+                />
               </div>
+              <input
+                type="text"
+                value={adjNote}
+                onChange={(e) => setAdjNote(e.target.value)}
+                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground"
+                placeholder="메모 (선택) — 예: 5/1 근로자의날 대체"
+              />
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
                   variant="default"
                   className="text-xs h-7"
-                  disabled={!useDate || useMut.isPending}
+                  disabled={!adjDate || !adjDays || adjustMut.isPending}
                   onClick={() => {
-                    useMut.mutate({
-                      userId: useLeaveTarget.userId,
+                    const days = parseFloat(adjDays);
+                    if (!isFinite(days) || days <= 0) return;
+                    adjustMut.mutate({
+                      userId: adjustTarget.userId,
                       restaurantId,
-                      leaveType: useLeaveTarget.leaveType,
-                      useDate,
-                      days: parseFloat(useDays),
+                      txType: adjType,
+                      date: adjDate,
+                      days,
+                      note: adjNote || undefined,
                     });
                   }}
                 >
-                  {useMut.isPending ? "처리중..." : "소진 등록"}
+                  {adjustMut.isPending ? "처리중..." : "저장"}
                 </Button>
-                <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => setUseLeaveTarget(null)}>
+                <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => setAdjustTarget(null)}>
                   취소
                 </Button>
-                {useMut.error && (
-                  <span className="text-xs text-red-500">{useMut.error.message}</span>
+                {adjustMut.error && (
+                  <span className="text-xs text-red-500">{adjustMut.error.message}</span>
                 )}
               </div>
             </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── 대체휴무 이력 행 ─────────────────────────────── */
+function SubstituteHistoryRows({
+  txs,
+  onDelete,
+  isDeleting,
+}: {
+  txs: Array<{
+    id: number;
+    txType: string;
+    days: string;
+    holidayDate: string | null;
+    holidayName: string | null;
+    useDate: string | null;
+    note: string | null;
+  }>;
+  onDelete: (id: number) => void;
+  isDeleting: boolean;
+}) {
+  if (txs.length === 0) {
+    return <div className="text-[11px] text-muted-foreground">등록된 이력이 없습니다.</div>;
+  }
+  return (
+    <div className="space-y-1">
+      {txs.map((tx) => {
+        const date = tx.txType === "earn" ? tx.holidayDate : tx.useDate;
+        const sign = tx.txType === "earn" ? "+" : "−";
+        const color = tx.txType === "earn" ? "text-blue-600" : "text-rose-600";
+        return (
+          <div key={tx.id} className="flex items-center gap-2 text-[11px]">
+            <span className={`font-semibold ${color} w-12`}>{sign}{tx.days}일</span>
+            <span className="text-foreground w-24">{date ?? "-"}</span>
+            <span className="text-muted-foreground flex-1 truncate">
+              {tx.holidayName ? `${tx.holidayName}` : ""}
+              {tx.note ? ` · ${tx.note}` : ""}
+            </span>
+            <button
+              onClick={() => onDelete(tx.id)}
+              disabled={isDeleting}
+              className="text-muted-foreground hover:text-red-500 transition-colors"
+              title="이력 삭제"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

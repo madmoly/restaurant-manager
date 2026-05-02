@@ -268,6 +268,118 @@ export const leaveBalanceRouter = router({
     }),
 
   /**
+   * 대체휴무 임의 조정 (점장 직접 편집)
+   * - 공휴일/5인이상 검증 우회
+   * - txType: earn(발생) | use(사용)
+   * - 사용 시에는 잔여일수 검증
+   */
+  adjustSubstitute: managerProcedure
+    .input(z.object({
+      userId: z.number(),
+      restaurantId: z.number(),
+      txType: z.enum(["earn", "use"]),
+      date: z.string(), // YYYY-MM-DD
+      days: z.number().min(0.5).max(31),
+      note: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      const year = parseInt(input.date.slice(0, 4));
+
+      if (input.txType === "use") {
+        const balance = await getLeaveBalance(input.userId, input.restaurantId, year, "substitute");
+        if (balance.remaining < input.days) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `대체휴무 잔여일수가 부족합니다 (잔여: ${balance.remaining}일)`,
+          });
+        }
+      }
+
+      await db.insert(leaveTransactions).values({
+        userId: input.userId,
+        restaurantId: input.restaurantId,
+        year,
+        leaveType: "substitute",
+        txType: input.txType,
+        days: String(input.days),
+        ...(input.txType === "earn"
+          ? { holidayDate: input.date, holidayName: "수동 조정" }
+          : { useDate: input.date }),
+        note: input.note ?? "점장 임의 조정",
+        createdBy: ctx.user.userId,
+      } as any);
+
+      await syncLeaveBalance(input.userId, input.restaurantId, year, "substitute");
+
+      return { ok: true };
+    }),
+
+  /**
+   * 대체휴무 이력 삭제 (점장 직접 편집 — 잘못 등록한 항목 정리)
+   */
+  deleteSubstituteTransaction: managerProcedure
+    .input(z.object({
+      transactionId: z.number(),
+      restaurantId: z.number(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
+      const [tx] = await db.select()
+        .from(leaveTransactions)
+        .where(and(
+          eq(leaveTransactions.id, input.transactionId),
+          eq(leaveTransactions.restaurantId, input.restaurantId),
+          eq(leaveTransactions.leaveType, "substitute"),
+        ))
+        .limit(1);
+
+      if (!tx) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "해당 이력을 찾을 수 없습니다" });
+      }
+
+      await db.delete(leaveTransactions).where(eq(leaveTransactions.id, input.transactionId));
+      await syncLeaveBalance(tx.userId, tx.restaurantId, tx.year, "substitute");
+
+      return { ok: true };
+    }),
+
+  /**
+   * 매장 전체 직원의 대체휴무 이력 (점장 편집용)
+   */
+  storeSubstituteTransactions: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      year: z.number(),
+    }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const txs = await db.select({
+        id: leaveTransactions.id,
+        userId: leaveTransactions.userId,
+        userName: users.name,
+        txType: leaveTransactions.txType,
+        days: leaveTransactions.days,
+        holidayDate: leaveTransactions.holidayDate,
+        holidayName: leaveTransactions.holidayName,
+        useDate: leaveTransactions.useDate,
+        note: leaveTransactions.note,
+        createdAt: leaveTransactions.createdAt,
+      })
+        .from(leaveTransactions)
+        .innerJoin(users, eq(users.id, leaveTransactions.userId))
+        .where(and(
+          eq(leaveTransactions.restaurantId, input.restaurantId),
+          eq(leaveTransactions.year, input.year),
+          eq(leaveTransactions.leaveType, "substitute"),
+        ))
+        .orderBy(leaveTransactions.createdAt);
+
+      return txs;
+    }),
+
+  /**
    * 특정 직원의 대체휴무/연차 잔여일수 조회
    */
   getBalance: protectedProcedure
@@ -307,6 +419,8 @@ export const leaveBalanceRouter = router({
 
   /**
    * 매장 전체 직원의 대체휴무/연차 요약 (점장용)
+   * - 5인 이상 직원: 자동 노출
+   * - 5인 미만이라도 점장이 임의 편집한 이력이 있으면 노출
    */
   storeSummary: managerProcedure
     .input(z.object({
@@ -325,10 +439,20 @@ export const leaveBalanceRouter = router({
         .innerJoin(users, eq(users.id, restaurantUsers.userId))
         .where(eq(restaurantUsers.restaurantId, input.restaurantId));
 
+      // 대체휴무 이력이 있는 직원 ID (5인 미만 임의 편집 케이스 포함)
+      const subTxRows = await db.select({ userId: leaveTransactions.userId })
+        .from(leaveTransactions)
+        .where(and(
+          eq(leaveTransactions.restaurantId, input.restaurantId),
+          eq(leaveTransactions.year, input.year),
+          eq(leaveTransactions.leaveType, "substitute"),
+        ));
+      const hasSubTx = new Set(subTxRows.map((r) => r.userId));
+
       const results = [];
       for (const staff of staffRows) {
         const is5Plus = await check5PlusEmployee(staff.userId, input.restaurantId);
-        if (!is5Plus) continue; // 5인 미만 계약자 제외
+        if (!is5Plus && !hasSubTx.has(staff.userId)) continue;
 
         const sub = await getLeaveBalance(staff.userId, input.restaurantId, input.year, "substitute");
         const ann = await getLeaveBalance(staff.userId, input.restaurantId, input.year, "annual");
@@ -339,6 +463,7 @@ export const leaveBalanceRouter = router({
           storeRole: staff.storeRole,
           substitute: sub,
           annual: ann,
+          is5Plus,
         });
       }
 
