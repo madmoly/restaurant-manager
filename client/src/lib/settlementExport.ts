@@ -7,6 +7,7 @@ const FIXED_TYPE_LABEL: Record<string, string> = {
   yearly: "연납÷12",
   quarterly: "분기÷3",
   sales_ratio: "매출비례",
+  profit_ratio: "이익비례",
   one_time: "일시",
 };
 const fixedTypeLabel = (t: string) => FIXED_TYPE_LABEL[t] ?? "일시";
@@ -45,20 +46,26 @@ function buildFileBase({ restaurantName, year, month, data }: ExportContext) {
   return sanitize(`월정산_${restaurantName}_${year}년${month}월${tag}`);
 }
 
-// 숫자 셀 서식 적용 (시트 단위, 헤더 1행 제외)
-function applyNumFmt(ws: any, colIndexes: number[], fmt = "#,##0") {
-  const ref = ws["!ref"];
-  if (!ref) return;
-  const range = /^[A-Z]+\d+:([A-Z]+)(\d+)$/.exec(ref);
-  if (!range) return;
-  const rows = parseInt(range[2], 10);
-  for (const ci of colIndexes) {
-    for (let r = 1; r <= rows; r++) {
-      const addr = String.fromCharCode(65 + ci) + (r + 1);
-      const cell = ws[addr];
-      if (cell && cell.t === "n") cell.z = fmt;
-    }
-  }
+// 페이지 데이터 수집 현황과 동일한 detail 문자열 생성 (MonthlySettlementPage와 1:1 일치)
+function buildCollectionDetail(c: any) {
+  const closing = c.unclosedDates.length > 0
+    ? `${c.unclosedDates.length}일 미마감 (${c.unclosedDates.map((d: string) => `${parseInt(d.split("-")[2])}일`).join(", ")})`
+    : `${c.closedDays}일 전체 마감 완료`;
+  const sales = c.salesMissingDates.length > 0
+    ? `${c.salesMissingDates.length}일 매출 미입력`
+    : `${c.salesInputDays}일 입력 완료`;
+  const purchases = c.purchaseCount === 0
+    ? "매입 데이터 없음"
+    : c.purchasePendingCount > 0
+      ? `총 ${c.purchaseCount}건 중 미확정 ${c.purchasePendingCount}건`
+      : `${c.purchaseCount}건 전체 확정(입고)`;
+  const labor = c.draftScheduleCount > 0
+    ? `미확정 스케줄 ${c.draftScheduleCount}건 (확정/완료만 인건비 반영)`
+    : "전체 스케줄 확정 완료";
+  const fixedCost = c.fixedCostCount > 0
+    ? `${c.fixedCostCount}개 항목 등록`
+    : "고정비 미등록";
+  return { closing, sales, purchases, labor, fixedCost };
 }
 
 // ── Excel ────────────────────────────────────────────────
@@ -69,7 +76,82 @@ export async function exportSettlementExcel(ctx: ExportContext) {
 
   const wb = XLSX.utils.book_new();
 
-  // ── 시트 1: 요약 ──
+  // ── 시트1: 상세 (매출/매입/인건비/고정비/즉시지출 통합) ──
+  const detailAoa: any[][] = [];
+
+  // 매출 (결제수단별)
+  const sbm = income.salesByMethod ?? {};
+  const salesPct = (n: number) => income.salesTotal > 0 ? Number((n / income.salesTotal * 100).toFixed(1)) : 0;
+  detailAoa.push(["[매출 — 결제수단별]"]);
+  detailAoa.push(["결제수단", "금액(원)", "비율(%)"]);
+  detailAoa.push(["카드", sbm.card ?? 0, salesPct(sbm.card ?? 0)]);
+  detailAoa.push(["현금", sbm.cash ?? 0, salesPct(sbm.cash ?? 0)]);
+  detailAoa.push(["상품권", sbm.giftCard ?? 0, salesPct(sbm.giftCard ?? 0)]);
+  detailAoa.push(["계좌이체", sbm.transfer ?? 0, salesPct(sbm.transfer ?? 0)]);
+  detailAoa.push(["기타", sbm.other ?? 0, salesPct(sbm.other ?? 0)]);
+  detailAoa.push(["합계", income.salesTotal, 100]);
+  detailAoa.push([]);
+
+  // 매입 (거래처별)
+  detailAoa.push(["[매입 — 거래처별]"]);
+  detailAoa.push(["거래처", "건수", "금액(원)", "매출대비(%)"]);
+  for (const cp of income.purchasesByCounterparty) {
+    detailAoa.push([cp.name, cp.count, cp.amount, pctOfSales(cp.amount, income.salesTotal)]);
+  }
+  detailAoa.push([
+    "합계",
+    income.purchasesByCounterparty.reduce((s: number, c: any) => s + c.count, 0),
+    income.purchasesTotal,
+    pctOfSales(income.purchasesTotal, income.salesTotal),
+  ]);
+  detailAoa.push([]);
+
+  // 인건비 (소속회사별)
+  detailAoa.push(["[인건비 — 소속회사별]"]);
+  detailAoa.push(["소속회사", "인원", "시간(h)", "금액(원)", "매출대비(%)"]);
+  for (const co of income.laborByCompany) {
+    detailAoa.push([co.company, co.headcount, co.hours, co.amount, pctOfSales(co.amount, income.salesTotal)]);
+  }
+  detailAoa.push([
+    "합계",
+    income.laborByCompany.reduce((s: number, c: any) => s + c.headcount, 0),
+    Number(income.laborByCompany.reduce((s: number, c: any) => s + c.hours, 0).toFixed(1)),
+    income.laborCost,
+    pctOfSales(income.laborCost, income.salesTotal),
+  ]);
+  detailAoa.push([]);
+
+  // 고정비
+  detailAoa.push(["[고정비 — 항목별]"]);
+  detailAoa.push(["항목", "유형", "원비율(%)", "금액(원)", "매출대비(%)"]);
+  for (const f of income.fixedBreakdown) {
+    detailAoa.push([f.name, fixedTypeLabel(f.type), f.ratio ?? "", f.amount, pctOfSales(f.amount, income.salesTotal)]);
+  }
+  detailAoa.push(["합계", "", "", income.fixedCostsTotal, pctOfSales(income.fixedCostsTotal, income.salesTotal)]);
+  detailAoa.push([]);
+
+  // 즉시지출 (분류별)
+  const expensesByCategory = income.expensesByCategory ?? [];
+  detailAoa.push(["[즉시지출 — 분류별]"]);
+  detailAoa.push(["분류", "건수", "금액(원)", "매출대비(%)"]);
+  if (expensesByCategory.length > 0) {
+    for (const e of expensesByCategory) {
+      detailAoa.push([e.category, e.count, e.amount, pctOfSales(e.amount, income.salesTotal)]);
+    }
+  }
+  detailAoa.push([
+    "합계",
+    expensesByCategory.reduce((s: number, e: any) => s + e.count, 0),
+    income.expensesTotal,
+    pctOfSales(income.expensesTotal, income.salesTotal),
+  ]);
+
+  const wsDetail = XLSX.utils.aoa_to_sheet(detailAoa);
+  // 5컬럼 max 폭 (모든 섹션 커버)
+  wsDetail["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, wsDetail, "상세");
+
+  // ── 시트2: 요약 ──
   const statusLabel = closing?.isClosed ? "확정" : "미확정";
   const summaryAoa: any[][] = [
     [`${year}년 ${month}월 월정산`],
@@ -102,6 +184,7 @@ export async function exportSettlementExcel(ctx: ExportContext) {
     summaryAoa.push(["매출", income.salesTotal, prevMonth.salesTotal, delta(income.salesTotal, prevMonth.salesTotal)]);
     summaryAoa.push(["매입", income.purchasesTotal, prevMonth.purchasesTotal, delta(income.purchasesTotal, prevMonth.purchasesTotal)]);
     summaryAoa.push(["인건비", income.laborCost, prevMonth.laborCost, delta(income.laborCost, prevMonth.laborCost)]);
+    summaryAoa.push(["즉시지출", income.expensesTotal, prevMonth.expensesTotal, delta(income.expensesTotal, prevMonth.expensesTotal)]);
     summaryAoa.push(["고정비", income.fixedCostsTotal, prevMonth.fixedCostsTotal, delta(income.fixedCostsTotal, prevMonth.fixedCostsTotal)]);
     summaryAoa.push(["순이익", income.profit, prevMonth.profit, delta(income.profit, prevMonth.profit)]);
     summaryAoa.push([]);
@@ -117,15 +200,16 @@ export async function exportSettlementExcel(ctx: ExportContext) {
   if (metrics.targetLaborRatio > 0) summaryAoa.push(["목표 인건비율(%)", metrics.targetLaborRatio]);
   summaryAoa.push([]);
 
-  summaryAoa.push(["[수집 현황]"]);
-  summaryAoa.push(["영업일", collection.operatingDays]);
-  summaryAoa.push(["일마감 완료일", collection.closedDays]);
-  summaryAoa.push(["미마감 날짜", (collection.unclosedDates ?? []).join(", ")]);
-  summaryAoa.push(["매출 입력 누락일", (collection.salesMissingDates ?? []).join(", ")]);
-  summaryAoa.push(["매입 건수", collection.purchaseCount]);
-  summaryAoa.push(["매입 대기(ordered)", collection.purchasePendingCount]);
-  summaryAoa.push(["스케줄 draft", collection.draftScheduleCount]);
-  summaryAoa.push(["고정비 항목 수", collection.fixedCostCount]);
+  // 데이터 수집 현황 — MonthlySettlementPage 5개 항목과 1:1 일치
+  const cd = buildCollectionDetail(collection);
+  summaryAoa.push(["[데이터 수집 현황]"]);
+  summaryAoa.push(["항목", "상태"]);
+  summaryAoa.push(["영업일", `${collection.operatingDays}일`]);
+  summaryAoa.push(["일마감", cd.closing]);
+  summaryAoa.push(["매출 입력", cd.sales]);
+  summaryAoa.push(["매입 데이터", cd.purchases]);
+  summaryAoa.push(["인건비 (스케줄)", cd.labor]);
+  summaryAoa.push(["고정비", cd.fixedCost]);
   summaryAoa.push([]);
 
   summaryAoa.push(["[미반영분 — 일마감 미완료]"]);
@@ -135,75 +219,9 @@ export async function exportSettlementExcel(ctx: ExportContext) {
   summaryAoa.push(["미반영 인건비", unconfirmed.laborCost]);
   summaryAoa.push(["미마감일수", unconfirmed.unclosedDays]);
 
-  const ws1 = XLSX.utils.aoa_to_sheet(summaryAoa);
-  ws1["!cols"] = [{ wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 12 }];
-  XLSX.utils.book_append_sheet(wb, ws1, "요약");
-
-  // ── 시트 2: 매출(결제수단별) ──
-  const sbm = income.salesByMethod ?? {};
-  const salesAoa: any[][] = [
-    ["결제수단", "금액(원)", "비율(%)"],
-    ["카드", sbm.card ?? 0, income.salesTotal > 0 ? Number(((sbm.card ?? 0) / income.salesTotal * 100).toFixed(1)) : 0],
-    ["현금", sbm.cash ?? 0, income.salesTotal > 0 ? Number(((sbm.cash ?? 0) / income.salesTotal * 100).toFixed(1)) : 0],
-    ["상품권", sbm.giftCard ?? 0, income.salesTotal > 0 ? Number(((sbm.giftCard ?? 0) / income.salesTotal * 100).toFixed(1)) : 0],
-    ["계좌이체", sbm.transfer ?? 0, income.salesTotal > 0 ? Number(((sbm.transfer ?? 0) / income.salesTotal * 100).toFixed(1)) : 0],
-    ["기타", sbm.other ?? 0, income.salesTotal > 0 ? Number(((sbm.other ?? 0) / income.salesTotal * 100).toFixed(1)) : 0],
-    ["합계", income.salesTotal, 100],
-  ];
-  const ws2 = XLSX.utils.aoa_to_sheet(salesAoa);
-  ws2["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 12 }];
-  applyNumFmt(ws2, [1], "#,##0");
-  applyNumFmt(ws2, [2], "0.0");
-  XLSX.utils.book_append_sheet(wb, ws2, "매출");
-
-  // ── 시트 3: 매입 ──
-  const purchAoa: any[][] = [["거래처", "건수", "금액(원)", "매출대비(%)"]];
-  for (const cp of income.purchasesByCounterparty) {
-    purchAoa.push([cp.name, cp.count, cp.amount, pctOfSales(cp.amount, income.salesTotal)]);
-  }
-  purchAoa.push([
-    "합계",
-    income.purchasesByCounterparty.reduce((s: number, c: any) => s + c.count, 0),
-    income.purchasesTotal,
-    pctOfSales(income.purchasesTotal, income.salesTotal),
-  ]);
-  const ws3 = XLSX.utils.aoa_to_sheet(purchAoa);
-  ws3["!cols"] = [{ wch: 24 }, { wch: 8 }, { wch: 16 }, { wch: 12 }];
-  applyNumFmt(ws3, [2], "#,##0");
-  applyNumFmt(ws3, [3], "0.0");
-  XLSX.utils.book_append_sheet(wb, ws3, "매입");
-
-  // ── 시트 4: 인건비 ──
-  const laborAoa: any[][] = [["소속회사", "인원", "시간(h)", "금액(원)", "매출대비(%)"]];
-  for (const co of income.laborByCompany) {
-    laborAoa.push([co.company, co.headcount, co.hours, co.amount, pctOfSales(co.amount, income.salesTotal)]);
-  }
-  laborAoa.push([
-    "합계",
-    income.laborByCompany.reduce((s: number, c: any) => s + c.headcount, 0),
-    Number(income.laborByCompany.reduce((s: number, c: any) => s + c.hours, 0).toFixed(1)),
-    income.laborCost,
-    pctOfSales(income.laborCost, income.salesTotal),
-  ]);
-  const ws4 = XLSX.utils.aoa_to_sheet(laborAoa);
-  ws4["!cols"] = [{ wch: 16 }, { wch: 8 }, { wch: 10 }, { wch: 16 }, { wch: 12 }];
-  applyNumFmt(ws4, [2], "0.0");
-  applyNumFmt(ws4, [3], "#,##0");
-  applyNumFmt(ws4, [4], "0.0");
-  XLSX.utils.book_append_sheet(wb, ws4, "인건비");
-
-  // ── 시트 5: 고정비 ──
-  const fixedAoa: any[][] = [["항목", "유형", "원비율(%)", "금액(원)", "매출대비(%)"]];
-  for (const f of income.fixedBreakdown) {
-    fixedAoa.push([f.name, fixedTypeLabel(f.type), f.ratio ?? "", f.amount, pctOfSales(f.amount, income.salesTotal)]);
-  }
-  fixedAoa.push(["합계", "", "", income.fixedCostsTotal, pctOfSales(income.fixedCostsTotal, income.salesTotal)]);
-  const ws5 = XLSX.utils.aoa_to_sheet(fixedAoa);
-  ws5["!cols"] = [{ wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
-  applyNumFmt(ws5, [2], "0.0");
-  applyNumFmt(ws5, [3], "#,##0");
-  applyNumFmt(ws5, [4], "0.0");
-  XLSX.utils.book_append_sheet(wb, ws5, "고정비");
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryAoa);
+  wsSummary["!cols"] = [{ wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, wsSummary, "요약");
 
   const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -373,7 +391,7 @@ export async function exportSettlementPDF(ctx: ExportContext) {
     finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 30;
   }
 
-  // 전월 대비
+  // 전월 대비 — 즉시지출 행 추가
   if (prevMonth) {
     section("전월 대비");
     const deltaCell = (curr: number, prev: number) => prev === 0 ? "-" : `${((curr - prev) / prev * 100).toFixed(1)}%`;
@@ -385,6 +403,7 @@ export async function exportSettlementPDF(ctx: ExportContext) {
         ["매출", fmtKRW(income.salesTotal), fmtKRW(prevMonth.salesTotal), deltaCell(income.salesTotal, prevMonth.salesTotal)],
         ["매입", fmtKRW(income.purchasesTotal), fmtKRW(prevMonth.purchasesTotal), deltaCell(income.purchasesTotal, prevMonth.purchasesTotal)],
         ["인건비", fmtKRW(income.laborCost), fmtKRW(prevMonth.laborCost), deltaCell(income.laborCost, prevMonth.laborCost)],
+        ["즉시지출", fmtKRW(income.expensesTotal), fmtKRW(prevMonth.expensesTotal), deltaCell(income.expensesTotal, prevMonth.expensesTotal)],
         ["고정비", fmtKRW(income.fixedCostsTotal), fmtKRW(prevMonth.fixedCostsTotal), deltaCell(income.fixedCostsTotal, prevMonth.fixedCostsTotal)],
         ["순이익", fmtKRW(income.profit), fmtKRW(prevMonth.profit), deltaCell(income.profit, prevMonth.profit)],
       ],
@@ -394,23 +413,24 @@ export async function exportSettlementPDF(ctx: ExportContext) {
     finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 30;
   }
 
-  // 수집 현황
-  section("수집 현황");
+  // 데이터 수집 현황 — MonthlySettlementPage 5개 항목과 1:1 일치
+  section("데이터 수집 현황");
+  const cdp = buildCollectionDetail(collection);
   const collRows: any[][] = [
-    ["영업일", String(collection.operatingDays)],
-    ["일마감 완료일", String(collection.closedDays)],
-    ["매입 건수 (대기/전체)", `${collection.purchasePendingCount} / ${collection.purchaseCount}`],
-    ["스케줄 draft", String(collection.draftScheduleCount)],
-    ["고정비 항목 수", String(collection.fixedCostCount)],
+    ["영업일", `${collection.operatingDays}일`],
+    ["일마감", cdp.closing],
+    ["매출 입력", cdp.sales],
+    ["매입 데이터", cdp.purchases],
+    ["인건비 (스케줄)", cdp.labor],
+    ["고정비", cdp.fixedCost],
   ];
-  if ((collection.unclosedDates ?? []).length > 0) collRows.push(["미마감 날짜", collection.unclosedDates.join(", ")]);
-  if ((collection.salesMissingDates ?? []).length > 0) collRows.push(["매출 입력 누락일", collection.salesMissingDates.join(", ")]);
   autoTable(doc, {
     ...tableBase,
     startY: finalY + 11,
-    head: [["항목", "값"]],
+    head: [["항목", "상태"]],
     body: collRows,
     headStyles: headSub,
+    columnStyles: { 0: { cellWidth: 38 } },
   });
   finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 30;
 

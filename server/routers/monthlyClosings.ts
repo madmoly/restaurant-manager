@@ -20,6 +20,7 @@ import {
   storeWeeklyClosures,
   settlementImages,
   dailyExpenses,
+  expenseCategories,
   affiliatedCompanies,
 } from "../../drizzle/schema";
 import { calcMonthlyFixedCosts } from "../helpers/fixedCostCalc";
@@ -469,15 +470,36 @@ export const monthlyClosingsRouter = router({
       const unconfirmedLaborCost = allLabor.totalCost - confirmedLabor.totalCost;
 
       // ── 즉시 지출 (날짜 기반, 일마감 무관) ──
-      const [expRow] = await db
-        .select({ total: sql<string>`COALESCE(SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2))), 0)` })
+      // 분류별 합산 (categoryId → expense_categories 이름, 폴백 legacy category 컬럼)
+      const expByCatRows = await db
+        .select({
+          categoryId: dailyExpenses.categoryId,
+          categoryName: expenseCategories.name,
+          legacyCategory: dailyExpenses.category,
+          amount: sql<string>`COALESCE(SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2))), 0)`,
+          count: sql<number>`COUNT(*)`,
+        })
         .from(dailyExpenses)
+        .leftJoin(expenseCategories, eq(expenseCategories.id, dailyExpenses.categoryId))
         .where(and(
           eq(dailyExpenses.restaurantId, restaurantId),
           sql`${dailyExpenses.date} >= ${startDate}`,
           sql`${dailyExpenses.date} <= ${endDate}`,
-        ));
-      const expensesTotal = Math.round(Number(expRow?.total ?? 0));
+        ))
+        .groupBy(dailyExpenses.categoryId, expenseCategories.name, dailyExpenses.category);
+
+      // 같은 분류명이 categoryId/legacy 양쪽으로 분산될 수 있어 동일 키로 한 번 더 합산
+      const expCatMap = new Map<string, { category: string; amount: number; count: number }>();
+      for (const r of expByCatRows) {
+        const key = r.categoryName ?? r.legacyCategory ?? "미분류";
+        const existing = expCatMap.get(key);
+        const amt = Math.round(Number(r.amount));
+        const cnt = Number(r.count);
+        if (existing) { existing.amount += amt; existing.count += cnt; }
+        else { expCatMap.set(key, { category: key, amount: amt, count: cnt }); }
+      }
+      const expensesByCategory = Array.from(expCatMap.values()).sort((a, b) => b.amount - a.amount);
+      const expensesTotal = expensesByCategory.reduce((s, e) => s + e.amount, 0);
 
       // ── 고정비 (profit_ratio 정확 계산을 위해 매입/인건비/즉시지출 이후 호출) ──
       const fixedResult = await calcMonthlyFixedCosts(
@@ -573,6 +595,7 @@ export const monthlyClosingsRouter = router({
           purchasesByCounterparty: confirmedPurchases.byCounterparty,
           laborByCompany: confirmedLabor.byCompany,
           fixedBreakdown,
+          expensesByCategory,
         },
         // 미반영분 (일마감 미완료)
         unconfirmed: {
