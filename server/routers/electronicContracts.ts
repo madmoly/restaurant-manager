@@ -367,6 +367,19 @@ export const electronicContractsRouter = router({
       // over5Employees 자동 결정 — 소속회사 마스터 매칭 (없으면 false 보수적 기본)
       const over5 = await getOver5FromCompany(input.restaurantId, input.affiliatedCompany);
 
+      // 포괄연차수당 검증 (2026-05-02): 5인 이상 사업장 + 월급제 → annualLeavePay > 0 필수
+      // 사업주 운영 정책: 모든 직원 급여를 포괄연차수당으로 지급. 0원 입력 시 본문이
+      // "미사용 연차에 대해서는 관련 법령에 따라 수당으로 정산한다"로 출력되어 정책과 충돌.
+      if (over5 && input.wageType === "monthly") {
+        const alp = Number(input.annualLeavePay ?? 0);
+        if (!isFinite(alp) || alp <= 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "5인 이상 사업장의 월급제 계약은 포괄연차수당이 0원일 수 없습니다.",
+          });
+        }
+      }
+
       // 동일 직원의 기존 활성 계약서 자동 만료 처리 (직원 1명당 1계약)
       if (input.employeeId) {
         await db
@@ -477,7 +490,13 @@ export const electronicContractsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { id, ...updates } = input;
       const [contract] = await db
-        .select({ status: employmentElectronicContracts.status, restaurantId: employmentElectronicContracts.restaurantId })
+        .select({
+          status: employmentElectronicContracts.status,
+          restaurantId: employmentElectronicContracts.restaurantId,
+          wageType: employmentElectronicContracts.wageType,
+          over5Employees: employmentElectronicContracts.over5Employees,
+          annualLeavePay: employmentElectronicContracts.annualLeavePay,
+        })
         .from(employmentElectronicContracts)
         .where(eq(employmentElectronicContracts.id, id))
         .limit(1);
@@ -503,6 +522,25 @@ export const electronicContractsRouter = router({
           contract.restaurantId,
           updates.affiliatedCompany,
         );
+      }
+
+      // 포괄연차수당 검증 (2026-05-02): 업데이트 후 최종 상태 기준
+      // 5인 이상 + 월급제 → annualLeavePay > 0 필수 (사업주 운영 정책: 전부 포괄로 지급)
+      const finalOver5 = setData.over5Employees !== undefined
+        ? Boolean(setData.over5Employees)
+        : Boolean(contract.over5Employees);
+      const finalWageType = updates.wageType ?? contract.wageType;
+      const finalAnnualLeavePay = updates.annualLeavePay !== undefined
+        ? updates.annualLeavePay
+        : contract.annualLeavePay;
+      if (finalOver5 && finalWageType === "monthly") {
+        const alp = Number(finalAnnualLeavePay ?? 0);
+        if (!isFinite(alp) || alp <= 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "5인 이상 사업장의 월급제 계약은 포괄연차수당이 0원일 수 없습니다.",
+          });
+        }
       }
 
       if (Object.keys(setData).length > 0) {

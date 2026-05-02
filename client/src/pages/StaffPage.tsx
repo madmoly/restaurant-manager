@@ -2069,6 +2069,9 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 {hourlyWageCalc > 0 && hourlyWageCalc < 10320 && (
                   <p className="text-[10px] text-red-600 font-semibold">⚠ 통상시급이 2026년 최저시급(10,320원) 미만입니다</p>
                 )}
+                {form.over5Employees && annualLeavePayCalc <= 0 && (
+                  <p className="text-[10px] text-red-600 font-semibold">⚠ 5인 이상 사업장의 월급제 계약은 포괄연차수당이 0원일 수 없습니다. 월급액을 확인하세요.</p>
+                )}
               </div>
             </div>
           )}
@@ -2204,6 +2207,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               if (!form.wageAmount || !isFinite(wageAmountNum) || wageAmountNum <= 0) {
                 toast.error(`${form.wageType === "hourly" ? "시급" : "월급"} 금액을 입력하세요`); return;
               }
+              // 포괄연차수당 검증 (2026-05-02): 5인 이상 + 월급제 → 0원 금지
+              if (form.over5Employees && form.wageType === "monthly" && annualLeavePayCalc <= 0) {
+                toast.error("5인 이상 사업장의 월급제 계약은 포괄연차수당이 0원일 수 없습니다.");
+                return;
+              }
               const payload = {
                 employeeName: form.employeeName,
                 employeePhone: form.employeePhone || undefined,
@@ -2243,7 +2251,13 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 create.mutate({ restaurantId, employeeId: form.employeeId || undefined, hasProbation: false, probationMonths: 0, ...payload });
               }
             }}
-            disabled={!form.employeeName || !form.affiliatedCompany || create.isPending || updateContract.isPending}
+            disabled={
+              !form.employeeName ||
+              !form.affiliatedCompany ||
+              create.isPending ||
+              updateContract.isPending ||
+              (form.over5Employees && form.wageType === "monthly" && wageNum > 0 && annualLeavePayCalc <= 0)
+            }
           >
             {(create.isPending || updateContract.isPending) ? "처리 중..." : editingContract ? "수정 저장" : "초안 생성"}
           </Button>
