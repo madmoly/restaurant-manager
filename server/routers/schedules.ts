@@ -968,8 +968,12 @@ export const schedulesRouter = router({
 
       // 박제 계약서 batch fetch (2026-05-02 노무사전송 누락 보완):
       //   restaurant_users.position이 NULL인 직원의 직위 / 직원 신원(주민·계좌)을 박제 계약서에서 채움.
-      //   매칭: restaurantId + employeeId + status='signed' 중 가장 최근 signedAt.
+      //   매칭: restaurantId + employeeId + status IN ('signed','superseded') (이력 토글에도 superseded 포함).
       //   snapshot* 컬럼 우선 (서명 시점 박제), NULL이면 본 컬럼 fallback (Phase E 박제 전 서명분).
+      // 정산월 활성 계약 (2026-05-03):
+      //   카드에 "현재 활성 계약"이 아닌 "정산월에 활성이었던 계약"을 노출. 진재이 사례 대응.
+      //   범위: contractStart ≤ monthEnd AND (contractEnd IS NULL OR contractEnd ≥ monthStart)
+      //   정산월 활성 계약 없으면 가장 최근 종료 계약을 fallback + monthlyContractMissing=true.
       const empIds = [...new Set(rows.map(r => r.userId).filter((v): v is number => Boolean(v)))];
       const contractMap = new Map<number, {
         position: string | null;
@@ -977,6 +981,12 @@ export const schedulesRouter = router({
         bankAccount: string | null;
         residentNumber: string | null;
       }>();
+      // 정산월 (KST) 범위 — 문자열 비교 (DATE 타입과 매칭)
+      const monthStartStr = `${input.year}-${monthStr}-01`;
+      const monthEndStr = `${ny}-${String(nm).padStart(2, "0")}-01`; // 다음 달 1일 (exclusive)
+      type ContractRecord = { contractStart: string; contractEnd: string | null; signedAt: string | null };
+      const monthlyContractMap = new Map<number, { record: ContractRecord; missing: boolean }>();
+      const historyMap = new Map<number, ContractRecord[]>();
       if (empIds.length > 0) {
         const ecRows = await db
           .select({
@@ -989,27 +999,77 @@ export const schedulesRouter = router({
             snapshotBankAccount: employmentElectronicContracts.snapshotBankAccount,
             employeeResidentNumber: employmentElectronicContracts.employeeResidentNumber,
             snapshotResidentNumber: employmentElectronicContracts.snapshotResidentNumber,
+            contractStart: employmentElectronicContracts.contractStart,
+            contractEnd: employmentElectronicContracts.contractEnd,
+            snapshotContractStart: employmentElectronicContracts.snapshotContractStart,
+            snapshotContractEnd: employmentElectronicContracts.snapshotContractEnd,
             signedAt: employmentElectronicContracts.signedAt,
+            status: employmentElectronicContracts.status,
           })
           .from(employmentElectronicContracts)
           .where(and(
             eq(employmentElectronicContracts.restaurantId, input.restaurantId),
-            eq(employmentElectronicContracts.status, "signed"),
+            sql`${employmentElectronicContracts.status} IN ('signed', 'superseded')`,
             sql`${employmentElectronicContracts.employeeId} IN (${sql.join(empIds.map(id => sql`${id}`), sql`, `)})`,
           ))
           .orderBy(desc(employmentElectronicContracts.signedAt));
         for (const c of ecRows) {
-          if (!c.employeeId || contractMap.has(c.employeeId)) continue;
-          contractMap.set(c.employeeId, {
-            position: c.snapshotPosition ?? c.position ?? null,
-            bankName: c.snapshotBankName ?? c.bankName ?? null,
-            bankAccount: c.snapshotBankAccount ?? c.employeeBankAccount ?? null,
-            residentNumber: c.snapshotResidentNumber ?? c.employeeResidentNumber ?? null,
-          });
+          if (!c.employeeId) continue;
+          // 노무사전송 누락 보완용 fallback 맵: 가장 최근 signedAt 1건만
+          if (!contractMap.has(c.employeeId)) {
+            contractMap.set(c.employeeId, {
+              position: c.snapshotPosition ?? c.position ?? null,
+              bankName: c.snapshotBankName ?? c.bankName ?? null,
+              bankAccount: c.snapshotBankAccount ?? c.employeeBankAccount ?? null,
+              residentNumber: c.snapshotResidentNumber ?? c.employeeResidentNumber ?? null,
+            });
+          }
+          // 계약기간 박제 우선 (snapshot*), 없으면 본 컬럼
+          const cs = c.snapshotContractStart ?? c.contractStart;
+          if (!cs) continue;
+          const csStr = String(cs);
+          const ce = c.snapshotContractEnd ?? c.contractEnd;
+          const ceStr = ce ? String(ce) : null;
+          const record: ContractRecord = {
+            contractStart: csStr,
+            contractEnd: ceStr,
+            signedAt: c.signedAt ? new Date(c.signedAt).toISOString() : null,
+          };
+          // 이력 누적 (signedAt desc 순, 동일 토큰 중복 가능성 매우 낮으므로 단순 push)
+          const list = historyMap.get(c.employeeId) ?? [];
+          list.push(record);
+          historyMap.set(c.employeeId, list);
+        }
+        // 정산월 활성 계약 선택. monthEndStr는 다음달 1일(exclusive).
+        for (const [empId, list] of historyMap.entries()) {
+          // 1) 정산월에 활성 계약: signedAt desc 중 첫 번째 적합 (활성이 여러 건이면 가장 최근 서명이 사실상 유효)
+          const active = list.find(r =>
+            r.contractStart < monthEndStr &&
+            (r.contractEnd === null || r.contractEnd >= monthStartStr)
+          );
+          if (active) {
+            monthlyContractMap.set(empId, { record: active, missing: false });
+            continue;
+          }
+          // 2) 정산월 이전에 가장 늦게 종료된 계약 (contractEnd desc 정렬)
+          const past = list
+            .filter(r => r.contractEnd !== null && r.contractEnd < monthStartStr)
+            .sort((a, b) => (b.contractEnd ?? "").localeCompare(a.contractEnd ?? ""))[0];
+          if (past) {
+            monthlyContractMap.set(empId, { record: past, missing: true });
+            continue;
+          }
+          // 3) 정산월 이후에 가장 먼저 시작될 계약 (contractStart asc 정렬)
+          const future = list
+            .filter(r => r.contractStart >= monthEndStr)
+            .sort((a, b) => a.contractStart.localeCompare(b.contractStart))[0];
+          if (future) {
+            monthlyContractMap.set(empId, { record: future, missing: true });
+          }
         }
       }
 
-      console.log(`[laborCost] rows found: ${rows.length}, contracts mapped: ${contractMap.size}`);
+      console.log(`[laborCost] rows found: ${rows.length}, contracts mapped: ${contractMap.size}, monthly active: ${[...monthlyContractMap.values()].filter(v => !v.missing).length}/${monthlyContractMap.size}`);
 
       // ── 영업일수 계산 ──
       // 1) 정기 휴무 요일 조회
@@ -1292,6 +1352,10 @@ export const schedulesRouter = router({
             night: 0,
           };
 
+          // 정산월 활성 계약 (2026-05-03)
+          const monthlyEntry = uid ? monthlyContractMap.get(uid) : undefined;
+          const history = uid ? historyMap.get(uid) ?? [] : [];
+
           return {
             ...emp,
             isTemp,
@@ -1314,6 +1378,15 @@ export const schedulesRouter = router({
             over5Employees: emp.over5Employees,
             hourlyWageIncludesHolidayPay: emp.hourlyWageIncludesHolidayPay,
             taxMode: emp.taxMode,
+            // 정산월 활성 계약 — 카드 표시용. 없으면 fallback(직전/직후) + missing=true
+            monthlyContractStart: monthlyEntry?.record.contractStart ?? null,
+            monthlyContractEnd: monthlyEntry?.record.contractEnd ?? null,
+            monthlyContractMissing: monthlyEntry ? monthlyEntry.missing : (history.length > 0),
+            contractHistory: history.map(r => ({
+              contractStart: r.contractStart,
+              contractEnd: r.contractEnd,
+              signedAt: r.signedAt,
+            })),
             userId: undefined, // 클라이언트에 노출하지 않음
             dateSet: undefined, // 내부 집계용
             shiftsForWeek: undefined, // 내부 집계용

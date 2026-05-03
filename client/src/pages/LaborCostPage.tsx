@@ -473,6 +473,11 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
               </span>
             )}
             {emp.recheckRequired && <AlertTriangle className="w-3 h-3 text-amber-500" />}
+            {emp.monthlyContractMissing && (
+              <span className="text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5">
+                <AlertTriangle className="w-2.5 h-2.5" /> 정산월 계약 미연결
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -580,10 +585,17 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
             <div className="col-span-3">
               <span className="text-muted-foreground">계약기간</span>
               <div className="font-medium text-foreground text-[10px]">
-                {emp.contractStart ? `${fmtDate(emp.contractStart)} ~ ${fmtDate(emp.contractEnd)}` : "-"}
+                {(() => {
+                  const cs = emp.monthlyContractStart ?? emp.contractStart;
+                  const ce = emp.monthlyContractEnd ?? emp.contractEnd;
+                  return cs ? `${fmtDate(cs)} ~ ${fmtDate(ce)}` : "-";
+                })()}
               </div>
             </div>
           </div>
+          {emp.contractHistory && emp.contractHistory.length > 0 && (
+            <ContractHistoryToggle history={emp.contractHistory} />
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] pt-1 border-t border-border/30">
@@ -668,6 +680,37 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/* ─── 계약 이력 토글 ─────────────────────────────── */
+function ContractHistoryToggle({ history }: { history: Array<{ contractStart: string; contractEnd: string | null; signedAt: string | null }> }) {
+  const [open, setOpen] = useState(false);
+  // 시간순 정렬 (오래된 순 → 최신 순)
+  const sorted = [...history].sort((a, b) => a.contractStart.localeCompare(b.contractStart));
+  return (
+    <div className="text-[10px]">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="text-muted-foreground hover:text-foreground flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-accent"
+      >
+        {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        계약 이력 {history.length}건
+      </button>
+      {open && (
+        <ul className="mt-1 pl-3 space-y-0.5 text-muted-foreground">
+          {sorted.map((r, i) => (
+            <li key={i}>
+              {fmtDate(r.contractStart)} ~ {fmtDate(r.contractEnd)}
+              {r.signedAt && (
+                <span className="ml-1 text-muted-foreground/70">(서명 {fmtDate(r.signedAt.slice(0, 10))})</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
