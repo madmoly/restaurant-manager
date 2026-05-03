@@ -457,7 +457,6 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
   };
 
   const subUsed = emp.substituteLeave && emp.substituteLeave.used > 0;
-  const annUsed = emp.annualLeave && emp.annualLeave.used > 0;
   const badge = wageTypeBadge(emp);
   const wb = emp.wageBreakdown ?? { base: Math.round(emp.totalWage ?? 0), weeklyHoliday: 0, overtime: 0, night: 0 };
   return (
@@ -545,34 +544,17 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
         );
       })()}
 
-      {/* 메타 — 정규직: 대체휴무/연차/계약기간/계약·실휴무 */}
+      {/* 메타 — 정규직: 대체휴무/계약기간/계약·실휴무 (연차는 포괄수당 박제, 시스템 미추적) */}
       {!emp.isTemp ? (
         <div className="space-y-1 pt-1 border-t border-border/30">
-          <div className="grid grid-cols-4 gap-x-3 gap-y-1 text-[11px]">
-            {/* 휴가 라인은 5인이상 직원에게만 표시 (5인미만은 법적 의무 없음) */}
-            {emp.over5Employees ? (
-              <>
-                <div>
-                  <span className="text-muted-foreground">대체휴무</span>
-                  <div className="font-medium text-foreground">
-                    {subUsed ? "사용" : "미사용"}
-                    {emp.substituteLeave && <span className="text-muted-foreground"> ({emp.substituteLeave.remaining}일)</span>}
-                  </div>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">연차</span>
-                  <div className="font-medium text-foreground">
-                    {annUsed ? "사용" : "미사용"}
-                    {emp.annualLeave && <span className="text-muted-foreground"> ({emp.annualLeave.remaining}일)</span>}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="col-span-2">
-                <span className="text-muted-foreground">휴가</span>
-                <div className="text-[10px] text-muted-foreground">5인미만 사업장 — 법정 의무 없음</div>
+          <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-[11px]">
+            <div>
+              <span className="text-muted-foreground">대체휴무</span>
+              <div className="font-medium text-foreground">
+                {subUsed ? "사용" : "미사용"}
+                {emp.substituteLeave && <span className="text-muted-foreground"> ({emp.substituteLeave.remaining}일)</span>}
               </div>
-            )}
+            </div>
             <div>
               <span className="text-muted-foreground">계약/실휴무</span>
               <div className="font-medium text-foreground">{emp.contractDaysOff ?? 0}/{emp.daysOff ?? 0}일</div>
@@ -583,27 +565,13 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
                 {emp.hireDate ? fmtDate(emp.hireDate) : "-"}
               </div>
             </div>
-            <div className="col-span-4">
+            <div className="col-span-3">
               <span className="text-muted-foreground">계약기간</span>
               <div className="font-medium text-foreground text-[10px]">
                 {emp.contractStart ? `${fmtDate(emp.contractStart)} ~ ${fmtDate(emp.contractEnd)}` : "-"}
               </div>
             </div>
           </div>
-          {/* 연차 발생 일정 (5인이상 + 입사일 있는 경우만) */}
-          {emp.over5Employees && emp.annualAccrual && (
-            <div className="text-[10px] bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded px-2 py-1 text-blue-700 dark:text-blue-300">
-              <div>
-                입사일 기준 누적 발생 <b>{emp.annualAccrual.totalAccruedToDate}일</b>
-                {" · "}
-                다음 발생 <b>{fmtDate(emp.annualAccrual.nextAccrualDate)}</b>
-                {" "}<span className="text-muted-foreground">(+{emp.annualAccrual.nextAccrualAmount}일)</span>
-              </div>
-              <div className="text-muted-foreground mt-0.5">
-                연차 사용 시 자동 소진되며 급여에는 영향 없음 (정상 출근 처리).
-              </div>
-            </div>
-          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] pt-1 border-t border-border/30">
