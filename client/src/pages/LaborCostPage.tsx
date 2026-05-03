@@ -514,22 +514,34 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
         const holidayCell = wHoliday > 0
           ? <span className="font-medium text-foreground">{fmtWon(wHoliday)}</span>
           : <span className="font-medium text-muted-foreground">포함</span>;
+        const isHourly = emp.wageType === "hourly";
+        const hourlyRate = isHourly ? Number(emp.wageAmount) : NaN;
+        const gridCols = isHourly ? "grid-cols-4" : "grid-cols-3";
+        const totalSpan = isHourly ? "col-span-4" : "col-span-3";
         return (
           <div className="space-y-1 pt-1 border-t border-border/30">
-            <div className="text-[11px] grid grid-cols-3 gap-x-3 gap-y-1">
+            <div className={`text-[11px] grid ${gridCols} gap-x-3 gap-y-1`}>
               <div>
                 <span className="text-muted-foreground">근무시간</span>
                 <div className="font-medium text-foreground">{(emp.totalHours ?? 0).toFixed(1)}h</div>
               </div>
+              {isHourly && (
+                <div>
+                  <span className="text-muted-foreground">시급</span>
+                  <div className="font-medium text-foreground">
+                    {isFinite(hourlyRate) && hourlyRate > 0 ? fmtWon(hourlyRate) : "-"}
+                  </div>
+                </div>
+              )}
               <div>
-                <span className="text-muted-foreground">{emp.wageType === "hourly" ? "시간×시급" : "기본"}</span>
+                <span className="text-muted-foreground">{isHourly ? "시간×시급" : "기본"}</span>
                 <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
               </div>
               <div>
                 <span className="text-muted-foreground">주휴</span>
                 <div>{holidayCell}</div>
               </div>
-              <div className="col-span-3">
+              <div className={totalSpan}>
                 <span className="text-muted-foreground">합계</span>
                 <div className="font-bold text-foreground">{fmtWon(tentative)}</div>
               </div>
