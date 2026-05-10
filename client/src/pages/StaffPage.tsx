@@ -1036,7 +1036,7 @@ export default function StaffPage() {
                                     onChange={(e) => setEditingWage({ ...editingWage, effectiveFrom: e.target.value })} />
                                 </div>
                                 <div className="flex items-center gap-2 pt-1">
-                                  <button onClick={() => updateWage.mutate(editingWage)} className="px-3 py-1 text-xs rounded bg-primary text-primary-foreground">저장</button>
+                                  <button onClick={() => updateWage.mutate({ restaurantId, ...editingWage })} className="px-3 py-1 text-xs rounded bg-primary text-primary-foreground">저장</button>
                                   <button onClick={() => setEditingWage(null)} className="px-3 py-1 text-xs rounded border border-input">취소</button>
                                 </div>
                               </div>
