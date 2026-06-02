@@ -142,13 +142,14 @@ async function runClaudeTextStage(
   const claudeStarted = Date.now();
   const response = await deps.anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 8192,
+    max_tokens: 16384,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
   });
 
   const claudeElapsed = Date.now() - claudeStarted;
   const inputTokens = response.usage?.input_tokens ?? 0;
   const outputTokens = response.usage?.output_tokens ?? 0;
+  console.log(`[OCR] stop_reason=${response.stop_reason}, output_tokens=${outputTokens}`);
 
   const text = deps.extractText(response) ?? "";
   const rawJson = deps.parseAIJson(text);
@@ -187,7 +188,7 @@ async function runClaudeVisionStage(
   const claudeStarted = Date.now();
   const response = await deps.anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 8192,
+    max_tokens: 16384,
     messages: [
       {
         role: "user",
@@ -209,6 +210,7 @@ async function runClaudeVisionStage(
   const claudeElapsed = Date.now() - claudeStarted;
   const inputTokens = response.usage?.input_tokens ?? 0;
   const outputTokens = response.usage?.output_tokens ?? 0;
+  console.log(`[OCR] stop_reason=${response.stop_reason}, output_tokens=${outputTokens}`);
 
   const text = deps.extractText(response) ?? "";
   const rawJson = deps.parseAIJson(text);
