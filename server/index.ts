@@ -1407,6 +1407,25 @@ app.use(express.json({ limit: "10mb" }));
       console.log("[migrate:redesign-2026-05-02-E] already applied (skip DROP TABLE)");
     }
 
+    // ─── 피드백/버그 제보 테이블 ──────────────────────────────────────────────
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS user_feedbacks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        userId INT NOT NULL,
+        restaurantId INT NULL,
+        type ENUM('bug','suggestion') NOT NULL DEFAULT 'bug',
+        title VARCHAR(200) NOT NULL,
+        content TEXT NOT NULL,
+        screenshotBase64 MEDIUMTEXT NULL,
+        status ENUM('pending','reviewed','resolved') NOT NULL DEFAULT 'pending',
+        createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (userId) REFERENCES users(id),
+        INDEX idx_feedback_user (userId),
+        INDEX idx_feedback_status (status, createdAt)
+      )
+    `).catch(() => {});
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

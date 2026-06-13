@@ -1452,3 +1452,18 @@ export const posOrderCounters = mysqlTable(
 );
 export type PosOrderCounter = typeof posOrderCounters.$inferSelect;
 export type InsertPosOrderCounter = typeof posOrderCounters.$inferInsert;
+
+// ─── 피드백/버그 제보 ────────────────────────────────────────────────────────
+export const userFeedbacks = mysqlTable("user_feedbacks", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  restaurantId: int("restaurantId"),
+  type: mysqlEnum("type", ["bug", "suggestion"]).notNull().default("bug"),
+  title: varchar("title", { length: 200 }).notNull(),
+  content: text("content").notNull(),
+  screenshotBase64: mediumtext("screenshotBase64"),
+  status: mysqlEnum("status", ["pending", "reviewed", "resolved"]).notNull().default("pending"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type UserFeedback = typeof userFeedbacks.$inferSelect;

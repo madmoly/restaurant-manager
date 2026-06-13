@@ -39,6 +39,8 @@ import { posRouter } from "./pos";
 import { settlementStatementsRouter } from "./settlementStatements";
 // 계약·인건비 재설계 (2026-05-02)
 import { affiliatedCompaniesRouter } from "./affiliatedCompanies";
+// 피드백/버그 제보
+import { feedbackRouter } from "./feedback";
 
 export const appRouter = router({
   auth: authRouter,
@@ -81,6 +83,8 @@ export const appRouter = router({
   settlementStatements: settlementStatementsRouter,
   // 계약·인건비 재설계
   affiliatedCompanies: affiliatedCompaniesRouter,
+  // 피드백/버그 제보
+  feedback: feedbackRouter,
 });
 
 export type AppRouter = typeof appRouter;

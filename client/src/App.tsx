@@ -29,6 +29,7 @@ import ContractSignPage from "./pages/ContractSignPage";
 import JoinPage from "./pages/JoinPage";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
 import SystemPage from "./pages/SystemPage";
+import FeedbackListPage from "./pages/FeedbackListPage";
 import RecipesPage from "./pages/RecipesPage";
 import StoreInfoPage from "./pages/StoreInfoPage";
 import AppLayout from "./components/AppLayout";
@@ -90,6 +91,7 @@ function RoleRouter() {
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/system" component={SystemPage} />
+            <Route path="/feedback" component={FeedbackListPage} />
           </>
         )}
 

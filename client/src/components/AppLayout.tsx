@@ -5,6 +5,7 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
 import TutorialBanner from "@/components/TutorialBanner";
+import FeedbackButton from "@/components/FeedbackButton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -17,14 +18,14 @@ import {
 } from "@/components/ui/select";
 import { cn, formatKoreanDate } from "@/lib/utils";
 import { ROLE_LABELS, type EffectiveRole } from "@shared/permissions";
-import { 
+import {
   UtensilsCrossed, LogOut, Menu, X, Sun, Moon, MoreHorizontal,
   Check, Building2, ZoomIn,
 
   // 새롭게 개편된 직관적인 프리미엄 아이콘 세트
   LayoutGrid, Activity, CalendarRange, ListChecks, Clock,
   UsersRound, Coins, BarChart3, Receipt, ShoppingCart, ShieldCheck,
-  Store, Bell, ChefHat, ClipboardList, CalendarClock,
+  Store, Bell, ChefHat, ClipboardList, CalendarClock, MessageSquareWarning,
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -79,6 +80,12 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
     label: "시스템 관리", href: "/system",
     icon: <Activity className="h-4 w-4" />,
     mobileIcon: <Activity className="h-5 w-5" />,
+    roles: ["master"],
+  },
+  {
+    label: "피드백 관리", href: "/feedback",
+    icon: <MessageSquareWarning className="h-4 w-4" />,
+    mobileIcon: <MessageSquareWarning className="h-5 w-5" />,
     roles: ["master"],
   },
 ];
@@ -579,6 +586,9 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </Button>
             )}
+
+            {/* 피드백 버튼 */}
+            <FeedbackButton />
 
             {/* 알림 벨 */}
             <NotificationBell />
