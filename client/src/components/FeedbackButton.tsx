@@ -83,7 +83,7 @@ export default function FeedbackButton() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-2 w-[360px] bg-popover border border-border rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+          <div className="fixed inset-x-4 top-20 z-50 max-h-[calc(100svh-5.5rem)] overflow-y-auto bg-popover border border-border rounded-xl shadow-2xl animate-in fade-in slide-in-from-top-2 lg:absolute lg:inset-x-auto lg:left-auto lg:right-0 lg:top-full lg:mt-2 lg:w-[360px] lg:max-h-none lg:overflow-visible">
             {/* 헤더 */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <span className="text-sm font-semibold text-foreground">피드백 제보</span>
