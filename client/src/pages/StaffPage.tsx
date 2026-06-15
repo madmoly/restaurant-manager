@@ -1869,7 +1869,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             <input className={inputCls + " mt-1"} value={form.employeePhone} onChange={(e) => setForm({ ...form, employeePhone: e.target.value })} placeholder="연락처 (예: 010-1234-5678)" />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className={labelCls}>계약유형</label>
               <select className={inputCls} value={form.contractType} onChange={(e) => setForm({ ...form, contractType: e.target.value as any })}>
@@ -1885,6 +1885,12 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               <input type="date" className={inputCls} value={form.hireDate}
                 onChange={(e) => setForm({ ...form, hireDate: e.target.value })} />
               <p className={subLabelCls}>계약서 시점에 박제됩니다 (직원정보 SSOT와 분리)</p>
+            </div>
+            <div>
+              <label className={labelCls}>휴게(분)</label>
+              <input type="number" className={inputCls} value={form.breakMinutes}
+                onChange={(e) => setForm({ ...form, breakMinutes: Number(e.target.value) })}
+                min={0} max={480} step={5} placeholder="60" />
             </div>
           </div>
 
