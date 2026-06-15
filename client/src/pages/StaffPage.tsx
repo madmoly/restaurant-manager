@@ -1595,6 +1595,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     { enabled: restaurantId > 0 },
   );
   const [templateApplied, setTemplateApplied] = useState(false);
+  const [showAffiliatedManage, setShowAffiliatedManage] = useState(false);
 
   const ec = editingContract; // 수정 모드 시 기존 데이터
   const [form, setForm] = useState({
@@ -1809,10 +1810,25 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             여기서 변경한 값은 SSOT에 자동 반영되지 않으므로, 박제와 SSOT가 어긋나면 갱신 필요 배너가 출현합니다.
           </div>
 
-          {/* ═══ 사업주 (소속회사) — 재설계 2026-05-02: select + over5 자동 ═══ */}
+          {/* ═══ 사업주 (소속회사) ═══ */}
           <div className="rounded-lg border border-border p-3 space-y-2">
-            <div>
+            <div className="flex items-center justify-between">
               <label className={labelCls}>사업주 (소속회사)</label>
+              <button
+                type="button"
+                onClick={() => setShowAffiliatedManage((v) => !v)}
+                className="text-[11px] text-primary hover:underline flex items-center gap-0.5"
+              >
+                <Building2 className="w-3 h-3" />
+                {showAffiliatedManage ? "닫기" : "소속회사 관리"}
+              </button>
+            </div>
+
+            {showAffiliatedManage && (
+              <AffiliatedCompaniesSection restaurantId={restaurantId} />
+            )}
+
+            <div>
               <select className={inputCls} value={form.affiliatedCompany}
                 onChange={(e) => {
                   const sel = affiliatedCompaniesMaster.find((c: any) => c.companyName === e.target.value);
@@ -1820,7 +1836,6 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                     ...form,
                     affiliatedCompany: e.target.value,
                     employerBusinessNumber: sel?.businessNumber || form.employerBusinessNumber,
-                    // 표시 전용 (서버가 마스터에서 다시 결정)
                     over5Employees: sel ? !!sel.over5Employees : false,
                   });
                 }}
@@ -1834,7 +1849,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               </select>
               {affiliatedCompaniesMaster.length === 0 && (
                 <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
-                  ⚠ 등록된 소속회사가 없습니다. 매장 정보에서 먼저 등록하세요.
+                  ⚠ 등록된 소속회사가 없습니다. 위 "소속회사 관리"에서 먼저 등록하세요.
                 </p>
               )}
             </div>
@@ -1853,7 +1868,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 )}
               </div>
             )}
-            <p className={subLabelCls}>※ 5인 여부는 소속회사 마스터(매장 정보)에서 토글합니다</p>
+            <p className={subLabelCls}>※ 5인 여부는 소속회사 관리에서 토글합니다</p>
           </div>
 
           {/* ═══ 직원 정보 ═══ */}
@@ -2373,6 +2388,172 @@ function QuickAddModal({ restaurantId, onClose, onSubmit, isPending }: {
             onClick={() => onSubmit({ name: name.trim(), phone: phone.trim(), role, sendInvite })}
           >
             {isPending ? "처리 중..." : "추가"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 소속회사 마스터 관리 ────────────────────────────────────────────────────
+
+function AffiliatedCompaniesSection({ restaurantId }: { restaurantId: number }) {
+  const utils = trpc.useUtils();
+  const { data: list = [], isLoading } = trpc.affiliatedCompanies.list.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<any | null>(null);
+
+  const createMut = trpc.affiliatedCompanies.create.useMutation({
+    onSuccess() { toast.success("소속회사 등록됨"); utils.affiliatedCompanies.list.invalidate(); setShowForm(false); },
+    onError(e) { toast.error(e.message); },
+  });
+  const updateMut = trpc.affiliatedCompanies.update.useMutation({
+    onSuccess() { toast.success("수정됨"); utils.affiliatedCompanies.list.invalidate(); utils.restaurants.getStaff.invalidate(); setEditing(null); setShowForm(false); },
+    onError(e) { toast.error(e.message); },
+  });
+  const deleteMut = trpc.affiliatedCompanies.delete.useMutation({
+    onSuccess() { toast.success("삭제됨"); utils.affiliatedCompanies.list.invalidate(); },
+    onError(e) { toast.error(e.message); },
+  });
+
+  return (
+    <div className="border border-border rounded-lg bg-card p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Building2 className="w-3.5 h-3.5 text-primary" />
+          <span className="text-xs font-semibold text-foreground">소속회사 관리</span>
+          <span className="text-[10px] text-muted-foreground">{list.length}건</span>
+        </div>
+        <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={() => { setEditing(null); setShowForm(true); }}>
+          <Plus className="w-3 h-3 mr-0.5" /> 등록
+        </Button>
+      </div>
+
+      {!isLoading && list.length === 0 && (
+        <div className="text-[11px] rounded-md px-3 py-2 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+          <AlertTriangle className="w-3 h-3 inline mr-1" />
+          등록된 소속회사가 없습니다. 계약서 작성 전에 먼저 등록하세요.
+        </div>
+      )}
+
+      {!isLoading && list.length > 0 && (
+        <div className="space-y-1.5">
+          {list.map((c: any) => (
+            <div key={c.id} className="border border-border rounded-md px-3 py-2 flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-medium text-foreground">{c.companyName}</span>
+                  <span className={`text-[10px] px-1.5 py-0 rounded-full font-medium ${
+                    c.over5Employees ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                  }`}>{c.over5Employees ? "5인 이상" : "5인 미만"}</span>
+                  {c.isDefault && <span className="text-[10px] text-muted-foreground">기본</span>}
+                </div>
+                {c.businessNumber && <div className="text-[10px] text-muted-foreground">{c.businessNumber}</div>}
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={() => updateMut.mutate({ id: c.id, restaurantId, over5Employees: !c.over5Employees })}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent text-foreground"
+                  title="5인 미만/이상 토글"
+                >{c.over5Employees ? "→ 5인↓" : "→ 5인↑"}</button>
+                <button onClick={() => { setEditing(c); setShowForm(true); }} className="p-1 rounded hover:bg-accent text-muted-foreground" title="수정">
+                  <Edit3 className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => { if (confirm(`"${c.companyName}"을(를) 삭제하시겠습니까?`)) deleteMut.mutate({ id: c.id, restaurantId }); }}
+                  className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500" title="삭제"
+                ><Trash2 className="w-3 h-3" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[10px] text-muted-foreground">⚠ 5인 토글 변경 시 기존 계약서 박제는 변경되지 않습니다. 신규 계약서부터 적용.</p>
+
+      {showForm && (
+        <AffiliatedCompanyFormModal
+          restaurantId={restaurantId}
+          editing={editing}
+          onClose={() => { setShowForm(false); setEditing(null); }}
+          onSubmit={(payload) => {
+            if (editing) updateMut.mutate({ id: editing.id, restaurantId, ...payload });
+            else createMut.mutate({ restaurantId, ...payload });
+          }}
+          isPending={createMut.isPending || updateMut.isPending}
+        />
+      )}
+    </div>
+  );
+}
+
+function AffiliatedCompanyFormModal({ editing, onClose, onSubmit, isPending }: {
+  restaurantId: number;
+  editing: any | null;
+  onClose: () => void;
+  onSubmit: (payload: { companyName: string; businessNumber?: string | null; over5Employees: boolean; isDefault: boolean }) => void;
+  isPending: boolean;
+}) {
+  const [companyName, setCompanyName] = useState(editing?.companyName ?? "");
+  const [businessNumber, setBusinessNumber] = useState(editing?.businessNumber ?? "");
+  const [over5, setOver5] = useState<boolean>(editing?.over5Employees ?? false);
+  const [isDefault, setIsDefault] = useState<boolean>(editing?.isDefault ?? false);
+
+  const inputCls = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+      <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md mx-4 p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">{editing ? "소속회사 수정" : "소속회사 등록"}</h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">회사명 *</label>
+          <input className={inputCls} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="(주)회사명" autoFocus />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">사업자등록번호</label>
+          <input className={inputCls} value={businessNumber} onChange={(e) => setBusinessNumber(e.target.value)} placeholder="000-00-00000" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">사업장 규모</label>
+          <div className="mt-1 flex gap-1 bg-muted p-0.5 rounded-lg w-fit">
+            <button type="button" onClick={() => setOver5(false)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!over5 ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+              5인 미만
+            </button>
+            <button type="button" onClick={() => setOver5(true)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${over5 ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+              5인 이상
+            </button>
+          </div>
+          {editing && editing.over5Employees !== over5 && (
+            <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+              ⚠ 기존 직원 계약서 박제는 변경되지 않습니다. 신규 계약서부터 적용.
+            </p>
+          )}
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} className="rounded" />
+          기본 회사로 설정
+        </label>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose}>취소</Button>
+          <Button
+            onClick={() => {
+              if (!companyName.trim()) { toast.error("회사명을 입력하세요"); return; }
+              onSubmit({ companyName: companyName.trim(), businessNumber: businessNumber.trim() || null, over5Employees: over5, isDefault });
+            }}
+            disabled={isPending || !companyName.trim()}
+          >
+            {isPending ? "저장 중..." : editing ? "수정" : "등록"}
           </Button>
         </div>
       </div>
