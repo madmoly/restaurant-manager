@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
+import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import {
   ArrowUpDown, TrendingUp, TrendingDown,
@@ -8,7 +9,7 @@ import {
   ChevronDown, ChevronUp, Pencil, X, Save,
   ChevronLeft, ChevronRight,
   CalendarRange, AlertTriangle, Merge, CheckSquare, Square,
-  Trash2,
+  Trash2, Link2, Plus, CheckCircle2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,21 +17,35 @@ import { Card } from "@/components/ui/card";
 import { formatKRW } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 
-type TabId = "master" | "analysis" | "history";
+type TabId = "master" | "analysis" | "history" | "unmatched";
+
+const MANAGER_STORE_ROLES = ["owner", "supervisor", "store_manager", "manager"];
 
 export default function PurchaseManagementPage() {
   const { selectedRestaurant: current } = useRestaurant();
+  const { user } = useAuth();
   const restaurantId = current?.id ?? 0;
   const [activeTab, setActiveTab] = useState<TabId>("history");
+
+  const isManagerLevel =
+    user?.role === "master" || user?.role === "admin" ||
+    MANAGER_STORE_ROLES.includes(current?.storeRole ?? "");
+
+  const { data: unmatchedGroups } = trpc.purchasesV2.listUnmatchedItems.useQuery(
+    { restaurantId },
+    { enabled: !!restaurantId && isManagerLevel },
+  );
+  const unmatchedCount = unmatchedGroups?.length ?? 0;
 
   if (!restaurantId) {
     return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
   }
 
-  const tabs: { id: TabId; label: string; icon: any }[] = [
+  const tabs: { id: TabId; label: string; icon: any; badge?: number }[] = [
     { id: "history", label: "매입현황", icon: CalendarRange },
     { id: "master", label: "품목마스터", icon: Package },
     { id: "analysis", label: "가격분석", icon: ArrowUpDown },
+    ...(isManagerLevel ? [{ id: "unmatched" as TabId, label: "미연결", icon: Link2, badge: unmatchedCount }] : []),
   ];
 
   return (
@@ -49,7 +64,14 @@ export default function PurchaseManagementPage() {
                   active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <div className="relative">
+                  <Icon className="w-4 h-4" />
+                  {tab.badge != null && tab.badge > 0 && (
+                    <span className="absolute -top-1.5 -right-2 min-w-[14px] h-[14px] px-0.5 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center leading-none">
+                      {tab.badge > 99 ? "99+" : tab.badge}
+                    </span>
+                  )}
+                </div>
                 {tab.label}
               </button>
             );
@@ -62,6 +84,7 @@ export default function PurchaseManagementPage() {
         {activeTab === "master" && <ItemMasterTab restaurantId={restaurantId} />}
         {activeTab === "analysis" && <PriceAnalysisTab restaurantId={restaurantId} />}
         {activeTab === "history" && <MonthlyPurchaseTab restaurantId={restaurantId} />}
+        {activeTab === "unmatched" && <UnmatchedItemsTab restaurantId={restaurantId} />}
       </div>
     </div>
   );
@@ -1420,6 +1443,246 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 미연결 품목 탭 — orphan relink
+// ═══════════════════════════════════════════════════════════════════════
+function UnmatchedItemsTab({ restaurantId }: { restaurantId: number }) {
+  const utils = trpc.useUtils();
+  const { data: groups, isLoading } = trpc.purchasesV2.listUnmatchedItems.useQuery({ restaurantId });
+
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [newItemName, setNewItemName] = useState("");
+
+  const { data: searchResults } = trpc.items.searchSimilar.useQuery(
+    { restaurantId, query: searchQuery },
+    { enabled: searchQuery.length >= 1 },
+  );
+  const { data: newItemCandidates } = trpc.items.searchSimilar.useQuery(
+    { restaurantId, query: newItemName },
+    { enabled: showNewForm && newItemName.length >= 1 },
+  );
+
+  const relinkMutation = trpc.purchasesV2.relinkByName.useMutation({
+    onSuccess: (data) => {
+      toast.success(`${data.updated}건 연결됨`);
+      utils.purchasesV2.listUnmatchedItems.invalidate();
+      setExpanded(null);
+      resetForm();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const createAndRelinkMutation = trpc.purchasesV2.createItemAndRelinkByName.useMutation({
+    onSuccess: (data) => {
+      toast.success(`품목 생성 후 ${data.updated}건 연결됨`);
+      utils.purchasesV2.listUnmatchedItems.invalidate();
+      utils.items.list.invalidate();
+      setExpanded(null);
+      resetForm();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const resetForm = () => {
+    setSearchQuery("");
+    setSelectedItemId(null);
+    setShowNewForm(false);
+    setNewItemName("");
+  };
+
+  const handleExpand = (rawItemName: string) => {
+    if (expanded === rawItemName) {
+      setExpanded(null);
+      resetForm();
+    } else {
+      setExpanded(rawItemName);
+      setSearchQuery(rawItemName);
+      setSelectedItemId(null);
+      setShowNewForm(false);
+      setNewItemName(rawItemName);
+    }
+  };
+
+  if (isLoading) {
+    return <div className="text-center py-8 text-muted-foreground text-sm">불러오는 중...</div>;
+  }
+  if (!groups || groups.length === 0) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />
+        <p className="text-sm">미연결 품목이 없습니다</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground px-1">
+        품목마스터에 연결되지 않은 매입 항목입니다. 연결하면 가격비교·단가추이에 반영됩니다.
+      </p>
+      <Card className="divide-y divide-border">
+        {groups.map((group) => {
+          const isOpen = expanded === group.rawItemName;
+          return (
+            <div key={group.rawItemName}>
+              <button
+                className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-muted/30 transition-colors"
+                onClick={() => handleExpand(group.rawItemName)}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">{group.rawItemName}</span>
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{group.count}건</Badge>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    {group.counterpartyName && (
+                      <span className="text-xs text-muted-foreground">{group.counterpartyName}</span>
+                    )}
+                    <span className="text-xs text-muted-foreground">최근 {group.lastPurchaseDate}</span>
+                    {group.lastUnitPrice != null && (
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {formatKRW(group.lastUnitPrice)}{group.unitName ? `/${group.unitName}` : ""}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {isOpen
+                  ? <ChevronUp className="w-4 h-4 shrink-0 text-muted-foreground" />
+                  : <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground" />}
+              </button>
+
+              {isOpen && (
+                <div className="px-4 pb-4 space-y-3 bg-muted/10 border-t border-border">
+                  {!showNewForm ? (
+                    <>
+                      <div className="pt-3">
+                        <p className="text-xs text-muted-foreground mb-2">기존 품목에 연결</p>
+                        <Input
+                          value={searchQuery}
+                          onChange={(e) => { setSearchQuery(e.target.value); setSelectedItemId(null); }}
+                          placeholder="품목명 검색..."
+                          className="text-sm h-8"
+                        />
+                      </div>
+                      {searchResults && searchResults.length > 0 ? (
+                        <div className="space-y-1">
+                          {searchResults.map((item) => (
+                            <button
+                              key={item.id}
+                              onClick={() => setSelectedItemId(item.id)}
+                              className={`w-full px-3 py-2 text-left text-sm rounded border transition-colors ${
+                                selectedItemId === item.id
+                                  ? "border-primary bg-primary/5 text-primary"
+                                  : "border-border hover:bg-muted/30 text-foreground"
+                              }`}
+                            >
+                              {item.name}
+                              {item.costingCategory && (
+                                <span className="text-xs text-muted-foreground ml-1.5">({item.costingCategory})</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      ) : searchQuery.length > 0 ? (
+                        <p className="text-xs text-muted-foreground">검색 결과 없음</p>
+                      ) : null}
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          disabled={!selectedItemId || relinkMutation.isPending}
+                          onClick={() =>
+                            relinkMutation.mutate({
+                              restaurantId,
+                              rawItemName: group.rawItemName,
+                              itemId: selectedItemId!,
+                            })
+                          }
+                          className="flex-1"
+                        >
+                          연결
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShowNewForm(true)}
+                        >
+                          <Plus className="w-3.5 h-3.5 mr-1" />
+                          신규 등록
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="pt-3">
+                        <p className="text-xs text-muted-foreground mb-2">신규 품목 등록 후 연결</p>
+                        <Input
+                          value={newItemName}
+                          onChange={(e) => setNewItemName(e.target.value)}
+                          placeholder="품목명"
+                          className="text-sm h-8"
+                          autoFocus
+                        />
+                      </div>
+                      {newItemCandidates && newItemCandidates.length > 0 && (
+                        <div className="rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-3 py-2 space-y-1">
+                          <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                            <AlertTriangle className="w-3 h-3 inline mr-1" />
+                            유사한 품목이 이미 있습니다. 기존 품목 연결을 권장합니다.
+                          </p>
+                          {newItemCandidates.map((c) => (
+                            <button
+                              key={c.id}
+                              onClick={() => {
+                                setShowNewForm(false);
+                                setSearchQuery(c.name);
+                                setSelectedItemId(c.id);
+                              }}
+                              className="block text-xs text-amber-800 dark:text-amber-300 hover:underline"
+                            >
+                              → {c.name} 에 연결
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShowNewForm(false)}
+                          className="shrink-0"
+                        >
+                          취소
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={!newItemName.trim() || createAndRelinkMutation.isPending}
+                          onClick={() =>
+                            createAndRelinkMutation.mutate({
+                              restaurantId,
+                              rawItemName: group.rawItemName,
+                              newItemName: newItemName.trim(),
+                            })
+                          }
+                          className="flex-1"
+                        >
+                          등록+연결
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </Card>
     </div>
   );
 }

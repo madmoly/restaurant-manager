@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
 import { router, storeReadProcedure, storeWriteProcedure, storeManagerProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { db } from "../db";
@@ -1072,5 +1072,156 @@ export const purchasesV2Router = router({
         purchaseDate: r.purchaseDate,
         createdAt: r.createdAt,
       }));
+    }),
+
+  /** 미연결 품목 목록 — rawItemName 그룹핑 */
+  listUnmatchedItems: storeManagerProcedure
+    .query(async ({ input }) => {
+      const rows = (await db.execute(sql`
+        SELECT
+          oi.rawItemName,
+          COUNT(*) AS cnt,
+          MAX(o.purchaseDate) AS lastPurchaseDate,
+          SUBSTRING_INDEX(GROUP_CONCAT(oi.unitName ORDER BY o.purchaseDate DESC SEPARATOR 0x1f), 0x1f, 1) AS unitName,
+          SUBSTRING_INDEX(GROUP_CONCAT(CAST(oi.unitPrice AS CHAR) ORDER BY o.purchaseDate DESC SEPARATOR 0x1f), 0x1f, 1) AS lastUnitPrice,
+          MIN(c.id) AS counterpartyId,
+          MIN(c.name) AS counterpartyName
+        FROM purchase_order_items_v2 oi
+        JOIN purchase_orders_v2 o ON oi.purchaseOrderId = o.id
+        LEFT JOIN counterparties c ON o.counterpartyId = c.id
+        WHERE o.restaurantId = ${input.restaurantId}
+          AND oi.itemId IS NULL
+          AND oi.rawItemName IS NOT NULL
+          AND oi.rawItemName != ''
+        GROUP BY oi.rawItemName
+        ORDER BY cnt DESC, lastPurchaseDate DESC
+      `))[0] as any[];
+      return rows.map((r: any) => ({
+        rawItemName: r.rawItemName as string,
+        count: Number(r.cnt),
+        lastPurchaseDate: r.lastPurchaseDate instanceof Date
+          ? r.lastPurchaseDate.toISOString().split("T")[0]
+          : String(r.lastPurchaseDate ?? ""),
+        lastUnitPrice: r.lastUnitPrice != null ? Number(r.lastUnitPrice) : null,
+        unitName: (r.unitName ?? null) as string | null,
+        counterpartyId: r.counterpartyId != null ? Number(r.counterpartyId) : null,
+        counterpartyName: (r.counterpartyName ?? null) as string | null,
+      }));
+    }),
+
+  /** orphan 항목을 기존 품목에 연결 (rawItemName 기준 일괄) */
+  relinkByName: storeManagerProcedure
+    .input(z.object({
+      rawItemName: z.string().min(1),
+      itemId: z.number().int().positive(),
+    }))
+    .mutation(async ({ input }) => {
+      const rows = (await db.execute(sql`
+        SELECT oi.id, oi.unitName, oi.unitPrice, o.counterpartyId, o.status
+        FROM purchase_order_items_v2 oi
+        JOIN purchase_orders_v2 o ON oi.purchaseOrderId = o.id
+        WHERE o.restaurantId = ${input.restaurantId}
+          AND oi.itemId IS NULL
+          AND oi.rawItemName = ${input.rawItemName}
+        ORDER BY o.purchaseDate DESC
+      `))[0] as any[];
+
+      if (rows.length === 0) return { updated: 0 };
+
+      const ids = rows.map((r: any) => Number(r.id));
+      await db.update(purchaseOrderItemsV2)
+        .set({ itemId: input.itemId })
+        .where(inArray(purchaseOrderItemsV2.id, ids));
+
+      const seenCpIds = new Set<number>();
+      for (const row of rows) {
+        const cpId = row.counterpartyId != null ? Number(row.counterpartyId) : null;
+        if (!cpId || row.status !== "received" || seenCpIds.has(cpId)) continue;
+        seenCpIds.add(cpId);
+        const existing = await db
+          .select({ id: counterpartyItems.id })
+          .from(counterpartyItems)
+          .where(and(
+            eq(counterpartyItems.restaurantId, input.restaurantId),
+            eq(counterpartyItems.counterpartyId, cpId),
+            eq(counterpartyItems.itemId, input.itemId),
+          ))
+          .limit(1);
+        if (existing.length === 0) {
+          await db.insert(counterpartyItems).values({
+            restaurantId: input.restaurantId,
+            counterpartyId: cpId,
+            itemId: input.itemId,
+            supplierItemName: input.rawItemName,
+            purchaseUnit: row.unitName || null,
+            lastPrice: row.unitPrice != null ? String(row.unitPrice) : null,
+          });
+        }
+      }
+
+      return { updated: ids.length };
+    }),
+
+  /** 신규 품목 생성 후 orphan 연결 */
+  createItemAndRelinkByName: storeManagerProcedure
+    .input(z.object({
+      rawItemName: z.string().min(1),
+      newItemName: z.string().min(1),
+      itemType: z.enum(["product", "service", "misc"]).default("product"),
+      costingCategory: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const [result] = await db.insert(items).values({
+        restaurantId: input.restaurantId,
+        name: input.newItemName,
+        itemType: input.itemType,
+        costingCategory: input.costingCategory || null,
+      }).$returningId();
+      const newItemId = result.id;
+
+      const rows = (await db.execute(sql`
+        SELECT oi.id, oi.unitName, oi.unitPrice, o.counterpartyId, o.status
+        FROM purchase_order_items_v2 oi
+        JOIN purchase_orders_v2 o ON oi.purchaseOrderId = o.id
+        WHERE o.restaurantId = ${input.restaurantId}
+          AND oi.itemId IS NULL
+          AND oi.rawItemName = ${input.rawItemName}
+        ORDER BY o.purchaseDate DESC
+      `))[0] as any[];
+
+      if (rows.length > 0) {
+        const ids = rows.map((r: any) => Number(r.id));
+        await db.update(purchaseOrderItemsV2)
+          .set({ itemId: newItemId })
+          .where(inArray(purchaseOrderItemsV2.id, ids));
+
+        const seenCpIds = new Set<number>();
+        for (const row of rows) {
+          const cpId = row.counterpartyId != null ? Number(row.counterpartyId) : null;
+          if (!cpId || row.status !== "received" || seenCpIds.has(cpId)) continue;
+          seenCpIds.add(cpId);
+          const existing = await db
+            .select({ id: counterpartyItems.id })
+            .from(counterpartyItems)
+            .where(and(
+              eq(counterpartyItems.restaurantId, input.restaurantId),
+              eq(counterpartyItems.counterpartyId, cpId),
+              eq(counterpartyItems.itemId, newItemId),
+            ))
+            .limit(1);
+          if (existing.length === 0) {
+            await db.insert(counterpartyItems).values({
+              restaurantId: input.restaurantId,
+              counterpartyId: cpId,
+              itemId: newItemId,
+              supplierItemName: input.rawItemName,
+              purchaseUnit: row.unitName || null,
+              lastPrice: row.unitPrice != null ? String(row.unitPrice) : null,
+            });
+          }
+        }
+      }
+
+      return { itemId: newItemId, updated: rows.length };
     }),
 });
