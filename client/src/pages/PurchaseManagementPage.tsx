@@ -807,15 +807,28 @@ function PriceCompareTab({ restaurantId }: { restaurantId: number }) {
 function PriceTrendTab({ restaurantId }: { restaurantId: number }) {
   const [search, setSearch] = useState("");
   const [months, setMonths] = useState(6);
+  const [sort, setSort] = useState<"change" | "name">("change");
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const { data, isLoading } = trpc.purchasesV2.itemPriceTrend.useQuery(
     { restaurantId, months },
     { enabled: restaurantId > 0 },
   );
 
-  const items = (data || []).filter((item: any) =>
-    !search || item.itemName.toLowerCase().includes(search.toLowerCase())
-  );
+  const items = (data || [])
+    .filter((item: any) =>
+      !search || item.itemName.toLowerCase().includes(search.toLowerCase())
+    )
+    .map((item: any) => ({
+      ...item,
+      changePercent: item.points.length >= 2
+        ? ((item.latestPrice - item.points[0].unitPrice) / item.points[0].unitPrice * 100)
+        : 0,
+    }))
+    .sort((a: any, b: any) =>
+      sort === "change"
+        ? Math.abs(b.changePercent) - Math.abs(a.changePercent)
+        : a.itemName.localeCompare(b.itemName, "ko")
+    );
 
   return (
     <div className="space-y-3">
@@ -835,6 +848,14 @@ function PriceTrendTab({ restaurantId }: { restaurantId: number }) {
           <option value={6}>6개월</option>
           <option value={12}>12개월</option>
         </select>
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as "change" | "name")}
+          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+        >
+          <option value="change">변동률순</option>
+          <option value="name">품목명순</option>
+        </select>
       </div>
 
       {isLoading ? (
@@ -845,9 +866,7 @@ function PriceTrendTab({ restaurantId }: { restaurantId: number }) {
         <div className="space-y-2">
           {items.map((item: any) => {
             const expanded = expandedItem === item.itemName;
-            const changePercent = item.points.length >= 2
-              ? ((item.latestPrice - item.points[0].unitPrice) / item.points[0].unitPrice * 100)
-              : 0;
+            const { changePercent } = item;
 
             return (
               <Card key={item.itemName} className="overflow-hidden">
