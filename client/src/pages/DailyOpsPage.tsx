@@ -960,7 +960,7 @@ function PurchaseTab({
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [ocrOriginalItems, setOcrOriginalItems] = useState<any[] | null>(null);
-  const [ocrRotation, setOcrRotation] = useState(270);
+  const [ocrRotation, setOcrRotation] = useState(0);
   const [ocrStep, setOcrStep] = useState<'idle' | 'uploaded' | 'analyzed'>('idle');
   const [ocrDateSuggestion, setOcrDateSuggestion] = useState<string | null>(null);
   const ocrRetryRef = useRef(0);
@@ -1229,7 +1229,7 @@ function PurchaseTab({
     setAttachmentUrl(undefined);
     setOcrPreviewUrl(null);
     setOcrError(null);
-    setOcrRotation(270);
+    setOcrRotation(0);
     setOcrStep('idle');
     setOcrDateSuggestion(null);
     ocrRetryRef.current = 0;
@@ -1254,7 +1254,7 @@ function PurchaseTab({
     try {
       setOcrProcessing(true);
       setOcrError(null);
-      setOcrRotation(270);
+      setOcrRotation(0);
 
       const formData = new FormData();
       formData.append('photo', file);
@@ -2121,7 +2121,7 @@ function PurchaseTab({
                       setOcrPreviewUrl(null);
                       setAttachmentUrl(undefined);
                       setOcrStep('idle');
-                      setOcrRotation(270);
+                      setOcrRotation(0);
                       setPurchaseItems([emptyPurchaseItem()]);
                     }}
                     className="flex items-center gap-1 text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded hover:bg-red-500/10"
