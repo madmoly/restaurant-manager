@@ -960,7 +960,7 @@ function PurchaseTab({
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [ocrOriginalItems, setOcrOriginalItems] = useState<any[] | null>(null);
-  const [ocrRotation, setOcrRotation] = useState(0);
+  const [ocrRotation, setOcrRotation] = useState(270);
   const [ocrStep, setOcrStep] = useState<'idle' | 'uploaded' | 'analyzed'>('idle');
   const [ocrDateSuggestion, setOcrDateSuggestion] = useState<string | null>(null);
   const ocrRetryRef = useRef(0);
@@ -1229,7 +1229,7 @@ function PurchaseTab({
     setAttachmentUrl(undefined);
     setOcrPreviewUrl(null);
     setOcrError(null);
-    setOcrRotation(0);
+    setOcrRotation(270);
     setOcrStep('idle');
     setOcrDateSuggestion(null);
     ocrRetryRef.current = 0;
@@ -1254,7 +1254,7 @@ function PurchaseTab({
     try {
       setOcrProcessing(true);
       setOcrError(null);
-      setOcrRotation(0);
+      setOcrRotation(270);
 
       const formData = new FormData();
       formData.append('photo', file);
@@ -2079,7 +2079,7 @@ function PurchaseTab({
                   <img
                     src={ocrPreviewUrl}
                     alt="전표 이미지"
-                    className="w-full max-h-48 object-contain cursor-pointer transition-transform"
+                    className="w-full max-h-48 object-contain cursor-pointer transition-transform duration-200"
                     style={{ transform: `rotate(${ocrRotation}deg)` }}
                     onClick={() => setViewerImage(ocrPreviewUrl)}
                   />
@@ -2097,22 +2097,20 @@ function PurchaseTab({
                     {ocrStep === 'uploaded' && (
                       <>
                         <button
-                          onClick={() => setOcrRotation((prev) => (prev - 90 + 360) % 360)}
+                          onClick={() => setOcrRotation((prev) => prev - 90)}
                           className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/50"
                           title="왼쪽 회전"
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => setOcrRotation((prev) => (prev + 90) % 360)}
+                          onClick={() => setOcrRotation((prev) => prev + 90)}
                           className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/50"
                           title="오른쪽 회전"
                         >
                           <RotateCw className="w-3.5 h-3.5" />
                         </button>
-                        {ocrRotation !== 0 && (
-                          <span className="text-[10px] text-amber-600 dark:text-amber-400 ml-1">{ocrRotation}° 회전</span>
-                        )}
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 ml-1">{((ocrRotation % 360) + 360) % 360}° 회전</span>
                       </>
                     )}
                   </div>
@@ -2123,7 +2121,7 @@ function PurchaseTab({
                       setOcrPreviewUrl(null);
                       setAttachmentUrl(undefined);
                       setOcrStep('idle');
-                      setOcrRotation(0);
+                      setOcrRotation(270);
                       setPurchaseItems([emptyPurchaseItem()]);
                     }}
                     className="flex items-center gap-1 text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded hover:bg-red-500/10"
