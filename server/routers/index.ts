@@ -29,6 +29,7 @@ import { systemRouter } from "./system";
 import { invitesRouter } from "./invites";
 import { leaveBalanceRouter } from "./leaveBalance";
 import { recipesRouter } from "./recipes";
+import { recipeIngredientsRouter } from "./recipeIngredients";
 import { storeInfoRouter } from "./storeInfo";
 import { businessGroupsRouter } from "./businessGroups";
 import { dailyExpensesRouter } from "./dailyExpenses";
@@ -73,6 +74,7 @@ export const appRouter = router({
   invites: invitesRouter,
   leaveBalance: leaveBalanceRouter,
   recipes: recipesRouter,
+  recipeIngredients: recipeIngredientsRouter,
   storeInfo: storeInfoRouter,
   businessGroups: businessGroupsRouter,
   dailyExpenses: dailyExpensesRouter,

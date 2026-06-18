@@ -619,6 +619,7 @@ export const items = mysqlTable("items", {
   costingCategory: varchar("costingCategory", { length: 50 }),
   baseUnit: varchar("baseUnit", { length: 30 }),
   isActive: boolean("isActive").default(true).notNull(),
+  costPerBaseManual: decimal("costPerBaseManual", { precision: 14, scale: 4 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -1060,11 +1061,34 @@ export const recipes = mysqlTable("recipes", {
   content: text("content"),                                       // 레시피 본문 (재료, 조리법 등)
   sortOrder: int("sortOrder").default(0).notNull(),
   isPublished: boolean("isPublished").default(true).notNull(),
+  // ─── 원가 계산 (2026-06-18) ──────────────────────────────────────────────
+  servingYield: decimal("servingYield", { precision: 10, scale: 2 }).notNull().default("1"),
+  sellingPrice: decimal("sellingPrice", { precision: 14, scale: 2 }),
+  lossRate: decimal("lossRate", { precision: 5, scale: 4 }).notNull().default("0"),
   createdBy: int("createdBy").notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type Recipe = typeof recipes.$inferSelect;
+
+// ─── 레시피 재료행 ────────────────────────────────────────────────────────────
+export const recipeIngredients = mysqlTable("recipe_ingredients", {
+  id: int("id").autoincrement().primaryKey(),
+  restaurantId: int("restaurantId").notNull(),
+  recipeId: int("recipeId").notNull(),
+  itemId: int("itemId"),
+  rawName: varchar("rawName", { length: 100 }),
+  quantity: decimal("quantity", { precision: 10, scale: 4 }).notNull().default("1"),
+  unitName: varchar("unitName", { length: 30 }),
+  yieldRate: decimal("yieldRate", { precision: 5, scale: 4 }).notNull().default("1.0000"),
+  sortOrder: int("sortOrder").notNull().default(0),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => [
+  index("idx_ri_recipe").on(t.recipeId),
+  index("idx_ri_restaurant").on(t.restaurantId),
+]);
+export type RecipeIngredient = typeof recipeIngredients.$inferSelect;
 
 // ─── 매장 업무정보 (카드형) ───────────────────────────────────────────────────
 export const storeInfoCards = mysqlTable("store_info_cards", {

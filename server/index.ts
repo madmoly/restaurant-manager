@@ -1426,6 +1426,29 @@ app.use(express.json({ limit: "10mb" }));
       )
     `).catch(() => {});
 
+    // ─── 레시피 원가 계산 (2026-06-18) ───────────────────────────────────────
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS recipe_ingredients (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurantId INT NOT NULL,
+        recipeId INT NOT NULL,
+        itemId INT NULL,
+        rawName VARCHAR(100) NULL,
+        quantity DECIMAL(10,4) NOT NULL DEFAULT 1,
+        unitName VARCHAR(30) NULL,
+        yieldRate DECIMAL(5,4) NOT NULL DEFAULT 1.0000,
+        sortOrder INT NOT NULL DEFAULT 0,
+        note TEXT NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ri_recipe (recipeId),
+        INDEX idx_ri_restaurant (restaurantId)
+      )
+    `).catch(() => {});
+    await addColumnIfNotExists("recipes", "servingYield", "DECIMAL(10,2) NOT NULL DEFAULT 1");
+    await addColumnIfNotExists("recipes", "sellingPrice", "DECIMAL(14,2) NULL");
+    await addColumnIfNotExists("recipes", "lossRate", "DECIMAL(5,4) NOT NULL DEFAULT 0");
+    await addColumnIfNotExists("items", "costPerBaseManual", "DECIMAL(14,4) NULL");
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

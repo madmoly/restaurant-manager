@@ -38,6 +38,9 @@ export const recipesRouter = router({
       category: z.string().optional(),
       imageUrl: z.string().optional(),
       content: z.string().optional(),
+      servingYield: z.number().min(0.01).optional(),
+      sellingPrice: z.number().nullable().optional(),
+      lossRate: z.number().min(0).max(1).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
@@ -47,6 +50,9 @@ export const recipesRouter = router({
         category: input.category ?? null,
         imageUrl: input.imageUrl ?? null,
         content: input.content ?? null,
+        servingYield: String(input.servingYield ?? 1),
+        sellingPrice: input.sellingPrice != null ? String(input.sellingPrice) : null,
+        lossRate: String(input.lossRate ?? 0),
         createdBy: ctx.user.userId,
       });
       return { id: result.insertId };
@@ -61,13 +67,20 @@ export const recipesRouter = router({
       imageUrl: z.string().optional(),
       content: z.string().optional(),
       sortOrder: z.number().optional(),
+      servingYield: z.number().min(0.01).optional(),
+      sellingPrice: z.number().nullable().optional(),
+      lossRate: z.number().min(0).max(1).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const [current] = await db.select({ restaurantId: recipes.restaurantId }).from(recipes).where(eq(recipes.id, input.id)).limit(1);
       if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "레시피를 찾을 수 없습니다" });
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, current.restaurantId, true);
-      const { id, ...data } = input;
-      await db.update(recipes).set(data).where(eq(recipes.id, id));
+      const { id, servingYield, sellingPrice, lossRate, ...rest } = input;
+      const setData: Record<string, unknown> = { ...rest };
+      if (servingYield !== undefined) setData.servingYield = String(servingYield);
+      if (sellingPrice !== undefined) setData.sellingPrice = sellingPrice != null ? String(sellingPrice) : null;
+      if (lossRate !== undefined) setData.lossRate = String(lossRate);
+      await db.update(recipes).set(setData).where(eq(recipes.id, id));
       return { ok: true };
     }),
 
