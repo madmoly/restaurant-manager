@@ -17,7 +17,7 @@ import fs from "fs";
 import path from "path";
 
 // ─── 설정 ────────────────────────────────────────────────────────────────────
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 8192;
 
 // ─── OCR 프롬프트 (server/ocr.ts와 동일) ────────────────────────────────────

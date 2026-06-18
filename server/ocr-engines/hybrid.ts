@@ -141,7 +141,7 @@ async function runClaudeTextStage(
 
   const claudeStarted = Date.now();
   const response = await deps.anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 16384,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
   });
@@ -162,7 +162,7 @@ async function runClaudeTextStage(
       usedOcrMode: "auto",
     },
     claude: {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       inputTokens,
       outputTokens,
       elapsedMs: claudeElapsed,
@@ -187,7 +187,7 @@ async function runClaudeVisionStage(
 
   const claudeStarted = Date.now();
   const response = await deps.anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 16384,
     messages: [
       {
@@ -218,7 +218,7 @@ async function runClaudeVisionStage(
   return {
     engine: "claude_vision",
     claude: {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       inputTokens,
       outputTokens,
       elapsedMs: claudeElapsed,

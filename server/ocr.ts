@@ -1126,7 +1126,7 @@ ${profileHint}`;
     // ⚠️ Anthropic SDK는 max_tokens가 크면 non-streaming 요청을 거부함 (예상 처리시간 >10분).
     //    streaming으로 호출 후 finalMessage()로 한 번에 받음 (인터페이스는 동일).
     const stream = anthropic.messages.stream({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 32768,
       messages: [{ role: "user", content: messageContent }],
     });
@@ -1279,7 +1279,7 @@ ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
 
     // 보건증은 단순 구조 → haiku로 충분 (비용 절감)
     const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 1024,
       messages: [{
         role: "user",
@@ -1560,7 +1560,7 @@ ocrRouter.get("/tracking", async (req: Request, res: Response) => {
         estimatedUsd: estimatedCost.toFixed(2),
         estimatedKrw: Math.round(estimatedCost * 1350),
         perCallUsd: "0.042",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
       },
       daily: dailyCalls.map(d => ({
         date: d.date,
@@ -1955,7 +1955,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
 }`;
 
     const aiResponse = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 4096,
       messages: [{
         role: "user",
@@ -1972,7 +1972,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     // JSON 파싱
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON 파싱 실패", model: "claude-sonnet-4-20250514" });
+      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON 파싱 실패", model: "claude-sonnet-4-6" });
       res.status(422).json({ error: "전표 인식에 실패했습니다. 다시 촬영해주세요." });
       return;
     }
@@ -1981,7 +1981,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     try {
       ocrResult = JSON.parse(jsonMatch[0]);
     } catch {
-      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON parse error", model: "claude-sonnet-4-20250514" });
+      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON parse error", model: "claude-sonnet-4-6" });
       res.status(422).json({ error: "전표 인식 결과를 파싱할 수 없습니다." });
       return;
     }
@@ -1998,7 +1998,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
       success: true,
       inputTokens: aiResponse.usage?.input_tokens,
       outputTokens: aiResponse.usage?.output_tokens,
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       itemCount: ocrResult.items.length,
       requestPayloadSize: base64.length,
     });
@@ -2012,7 +2012,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     const responseTimeMs = Date.now() - startTime;
     console.error("[OCR-Sales] error:", err);
     await logOcrError("extract-sales 실패", { error: err.message }, Number(req.body?.restaurantId) || undefined);
-    await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(req.body?.restaurantId) || undefined, responseTimeMs, success: false, errorMessage: err.message, model: "claude-sonnet-4-20250514" });
+    await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(req.body?.restaurantId) || undefined, responseTimeMs, success: false, errorMessage: err.message, model: "claude-sonnet-4-6" });
     res.status(500).json({ error: err.message, retryable: true });
   }
 });
