@@ -963,7 +963,8 @@ function PurchaseTab({
   const [ocrRotation, setOcrRotation] = useState(0);
   const [ocrStep, setOcrStep] = useState<'idle' | 'uploaded' | 'analyzed'>('idle');
   const [ocrDateSuggestion, setOcrDateSuggestion] = useState<string | null>(null);
-  const [ocrRetryCount, setOcrRetryCount] = useState(0);
+  const ocrRetryRef = useRef(0);
+  const ocrRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [viewerImage, setViewerImage] = useState<string | null>(null);
 
   // 품목 Combobox 상태 (행 인덱스별)
@@ -1040,6 +1041,9 @@ function PurchaseTab({
   useEffect(() => {
     seedAttemptedRef.current = false;
   }, [restaurantId]);
+  useEffect(() => () => {
+    if (ocrRetryTimerRef.current) clearTimeout(ocrRetryTimerRef.current);
+  }, []);
   useEffect(() => {
     if (
       restaurantId > 0 &&
@@ -1228,7 +1232,8 @@ function PurchaseTab({
     setOcrRotation(0);
     setOcrStep('idle');
     setOcrDateSuggestion(null);
-    setOcrRetryCount(0);
+    ocrRetryRef.current = 0;
+    if (ocrRetryTimerRef.current) { clearTimeout(ocrRetryTimerRef.current); ocrRetryTimerRef.current = null; }
   };
 
   const updateItem = (idx: number, field: keyof PurchaseItemRow, value: string) => {
@@ -1417,13 +1422,12 @@ function PurchaseTab({
 
       if (ocrData.note) setNote(ocrData.note);
     } catch (error: any) {
-      const nextRetry = ocrRetryCount + 1;
-      setOcrRetryCount(nextRetry);
+      const nextRetry = ocrRetryRef.current + 1;
+      ocrRetryRef.current = nextRetry;
 
       if (nextRetry < 2) {
         toast.info(`분석 실패, 자동 재시도 중... (${nextRetry}/2)`);
-        setOcrProcessing(false);
-        setTimeout(() => handleOcrAnalyze(), 500);
+        ocrRetryTimerRef.current = setTimeout(() => handleOcrAnalyze(), 500);
         return;
       } else {
         setOcrError('전표 분석에 실패했습니다. 이미지를 다시 올리거나 직접 입력해주세요.');
@@ -2135,7 +2139,7 @@ function PurchaseTab({
                       글씨가 정방향으로 읽히는지 확인하세요. 돌아가 있으면 회전 버튼을 눌러주세요.
                     </p>
                     <button
-                      onClick={() => { setOcrRetryCount(0); handleOcrAnalyze(); }}
+                      onClick={() => { ocrRetryRef.current = 0; if (ocrRetryTimerRef.current) clearTimeout(ocrRetryTimerRef.current); handleOcrAnalyze(); }}
                       className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
                     >
                       <Search className="w-4 h-4" />
