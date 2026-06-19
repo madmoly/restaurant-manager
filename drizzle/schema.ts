@@ -998,6 +998,7 @@ export const apiUsageLogs = mysqlTable("api_usage_logs", {
   responseTimeMs: int("responseTimeMs"),
   success: boolean("success").default(true).notNull(),
   errorMessage: text("errorMessage"),
+  timingBreakdown: varchar("timingBreakdown", { length: 120 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type ApiUsageLog = typeof apiUsageLogs.$inferSelect;

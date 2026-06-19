@@ -39,6 +39,7 @@ async function logOcrApiUsage(opts: {
   outputTokens?: number;
   model?: string;
   itemCount?: number;
+  timingBreakdown?: string;
 }) {
   try {
     await db.insert(apiUsageLogs).values({
@@ -50,6 +51,7 @@ async function logOcrApiUsage(opts: {
       responseTimeMs: opts.responseTimeMs,
       success: opts.success,
       errorMessage: opts.errorMessage || null,
+      timingBreakdown: opts.timingBreakdown || null,
     });
   } catch (e) {
     console.error("[OCR] API 사용량 로그 저장 실패:", e);
@@ -770,6 +772,8 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       return;
     }
 
+    const preStart = Date.now();
+
     // ── EXIF 방향 보정 ──
     await fixExifOrientation(filePath);
 
@@ -917,6 +921,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       inputTokens, outputTokens,
       model: "sonnet",
       itemCount: items.length,
+      timingBreakdown: `pre=${ocrStartTime - preStart},upstage=${hybridOut.upstage?.elapsedMs ?? 0},claude=${hybridOut.claude.elapsedMs}`,
     });
 
     res.json(result);
@@ -1125,12 +1130,14 @@ ${profileHint}`;
     // 32768로 상향 — claude-sonnet-4는 64K까지 지원.
     // ⚠️ Anthropic SDK는 max_tokens가 크면 non-streaming 요청을 거부함 (예상 처리시간 >10분).
     //    streaming으로 호출 후 finalMessage()로 한 번에 받음 (인터페이스는 동일).
+    const claudeStart = Date.now();
     const stream = anthropic.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 32768,
       messages: [{ role: "user", content: messageContent }],
     });
     const message = await stream.finalMessage();
+    const claudeMs = Date.now() - claudeStart;
 
     const inputTokens = message.usage?.input_tokens ?? 0;
     const outputTokens = message.usage?.output_tokens ?? 0;
@@ -1231,6 +1238,7 @@ ${profileHint}`;
       inputTokens, outputTokens,
       model: "sonnet",
       itemCount: normalizedItems.length,
+      timingBreakdown: `claude=${claudeMs}`,
     });
 
     res.json(result);
