@@ -1269,24 +1269,6 @@ function PurchaseTab({
       setOcrPreviewUrl(url + `?t=${Date.now()}`);
       setOcrStep('uploaded');
 
-      try {
-        const orientRes = await fetch('/api/ocr/detect-orientation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: url }),
-        });
-        if (orientRes.ok) {
-          const { suggestedRotation } = await orientRes.json();
-          if (suggestedRotation && suggestedRotation !== 0) {
-            setOcrRotation(suggestedRotation);
-            toast.info(`방향 자동감지: ${suggestedRotation}° 회전 적용됨. 확인 후 수정 가능합니다.`);
-          } else {
-            toast.info('이미지 방향을 확인하세요. 필요시 회전 후 분석을 눌러주세요.');
-          }
-        }
-      } catch {
-        // 방향감지 실패는 무시
-      }
     } catch (error: any) {
       setOcrError(error.message || '업로드 실패');
       toast.error(error.message || '업로드 실패');
