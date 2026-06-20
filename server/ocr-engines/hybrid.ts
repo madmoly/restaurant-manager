@@ -152,7 +152,12 @@ async function runClaudeTextStage(
   console.log(`[OCR] stop_reason=${response.stop_reason}, output_tokens=${outputTokens}`);
 
   const text = deps.extractText(response) ?? "";
-  const rawJson = deps.parseAIJson(text);
+  let rawJson: any = null;
+  try {
+    rawJson = deps.parseAIJson(text);
+  } catch (err: any) {
+    console.warn(`[OCR] parseAIJson 실패 (text stage): ${err?.message ?? err}`);
+  }
 
   return {
     engine: "upstage",
@@ -213,7 +218,12 @@ async function runClaudeVisionStage(
   console.log(`[OCR] stop_reason=${response.stop_reason}, output_tokens=${outputTokens}`);
 
   const text = deps.extractText(response) ?? "";
-  const rawJson = deps.parseAIJson(text);
+  let rawJson: any = null;
+  try {
+    rawJson = deps.parseAIJson(text);
+  } catch (err: any) {
+    console.warn(`[OCR] parseAIJson 실패 (vision stage): ${err?.message ?? err}`);
+  }
 
   return {
     engine: "claude_vision",

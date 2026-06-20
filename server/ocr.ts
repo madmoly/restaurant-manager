@@ -248,16 +248,25 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
     let qty = parseFloat(qtyStr) || 0;
     const price = parseFloat(priceStr) || 0;
 
-    // ── 수량 ".000" 오독 보정 ──────────────────────────────────────────────
-    // OCR이 "3.000"을 "3000"으로 읽는 패턴: qty가 1000의 배수이고,
-    // qty/1000 × price = lineTotal 이면 수량을 1000으로 나눈다
-    if (qty >= 1000 && qty % 1000 === 0 && price > 0) {
-      const correctedQty = qty / 1000;
+    // ── 수량 ".000"/스케일 오독 보정 (×1000, ×10, 음수 포함) ────────────────
+    // OCR/Vision 폴백이 "3.000"을 "3000"으로 읽는 패턴: qty가 1000(또는 10)의
+    // 배수(음수 포함)이고 qty/N × price ≈ lineTotal 이면 수량을 N으로 나눈다.
+    // 나눗셈이라 부호는 자연 보존됨. 0.5·-2 같은 정상 소수/음수는 1000·10의
+    // 배수가 아니므로 대상에서 자동 제외되어 과보정되지 않는다.
+    if (qty !== 0 && price > 0) {
       const totalCheck = parseFloat(totalStr) || 0;
-      if (totalCheck > 0 && Math.abs(correctedQty * price - totalCheck) <= 1) {
-        console.log(`[OCR] 수량 .000 보정: ${qtyStr} → ${correctedQty} (${shortName})`);
-        qty = correctedQty;
-        qtyStr = String(correctedQty);
+      if (totalCheck !== 0) {
+        for (const divisor of [1000, 10]) {
+          if (Math.abs(qty) >= divisor && qty % divisor === 0) {
+            const correctedQty = qty / divisor;
+            if (Math.abs(correctedQty * price - totalCheck) <= 1) {
+              console.log(`[OCR] 수량 ×${divisor} 오독 보정: ${qtyStr} → ${correctedQty} (${shortName})`);
+              qty = correctedQty;
+              qtyStr = String(correctedQty);
+              break;
+            }
+          }
+        }
       }
     }
     const total = parseFloat(totalStr) || 0;
@@ -846,7 +855,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     const parsed = hybridOut.rawJson;
     if (!parsed) {
       logOcrApiUsage({ endpoint: "extract-purchase", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "AI 응답 파싱 실패", inputTokens, outputTokens, model: "sonnet" });
-      res.status(500).json({ error: "AI 응답을 처리하지 못했습니다. 다시 시도해주세요.", retryable: true });
+      res.status(500).json({ error: "AI 응답을 처리하지 못했습니다. 다시 시도해주세요.", retryable: true, reason: "parse_failed" });
       return;
     }
 
@@ -931,9 +940,11 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       stack: err.stack?.substring(0, 1000),
       imageUrl: req.body?.imageUrl,
     }, req.body?.restaurantId ? Number(req.body.restaurantId) : undefined);
+    const isRateLimited = err?.status === 429 || err?.response?.status === 429;
     res.status(500).json({
       error: `OCR 처리 중 오류가 발생했습니다.`,
       retryable: true,
+      reason: isRateLimited ? "rate_limited" : "upstream_error",
     });
   }
 });

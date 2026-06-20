@@ -865,6 +865,15 @@ function OpenTab({
 
 const UNIT_OPTIONS = ['개', '박스', 'kg', 'g', '리터', 'ml', '팩', '봉', '병', '캔', '포', '판', '줄', '묶음', '단', 'EA', '직접입력'];
 
+// OCR 분석 실패 사유 → 사용자 노출 문구 (서버 reason 필드 매핑)
+const OCR_REASON_LABEL: Record<string, string> = {
+  rate_limited: '분석 서버가 일시적으로 혼잡합니다. 잠시 후 다시 시도해주세요.',
+  parse_failed: '전표 판독에 실패했습니다. 다시 촬영하거나 직접 입력해주세요.',
+  upstream_error: '일시적인 분석 오류입니다. 잠시 후 다시 시도해주세요.',
+};
+const MAX_OCR_AUTO_RETRY = 2;
+const OCR_RETRY_DELAYS_MS = [2000, 5000];
+
 interface PurchaseItemRow {
   rawItemName: string;
   spec?: string;          // 규격 (용량/중량/사이즈)
@@ -1279,7 +1288,7 @@ function PurchaseTab({
 
   // ── STEP 2: 회전 적용 + OCR 분석 실행 ───────────────
   const handleOcrAnalyze = async () => {
-    if (!attachmentUrl) return;
+    if (!attachmentUrl || ocrProcessing) return;
     try {
       setOcrProcessing(true);
       setOcrError(null);
@@ -1299,7 +1308,10 @@ function PurchaseTab({
 
       if (!ocrRes.ok) {
         const errData = await ocrRes.json().catch(() => ({}));
-        throw new Error(errData.error || 'OCR 처리 실패');
+        const err = new Error(errData.error || 'OCR 처리 실패') as Error & { retryable?: boolean; reason?: string };
+        err.retryable = errData.retryable === true;
+        err.reason = errData.reason;
+        throw err;
       }
 
       const ocrData = await ocrRes.json();
@@ -1404,15 +1416,15 @@ function PurchaseTab({
 
       if (ocrData.note) setNote(ocrData.note);
     } catch (error: any) {
-      const nextRetry = ocrRetryRef.current + 1;
-      ocrRetryRef.current = nextRetry;
-
-      if (nextRetry < 2) {
-        toast.info(`분석 실패, 자동 재시도 중... (${nextRetry}/2)`);
-        ocrRetryTimerRef.current = setTimeout(() => handleOcrAnalyze(), 500);
+      if (error.retryable && ocrRetryRef.current < MAX_OCR_AUTO_RETRY) {
+        const nextRetry = ocrRetryRef.current + 1;
+        ocrRetryRef.current = nextRetry;
+        const delayMs = OCR_RETRY_DELAYS_MS[nextRetry - 1];
+        toast.info(`분석 실패, 자동 재시도 중... (${nextRetry}/${MAX_OCR_AUTO_RETRY})`);
+        ocrRetryTimerRef.current = setTimeout(() => handleOcrAnalyze(), delayMs);
         return;
       } else {
-        setOcrError('전표 분석에 실패했습니다. 이미지를 다시 올리거나 직접 입력해주세요.');
+        setOcrError(OCR_REASON_LABEL[error.reason] || error.message || '전표 분석에 실패했습니다. 이미지를 다시 올리거나 직접 입력해주세요.');
         setOcrStep('uploaded');
         toast.error('분석 실패 — 이미지를 다시 올리거나 직접 입력해주세요');
       }
@@ -2047,7 +2059,7 @@ function PurchaseTab({
             {ocrError && (
               <div className="bg-red-500/10 border border-red-200 dark:border-red-800 rounded-lg p-3">
                 <p className="text-sm text-red-600 dark:text-red-400">{ocrError}</p>
-                <p className="text-xs text-muted-foreground mt-1">API 키가 설정되지 않았거나 서버 오류입니다.</p>
+                <p className="text-xs text-muted-foreground mt-1">일시적 분석 실패입니다. 잠시 후 다시 시도하거나 직접 입력해주세요.</p>
                 <Button size="sm" variant="secondary" className="mt-2" onClick={() => { setOcrError(null); setOcrPreviewUrl(null); }}>
                   다시 촬영
                 </Button>
@@ -2120,7 +2132,8 @@ function PurchaseTab({
                     </p>
                     <button
                       onClick={() => { ocrRetryRef.current = 0; if (ocrRetryTimerRef.current) clearTimeout(ocrRetryTimerRef.current); handleOcrAnalyze(); }}
-                      className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
+                      disabled={ocrProcessing}
+                      className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Search className="w-4 h-4" />
                       전표 분석 시작

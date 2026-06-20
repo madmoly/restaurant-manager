@@ -103,7 +103,7 @@ export async function extractWithUpstage(
   const ocrMode = opts.ocrMode ?? "auto"; // auto가 비용 효율 (인쇄 텍스트는 OCR 스킵)
   const timeoutMs = opts.timeoutMs ?? 30_000;
 
-  // FormData 구성
+  // FormData 구성 (재시도 시에도 재사용 — Blob은 불변이라 재전송 안전)
   const form = new FormData();
   const fileBuf = fs.readFileSync(filePath);
   const blob = new Blob([fileBuf]);
@@ -114,64 +114,84 @@ export async function extractWithUpstage(
   form.append("coordinates", "true");
   form.append("base64_encoding", "[]"); // 이미지 base64 반환 안 받음 (페이로드 축소)
 
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  const maxAttempts = 2; // 1차 + 429 전용 재시도 1회
 
-  try {
-    const res = await fetch("https://api.upstage.ai/v1/document-digitization", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-      signal: controller.signal,
-    });
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
-    const elapsedMs = Date.now() - started;
+    try {
+      const res = await fetch("https://api.upstage.ai/v1/document-digitization", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal: controller.signal,
+      });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      return { ok: false, status: res.status, error: errText || res.statusText, elapsedMs };
+      const elapsedMs = Date.now() - started;
+
+      if (res.status === 429) {
+        if (attempt < maxAttempts) {
+          const retryAfterHeader = res.headers.get("Retry-After");
+          const retryAfterSec = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN;
+          const waitMs = Number.isFinite(retryAfterSec) && retryAfterSec >= 0 ? retryAfterSec * 1000 : 2000;
+          console.log(`[upstage] 429 rate limited — ${waitMs}ms 대기 후 재시도 (${attempt}/${maxAttempts})`);
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        const errText = await res.text().catch(() => "");
+        return { ok: false, status: 429, error: errText || res.statusText, elapsedMs };
+      }
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        return { ok: false, status: res.status, error: errText || res.statusText, elapsedMs };
+      }
+
+      const raw = (await res.json()) as UpstageResponse;
+
+      const markdown =
+        raw.content?.markdown ??
+        raw.content?.text ??
+        raw.elements
+          .map((e) => e.content?.markdown ?? e.content?.text ?? "")
+          .filter(Boolean)
+          .join("\n\n");
+
+      const tablesHtml = raw.elements
+        .filter((e) => e.category === "table")
+        .map((e) => e.content?.html ?? "")
+        .filter(Boolean);
+
+      const paragraphs = raw.elements
+        .filter((e) => e.category === "paragraph")
+        .map((e) => e.content?.text ?? "")
+        .filter(Boolean);
+
+      return {
+        ok: true,
+        raw,
+        markdown,
+        tablesHtml,
+        paragraphs,
+        pages: raw.usage?.pages ?? 1,
+        elapsedMs,
+      };
+    } catch (err: any) {
+      const elapsedMs = Date.now() - started;
+      return {
+        ok: false,
+        status: 0,
+        error: err?.name === "AbortError" ? "timeout" : String(err?.message ?? err),
+        elapsedMs,
+      };
+    } finally {
+      clearTimeout(timeoutHandle);
     }
-
-    const raw = (await res.json()) as UpstageResponse;
-
-    const markdown =
-      raw.content?.markdown ??
-      raw.content?.text ??
-      raw.elements
-        .map((e) => e.content?.markdown ?? e.content?.text ?? "")
-        .filter(Boolean)
-        .join("\n\n");
-
-    const tablesHtml = raw.elements
-      .filter((e) => e.category === "table")
-      .map((e) => e.content?.html ?? "")
-      .filter(Boolean);
-
-    const paragraphs = raw.elements
-      .filter((e) => e.category === "paragraph")
-      .map((e) => e.content?.text ?? "")
-      .filter(Boolean);
-
-    return {
-      ok: true,
-      raw,
-      markdown,
-      tablesHtml,
-      paragraphs,
-      pages: raw.usage?.pages ?? 1,
-      elapsedMs,
-    };
-  } catch (err: any) {
-    const elapsedMs = Date.now() - started;
-    return {
-      ok: false,
-      status: 0,
-      error: err?.name === "AbortError" ? "timeout" : String(err?.message ?? err),
-      elapsedMs,
-    };
-  } finally {
-    clearTimeout(timeoutHandle);
   }
+
+  // 도달 불가 (루프는 항상 return/continue로 종료) — TS 타입 충족용
+  return { ok: false, status: 429, error: "rate_limited_exhausted", elapsedMs: Date.now() - started };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
