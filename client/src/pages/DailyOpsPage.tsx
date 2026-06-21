@@ -1435,7 +1435,8 @@ function PurchaseTab({
 
       if (ocrData.note) setNote(ocrData.note);
     } catch (error: any) {
-      if (error.retryable && ocrRetryRef.current < MAX_OCR_AUTO_RETRY) {
+      const autoRetryExcluded = error.reason === 'timeout' || error.reason === 'network_error';
+      if (error.retryable && !autoRetryExcluded && ocrRetryRef.current < MAX_OCR_AUTO_RETRY) {
         const nextRetry = ocrRetryRef.current + 1;
         ocrRetryRef.current = nextRetry;
         const delayMs = OCR_RETRY_DELAYS_MS[nextRetry - 1];

@@ -23,6 +23,11 @@ import {
 
 export type OcrEngine = "upstage" | "claude_vision";
 
+// 텍스트 stage(Upstage 결과 구조화)는 Haiku로 충분 — 속도 2~3배.
+// Vision stage(이미지 직접 판독, 폴백 전용)는 정확도 위해 Sonnet 유지.
+const TEXT_STAGE_MODEL = "claude-haiku-4-5";
+const VISION_STAGE_MODEL = "claude-sonnet-4-6";
+
 export interface HybridOcrInput {
   filePath: string;
   restaurantId?: number;
@@ -120,7 +125,7 @@ async function runClaudeTextStage(
 
   const claudeStarted = Date.now();
   const stream = deps.anthropic.messages.stream({
-    model: "claude-sonnet-4-6",
+    model: TEXT_STAGE_MODEL,
     max_tokens: 8192,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
   });
@@ -147,7 +152,7 @@ async function runClaudeTextStage(
       usedOcrMode: "auto",
     },
     claude: {
-      model: "claude-sonnet-4-6",
+      model: TEXT_STAGE_MODEL,
       inputTokens,
       outputTokens,
       elapsedMs: claudeElapsed,
@@ -172,7 +177,7 @@ async function runClaudeVisionStage(
 
   const claudeStarted = Date.now();
   const stream = deps.anthropic.messages.stream({
-    model: "claude-sonnet-4-6",
+    model: VISION_STAGE_MODEL,
     max_tokens: 8192,
     messages: [
       {
@@ -209,7 +214,7 @@ async function runClaudeVisionStage(
   return {
     engine: "claude_vision",
     claude: {
-      model: "claude-sonnet-4-6",
+      model: VISION_STAGE_MODEL,
       inputTokens,
       outputTokens,
       elapsedMs: claudeElapsed,
