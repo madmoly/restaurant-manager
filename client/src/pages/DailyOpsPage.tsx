@@ -870,9 +870,12 @@ const OCR_REASON_LABEL: Record<string, string> = {
   rate_limited: '분석 서버가 일시적으로 혼잡합니다. 잠시 후 다시 시도해주세요.',
   parse_failed: '전표 판독에 실패했습니다. 다시 촬영하거나 직접 입력해주세요.',
   upstream_error: '일시적인 분석 오류입니다. 잠시 후 다시 시도해주세요.',
+  timeout: '분석이 너무 오래 걸려 중단되었습니다. 잠시 후 다시 시도해주세요.',
+  network_error: '연결이 끊겼습니다. 네트워크 상태를 확인하고 다시 시도해주세요.',
 };
 const MAX_OCR_AUTO_RETRY = 2;
 const OCR_RETRY_DELAYS_MS = [2000, 5000];
+const OCR_ANALYZE_TIMEOUT_MS = 70_000;
 
 interface PurchaseItemRow {
   rawItemName: string;
@@ -1293,18 +1296,34 @@ function PurchaseTab({
       setOcrProcessing(true);
       setOcrError(null);
 
-      toast.info('전표 분석중...');
+      toast.info('전표 분석중... (최대 1분 소요될 수 있습니다)');
 
-      const ocrRes = await fetch('/api/ocr/extract-purchase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageUrl: attachmentUrl,
-          restaurantId,
-          rotation: ocrRotation,
-          counterpartyId: counterpartyId || undefined,
-        }),
-      });
+      const controller = new AbortController();
+      const timeoutHandle = setTimeout(() => controller.abort(), OCR_ANALYZE_TIMEOUT_MS);
+
+      let ocrRes: Response;
+      try {
+        ocrRes = await fetch('/api/ocr/extract-purchase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageUrl: attachmentUrl,
+            restaurantId,
+            rotation: ocrRotation,
+            counterpartyId: counterpartyId || undefined,
+          }),
+          signal: controller.signal,
+        });
+      } catch (fetchErr: any) {
+        const err = new Error(
+          fetchErr?.name === 'AbortError' ? 'OCR 분석 시간 초과' : '네트워크 연결이 끊겼습니다'
+        ) as Error & { retryable?: boolean; reason?: string };
+        err.retryable = true;
+        err.reason = fetchErr?.name === 'AbortError' ? 'timeout' : 'network_error';
+        throw err;
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
 
       if (!ocrRes.ok) {
         const errData = await ocrRes.json().catch(() => ({}));

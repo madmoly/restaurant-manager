@@ -1,15 +1,11 @@
 /**
- * Upstage Document Parse 어댑터 (DRAFT — 2026-04-14)
+ * Upstage Document Parse 어댑터
  *
- * 위치 예정: server/ocr-engines/upstage.ts
  * 용도: Upstage Document Parse API 호출 → 정규화된 구조화 텍스트 반환
+ * 연결 지점: hybrid.ts의 runHybridOcr에서 호출.
  *
  * 환경변수: UPSTAGE_API_KEY
  * 공식 문서: https://console.upstage.ai/api/document-digitization/document-parse
- *
- * ─── 주의 ───
- * 이 파일은 아직 server/ocr.ts와 연결되어 있지 않음. 독립 draft.
- * 통합 단계: server/ocr-engines/ 폴더로 이동 + hybrid.ts에서 호출.
  */
 
 import fs from "fs";
@@ -101,7 +97,7 @@ export async function extractWithUpstage(
   }
 
   const ocrMode = opts.ocrMode ?? "auto"; // auto가 비용 효율 (인쇄 텍스트는 OCR 스킵)
-  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const timeoutMs = opts.timeoutMs ?? 10_000;
 
   // FormData 구성 (재시도 시에도 재사용 — Blob은 불변이라 재전송 안전)
   const form = new FormData();

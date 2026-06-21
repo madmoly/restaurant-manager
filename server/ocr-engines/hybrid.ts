@@ -1,17 +1,13 @@
 /**
- * OCR Hybrid Orchestrator (DRAFT — 2026-04-14)
+ * OCR Hybrid Orchestrator
  *
- * 위치 예정: server/ocr-engines/hybrid.ts
  * 용도: Upstage → Claude 2단계 파이프라인 오케스트레이션 + 엔진 토글 + fallback
+ * 연결 지점: server/ocr.ts의 `/extract-purchase` 엔드포인트에서 호출.
  *
  * 환경변수:
  *   OCR_ENGINE=upstage | claude_vision (기본: upstage)
  *   UPSTAGE_API_KEY
  *   ANTHROPIC_API_KEY
- *
- * ─── 주의 ───
- * 이 파일은 아직 server/ocr.ts와 연결되어 있지 않음. 독립 draft.
- * 통합 시: server/ocr.ts의 `/extract-purchase` 엔드포인트에서 이 모듈을 호출.
  */
 
 import type Anthropic from "@anthropic-ai/sdk";
@@ -20,23 +16,6 @@ import {
   buildClaudeContext,
   type UpstageParseResult,
 } from "./upstage";
-
-// 기존 ocr.ts에서 export 가공 후 가져올 심볼 (integration 때 확정):
-// - getAnthropicClient(): Anthropic | null
-// - buildProfileHint(profile): string
-// - logOcrApiUsage(opts): Promise<void>
-// - validateAndEnrichItems(items, summary): OcrItem[]
-// - matchCounterpartyItems(restaurantId, counterpartyId, items): Promise<OcrItem[]>
-
-// 아래 import는 integration 시 활성화:
-// import {
-//   getAnthropicClient,
-//   buildProfileHint,
-//   logOcrApiUsage,
-//   validateAndEnrichItems,
-//   matchCounterpartyItems,
-//   getOcrProfile,
-// } from "../ocr";
 
 // ────────────────────────────────────────────────────────────────────────────
 // 타입
@@ -140,11 +119,12 @@ async function runClaudeTextStage(
   const prompt = deps.promptV2Template(context, profileHint);
 
   const claudeStarted = Date.now();
-  const response = await deps.anthropic.messages.create({
+  const stream = deps.anthropic.messages.stream({
     model: "claude-sonnet-4-6",
-    max_tokens: 16384,
+    max_tokens: 8192,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
   });
+  const response = await stream.finalMessage();
 
   const claudeElapsed = Date.now() - claudeStarted;
   const inputTokens = response.usage?.input_tokens ?? 0;
@@ -191,9 +171,9 @@ async function runClaudeVisionStage(
   const prompt = deps.promptV1ImageFallback(profileHint);
 
   const claudeStarted = Date.now();
-  const response = await deps.anthropic.messages.create({
+  const stream = deps.anthropic.messages.stream({
     model: "claude-sonnet-4-6",
-    max_tokens: 16384,
+    max_tokens: 8192,
     messages: [
       {
         role: "user",
@@ -211,6 +191,7 @@ async function runClaudeVisionStage(
       },
     ],
   });
+  const response = await stream.finalMessage();
 
   const claudeElapsed = Date.now() - claudeStarted;
   const inputTokens = response.usage?.input_tokens ?? 0;
