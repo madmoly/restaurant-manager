@@ -12,6 +12,7 @@ import {
 import { ROLE_LEVEL } from "@shared/permissions";
 import { getOwnedRestaurants, getOwnedRestaurantIds, realStoreCondition } from "../helpers/restaurantScope";
 import { calcMonthlyFixedCosts } from "../helpers/fixedCostCalc";
+import { sumLaborByCompany } from "./monthlyClosings";
 
 export const adminRouter = router({
   /**
@@ -56,18 +57,22 @@ export const adminRouter = router({
             .from(purchaseOrders)
             .where(and(eq(purchaseOrders.restaurantId, r.id), between(purchaseOrders.purchaseDate, start, end)));
 
-          // 일마감 데이터 (인건비 포함)
-          const [closingRow] = await db
-            .select({
-              laborCost: sql<string>`COALESCE(SUM(${dailyClosings.laborCost}), 0)`,
-              closedDays: sql<number>`COUNT(*)`,
-            })
+          // 일마감 날짜 목록 (마감 기준 인건비 계산용)
+          const closingRows = await db
+            .select({ closingDate: dailyClosings.closingDate })
             .from(dailyClosings)
             .where(and(eq(dailyClosings.restaurantId, r.id), between(dailyClosings.closingDate, start, end)));
+          const closedDateStrs = closingRows.map(c => {
+            const d = new Date(c.closingDate);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          });
+
+          // 인건비: 시프트 재계산 (수익분석과 동일 산식)
+          const laborResult = await sumLaborByCompany(r.id, input.year, input.month, closedDateStrs);
+          const laborCost = laborResult.totalCost;
 
           const salesTotal = Number(salesRow?.total ?? 0);
           const purchasesTotal = Number(purchaseRow?.total ?? 0);
-          const laborCost = Number(closingRow?.laborCost ?? 0);
 
           // 즉시 지출 (profit_ratio 정확 계산용)
           const [expRow] = await db
@@ -95,9 +100,10 @@ export const adminRouter = router({
             purchasesTotal,
             laborCost,
             fixedCostTotal,
+            expensesTotal,
             profit,
             profitRate: salesTotal > 0 ? (profit / salesTotal * 100) : 0,
-            closedDays: closingRow?.closedDays ?? 0,
+            closedDays: closingRows.length,
             daysInMonth: end.getDate(),
           };
         })
@@ -110,8 +116,9 @@ export const adminRouter = router({
           purchasesTotal: acc.purchasesTotal + s.purchasesTotal,
           laborCost: acc.laborCost + s.laborCost,
           fixedCostTotal: acc.fixedCostTotal + s.fixedCostTotal,
+          expensesTotal: acc.expensesTotal + s.expensesTotal,
           profit: acc.profit + s.profit,
-        }),        { salesTotal: 0, purchasesTotal: 0, laborCost: 0, fixedCostTotal: 0, profit: 0 }
+        }),        { salesTotal: 0, purchasesTotal: 0, laborCost: 0, fixedCostTotal: 0, expensesTotal: 0, profit: 0 }
       );
 
       return {

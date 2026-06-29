@@ -161,7 +161,7 @@ async function sumPurchasesByCP(
 //   → daily_closings.laborCost는 일마감 화면 표시용으로 격하. 월정산은 시프트 + 월말
 //   일괄로만 산출. Phase 5.5에서 5월 1건 박제값을 신 산식으로 재산출했으므로 일마감
 //   화면도 정합. 과거 박제(2025~2026-04)는 옛 산식 그대로 일마감 화면에 잔존.
-async function sumLaborByCompany(
+export async function sumLaborByCompany(
   restaurantId: number,
   year: number,
   month: number,

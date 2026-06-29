@@ -309,6 +309,7 @@ export default function OpsCalendarPage() {
 
   // 수익분석 권위 산식 그대로 사용 (재계산 금지)
   const inc = settlement?.income;
+  const mtr = settlement?.metrics;
   const closedSales     = Number(inc?.salesTotal ?? 0);
   const closedPurchases = Number(inc?.purchasesTotal ?? 0);
   const fixed           = Number(inc?.fixedCostsTotal ?? 0);   // 비례 포함
@@ -316,6 +317,11 @@ export default function OpsCalendarPage() {
   const expenses        = Number(inc?.expensesTotal ?? 0);      // 경비
   const closedDayCount  = settlement?.collection.closedDays ?? 0;
   const netProfit       = Number(inc?.profit ?? 0);             // 서버 산식 (재계산 금지)
+  const costRatio       = mtr?.costRatio ?? 0;
+  const laborRatio      = mtr?.laborRatio ?? 0;
+  const profitRatio     = mtr?.profitRatio ?? 0;
+  const expenseRatio    = closedSales > 0 ? Math.round(expenses / closedSales * 1000) / 10 : 0;
+  const fixedRatio      = closedSales > 0 ? Math.round(fixed / closedSales * 1000) / 10 : 0;
 
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
@@ -359,20 +365,24 @@ export default function OpsCalendarPage() {
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">매입</div>
                 <div className="text-sm font-bold text-foreground">{closedPurchases > 0 ? fmtWon(closedPurchases) : "-"}</div>
+                {closedSales > 0 && <div className="text-[9px] text-muted-foreground tabular-nums">{costRatio}%</div>}
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">고정비</div>
                 <div className="text-sm font-bold text-foreground">{fixed > 0 ? fmtWon(fixed) : "-"}</div>
+                {closedSales > 0 && <div className="text-[9px] text-muted-foreground tabular-nums">{fixedRatio}%</div>}
               </div>
             </div>
             <div className="border-t border-border/50 pt-2 grid grid-cols-3 gap-2">
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">인건비</div>
                 <div className="text-sm font-bold text-foreground">{labor > 0 ? fmtWon(labor) : "-"}</div>
+                {closedSales > 0 && <div className="text-[9px] text-muted-foreground tabular-nums">{laborRatio}%</div>}
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">경비</div>
                 <div className="text-sm font-bold text-foreground">{expenses > 0 ? fmtWon(expenses) : "-"}</div>
+                {closedSales > 0 && <div className="text-[9px] text-muted-foreground tabular-nums">{expenseRatio}%</div>}
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">순이익</div>
@@ -384,6 +394,7 @@ export default function OpsCalendarPage() {
                     </span>
                   ) : "-"}
                 </div>
+                {closedSales > 0 && <div className={`text-[9px] tabular-nums ${netProfit >= 0 ? "text-emerald-500" : "text-red-400"}`}>{profitRatio}%</div>}
               </div>
             </div>
           </div>

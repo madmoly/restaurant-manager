@@ -88,10 +88,15 @@ export default function AdminDashboard() {
     const purchasesTotal = stores.reduce((a, s) => a + s.purchasesTotal, 0);
     const laborCost = stores.reduce((a, s) => a + s.laborCost, 0);
     const fixedCostTotal = stores.reduce((a, s) => a + s.fixedCostTotal, 0);
+    const expensesTotal = stores.reduce((a, s) => a + ((s as any).expensesTotal ?? 0), 0);
     const profit = stores.reduce((a, s) => a + s.profit, 0);
     return {
-      salesTotal, purchasesTotal, laborCost, fixedCostTotal, profit,
+      salesTotal, purchasesTotal, laborCost, fixedCostTotal, expensesTotal, profit,
       profitRate: salesTotal > 0 ? (profit / salesTotal * 100) : 0,
+      costRatio: salesTotal > 0 ? (purchasesTotal / salesTotal * 100) : 0,
+      laborRatio: salesTotal > 0 ? (laborCost / salesTotal * 100) : 0,
+      fixedRatio: salesTotal > 0 ? (fixedCostTotal / salesTotal * 100) : 0,
+      expenseRatio: salesTotal > 0 ? (expensesTotal / salesTotal * 100) : 0,
       storeCount: stores.length,
     };
   }, [filteredStores]);
@@ -100,6 +105,7 @@ export default function AdminDashboard() {
   const totalPurchases = filteredTotals.purchasesTotal;
   const totalLabor = filteredTotals.laborCost;
   const totalFixed = filteredTotals.fixedCostTotal;
+  const totalExpenses = filteredTotals.expensesTotal;
   const totalProfit = filteredTotals.profit;
   const profitRate = filteredTotals.profitRate;
   const storeCount = filteredTotals.storeCount;
@@ -123,7 +129,8 @@ export default function AdminDashboard() {
     { name: "매입비", value: totalPurchases, color: "#7c3aed" },
     { name: "인건비", value: totalLabor, color: "#ec4899" },
     { name: "고정비", value: totalFixed, color: "#f59e0b" },
-  ].filter(d => d.value > 0), [totalPurchases, totalLabor, totalFixed]);
+    { name: "경비", value: totalExpenses, color: "#06b6d4" },
+  ].filter(d => d.value > 0), [totalPurchases, totalLabor, totalFixed, totalExpenses]);
 
   // 월 이동
   const goPrev = () => {
@@ -291,7 +298,29 @@ export default function AdminDashboard() {
           <span>매입 {fmtW(totalPurchases)}</span>
           <span>인건비 {fmtW(totalLabor)}</span>
           <span>고정비 {fmtW(totalFixed)}</span>
+          <span>경비 {fmtW(totalExpenses)}</span>
         </div>
+        {/* 비율 바 */}
+        {totalSales > 0 && (
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+            <div className="flex items-center justify-between bg-muted/40 rounded px-2 py-1">
+              <span className="text-muted-foreground">매입비율</span>
+              <span className="font-medium text-foreground tabular-nums">{filteredTotals.costRatio.toFixed(1)}%</span>
+            </div>
+            <div className="flex items-center justify-between bg-muted/40 rounded px-2 py-1">
+              <span className="text-muted-foreground">인건비율</span>
+              <span className="font-medium text-foreground tabular-nums">{filteredTotals.laborRatio.toFixed(1)}%</span>
+            </div>
+            <div className="flex items-center justify-between bg-muted/40 rounded px-2 py-1">
+              <span className="text-muted-foreground">고정비율</span>
+              <span className="font-medium text-foreground tabular-nums">{filteredTotals.fixedRatio.toFixed(1)}%</span>
+            </div>
+            <div className="flex items-center justify-between bg-muted/40 rounded px-2 py-1">
+              <span className="text-muted-foreground">순이익률</span>
+              <span className={`font-medium tabular-nums ${totalProfit >= 0 ? "text-emerald-600" : "text-red-500"}`}>{profitRate.toFixed(1)}%</span>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* 차트 영역 */}
