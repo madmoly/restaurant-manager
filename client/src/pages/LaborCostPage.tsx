@@ -343,10 +343,10 @@ export default function LaborCostPage() {
         </div>
       </div>
 
-      {/* 4대보험 공제 안내 */}
+      {/* 4대보험 공제 안내 (페이지 1회 표시) */}
       <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-lg px-3 py-2 text-[11px] text-blue-700 dark:text-blue-300">
         <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-        <span>4대보험 가입자의 공제는 노무사 정산 결과 기준이며 본 화면에 미반영입니다.</span>
+        <span>4대보험·원천세 공제는 노무사 정산 결과 기준이며 본 화면에 미반영입니다. 3.3% 사업소득자는 원천세(3.3%)만 별도 계산하세요.</span>
       </div>
 
       {/* 대체휴무/연차 잔여 요약 */}
@@ -436,12 +436,15 @@ function EffSpan({ label, eff, guide }: { label: string; eff: number | null; gui
   );
 }
 
-/* ─── 직원 행 컴포넌트 ─────────────────────────────── */
+/* ─── 직원 행 컴포넌트 (점진적 공개) ─────────────────────────────── */
 function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) {
   const utils = trpc.useUtils();
   const updateTempInfo = trpc.schedules.updateTempWorkerInfo.useMutation({
     onSuccess() { utils.schedules.laborCostByCompany.invalidate(); },
   });
+  const [expanded, setExpanded] = useState(false);
+  const [showComparison, setShowComparison] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
   const [editingTemp, setEditingTemp] = useState(false);
   const [tempBank, setTempBank] = useState(emp.bankAccount ?? "");
   const [tempPhoneVal, setTempPhoneVal] = useState(emp.phone ?? "");
@@ -456,233 +459,237 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
     setEditingTemp(false);
   };
 
-  const subUsed = emp.substituteLeave && emp.substituteLeave.used > 0;
   const badge = wageTypeBadge(emp);
   const wb = emp.wageBreakdown ?? { base: Math.round(emp.totalWage ?? 0), weeklyHoliday: 0, overtime: 0, night: 0 };
+  const isHourly = emp.wageType === "hourly";
+  const hourlyRate = isHourly ? Number(emp.wageAmount) : NaN;
+  const totalWage = Math.round(emp.totalWage ?? 0);
+
+  // 메타 요약 1줄
+  const metaParts: string[] = [];
+  if (!emp.isTemp) {
+    if (emp.substituteLeave) {
+      metaParts.push(`대휴 ${emp.substituteLeave.remaining}일 잔여`);
+    }
+    if (emp.contractDaysOff != null || emp.daysOff != null) {
+      metaParts.push(`휴무 ${emp.contractDaysOff ?? 0}/${emp.daysOff ?? 0}일`);
+    }
+    const cs = emp.monthlyContractStart ?? emp.contractStart;
+    const ce = emp.monthlyContractEnd ?? emp.contractEnd;
+    if (cs) {
+      metaParts.push(`계약 ${fmtDate(cs)}~${ce ? fmtDate(ce) : ""}`);
+    }
+  }
+
   return (
-    <div className={`px-4 py-3 space-y-2 ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
-      {/* L1: 이름 · 직책 · 임금유형 배지 */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-foreground flex items-center gap-1 flex-wrap">
-            <span>{emp.name}</span>
-            {emp.position && <span className="text-[10px] text-muted-foreground font-normal">({emp.position})</span>}
-            {badge && (
-              <span className="text-[9px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded font-medium">
-                {badge}
-              </span>
-            )}
-            {emp.recheckRequired && <AlertTriangle className="w-3 h-3 text-amber-500" />}
-            {emp.monthlyContractMissing && (
-              <span className="text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5">
-                <AlertTriangle className="w-2.5 h-2.5" /> 정산월 계약 미연결
-              </span>
-            )}
-          </div>
+    <div className={`px-4 py-2.5 ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
+      {/* ── 기본 행: 이름 · 유형 · 근무 · 총액 ── */}
+      <div
+        className="flex items-center gap-2 cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+          <span className="text-sm font-semibold text-foreground">{emp.name}</span>
+          {emp.position && <span className="text-[10px] text-muted-foreground">({emp.position})</span>}
+          {badge && (
+            <span className="text-[9px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded font-medium">
+              {badge}
+            </span>
+          )}
+          {emp.recheckRequired && <AlertTriangle className="w-3 h-3 text-amber-500" />}
+          {emp.monthlyContractMissing && (
+            <span className="text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5">
+              <AlertTriangle className="w-2.5 h-2.5" /> 계약 미연결
+            </span>
+          )}
+          <span className="text-[11px] text-muted-foreground">
+            {emp.workedDays ?? 0}일{(emp.totalHours ?? 0) > 0 && ` · ${emp.totalHours.toFixed(1)}h`}
+          </span>
         </div>
+        <div className="text-right shrink-0">
+          <span className="text-sm font-bold text-foreground">{fmtWon(totalWage)}</span>
+        </div>
+        {expanded
+          ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" />
+          : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
       </div>
 
       {/* 0원 이유 안내 */}
       {emp.zeroWageReason && (
-        <div className="flex items-center gap-1.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded px-2.5 py-1.5 text-[11px] text-red-600 dark:text-red-400">
+        <div className="flex items-center gap-1.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded px-2.5 py-1.5 text-[11px] text-red-600 dark:text-red-400 mt-2">
           <Info className="w-3.5 h-3.5 shrink-0" />
           <span>인건비 0원 — {emp.zeroWageReason}</span>
         </div>
       )}
 
-      {/* L2~L3: 가이드/실효 — 재설계 2026-05-02: 월급제만 표시 (시급제는 합계만) */}
-      {emp.wageType === "monthly" && (
-        <>
-          <div className="text-[11px]">
-            <span className="text-muted-foreground">가이드</span>
-            <div className="text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
-              <span>시급 <b>{fmtWon(emp.guideHourly)}</b></span>
-              <span>일급 <b>{fmtWon(emp.guideDaily)}</b></span>
-              <span>월급 <b>{fmtWon(emp.guideMonthly)}</b></span>
-            </div>
-          </div>
-          <div className="text-[11px]">
-            <span className="text-muted-foreground">실효</span>
-            <div className="text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
-              <EffSpan label="시급" eff={emp.effectiveHourly} guide={emp.guideHourly} />
-              <EffSpan label="일급" eff={emp.effectiveDaily} guide={emp.guideDaily} />
-              <EffSpan label="월급" eff={emp.effectiveMonthly} guide={emp.guideMonthly} />
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* L4: 비용 분해 — 사용자 요청 2026-05-02: 연장/야간 컬럼 제거. 주휴 0원이면 "포함" 표시 */}
-      {(() => {
-        const wHoliday = wb.weeklyHoliday ?? 0;
-        const tentative = (wb.base ?? 0) + wHoliday;
-        const holidayCell = wHoliday > 0
-          ? <span className="font-medium text-foreground">{fmtWon(wHoliday)}</span>
-          : <span className="font-medium text-muted-foreground">포함</span>;
-        const isHourly = emp.wageType === "hourly";
-        const hourlyRate = isHourly ? Number(emp.wageAmount) : NaN;
-        const gridCols = isHourly ? "grid-cols-4" : "grid-cols-3";
-        const totalSpan = isHourly ? "col-span-4" : "col-span-3";
-        return (
-          <div className="space-y-1 pt-1 border-t border-border/30">
-            <div className={`text-[11px] grid ${gridCols} gap-x-3 gap-y-1`}>
+      {/* ── 펼침 시: 상세 정보 ── */}
+      {expanded && (
+        <div className="mt-2 space-y-2">
+          {/* 급여 내역 */}
+          <div className="text-[11px] grid grid-cols-3 gap-x-3 gap-y-1 pt-2 border-t border-border/30">
+            {isHourly && (
               <div>
-                <span className="text-muted-foreground">근무시간</span>
-                <div className="font-medium text-foreground">{(emp.totalHours ?? 0).toFixed(1)}h</div>
+                <span className="text-muted-foreground">시급</span>
+                <div className="font-medium text-foreground">
+                  {isFinite(hourlyRate) && hourlyRate > 0 ? fmtWon(hourlyRate) : "-"}
+                </div>
               </div>
-              {isHourly && (
-                <div>
-                  <span className="text-muted-foreground">시급</span>
-                  <div className="font-medium text-foreground">
-                    {isFinite(hourlyRate) && hourlyRate > 0 ? fmtWon(hourlyRate) : "-"}
+            )}
+            <div>
+              <span className="text-muted-foreground">{isHourly ? "시간×시급" : "기본급"}</span>
+              <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
+            </div>
+            <div>
+              <span className="text-muted-foreground">주휴</span>
+              <div className="font-medium">
+                {(wb.weeklyHoliday ?? 0) > 0
+                  ? <span className="text-foreground">{fmtWon(wb.weeklyHoliday)}</span>
+                  : <span className="text-muted-foreground">포함</span>}
+              </div>
+            </div>
+            <div className="col-span-3 flex items-center justify-between border-t border-border/30 pt-1">
+              <span className="text-muted-foreground">합계</span>
+              <span className="font-bold text-foreground">{fmtWon(totalWage)}</span>
+            </div>
+          </div>
+
+          {/* 가이드/실효 비교 (옵션) */}
+          {emp.wageType === "monthly" && (
+            <div>
+              <button
+                onClick={() => setShowComparison(!showComparison)}
+                className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+              >
+                {showComparison ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                가이드/실효 비교
+              </button>
+              {showComparison && (
+                <div className="text-[11px] mt-1 space-y-1">
+                  <div className="text-muted-foreground">
+                    가이드: 시급 {fmtWon(emp.guideHourly)} · 일급 {fmtWon(emp.guideDaily)} · 월급 {fmtWon(emp.guideMonthly)}
+                  </div>
+                  <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5">
+                    <EffSpan label="실효 시급" eff={emp.effectiveHourly} guide={emp.guideHourly} />
+                    <EffSpan label="실효 일급" eff={emp.effectiveDaily} guide={emp.guideDaily} />
+                    <EffSpan label="실효 월급" eff={emp.effectiveMonthly} guide={emp.guideMonthly} />
                   </div>
                 </div>
               )}
-              <div>
-                <span className="text-muted-foreground">{isHourly ? "시간×시급" : "기본"}</span>
-                <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">주휴</span>
-                <div>{holidayCell}</div>
-              </div>
-              <div className={totalSpan}>
-                <span className="text-muted-foreground">합계</span>
-                <div className="font-bold text-foreground">{fmtWon(tentative)}</div>
-              </div>
             </div>
-            <div className="flex items-start gap-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300">
-              <Info className="w-3 h-3 mt-0.5 shrink-0" />
-              <span>
-                {emp.taxMode === "biz_income_3_3" ? "원천세(3.3%)" : "4대보험·원천세"}는 시스템에서 계산하지 않습니다. 별도 계산하세요.
-              </span>
-            </div>
-          </div>
-        );
-      })()}
+          )}
 
-      {/* 메타 — 정규직: 대체휴무/계약기간/계약·실휴무 (연차는 포괄수당 박제, 시스템 미추적) */}
-      {!emp.isTemp ? (
-        <div className="space-y-1 pt-1 border-t border-border/30">
-          <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-[11px]">
-            <div>
-              <span className="text-muted-foreground">대체휴무</span>
-              <div className="font-medium text-foreground">
-                {subUsed ? "사용" : "미사용"}
-                {emp.substituteLeave && <span className="text-muted-foreground"> ({emp.substituteLeave.remaining}일)</span>}
-              </div>
+          {/* 메타 요약 (1줄) */}
+          {!emp.isTemp && metaParts.length > 0 && (
+            <div className="text-[10px] text-muted-foreground pt-2 border-t border-border/30">
+              {metaParts.join(" · ")}
             </div>
-            <div>
-              <span className="text-muted-foreground">계약/실휴무</span>
-              <div className="font-medium text-foreground">{emp.contractDaysOff ?? 0}/{emp.daysOff ?? 0}일</div>
+          )}
+
+          {/* 임시직 근무 요약 */}
+          {emp.isTemp && (
+            <div className="text-[10px] text-muted-foreground pt-2 border-t border-border/30">
+              출근 {emp.workedDays ?? 0}일 · 실휴무 {emp.daysOff ?? 0}일
             </div>
-            <div>
-              <span className="text-muted-foreground">입사일</span>
-              <div className="font-medium text-foreground text-[10px]">
-                {emp.hireDate ? fmtDate(emp.hireDate) : "-"}
-              </div>
-            </div>
-            <div className="col-span-3">
-              <span className="text-muted-foreground">계약기간</span>
-              <div className="font-medium text-foreground text-[10px]">
-                {(() => {
-                  const cs = emp.monthlyContractStart ?? emp.contractStart;
-                  const ce = emp.monthlyContractEnd ?? emp.contractEnd;
-                  return cs ? `${fmtDate(cs)} ~ ${fmtDate(ce)}` : "-";
-                })()}
-              </div>
-            </div>
-          </div>
-          {emp.contractHistory && emp.contractHistory.length > 0 && (
+          )}
+
+          {/* 계약 이력 */}
+          {!emp.isTemp && emp.contractHistory && emp.contractHistory.length > 0 && (
             <ContractHistoryToggle history={emp.contractHistory} />
           )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] pt-1 border-t border-border/30">
-          <div>
-            <span className="text-muted-foreground">출근</span>
-            <div className="font-medium text-foreground">{emp.workedDays ?? 0}일</div>
-          </div>
-          <div>
-            <span className="text-muted-foreground">실휴무</span>
-            <div className="font-medium text-foreground">{emp.daysOff ?? 0}일</div>
+
+          {/* 계좌/민감정보 (토글) */}
+          <div className="pt-2 border-t border-border/30">
+            {!emp.isTemp ? (
+              (emp.bankAccount || emp.bankName || emp.residentNumber) ? (
+                <div>
+                  <button
+                    onClick={() => setShowAccount(!showAccount)}
+                    className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+                  >
+                    {showAccount ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    계좌·주민번호
+                  </button>
+                  {showAccount && (
+                    <div className="grid grid-cols-2 gap-x-3 text-xs mt-1">
+                      <div>
+                        <span className="text-muted-foreground">계좌번호</span>
+                        <div className="font-medium text-foreground">
+                          {emp.bankName ? <span className="text-muted-foreground mr-1">{emp.bankName}</span> : null}
+                          {emp.bankAccount || "-"}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">주민번호</span>
+                        <div className="font-medium text-foreground">{emp.residentNumber || "-"}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null
+            ) : (
+              /* 임시직: 계좌/연락처 인라인 편집 (기존 유지) */
+              <div className="text-xs">
+                {editingTemp ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="w-3 h-3 text-muted-foreground shrink-0" />
+                      <input
+                        className="flex-1 px-2 py-1 border border-input rounded text-xs bg-background"
+                        placeholder="계좌번호"
+                        value={tempBank}
+                        onChange={(e) => setTempBank(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Phone className="w-3 h-3 text-muted-foreground shrink-0" />
+                      <input
+                        className="flex-1 px-2 py-1 border border-input rounded text-xs bg-background"
+                        placeholder="연락처"
+                        value={tempPhoneVal}
+                        onChange={(e) => setTempPhoneVal(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5 justify-end">
+                      <button onClick={() => setEditingTemp(false)} className="text-[11px] text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent">취소</button>
+                      <button onClick={saveTempInfo} disabled={updateTempInfo.isPending} className="text-[11px] text-primary font-medium px-2 py-1 rounded hover:bg-primary/10 flex items-center gap-1">
+                        <Save className="w-3 h-3" /> 저장
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      {emp.bankAccount && (
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <CreditCard className="w-3 h-3" /> {emp.bankAccount}
+                        </span>
+                      )}
+                      {emp.phone && (
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Phone className="w-3 h-3" /> {emp.phone}
+                        </span>
+                      )}
+                      {!emp.bankAccount && !emp.phone && (
+                        <span className="text-muted-foreground/60">계좌/연락처 미등록</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => { setTempBank(emp.bankAccount ?? ""); setTempPhoneVal(emp.phone ?? ""); setEditingTemp(true); }}
+                      className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-primary/10"
+                    >
+                      <Edit3 className="w-3 h-3" /> {emp.bankAccount || emp.phone ? "수정" : "입력"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
-      {/* 4행: 계좌/주민번호/연락처 */}
-      {emp.isTemp ? (
-        <div className="text-xs pt-1 border-t border-border/30">
-          {editingTemp ? (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <CreditCard className="w-3 h-3 text-muted-foreground shrink-0" />
-                <input
-                  className="flex-1 px-2 py-1 border border-input rounded text-xs bg-background"
-                  placeholder="계좌번호"
-                  value={tempBank}
-                  onChange={(e) => setTempBank(e.target.value)}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Phone className="w-3 h-3 text-muted-foreground shrink-0" />
-                <input
-                  className="flex-1 px-2 py-1 border border-input rounded text-xs bg-background"
-                  placeholder="연락처"
-                  value={tempPhoneVal}
-                  onChange={(e) => setTempPhoneVal(e.target.value)}
-                />
-              </div>
-              <div className="flex items-center gap-1.5 justify-end">
-                <button onClick={() => setEditingTemp(false)} className="text-[11px] text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent">취소</button>
-                <button onClick={saveTempInfo} disabled={updateTempInfo.isPending} className="text-[11px] text-primary font-medium px-2 py-1 rounded hover:bg-primary/10 flex items-center gap-1">
-                  <Save className="w-3 h-3" /> 저장
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                {emp.bankAccount && (
-                  <span className="flex items-center gap-1 text-muted-foreground">
-                    <CreditCard className="w-3 h-3" /> {emp.bankAccount}
-                  </span>
-                )}
-                {emp.phone && (
-                  <span className="flex items-center gap-1 text-muted-foreground">
-                    <Phone className="w-3 h-3" /> {emp.phone}
-                  </span>
-                )}
-                {!emp.bankAccount && !emp.phone && (
-                  <span className="text-muted-foreground/60">계좌/연락처 미등록</span>
-                )}
-              </div>
-              <button
-                onClick={() => { setTempBank(emp.bankAccount ?? ""); setTempPhoneVal(emp.phone ?? ""); setEditingTemp(true); }}
-                className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-primary/10"
-              >
-                <Edit3 className="w-3 h-3" /> {emp.bankAccount || emp.phone ? "수정" : "입력"}
-              </button>
-            </div>
-          )}
-        </div>
-      ) : (emp.bankAccount || emp.bankName || emp.residentNumber) ? (
-        <div className="grid grid-cols-2 gap-x-3 text-xs pt-1 border-t border-border/30">
-          <div>
-            <span className="text-muted-foreground">계좌번호</span>
-            <div className="font-medium text-foreground">
-              {emp.bankName ? <span className="text-muted-foreground mr-1">{emp.bankName}</span> : null}
-              {emp.bankAccount || "-"}
-            </div>
-          </div>
-          <div>
-            <span className="text-muted-foreground">주민번호</span>
-            <div className="font-medium text-foreground">{emp.residentNumber || "-"}</div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
+
 
 /* ─── 계약 이력 토글 ─────────────────────────────── */
 function ContractHistoryToggle({ history }: { history: Array<{ contractStart: string; contractEnd: string | null; signedAt: string | null }> }) {
