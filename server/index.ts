@@ -260,7 +260,6 @@ app.use(express.json({ limit: "10mb" }));
     await conn.query(`
       INSERT IGNORE INTO system_settings (settingKey, settingValue, description) VALUES
       ('leave_min_days', '5', '휴무신청 최소 사전 일수'),
-      ('ocr_model', 'claude-sonnet-4-6', 'OCR에 사용하는 Claude 모델'),
       ('default_latitude', '37.5665', '기본 위도 (서울)'),
       ('default_longitude', '126.9780', '기본 경도 (서울)'),
       ('backup_retention_days', '30', 'DB 백업 보관 일수'),

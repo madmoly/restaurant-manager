@@ -16,6 +16,7 @@ import {
   buildClaudeContext,
   type UpstageParseResult,
 } from "./upstage";
+import { OCR_MODELS } from "./models";
 
 // ────────────────────────────────────────────────────────────────────────────
 // 타입
@@ -25,8 +26,10 @@ export type OcrEngine = "upstage" | "claude_vision";
 
 // 텍스트 stage(Upstage 결과 구조화)는 Haiku로 충분 — 속도 2~3배.
 // Vision stage(이미지 직접 판독, 폴백 전용)는 정확도 위해 Sonnet 유지.
-const TEXT_STAGE_MODEL = "claude-haiku-4-5";
-const VISION_STAGE_MODEL = "claude-sonnet-4-6";
+const TEXT_STAGE_MODEL = OCR_MODELS.text;
+const VISION_STAGE_MODEL = OCR_MODELS.vision;
+// 매입전표는 항목 30~50줄 내외가 통상 — 8192면 충분 (정산표처럼 100줄+ 케이스는 별도 엔드포인트)
+const STAGE_MAX_TOKENS = 8192;
 
 export interface HybridOcrInput {
   filePath: string;
@@ -126,7 +129,7 @@ async function runClaudeTextStage(
   const claudeStarted = Date.now();
   const stream = deps.anthropic.messages.stream({
     model: TEXT_STAGE_MODEL,
-    max_tokens: 8192,
+    max_tokens: STAGE_MAX_TOKENS,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
   });
   const response = await stream.finalMessage();
@@ -178,7 +181,7 @@ async function runClaudeVisionStage(
   const claudeStarted = Date.now();
   const stream = deps.anthropic.messages.stream({
     model: VISION_STAGE_MODEL,
-    max_tokens: 8192,
+    max_tokens: STAGE_MAX_TOKENS,
     messages: [
       {
         role: "user",

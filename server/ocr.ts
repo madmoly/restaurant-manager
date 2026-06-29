@@ -11,6 +11,19 @@ import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { exportDatasetToGDrive, isGDriveConfigured, getLastExportResult } from "./gdrive";
 import { runHybridOcr } from "./ocr-engines/hybrid";
 import { promptV2, promptV1ImageFallback } from "./ocr-engines/prompts";
+import { OCR_MODELS } from "./ocr-engines/models";
+
+// ─── OCR 이미지 전처리 해상도 캡 (px) ────────────────────────────────────────
+// 클라 OCR_HIGH(imageResize.ts)가 이미 2560px로 리사이즈하므로 3500은 실질적으로
+// no-op 캡 — 클라가 더 큰 원본을 보내는 경로(예: 회전 후 재처리)를 위한 안전망.
+const OCR_PREPROCESS_MAX_DIM = 3500;
+
+// ─── 정산표 OCR 응답 토큰 한도 ───────────────────────────────────────────────
+// 정산표는 100~200항목도 흔함. 8192면 ~40항목에서 truncate됨 → 64K 지원 모델 기준 상향.
+const STATEMENT_MAX_TOKENS = 32768;
+// 보건증/매출전표는 항목 수가 적어 기본 한도로 충분.
+const HEALTH_CERT_MAX_TOKENS = 1024;
+const SALES_MAX_TOKENS = 4096;
 
 // OCR 에러를 error_logs 테이블에 저장
 async function logOcrError(message: string, metadata?: Record<string, any>, restaurantId?: number) {
@@ -90,6 +103,8 @@ ocrRouter.get("/debug", async (_req: Request, res: Response) => {
 });
 
 // ─── POST /api/ocr/detect-orientation — Tesseract OSD 1회 방향감지 ──────────
+// 713d7ba 이후 클라이언트가 호출하지 않음 (자동회전 감지 폐기, 수동회전으로 대체).
+// 디버그/수동 점검용으로만 잔존 — 엔드포인트 제거는 보류.
 ocrRouter.post("/detect-orientation", async (req: Request, res: Response) => {
   try {
     const { imageUrl } = req.body;
@@ -177,6 +192,83 @@ async function fixExifOrientation(filePath: string): Promise<void> {
   } catch (exifErr: any) {
     console.warn(`[OCR] EXIF 회전 실패 (무시): ${path.basename(filePath)} — ${exifErr.message}`);
   }
+}
+
+// ─── 헬퍼: 문서 OCR 특화 이미지 전처리 (해상도 캡+그레이스케일+대비+샤픈, v9) ──
+// extract-purchase / extract-statement(이미지) / extract-sales 3곳에서 공통 사용.
+async function preprocessImageForOcr(filePath: string, logPrefix: string): Promise<void> {
+  try {
+    const meta = await sharp(filePath).metadata();
+    const maxDim = Math.max(meta.width || 0, meta.height || 0);
+
+    let pipeline = sharp(filePath);
+    if (maxDim > OCR_PREPROCESS_MAX_DIM) {
+      pipeline = pipeline.resize(OCR_PREPROCESS_MAX_DIM, OCR_PREPROCESS_MAX_DIM, { fit: "inside", withoutEnlargement: true });
+    }
+
+    pipeline = pipeline
+      .grayscale()
+      .normalize()                       // 히스토그램 평활화
+      .linear(1.3, -(128 * 1.3 - 128))   // contrast boost 1.3x (중심점 128)
+      .gamma(1.2);                        // 배경 밝게 (흰 배경 강조)
+
+    pipeline = pipeline.sharpen({
+      sigma: 2.0,  // 넓은 커널 (글자 획 전체 커버)
+      m1: 2.0,     // flat area: 옅은 인쇄 강화
+      m2: 1.0,     // edge area: 글자 경계 강조
+    });
+
+    const enhancedBuf = await pipeline.jpeg({ quality: 95, mozjpeg: true }).toBuffer();
+    fs.writeFileSync(filePath, enhancedBuf);
+    console.log(`${logPrefix} 이미지 전처리 v9 완료: ${path.basename(filePath)} (${(enhancedBuf.length / 1024).toFixed(0)}KB, 원본 ${maxDim}px → grayscale+contrast+sharpen)`);
+  } catch (enhErr: any) {
+    console.warn(`${logPrefix} 이미지 전처리 실패 (원본 사용): ${enhErr.message}`);
+  }
+}
+
+// ─── 헬퍼: Claude 호출 + 텍스트 추출 + JSON 파싱 통합 ──────────────────────
+// extract-statement/extract-health-cert/extract-sales가 각각 복제하던
+// messages.create|stream → extractText → parseAIJson 패턴을 공통화.
+// throw하지 않고 parsed=null로 반환 (a39ccec 패턴과 동일하게 호출부가 분기).
+async function callClaudeJson(opts: {
+  anthropic: Anthropic;
+  model: string;
+  maxTokens: number;
+  content: any[];
+  stream?: boolean;
+}): Promise<{ parsed: any | null; rawText: string | null; inputTokens: number; outputTokens: number; elapsedMs: number; stopReason?: string | null }> {
+  const started = Date.now();
+  let message: Anthropic.Message;
+  if (opts.stream) {
+    const stream = opts.anthropic.messages.stream({
+      model: opts.model,
+      max_tokens: opts.maxTokens,
+      messages: [{ role: "user", content: opts.content }],
+    });
+    message = await stream.finalMessage();
+  } else {
+    message = await opts.anthropic.messages.create({
+      model: opts.model,
+      max_tokens: opts.maxTokens,
+      messages: [{ role: "user", content: opts.content }],
+    });
+  }
+
+  const elapsedMs = Date.now() - started;
+  const inputTokens = message.usage?.input_tokens ?? 0;
+  const outputTokens = message.usage?.output_tokens ?? 0;
+  const rawText = extractText(message);
+
+  let parsed: any | null = null;
+  if (rawText) {
+    try {
+      parsed = parseAIJson(rawText);
+    } catch (err: any) {
+      console.warn(`[OCR] parseAIJson 실패: ${err?.message ?? err}`);
+    }
+  }
+
+  return { parsed, rawText, inputTokens, outputTokens, elapsedMs, stopReason: message.stop_reason };
 }
 
 // ─── 헬퍼: 코드펜스 제거 + JSON 파싱 (잘린 JSON 복구 포함) ──────────────────
@@ -795,42 +887,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     }
 
     // ── 이미지 전처리: 문서 OCR 특화 파이프라인 (v9) ──
-    try {
-      const meta = await sharp(filePath).metadata();
-      const maxDim = Math.max(meta.width || 0, meta.height || 0);
-
-      // 1단계: 해상도 제한 (3500px — 작은 숫자 판독 위해 기존 3000에서 상향)
-      let pipeline = sharp(filePath);
-      if (maxDim > 3500) {
-        pipeline = pipeline.resize(3500, 3500, { fit: "inside", withoutEnlargement: true });
-      }
-
-      // 2단계: 그레이스케일 변환 (색상 노이즈 제거, 흑백 대비 극대화)
-      pipeline = pipeline.grayscale();
-
-      // 3단계: 대비 강화 (전표의 옅은 인쇄, 그림자 보정)
-      pipeline = pipeline
-        .normalize()                // 히스토그램 평활화
-        .linear(1.3, -(128 * 1.3 - 128))  // contrast boost 1.3x (중심점 128)
-        .gamma(1.2);                // 배경 밝게 (흰 배경 강조)
-
-      // 4단계: 샤프닝 (텍스트 가장자리 강화 — 한글/숫자 경계 선명화)
-      pipeline = pipeline.sharpen({
-        sigma: 2.0,           // 넓은 커널 (글자 획 전체 커버)
-        m1: 2.0,              // flat area: 옅은 인쇄 강화
-        m2: 1.0,              // edge area: 글자 경계 강조
-      });
-
-      // 5단계: 최종 출력 (고품질 JPEG)
-      const enhancedBuf = await pipeline
-        .jpeg({ quality: 95, mozjpeg: true })
-        .toBuffer();
-
-      fs.writeFileSync(filePath, enhancedBuf);
-      console.log(`[OCR] 이미지 전처리 v9 완료: ${path.basename(filePath)} (${(enhancedBuf.length / 1024).toFixed(0)}KB, 원본 ${maxDim}px → grayscale+contrast+sharpen)`);
-    } catch (enhErr: any) {
-      console.warn(`[OCR] 이미지 전처리 실패 (원본 사용): ${enhErr.message}`);
-    }
+    await preprocessImageForOcr(filePath, "[OCR]");
 
     // ── 하이브리드 OCR 파이프라인 (Upstage + Claude 텍스트 해석, fallback: Claude Vision) ──
     const ocrStartTime = Date.now();
@@ -854,7 +911,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
     const parsed = hybridOut.rawJson;
     if (!parsed) {
-      logOcrApiUsage({ endpoint: "extract-purchase", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "AI 응답 파싱 실패", inputTokens, outputTokens, model: "sonnet" });
+      logOcrApiUsage({ endpoint: "extract-purchase", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "AI 응답 파싱 실패", inputTokens, outputTokens, model: hybridOut.claude.model });
       res.status(500).json({ error: "AI 응답을 처리하지 못했습니다. 다시 시도해주세요.", retryable: true, reason: "parse_failed" });
       return;
     }
@@ -928,7 +985,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       responseTimeMs: ocrElapsed,
       success: true,
       inputTokens, outputTokens,
-      model: "sonnet",
+      model: hybridOut.claude.model,
       itemCount: items.length,
       timingBreakdown: `pre=${ocrStartTime - preStart},upstage=${hybridOut.upstage?.elapsedMs ?? 0},claude=${hybridOut.claude.elapsedMs}`,
     });
@@ -1001,24 +1058,7 @@ ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
         await fixExifOrientation(filePath);
 
         // 정산표는 길고 텍스트 위주 → 해상도 3500, 그레이+대비+샤프 (extract-purchase와 동일 v9)
-        try {
-          const meta = await sharp(filePath).metadata();
-          const maxDim = Math.max(meta.width || 0, meta.height || 0);
-          let pipeline = sharp(filePath);
-          if (maxDim > 3500) {
-            pipeline = pipeline.resize(3500, 3500, { fit: "inside", withoutEnlargement: true });
-          }
-          pipeline = pipeline
-            .grayscale()
-            .normalize()
-            .linear(1.3, -(128 * 1.3 - 128))
-            .gamma(1.2)
-            .sharpen({ sigma: 2.0, m1: 2.0, m2: 1.0 });
-          const enhancedBuf = await pipeline.jpeg({ quality: 95, mozjpeg: true }).toBuffer();
-          fs.writeFileSync(filePath, enhancedBuf);
-        } catch (enhErr: any) {
-          console.warn(`[OCR] statement 전처리 실패 (원본 사용): ${enhErr.message}`);
-        }
+        await preprocessImageForOcr(filePath, "[OCR-Statement]");
 
         const { base64, mediaType } = loadImageBase64Raw(filePath);
         fileBlocks.push({
@@ -1137,38 +1177,31 @@ ${profileHint}`;
     }
     messageContent.push({ type: "text", text: promptText });
 
-    // 정산표는 항목 수가 많을 수 있음 (100~200건도 흔함). 8192는 ~40항목에서 truncate됨.
-    // 32768로 상향 — claude-sonnet-4는 64K까지 지원.
+    // 정산표는 항목 수가 많을 수 있음 (100~200건도 흔함). STATEMENT_MAX_TOKENS(32768) 미만이면
+    // ~40항목에서 truncate됨. claude-sonnet-4는 64K까지 지원.
     // ⚠️ Anthropic SDK는 max_tokens가 크면 non-streaming 요청을 거부함 (예상 처리시간 >10분).
     //    streaming으로 호출 후 finalMessage()로 한 번에 받음 (인터페이스는 동일).
-    const claudeStart = Date.now();
-    const stream = anthropic.messages.stream({
-      model: "claude-sonnet-4-6",
-      max_tokens: 32768,
-      messages: [{ role: "user", content: messageContent }],
+    const { parsed: claudeParsed, rawText: text, inputTokens, outputTokens, elapsedMs: claudeMs } = await callClaudeJson({
+      anthropic,
+      model: OCR_MODELS.statement,
+      maxTokens: STATEMENT_MAX_TOKENS,
+      content: messageContent,
+      stream: true,
     });
-    const message = await stream.finalMessage();
-    const claudeMs = Date.now() - claudeStart;
-
-    const inputTokens = message.usage?.input_tokens ?? 0;
-    const outputTokens = message.usage?.output_tokens ?? 0;
-    const text = extractText(message);
     const ocrElapsed = Date.now() - ocrStartTime;
 
     if (!text) {
-      logOcrApiUsage({ endpoint: "extract-statement", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "AI 응답 비어있음", inputTokens, outputTokens, model: "sonnet" });
+      logOcrApiUsage({ endpoint: "extract-statement", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "AI 응답 비어있음", inputTokens, outputTokens, model: OCR_MODELS.statement });
       res.status(500).json({ error: "AI 응답이 비어있습니다", retryable: true });
       return;
     }
 
-    let parsed: any;
-    try {
-      parsed = parseAIJson(text);
-    } catch (parseErr: any) {
-      logOcrApiUsage({ endpoint: "extract-statement", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "JSON 파싱 실패", inputTokens, outputTokens, model: "sonnet" });
+    if (!claudeParsed) {
+      logOcrApiUsage({ endpoint: "extract-statement", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: ocrElapsed, success: false, errorMessage: "JSON 파싱 실패", inputTokens, outputTokens, model: OCR_MODELS.statement });
       res.status(500).json({ error: "AI 응답을 처리하지 못했습니다. 다시 시도해주세요.", retryable: true, rawText: text.slice(0, 500) });
       return;
     }
+    const parsed: any = claudeParsed;
 
     // ── 항목 정규화 + 검증 ───────────────────────────────────────────────
     const rawItems: any[] = Array.isArray(parsed.items) ? parsed.items : [];
@@ -1247,7 +1280,7 @@ ${profileHint}`;
       responseTimeMs: ocrElapsed,
       success: true,
       inputTokens, outputTokens,
-      model: "sonnet",
+      model: OCR_MODELS.statement,
       itemCount: normalizedItems.length,
       timingBreakdown: `claude=${claudeMs}`,
     });
@@ -1296,20 +1329,19 @@ ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
 
     const { base64, mediaType } = loadImageBase64Raw(filePath);
 
-    // 보건증은 단순 구조 → haiku로 충분 (비용 절감)
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: { type: "base64", media_type: mediaType as any, data: base64 },
-          },
-          {
-            type: "text",
-            text: `이 이미지는 보건증(건강진단결과서)입니다.
+    // 보건증은 단순 구조 — 항목 수 적음, 1024 토큰으로 충분
+    const { parsed, rawText: text } = await callClaudeJson({
+      anthropic,
+      model: OCR_MODELS.healthCert,
+      maxTokens: HEALTH_CERT_MAX_TOKENS,
+      content: [
+        {
+          type: "image",
+          source: { type: "base64", media_type: mediaType as any, data: base64 },
+        },
+        {
+          type: "text",
+          text: `이 이미지는 보건증(건강진단결과서)입니다.
 다음 정보를 추출해주세요:
 - 성명
 - 유효기간 종료일 (보건증은 보통 발급일로부터 1년)
@@ -1323,18 +1355,19 @@ ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
 
 유효기간 종료일이 명시되어 있지 않으면 발급일 + 1년으로 계산하세요.
 발급일도 없으면 expiryDate를 null로 반환하세요.`,
-          },
-        ],
-      }],
+        },
+      ],
     });
 
-    const text = extractText(message);
     if (!text) {
       res.status(500).json({ error: "AI 응답 없음" });
       return;
     }
+    if (!parsed) {
+      // callClaudeJson은 파싱 실패를 throw하지 않으므로 기존 동작(파싱 예외 → 외부 catch) 보존을 위해 직접 throw
+      throw new Error("JSON 파싱 불가");
+    }
 
-    const parsed = parseAIJson(text);
     res.json({
       name: parsed.name || null,
       issueDate: parsed.issueDate || null,
@@ -1898,20 +1931,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     }
 
     // 이미지 전처리 (매입 OCR과 동일 파이프라인)
-    try {
-      const meta = await sharp(filePath).metadata();
-      const maxDim = Math.max(meta.width || 0, meta.height || 0);
-      let pipeline = sharp(filePath);
-      if (maxDim > 3500) {
-        pipeline = pipeline.resize(3500, 3500, { fit: "inside", withoutEnlargement: true });
-      }
-      pipeline = pipeline.grayscale().normalize().linear(1.3, -(128 * 1.3 - 128)).gamma(1.2);
-      pipeline = pipeline.sharpen({ sigma: 2.0, m1: 2.0, m2: 1.0 });
-      const enhancedBuf = await pipeline.jpeg({ quality: 95, mozjpeg: true }).toBuffer();
-      fs.writeFileSync(filePath, enhancedBuf);
-    } catch (enhErr: any) {
-      console.warn(`[OCR-Sales] 이미지 전처리 실패 (원본 사용): ${enhErr.message}`);
-    }
+    await preprocessImageForOcr(filePath, "[OCR-Sales]");
 
     // base64 로드
     const { base64, mediaType } = loadImageBase64Raw(filePath);
@@ -1974,8 +1994,8 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
 }`;
 
     const aiResponse = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
+      model: OCR_MODELS.sales,
+      max_tokens: SALES_MAX_TOKENS,
       messages: [{
         role: "user",
         content: [
@@ -1991,7 +2011,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     // JSON 파싱
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON 파싱 실패", model: "claude-sonnet-4-6" });
+      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON 파싱 실패", model: OCR_MODELS.sales });
       res.status(422).json({ error: "전표 인식에 실패했습니다. 다시 촬영해주세요." });
       return;
     }
@@ -2000,7 +2020,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     try {
       ocrResult = JSON.parse(jsonMatch[0]);
     } catch {
-      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON parse error", model: "claude-sonnet-4-6" });
+      await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(restaurantId) || undefined, responseTimeMs, success: false, errorMessage: "JSON parse error", model: OCR_MODELS.sales });
       res.status(422).json({ error: "전표 인식 결과를 파싱할 수 없습니다." });
       return;
     }
@@ -2017,7 +2037,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
       success: true,
       inputTokens: aiResponse.usage?.input_tokens,
       outputTokens: aiResponse.usage?.output_tokens,
-      model: "claude-sonnet-4-6",
+      model: OCR_MODELS.sales,
       itemCount: ocrResult.items.length,
       requestPayloadSize: base64.length,
     });
@@ -2031,7 +2051,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
     const responseTimeMs = Date.now() - startTime;
     console.error("[OCR-Sales] error:", err);
     await logOcrError("extract-sales 실패", { error: err.message }, Number(req.body?.restaurantId) || undefined);
-    await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(req.body?.restaurantId) || undefined, responseTimeMs, success: false, errorMessage: err.message, model: "claude-sonnet-4-6" });
+    await logOcrApiUsage({ endpoint: "extract-sales", restaurantId: Number(req.body?.restaurantId) || undefined, responseTimeMs, success: false, errorMessage: err.message, model: OCR_MODELS.sales });
     res.status(500).json({ error: err.message, retryable: true });
   }
 });
