@@ -287,12 +287,8 @@ export default function OpsCalendarPage() {
     { restaurantId, year, month },
     { enabled: restaurantId > 0 },
   );
-  // 월간 P&L용 추가 데이터
-  const { data: fixedTotal } = trpc.fixedCosts.monthlyTotal.useQuery(
-    { restaurantId, year, month },
-    { enabled: restaurantId > 0 },
-  );
-  const { data: closingSummary } = trpc.dailyClosings.monthlySummary.useQuery(
+  // 월간 P&L: 수익분석(monthly-settlement)과 동일한 settlementData 쿼리 사용
+  const { data: settlement } = trpc.monthlyClosings.settlementData.useQuery(
     { restaurantId, year, month },
     { enabled: restaurantId > 0 },
   );
@@ -311,13 +307,15 @@ export default function OpsCalendarPage() {
     };
   }, [calData]);
 
-  // 월간 P&L: 수익분석과 동일하게 마감 기준 데이터 사용
-  const closedSales = Number(closingSummary?.salesTotal ?? 0);
-  const closedPurchases = Number(closingSummary?.purchasesTotal ?? 0);
-  const fixed = Number(fixedTotal?.total ?? 0);
-  const labor = Number(closingSummary?.laborCost ?? 0);
-  const closedDayCount = closingSummary?.closedDays ?? 0;
-  const netProfit = closedSales - closedPurchases - fixed - labor;
+  // 수익분석 권위 산식 그대로 사용 (재계산 금지)
+  const inc = settlement?.income;
+  const closedSales     = Number(inc?.salesTotal ?? 0);
+  const closedPurchases = Number(inc?.purchasesTotal ?? 0);
+  const fixed           = Number(inc?.fixedCostsTotal ?? 0);   // 비례 포함
+  const labor           = Number(inc?.laborCost ?? 0);          // 시프트 재계산
+  const expenses        = Number(inc?.expensesTotal ?? 0);      // 경비
+  const closedDayCount  = settlement?.collection.closedDays ?? 0;
+  const netProfit       = Number(inc?.profit ?? 0);             // 서버 산식 (재계산 금지)
 
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
@@ -373,8 +371,8 @@ export default function OpsCalendarPage() {
                 <div className="text-sm font-bold text-foreground">{labor > 0 ? fmtWon(labor) : "-"}</div>
               </div>
               <div className="text-center">
-                <div className="text-[10px] text-muted-foreground">마감</div>
-                <div className="text-sm font-bold text-foreground">{closedDayCount}일</div>
+                <div className="text-[10px] text-muted-foreground">경비</div>
+                <div className="text-sm font-bold text-foreground">{expenses > 0 ? fmtWon(expenses) : "-"}</div>
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-muted-foreground">순이익</div>
