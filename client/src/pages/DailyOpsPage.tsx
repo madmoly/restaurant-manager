@@ -4,6 +4,8 @@ import { formatDate } from 'date-fns';
 import { useLocation, useSearch } from 'wouter';
 import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
+import { useAuth } from '@/hooks/useAuth';
+import { getEffectiveRole, isManagerLevel } from '@shared/permissions';
 import { resizeImage, OCR_HIGH } from '@/lib/imageResize';
 import { formatDateWithHoliday, getHolidayName } from '@/lib/koreanHolidays';
 import { formatKRW } from '@/lib/utils';
@@ -2948,9 +2950,11 @@ interface SpecialItem {
 function CloseTab({
   restaurantId,
   date,
+  isClosedDay,
 }: {
   restaurantId: number;
   date: string;
+  isClosedDay?: boolean;
 }) {
   const [cashAmount, setCashAmount] = useState('');
   const [cardAmount, setCardAmount] = useState('');
@@ -3151,6 +3155,10 @@ function CloseTab({
   }, [salesQuery.data]);
 
   const handleSaveSales = async () => {
+    if (isClosedDay) {
+      toast.error('휴무일로 지정된 날짜는 매출을 입력할 수 없습니다.');
+      return;
+    }
     const cash = parseNum(cashAmount);
     const card = parseNum(cardAmount);
     const giftCard = parseNum(giftCardAmount);
@@ -3303,7 +3311,7 @@ function CloseTab({
           <h3 className="font-semibold text-foreground">매출 입력</h3>
           <button
             onClick={() => salesOcrInputRef.current?.click()}
-            disabled={salesOcrLoading}
+            disabled={salesOcrLoading || isClosedDay}
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500/10 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-500/20 disabled:opacity-50"
           >
             {salesOcrLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
@@ -3317,7 +3325,12 @@ function CloseTab({
             onChange={handleSalesOcr}
           />
         </div>
-        <div className="space-y-3 mb-4">
+        {isClosedDay && (
+          <div className="mb-4 text-xs px-3 py-2 rounded-lg bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400">
+            휴무일로 지정되어 매출 입력이 불가합니다.
+          </div>
+        )}
+        <fieldset disabled={isClosedDay} className="space-y-3 mb-4 disabled:opacity-50">
           <div>
             <Label htmlFor="cash" className="text-sm">
               현금 매출
@@ -3550,7 +3563,7 @@ function CloseTab({
           <div className="flex gap-2">
             <Button
               onClick={handleSaveSales}
-              disabled={saveSalesMutation.isPending}
+              disabled={saveSalesMutation.isPending || isClosedDay}
               className="flex-1"
             >
               {saveSalesMutation.isPending ? '저장 중...' : '매출 저장'}
@@ -3570,7 +3583,7 @@ function CloseTab({
               <Copy className="w-4 h-4 mr-1" /> 보고 복사
             </Button>
           </div>
-        </div>
+        </fieldset>
       </Card>
 
       {/* ─── 일마감 손익 + 마감 확정 (통합) ─── */}
@@ -4024,6 +4037,7 @@ function ClosingProfitSection({ restaurantId, date, closeNote, checklistAllDone,
 type TabType = 'open' | 'purchase' | 'midday' | 'close';
 
 export default function DailyOpsPage() {
+  const { user } = useAuth();
   const { selectedRestaurant } = useRestaurant();
   const searchString = useSearch();
   const urlDate = new URLSearchParams(searchString).get('date');
@@ -4032,6 +4046,42 @@ export default function DailyOpsPage() {
     return formatDate(new Date(), 'yyyy-MM-dd');
   });
   const [activeTab, setActiveTab] = useState<TabType>('open');
+
+  const restaurantId = selectedRestaurant?.id ?? 0;
+  const dateObj = new Date(date + "T12:00:00");
+  const effectiveRole = getEffectiveRole(user?.role ?? "user", selectedRestaurant?.storeRole ?? null);
+  const isManager = isManagerLevel(effectiveRole);
+
+  const closedDaysQuery = trpc.storeClosures.listByMonth.useQuery(
+    { restaurantId, year: dateObj.getFullYear(), month: dateObj.getMonth() + 1 },
+    { enabled: restaurantId > 0 },
+  );
+  const weeklyClosuresQuery = trpc.storeClosures.getWeeklyClosures.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const specificClosedEntry = (closedDaysQuery.data ?? []).find(
+    (d: any) => (typeof d.closedDate === 'string' ? d.closedDate : d.closedDate?.toISOString?.()?.slice(0, 10)) === date
+  ) ?? null;
+  const isWeeklyClosedDay = (weeklyClosuresQuery.data ?? []).some((w: any) => w.weekday === dateObj.getDay());
+  const isClosedDay = !!specificClosedEntry || isWeeklyClosedDay;
+
+  const closuresUtils = trpc.useUtils();
+  const createClosureMut = trpc.storeClosures.create.useMutation({
+    onSuccess: () => closuresUtils.storeClosures.listByMonth.invalidate({ restaurantId, year: dateObj.getFullYear(), month: dateObj.getMonth() + 1 }),
+  });
+  const deleteClosureMut = trpc.storeClosures.delete.useMutation({
+    onSuccess: () => closuresUtils.storeClosures.listByMonth.invalidate({ restaurantId, year: dateObj.getFullYear(), month: dateObj.getMonth() + 1 }),
+  });
+  const handleToggleClosedDay = () => {
+    if (isWeeklyClosedDay) return;
+    if (specificClosedEntry) {
+      deleteClosureMut.mutate({ id: specificClosedEntry.id });
+    } else {
+      if (!window.confirm('이 날짜를 휴무일로 지정하시겠습니까? (매출/스케줄 입력이 차단됩니다)')) return;
+      createClosureMut.mutate({ restaurantId, closedDate: date });
+    }
+  };
 
   if (!selectedRestaurant) {
     return (
@@ -4086,6 +4136,25 @@ export default function DailyOpsPage() {
               </div>
             );
           })()}
+          {isManager && (
+            <div className="mt-1 flex justify-center">
+              {isWeeklyClosedDay ? (
+                <span className="text-[11px] text-muted-foreground px-2 py-0.5 rounded-full bg-muted">정기휴무일</span>
+              ) : (
+                <button
+                  onClick={handleToggleClosedDay}
+                  disabled={createClosureMut.isPending || deleteClosureMut.isPending}
+                  className={`text-[11px] px-2 py-0.5 rounded-full font-medium transition-colors ${
+                    specificClosedEntry
+                      ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
+                >
+                  {specificClosedEntry ? "휴무 해제" : "휴무일로 지정"}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Tab Navigation */}
@@ -4121,7 +4190,7 @@ export default function DailyOpsPage() {
             <MiddayTab restaurantId={selectedRestaurant.id} date={date} />
           )}
           {activeTab === 'close' && (
-            <CloseTab restaurantId={selectedRestaurant.id} date={date} />
+            <CloseTab restaurantId={selectedRestaurant.id} date={date} isClosedDay={isClosedDay} />
           )}
         </div>
       </div>

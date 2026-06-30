@@ -196,6 +196,32 @@ app.use(express.json({ limit: "10mb" }));
       console.log("[migrate] daily_checklist_logs UNIQUE:", e.message);
     }
 
+    // store_closed_days: 중복 휴무일 행 정리 + UNIQUE(restaurantId, closedDate)
+    //   - 같은 매장/날짜에 휴무 지정이 중복 생성되는 것을 방지
+    try {
+      await conn.query(`
+        DELETE d1 FROM store_closed_days d1
+        INNER JOIN store_closed_days d2
+          ON d1.restaurantId = d2.restaurantId
+         AND d1.closedDate = d2.closedDate
+         AND d1.id < d2.id
+      `);
+      const [scdIdxRows] = await conn.query(
+        `SELECT COUNT(*) as cnt FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'store_closed_days'
+           AND INDEX_NAME = 'uniq_store_closed_days_rest_date'`
+      ) as any[];
+      if (scdIdxRows[0].cnt === 0) {
+        await conn.query(`
+          ALTER TABLE store_closed_days
+          ADD UNIQUE INDEX uniq_store_closed_days_rest_date (restaurantId, closedDate)
+        `);
+        console.log("[migrate] store_closed_days UNIQUE index added");
+      }
+    } catch (e: any) {
+      console.log("[migrate] store_closed_days UNIQUE:", e.message);
+    }
+
     // notifications type ENUM 확장 (health_cert_expiry 추가)
     try {
       await conn.query(`ALTER TABLE notifications MODIFY COLUMN type ENUM('schedule_change','cost_exceeded','target_achieved','general','schedule_assigned','schedule_updated','schedule_deleted','health_cert_expiry') NOT NULL`);
