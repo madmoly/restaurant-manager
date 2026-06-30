@@ -880,7 +880,7 @@ function ExpensesRow({ amount, expanded, onToggle, locked, restaurantId, year, m
               </div>
               {b.items.map((it: { date: string; title: string; amount: number }, j: number) => (
                 <div key={j} className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>{it.date.slice(5).replace("-", "/")} {it.title}</span>
+                  <span>{Number(it.date.slice(5, 7))}월 {Number(it.date.slice(8, 10))}일 {it.title}</span>
                   <span className="tabular-nums">{it.amount.toLocaleString()}원</span>
                 </div>
               ))}

@@ -230,7 +230,8 @@ export const dailyExpensesRouter = router({
         const cat = catMap.get(key)!;
         const amt = Math.round(Number(it.amount ?? 0));
         cat.amount += amt;
-        cat.items.push({ date: String(it.date).slice(0, 10), title: it.title, amount: amt });
+        const dateStr = it.date instanceof Date ? it.date.toISOString().slice(0, 10) : String(it.date).slice(0, 10);
+        cat.items.push({ date: dateStr, title: it.title, amount: amt });
       }
 
       const breakdown = Array.from(catMap.values()).sort((a, b) => b.amount - a.amount);
