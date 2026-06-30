@@ -56,8 +56,16 @@ export default function FixedCostsPage() {
     { restaurantId },
     { enabled: restaurantId > 0 },
   );
-  const { data: monthlyTotal } = trpc.fixedCosts.monthlyTotal.useQuery(
+  // 마감 기준 매출 (비율형 고정비 계산용)
+  const { data: closingSummary } = trpc.dailyClosings.monthlySummary.useQuery(
     { restaurantId, year: viewYear, month: viewMonth },
+    { enabled: restaurantId > 0 },
+  );
+  const closedSales = Number(closingSummary?.salesTotal ?? 0);
+  const closedPurchases = Number(closingSummary?.purchasesTotal ?? 0);
+  const closedLabor = Number(closingSummary?.laborCost ?? 0);
+  const { data: monthlyTotal } = trpc.fixedCosts.monthlyTotal.useQuery(
+    { restaurantId, year: viewYear, month: viewMonth, salesAmount: closedSales, purchasesAmount: closedPurchases, laborAmount: closedLabor, expensesAmount: 0 },
     { enabled: restaurantId > 0 },
   );
 
@@ -73,6 +81,7 @@ export default function FixedCostsPage() {
   const invalidateAll = () => {
     utils.fixedCosts.list.invalidate();
     utils.fixedCosts.monthlyTotal.invalidate();
+    utils.dailyClosings.monthlySummary.invalidate();
   };
 
   if (!restaurantId) return <EmptyState icon={<Wallet size={40} />} title="매장을 선택해주세요" />;
@@ -125,21 +134,28 @@ export default function FixedCostsPage() {
         <div className="mb-5 space-y-2">
           <StatCard
             icon={<Wallet size={14} />}
-            label={`${viewYear}년 ${viewMonth}월 고정비`}
-            value={Number(monthlyTotal.total).toLocaleString()}
+            label={`${viewYear}년 ${viewMonth}월 고정비 (마감 매출 기준)`}
+            value={Number(monthlyTotal.totalWithRatio).toLocaleString()}
             unit="원"
           />
-          {(monthlyTotal as any).ratioItems?.length > 0 && (
+          {Number(monthlyTotal.total) !== Number(monthlyTotal.totalWithRatio) && (
+            <div className="px-3 py-1.5 text-[11px] text-muted-foreground">
+              고정금액 {Number(monthlyTotal.total).toLocaleString()}원 + 매출비율 {Number((monthlyTotal as any).salesRatioTotal ?? 0).toLocaleString()}원 + 순이익비율 {Number((monthlyTotal as any).profitRatioTotal ?? 0).toLocaleString()}원
+            </div>
+          )}
+          {(monthlyTotal as any).salesRatioItems?.length > 0 && (
             <div className="px-4 py-2 bg-muted/50 rounded-lg space-y-1">
-              <p className="text-xs text-muted-foreground">매출대비 비율 항목 (매출 입력 시 자동 계산)</p>
-              {(monthlyTotal as any).ratioItems.map((r: any, i: number) => (
-                <span key={i} className="text-xs text-foreground mr-3">{r.name}: {r.ratio}%</span>
+              <p className="text-xs text-muted-foreground">매출대비 비율 항목</p>
+              {(monthlyTotal as any).salesRatioItems.map((r: any, i: number) => (
+                <span key={i} className="text-xs text-foreground mr-3">
+                  {r.name}: {r.ratio}%{closedSales > 0 && ` (${Math.round(closedSales * r.ratio / 100).toLocaleString()}원)`}
+                </span>
               ))}
             </div>
           )}
           {(monthlyTotal as any).profitRatioItems?.length > 0 && (
             <div className="px-4 py-2 bg-muted/50 rounded-lg space-y-1">
-              <p className="text-xs text-muted-foreground">월순이익대비 비율 항목 (월정산 시 자동 계산)</p>
+              <p className="text-xs text-muted-foreground">월순이익대비 비율 항목</p>
               {(monthlyTotal as any).profitRatioItems.map((r: any, i: number) => (
                 <span key={i} className="text-xs text-foreground mr-3">
                   {r.name}: {r.ratio}%
