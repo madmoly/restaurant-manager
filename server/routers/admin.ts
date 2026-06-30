@@ -12,7 +12,7 @@ import {
 import { ROLE_LEVEL } from "@shared/permissions";
 import { getOwnedRestaurants, getOwnedRestaurantIds, realStoreCondition } from "../helpers/restaurantScope";
 import { calcMonthlyFixedCosts } from "../helpers/fixedCostCalc";
-import { sumLaborByCompany } from "./monthlyClosings";
+import { sumLaborByCompany, sumSalesByMethod, sumPurchasesByCP } from "./monthlyClosings";
 
 export const adminRouter = router({
   /**
@@ -45,19 +45,8 @@ export const adminRouter = router({
       }
 
       const storeData = await Promise.all(
-        allRestaurants.map(async (r) => {          // 매출 합계
-          const [salesRow] = await db
-            .select({ total: sql<string>`COALESCE(SUM(${sales.amount}), 0)` })
-            .from(sales)
-            .where(and(eq(sales.restaurantId, r.id), between(sales.saleDate, start, end)));
-
-          // 매입 합계
-          const [purchaseRow] = await db
-            .select({ total: sql<string>`COALESCE(SUM(${purchaseOrders.totalAmount}), 0)` })
-            .from(purchaseOrders)
-            .where(and(eq(purchaseOrders.restaurantId, r.id), between(purchaseOrders.purchaseDate, start, end)));
-
-          // 일마감 날짜 목록 (마감 기준 인건비 계산용)
+        allRestaurants.map(async (r) => {
+          // 일마감 날짜 목록 (마감 기준 집계용)
           const closingRows = await db
             .select({ closingDate: dailyClosings.closingDate })
             .from(dailyClosings)
@@ -67,14 +56,22 @@ export const adminRouter = router({
             return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
           });
 
+          const startDateStr = `${input.year}-${String(input.month).padStart(2, "0")}-01`;
+          const endDateStr = `${input.year}-${String(input.month).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+
+          // 매출 (일마감 기준 — 수익분석과 동일)
+          const confirmedSales = await sumSalesByMethod(r.id, closedDateStrs, startDateStr, endDateStr);
+          const salesTotal = confirmedSales.salesTotal;
+
+          // 매입 (일마감 기준 — 수익분석과 동일)
+          const confirmedPurchases = await sumPurchasesByCP(r.id, startDateStr, endDateStr, true);
+          const purchasesTotal = confirmedPurchases.total;
+
           // 인건비: 시프트 재계산 (수익분석과 동일 산식)
           const laborResult = await sumLaborByCompany(r.id, input.year, input.month, closedDateStrs);
           const laborCost = laborResult.totalCost;
 
-          const salesTotal = Number(salesRow?.total ?? 0);
-          const purchasesTotal = Number(purchaseRow?.total ?? 0);
-
-          // 즉시 지출 (profit_ratio 정확 계산용)
+          // 즉시 지출 (날짜 기반, 일마감 무관 — 수익분석과 동일)
           const [expRow] = await db
             .select({ total: sql<string>`COALESCE(SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2))), 0)` })
             .from(dailyExpenses)

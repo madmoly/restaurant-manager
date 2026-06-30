@@ -39,7 +39,7 @@ function kstToday(): string {
 }
 
 // ── 결제수단별 매출 합산 (일마감 완료 날짜 기준) ──────────────────────────
-async function sumSalesByMethod(
+export async function sumSalesByMethod(
   restaurantId: number,
   closedDateStrs: string[],
   startDate: string,
@@ -92,7 +92,7 @@ async function sumUnconfirmedSales(
 }
 
 // ── 매입 합산 (거래처별, 날짜 필터) ─────────────────────────────────────
-async function sumPurchasesByCP(
+export async function sumPurchasesByCP(
   restaurantId: number,
   startDate: string,
   endDate: string,
