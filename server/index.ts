@@ -1473,6 +1473,9 @@ app.use(express.json({ limit: "10mb" }));
     await addColumnIfNotExists("recipes", "sellingPrice", "DECIMAL(14,2) NULL");
     await addColumnIfNotExists("recipes", "lossRate", "DECIMAL(5,4) NOT NULL DEFAULT 0");
     await addColumnIfNotExists("items", "costPerBaseManual", "DECIMAL(14,4) NULL");
+    await addColumnIfNotExists("items", "costingCategory", "VARCHAR(50) DEFAULT NULL");
+    await addColumnIfNotExists("items", "baseUnit", "VARCHAR(30) DEFAULT NULL");
+    await addColumnIfNotExists("purchase_order_items_v2", "costingCategory", "VARCHAR(50) DEFAULT NULL");
     await addColumnIfNotExists("api_usage_logs", "timingBreakdown", "VARCHAR(120) NULL");
 
     await conn.end();
