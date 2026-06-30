@@ -104,3 +104,39 @@ export const SHIFT_DAY_TYPES = [
   { value: "weekday", label: "평일" },
   { value: "weekend", label: "주말" },
 ] as const;
+
+// ─── 프리셋 라벨 / headcount 가중치 ──────────────────────────────────────────────
+
+export function resolvePresetLabel(preset: string | null, shiftPresets?: any[]): string {
+  if (!preset) return "";
+  const db = shiftPresets?.find((p: any) => p.presetType === preset);
+  if (db?.label) return db.label;
+  return DEFAULT_PRESET_LABELS[preset]?.label ?? preset;
+}
+
+export function timeToMinutes(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+
+export function calcHeadcountWeight(
+  startTime: string | Date,
+  endTime: string | Date,
+  openTime: string | null | undefined,
+  closeTime: string | null | undefined,
+  halfShiftThreshold: number | null | undefined,
+): number {
+  const st = startTime instanceof Date ? startTime : new Date(startTime);
+  const et = endTime instanceof Date ? endTime : new Date(endTime);
+  const workMinutes = (et.getTime() - st.getTime()) / 60000;
+  if (workMinutes <= 0) return 1;
+
+  const open = openTime ? timeToMinutes(openTime) : 0;
+  const close = closeTime ? timeToMinutes(closeTime) : 1440;
+  const storeMinutes = close > open ? close - open : 1440 - open + close;
+  if (storeMinutes <= 0) return 1;
+
+  const ratio = (workMinutes / storeMinutes) * 100;
+  const threshold = halfShiftThreshold ?? 60;
+  return ratio < threshold ? 0.5 : 1;
+}

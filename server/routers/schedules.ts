@@ -1548,11 +1548,33 @@ export const schedulesRouter = router({
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const { restaurantId, year, month } = input;
+
+      const [store] = await db
+        .select({
+          openTime: restaurants.openTime,
+          closeTime: restaurants.closeTime,
+          halfShiftThreshold: restaurants.halfShiftThreshold,
+        })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+
+      const toMinutes = (t: string | null | undefined) => {
+        if (!t) return 0;
+        const [h, m] = t.split(":").map(Number);
+        return h * 60 + (m || 0);
+      };
+      const openMin = toMinutes(store?.openTime) || 0;
+      const closeMin = store?.closeTime ? toMinutes(store.closeTime) : 1440;
+      const storeMinutes = closeMin > openMin ? closeMin - openMin : 1440 - openMin + closeMin;
+      const threshold = store?.halfShiftThreshold ?? 60;
+
       const rows = await db.execute(sql`
         SELECT
           DATE(CONVERT_TZ(startTime, '+00:00', '+09:00')) as date,
           SUM(CASE
-            WHEN shiftPreset IN ('open','close') THEN 0.5
+            WHEN TIMESTAMPDIFF(MINUTE, startTime, endTime) <= 0 THEN 1
+            WHEN (TIMESTAMPDIFF(MINUTE, startTime, endTime) / ${storeMinutes}) * 100 < ${threshold} THEN 0.5
             ELSE 1
           END) as headcount,
           MAX(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as hasUnconfirmed

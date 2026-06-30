@@ -11,6 +11,7 @@ interface Restaurant {
   longitude?: string | null;
   openTime?: string | null;
   closeTime?: string | null;
+  halfShiftThreshold?: number | null;
   monthlyTargetSales?: string | null;
   storeRole?: string | null;
 }
@@ -55,6 +56,7 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
         longitude: r.longitude,
         openTime: r.openTime,
         closeTime: r.closeTime,
+        halfShiftThreshold: r.halfShiftThreshold,
         monthlyTargetSales: r.monthlyTargetSales,
       }))
     : (myStoresQuery.data ?? []).map((s: any) => ({
@@ -66,6 +68,7 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
         longitude: s.restaurant?.longitude ?? s.longitude,
         openTime: s.restaurant?.openTime ?? s.openTime,
         closeTime: s.restaurant?.closeTime ?? s.closeTime,
+        halfShiftThreshold: s.restaurant?.halfShiftThreshold ?? s.halfShiftThreshold,
         monthlyTargetSales: s.restaurant?.monthlyTargetSales ?? s.monthlyTargetSales,
         storeRole: s.storeRole ?? null,
       }));

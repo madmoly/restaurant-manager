@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
 import { loadKoreanFont } from "@/lib/pdfKoreanFont";
+import { resolvePresetLabel } from "@/lib/scheduleHelpers";
 
 function fmtDate(d: string | null) {
   if (!d) return "-";
@@ -15,9 +16,6 @@ function fmtDate(d: string | null) {
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
-const PRESET_LABEL: Record<string, string> = {
-  open: "오픈", full: "풀타임", close: "마감", custom: "커스텀",
-};
 const STATUS_LABEL: Record<string, string> = {
   draft: "초안", scheduled: "예정", published: "게시",
   confirmed: "확정", completed: "완료", canceled: "취소",
@@ -283,6 +281,10 @@ function EmployeeShiftCard({
     { restaurantId, year, month, userId, tempWorkerName },
     { enabled },
   );
+  const { data: shiftPresets } = trpc.restaurants.getShiftPresets.useQuery(
+    { restaurantId },
+    { enabled: enabled && restaurantId > 0 },
+  );
 
   const totalHours = shifts?.reduce((s, r) => s + r.netHours, 0) ?? 0;
   const totalDays = shifts?.length ?? 0;
@@ -393,7 +395,7 @@ function EmployeeShiftCard({
                       </td>
                       <td className="px-2 py-2">
                         <span className={`text-[10px] px-1.5 py-0.5 rounded ${s.shiftPreset === "open" ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300" : s.shiftPreset === "close" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300" : s.shiftPreset === "full" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" : "bg-muted text-muted-foreground"}`}>
-                          {PRESET_LABEL[s.shiftPreset] ?? s.shiftPreset}
+                          {resolvePresetLabel(s.shiftPreset, shiftPresets)}
                         </span>
                       </td>
                       <td className="px-3 py-2">

@@ -7,6 +7,7 @@ import { useRestaurant } from '@/contexts/RestaurantContext';
 import { resizeImage, OCR_HIGH } from '@/lib/imageResize';
 import { formatDateWithHoliday, getHolidayName } from '@/lib/koreanHolidays';
 import { formatKRW } from '@/lib/utils';
+import { calcHeadcountWeight } from '@/lib/scheduleHelpers';
 import { toast } from 'sonner';
 import {
   Camera,
@@ -3592,33 +3593,6 @@ function CloseTab({
 // ============================================================================
 
 const SHIFT_LABELS: Record<string, string> = { open: '오픈', close: '마감', full: '풀타임' };
-
-function timeToMinutes(t: string): number {
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + (m || 0);
-}
-
-function calcHeadcountWeight(
-  startTime: string | Date,
-  endTime: string | Date,
-  openTime: string | null | undefined,
-  closeTime: string | null | undefined,
-  halfShiftThreshold: number | null | undefined,
-): number {
-  const st = startTime instanceof Date ? startTime : new Date(startTime);
-  const et = endTime instanceof Date ? endTime : new Date(endTime);
-  const workMinutes = (et.getTime() - st.getTime()) / 60000;
-  if (workMinutes <= 0) return 1;
-
-  const open = openTime ? timeToMinutes(openTime) : 0;
-  const close = closeTime ? timeToMinutes(closeTime) : 1440;
-  const storeMinutes = close > open ? close - open : 1440 - open + close;
-  if (storeMinutes <= 0) return 1;
-
-  const ratio = (workMinutes / storeMinutes) * 100;
-  const threshold = halfShiftThreshold ?? 60;
-  return ratio < threshold ? 0.5 : 1;
-}
 
 /** 스케줄 행의 매장 역할을 한국어 라벨로 변환 */
 function getRoleLabel(s: any): string {

@@ -30,7 +30,8 @@ import {
   fmtTime,
   DAY_NAMES,
   STATUS_LABELS,
-  DEFAULT_PRESET_LABELS,
+  resolvePresetLabel,
+  calcHeadcountWeight,
 } from "@/lib/scheduleHelpers";
 
 interface ScheduleGridTabProps {
@@ -377,10 +378,10 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     const map = new Map<string, number>();
     activeSchedulesByDate.forEach((items, dateStr) => {
       map.set(dateStr, items.reduce((sum, s) =>
-        sum + (s.shiftPreset === "open" || s.shiftPreset === "close" ? 0.5 : 1), 0));
+        sum + calcHeadcountWeight(s.startTime, s.endTime, current?.openTime, current?.closeTime, current?.halfShiftThreshold), 0));
     });
     return map;
-  }, [activeSchedulesByDate]);
+  }, [activeSchedulesByDate, current?.openTime, current?.closeTime, current?.halfShiftThreshold]);
 
   const assignedUserIds = useMemo(() => {
     if (!assignDate) return new Set<number>();
@@ -724,11 +725,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               <div className="space-y-1">
                 {active.map((s) => {
                   const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.draft;
-                  const presetInfo = s.shiftPreset ? (() => {
-                    const dbPreset = shiftPresets.find((p: any) => p.presetType === s.shiftPreset);
-                    if (dbPreset?.label) return { label: dbPreset.label };
-                    return DEFAULT_PRESET_LABELS[s.shiftPreset] ?? null;
-                  })() : null;
+                  const presetLabel = s.shiftPreset ? resolvePresetLabel(s.shiftPreset, shiftPresets) : "";
                   return (
                     <button
                       key={s.id}
@@ -751,7 +748,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                           </span>
                         )}
                         <span className="text-muted-foreground text-[10px] md:text-[11px] shrink-0 ml-auto">
-                          {presetInfo ? presetInfo.label.charAt(0) : `${fmtTime(s.startTime)}~${fmtTime(s.endTime)}`}
+                          {presetLabel ? presetLabel.charAt(0) : `${fmtTime(s.startTime)}~${fmtTime(s.endTime)}`}
                         </span>
                       </div>
                     </button>
