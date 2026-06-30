@@ -36,17 +36,8 @@ export default function ManagerDashboard() {
   const restaurantId = current?.id ?? 0;
   const enabled = restaurantId > 0;
 
-  // ─── 월간 요약 데이터 ────────────────────────────────────────────────────
-  const { data: monthlyTotal } = trpc.sales.monthlyTotal.useQuery(
-    { restaurantId, year, month }, { enabled }
-  );
-  const { data: purchaseTotal } = trpc.purchases.monthlyTotal.useQuery(
-    { restaurantId, year, month }, { enabled }
-  );
-  const { data: fixedTotal } = trpc.fixedCosts.monthlyTotal.useQuery(
-    { restaurantId, year, month }, { enabled }
-  );
-  const { data: profitSummary } = trpc.dailyClosings.monthlySummary.useQuery(
+  // ─── 월간 요약 데이터 (수익분석과 동일한 settlementData) ────────────────
+  const { data: settlement } = trpc.monthlyClosings.settlementData.useQuery(
     { restaurantId, year, month }, { enabled }
   );
 
@@ -102,18 +93,19 @@ export default function ManagerDashboard() {
     );
   }
 
-  // ─── 계산 (ProfitPage와 동일: 마감일 기준 매출/매입 + 비율 고정비) ─────────
-  const salesNum = Number(profitSummary?.salesTotal ?? 0);         // 마감 완료일 매출 합계
-  const purchasesNum = Number(profitSummary?.purchasesTotal ?? 0); // 마감 완료일 매입 합계
-  const laborNum = Number(profitSummary?.laborCost ?? 0);
-  const fixedStaticNum = Number(fixedTotal?.total ?? 0);           // 고정 금액 고정비
-  // 비율형 고정비: 마감 매출 × 비율%
-  const ratioFixedNum = ((fixedTotal as any)?.ratioItems ?? []).reduce(
-    (sum: number, item: any) => sum + Math.round(salesNum * Number(item.ratio ?? 0) / 100), 0
-  );
-  const fixedNum = fixedStaticNum + ratioFixedNum;
-  const profitNum = salesNum - purchasesNum - laborNum - fixedNum;
-  const profitRate = salesNum > 0 ? ((profitNum / salesNum) * 100).toFixed(1) : "0.0";
+  // ─── 계산 (수익분석 settlementData 권위값 그대로 사용) ─────────────────────
+  const inc = settlement?.income;
+  const mtr = settlement?.metrics;
+  const salesNum = Number(inc?.salesTotal ?? 0);
+  const purchasesNum = Number(inc?.purchasesTotal ?? 0);
+  const laborNum = Number(inc?.laborCost ?? 0);
+  const fixedNum = Number(inc?.fixedCostsTotal ?? 0);    // 비례 포함
+  const expensesNum = Number(inc?.expensesTotal ?? 0);   // 경비
+  const profitNum = Number(inc?.profit ?? 0);            // 서버 산식
+  const profitRate = salesNum > 0 ? (profitNum / salesNum * 100).toFixed(1) : "0.0";
+  const costRatio = mtr?.costRatio ?? 0;
+  const laborRatio = mtr?.laborRatio ?? 0;
+  const profitRatio = mtr?.profitRatio ?? 0;
 
   // 오픈 체크 상태
   const isOpenChecked = !!dailyOps?.openCheckedAt;
@@ -191,12 +183,17 @@ export default function ManagerDashboard() {
         </div>
         <div className="grid grid-cols-2 gap-2">
           <MiniStat label="매출" value={salesNum} color="text-emerald-400" />
-          <MiniStat label="매입" value={purchasesNum} color="text-orange-400" />
-          <MiniStat label="인건비" value={laborNum} color="text-blue-400" />
+          <MiniStat label={`매입 (${costRatio}%)`} value={purchasesNum} color="text-orange-400" />
+          <MiniStat label={`인건비 (${laborRatio}%)`} value={laborNum} color="text-blue-400" />
           <MiniStat label="고정비" value={fixedNum} color="text-muted-foreground" />
         </div>
+        {expensesNum > 0 && (
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <MiniStat label="경비" value={expensesNum} color="text-cyan-400" />
+          </div>
+        )}
         <div className="mt-2 pt-2 border-t border-border flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">추정 순이익</span>
+          <span className="text-xs text-muted-foreground">순이익 ({profitRatio}%)</span>
           <span className={cn(
             "text-sm font-bold",
             profitNum >= 0 ? "text-emerald-500" : "text-red-500"
