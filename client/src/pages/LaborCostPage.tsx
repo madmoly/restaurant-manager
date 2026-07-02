@@ -135,7 +135,7 @@ export default function LaborCostPage() {
             insuranceLabel,
             emp.workedDays ?? 0,
             emp.daysOff ?? 0,
-            emp.contractDaysOff ?? 0,
+            emp.contractDaysOff ?? "", // 시급제는 계약휴무 미적용 → 공란
             subUsed,
             subRemain,
             annUsed,
@@ -156,7 +156,7 @@ export default function LaborCostPage() {
             emp.position ?? "-",
             wageTypeLabel,
             emp.wageAmount ? Number(emp.wageAmount) : 0,
-            emp.contractDaysOff ?? 0,
+            emp.contractDaysOff ?? "", // 시급제는 계약휴무 미적용 → 공란
             emp.workedDays ?? 0,
             emp.totalHours != null ? Number((emp.totalHours).toFixed(1)) : 0,
             emp.daysOff ?? 0,
@@ -489,7 +489,8 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
       metaParts.push(`대휴 ${emp.substituteLeave.remaining}일 잔여`);
     }
     if (emp.contractDaysOff != null || emp.daysOff != null) {
-      metaParts.push(`휴무 ${emp.contractDaysOff ?? 0}/${emp.daysOff ?? 0}일`);
+      // 시급제(contractDaysOff null)는 계약휴무 자리 "-" 표시
+      metaParts.push(`휴무 ${emp.contractDaysOff ?? "-"}/${emp.daysOff ?? 0}일`);
     }
     const cs = emp.monthlyContractStart ?? emp.contractStart;
     const ce = emp.monthlyContractEnd ?? emp.contractEnd;

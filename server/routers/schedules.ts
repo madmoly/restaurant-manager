@@ -1117,7 +1117,7 @@ export const schedulesRouter = router({
           wageType: string | null; wageAmount: string | null;
           weeklyHours: string | null;
           position: string | null; contractStart: string | null; contractEnd: string | null;
-          daysOff: number; contractDaysOff: number;
+          daysOff: number; contractDaysOff: number | null;
           hireDate: string | null;
           userId: number | null;
           recheckRequired: boolean;
@@ -1161,7 +1161,8 @@ export const schedulesRouter = router({
             contractStart: r.contractStart ? String(r.contractStart) : null,
             contractEnd: r.contractEnd ? String(r.contractEnd) : null,
             daysOff: 0, // 아래에서 최종 계산
-            contractDaysOff: r.contractOffDays ?? 4,
+            // 시급제는 계약휴무일수 미적용 (2026-07-03) — 실근무 기준 정산
+            contractDaysOff: (r.wageType ?? r.tempWageType) === "hourly" ? null : (r.contractOffDays ?? 4),
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
             recheckRequired: false,
@@ -1622,11 +1623,14 @@ export const schedulesRouter = router({
           breakMinutes: schedules.breakMinutes,
           status: schedules.status,
           tempWorkerName: schedules.tempWorkerName,
+          tempWageType: schedules.tempWageType,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
           weeklyOffDays: restaurantUsers.weeklyOffDays,
           contractOffDays: restaurantUsers.contractOffDays,
           position: restaurantUsers.position,
+          // 시급제 판별용 (2026-07-03: 시급제는 계약휴무일수 미적용)
+          wageType: employeeWageHistory.wageType,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
         })
         .from(schedules)
@@ -1634,6 +1638,12 @@ export const schedulesRouter = router({
         .leftJoin(restaurantUsers, and(
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, schedules.userId),
+        ))
+        .leftJoin(employeeWageHistory, and(
+          eq(employeeWageHistory.userId, schedules.userId),
+          eq(employeeWageHistory.restaurantId, input.restaurantId),
+          sql`DATE_FORMAT(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00'), '%Y-%m-01') >= ${employeeWageHistory.effectiveFrom}`,
+          sql`(${employeeWageHistory.effectiveTo} IS NULL OR DATE_FORMAT(CONVERT_TZ(${schedules.startTime}, '+00:00', '+09:00'), '%Y-%m-01') < ${employeeWageHistory.effectiveTo})`,
         ))
         .where(
           and(
@@ -1685,7 +1695,7 @@ export const schedulesRouter = router({
           shifts: number;
           totalHours: number;
           daysOff: number;
-          contractDaysOff: number;
+          contractDaysOff: number | null;
           recheckRequired: boolean;
           isNoHolidayPayWorker: boolean;
           dailyMap: Map<string, { hours: number; shifts: number }>;
@@ -1710,7 +1720,8 @@ export const schedulesRouter = router({
             shifts: 0,
             totalHours: 0,
             daysOff: 0,
-            contractDaysOff: r.contractOffDays ?? 4,
+            // 시급제는 계약휴무일수 미적용 (2026-07-03)
+            contractDaysOff: (r.wageType ?? r.tempWageType) === "hourly" ? null : (r.contractOffDays ?? 4),
             recheckRequired: false,
             isNoHolidayPayWorker: false,
             dailyMap: new Map<string, { hours: number; shifts: number }>(),

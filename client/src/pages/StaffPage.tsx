@@ -800,7 +800,10 @@ export default function StaffPage() {
                       <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
                         <CalendarDays className="w-3 h-3" /> 휴무
                       </label>
-                      {editingOffDays?.userId === s.userId ? (
+                      {s.wageType === "hourly" ? (
+                        // 시급제는 계약휴무일수 미적용 (2026-07-03) — 실근무 기준 정산
+                        <span className="text-xs text-muted-foreground">해당 없음 (시급제)</span>
+                      ) : editingOffDays?.userId === s.userId ? (
                         <div className="flex items-center gap-2 flex-1">
                           <select
                             className="text-xs px-2 py-1 rounded border border-input bg-background"
@@ -2021,13 +2024,20 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             </div>
             <div>
               <label className={labelCls}>계약휴무일수</label>
-              <select className={inputCls} value={form.contractOffDays}
-                onChange={(e) => setForm({ ...form, contractOffDays: Number(e.target.value) })}>
-                {Array.from({ length: 12 }, (_, i) => i + 4).map(v => (
-                  <option key={v} value={v}>{v}일</option>
-                ))}
-              </select>
-              <p className="text-[10px] text-muted-foreground mt-0.5">≈ 주 {Math.round(form.contractOffDays / 4.345 * 10) / 10}일 (참고)</p>
+              {form.wageType === "hourly" ? (
+                // 시급제는 계약휴무일수 미적용 (2026-07-03) — 실근무 기준 정산
+                <p className="text-[10px] text-muted-foreground mt-1.5">해당 없음 (시급제 — 실근무 기준 정산)</p>
+              ) : (
+                <>
+                  <select className={inputCls} value={form.contractOffDays}
+                    onChange={(e) => setForm({ ...form, contractOffDays: Number(e.target.value) })}>
+                    {Array.from({ length: 12 }, (_, i) => i + 4).map(v => (
+                      <option key={v} value={v}>{v}일</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">≈ 주 {Math.round(form.contractOffDays / 4.345 * 10) / 10}일 (참고)</p>
+                </>
+              )}
             </div>
           </div>
 
@@ -2251,7 +2261,8 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 workStartTime: form.workStartTime,
                 workEndTime: form.workEndTime,
                 breakMinutes: form.breakMinutes,
-                contractOffDays: form.contractOffDays,
+                // 시급제는 미전송 → 서버가 null 저장 (계약휴무일수 미적용)
+                contractOffDays: form.wageType === "hourly" ? undefined : form.contractOffDays,
                 payDay: form.payDay,
                 payMethod: form.payMethod,
                 // 재설계 2026-05-02 폐기: position·weeklyHoliday·nightShiftConsent (계약서 박제도 제거)

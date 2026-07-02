@@ -444,7 +444,8 @@ export const electronicContractsRouter = router({
           workStartTime: input.workStartTime,
           workEndTime: input.workEndTime,
           breakMinutes: input.breakMinutes,
-          contractOffDays: input.contractOffDays,
+          // 시급제는 계약휴무일수 미적용 (2026-07-03) — 실근무 기준 정산이라 계약 휴무 개념 없음
+          contractOffDays: input.wageType === "hourly" ? null : input.contractOffDays,
           payDay: input.payDay,
           taxMode: input.taxMode,
           hourlyWageIncludesHolidayPay: input.hourlyWageIncludesHolidayPay,
@@ -539,6 +540,11 @@ export const electronicContractsRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "초안 또는 서명 대기중인 계약서만 수정할 수 있습니다" });
       }
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, contract.restaurantId, true);
+
+      // 시급제 계약은 계약휴무일수 미적용 (2026-07-03): null 고정 — 아래 SSOT 동기화에도 null 반영
+      if ((updates.wageType ?? contract.wageType) === "hourly") {
+        (updates as any).contractOffDays = null;
+      }
 
       // 날짜 필드 변환
       const setData: any = {};
@@ -763,7 +769,7 @@ export const electronicContractsRouter = router({
               snapshotWageType: contract.wageType ?? null,
               snapshotWeeklyHours: contract.weeklyHours ?? null,
               snapshotWeeklyOffDays: contract.weeklyOffDays ?? 1,
-              snapshotContractOffDays: contract.contractOffDays ?? 4,
+              snapshotContractOffDays: contract.wageType === "hourly" ? null : (contract.contractOffDays ?? 4),
               snapshotContractStart: toDateString(contract.contractStart),
               snapshotContractEnd: toDateString(contract.contractEnd),
               snapshotAffiliatedCompany: finalAffiliatedCompany,

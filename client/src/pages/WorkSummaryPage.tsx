@@ -76,7 +76,7 @@ export default function WorkSummaryPage() {
           emp.shifts,
           Math.round(emp.totalHours * 10) / 10,
           emp.daysOff ?? 0,
-          emp.contractDaysOff ?? 0,
+          emp.contractDaysOff ?? "", // 시급제는 계약휴무 미적용 → 공란
           subRemain,
           annRemain,
         ]);
@@ -319,9 +319,11 @@ function EmployeeShiftCard({
         <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
           실휴무 <b className="text-foreground">{emp.daysOff ?? 0}일</b>
         </span>
-        <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
-          계약휴무 <b className="text-foreground">{emp.contractDaysOff ?? 0}일</b>
-        </span>
+        {emp.contractDaysOff != null && (
+          <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
+            계약휴무 <b className="text-foreground">{emp.contractDaysOff}일</b>
+          </span>
+        )}
         {!emp.isTemp && emp.substituteLeave && (
           <span className="bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 rounded px-1.5 py-0.5">
             대휴 {subUsed ? "사용" : "미사용"} · 잔 {emp.substituteLeave.remaining}일
