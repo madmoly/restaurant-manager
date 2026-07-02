@@ -5,14 +5,10 @@ import { useLocation } from "wouter";
 import {
   Store, Users, TrendingUp, TrendingDown, DollarSign, Package,
   AlertTriangle, CheckCircle, ClipboardCheck,
-  Wallet, Receipt, Bell, ChevronRight, BarChart3, Building2, Filter,
+  Bell, ChevronRight, Building2, Filter, LineChart as LineChartIcon,
 } from "lucide-react";
 import { Card, StatCard, PageHeader } from "@/components/ui/compat";
 import { DashboardSkeleton } from "@/components/ui/skeletons";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
-} from "recharts";
 import { formatKoreanDate } from "@/lib/utils";
 
 // ─── 포맷 헬퍼 ─────────────────────────────────────────────────────────────
@@ -112,25 +108,6 @@ export default function AdminDashboard() {
 
   const prevTotalSales = prevSummary?.totals?.salesTotal ?? 0;
   const salesGrowth = prevTotalSales > 0 ? ((totalSales - prevTotalSales) / prevTotalSales * 100) : 0;
-  // 매장별 매출 데이터 (차트용)
-  const storeRevenueData = useMemo(() => {
-    if (!filteredStores.length) return [];
-    return [...filteredStores]
-      .sort((a, b) => b.salesTotal - a.salesTotal)
-      .map((s) => ({
-        name: s.restaurantName,
-        매출: s.salesTotal,
-        매입: s.purchasesTotal,
-      }));
-  }, [filteredStores]);
-
-  // 비용 구성 (파이 차트)
-  const costBreakdown = useMemo(() => [
-    { name: "매입비", value: totalPurchases, color: "#7c3aed" },
-    { name: "인건비", value: totalLabor, color: "#ec4899" },
-    { name: "고정비", value: totalFixed, color: "#f59e0b" },
-    { name: "경비", value: totalExpenses, color: "#06b6d4" },
-  ].filter(d => d.value > 0), [totalPurchases, totalLabor, totalFixed, totalExpenses]);
 
   // 월 이동
   const goPrev = () => {
@@ -161,6 +138,14 @@ export default function AdminDashboard() {
             {year}년 {month}월
           </span>
           <button onClick={goNext} className="px-2 py-1 rounded hover:bg-accent text-muted-foreground">▶</button>
+          <button
+            onClick={() => setLocation("/store-analysis")}
+            className="ml-1 flex items-center gap-1 text-xs px-3 py-1.5 rounded-full border border-primary/30 text-primary hover:bg-primary/5 transition-colors"
+          >
+            <LineChartIcon size={12} />
+            상세 분석
+            <ChevronRight size={12} />
+          </button>
         </div>
       </div>
 
@@ -323,67 +308,6 @@ export default function AdminDashboard() {
         )}
       </Card>
 
-      {/* 차트 영역 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* 매장별 매출 비교 */}
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <BarChart3 size={14} className="text-primary" />
-              매장별 매출 비교
-            </h3>
-          </div>
-          {storeRevenueData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={Math.max(200, storeRevenueData.length * 40)}>
-              <BarChart data={storeRevenueData} layout="vertical" margin={{ left: 10, right: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                <XAxis type="number" tickFormatter={(v) => fmtShort(v)} className="text-xs" />                <YAxis type="category" dataKey="name" width={80} className="text-xs" />
-                <Tooltip
-                  formatter={(value: number) => fmtW(value)}
-                  contentStyle={{ backgroundColor: "var(--color-card)", border: "1px solid var(--color-border)", borderRadius: "8px" }}
-                />
-                <Bar dataKey="매출" fill="#4f46e5" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-sm text-muted-foreground text-center py-12">매출 데이터가 없습니다</p>
-          )}
-        </Card>
-
-        {/* 비용 구성비 */}
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Wallet size={14} className="text-primary" />
-              비용 구성비
-            </h3>
-          </div>
-          {costBreakdown.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={costBreakdown}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"                  outerRadius={100}
-                  innerRadius={50}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                >
-                  {costBreakdown.map((entry, i) => (
-                    <Cell key={i} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => fmtW(value)} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-sm text-muted-foreground text-center py-12">비용 데이터가 없습니다</p>
-          )}
-        </Card>
-      </div>
-
       {/* 매장 목록 + 알림 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 매장 현황 */}
@@ -475,66 +399,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* 매장별 상세 테이블 (데스크탑) */}
-      <Card className="p-5 hidden lg:block">
-        <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-          <Receipt size={14} className="text-primary" />
-          매장별 손익 상세
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-muted-foreground">
-                <th className="py-2 px-3 font-medium">매장</th>
-                {isMaster && selectedGroup === "전체" && <th className="py-2 px-3 font-medium">그룹</th>}
-                <th className="py-2 px-3 font-medium text-right">매출</th>
-                <th className="py-2 px-3 font-medium text-right">매입</th>
-                <th className="py-2 px-3 font-medium text-right">인건비</th>
-                <th className="py-2 px-3 font-medium text-right">고정비</th>
-                <th className="py-2 px-3 font-medium text-right">영업이익</th>
-                <th className="py-2 px-3 font-medium text-right">이익률</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredStores.map((s) => (
-                <tr key={s.restaurantId} className="border-b border-border/50 hover:bg-accent/30 transition-colors">
-                  <td className="py-2.5 px-3 font-medium text-foreground">{s.restaurantName}</td>
-                  {isMaster && selectedGroup === "전체" && (
-                    <td className="py-2.5 px-3 text-xs text-muted-foreground">{(s as any).groupName ?? "미배정"}</td>
-                  )}
-                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt(s.salesTotal)}</td>
-                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt(s.purchasesTotal)}</td>
-                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt(s.laborCost)}</td>
-                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt(s.fixedCostTotal)}</td>
-                  <td className={`py-2.5 px-3 text-right font-semibold tabular-nums ${s.profit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
-                    {s.profit >= 0 ? "+" : ""}{fmt(s.profit)}
-                  </td>
-                  <td className={`py-2.5 px-3 text-right tabular-nums ${s.profitRate >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
-                    {s.profitRate.toFixed(1)}%
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            {filteredStores.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-border font-semibold text-foreground">
-                  <td className="py-2.5 px-3">합계</td>
-                  {isMaster && selectedGroup === "전체" && <td className="py-2.5 px-3"></td>}
-                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt(totalSales)}</td>
-                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt(totalPurchases)}</td>
-                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt(totalLabor)}</td>
-                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt(totalFixed)}</td>                  <td className={`py-2.5 px-3 text-right tabular-nums ${totalProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
-                    {totalProfit >= 0 ? "+" : ""}{fmt(totalProfit)}
-                  </td>
-                  <td className={`py-2.5 px-3 text-right tabular-nums ${profitRate >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
-                    {profitRate.toFixed(1)}%
-                  </td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </Card>
     </div>
   );
 }
