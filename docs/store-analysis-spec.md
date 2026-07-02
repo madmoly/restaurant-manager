@@ -1,6 +1,8 @@
 # 매장 분석 페이지 설계 (store-analysis)
 
-> 작성: 2026-07-02 (Cowork) · 상태: 설계 확정 대기 → Code 핸드오프 예정
+> 작성: 2026-07-02 (Cowork) · 상태: P1~P6 구현·배포 완료(2026-07-02, 커밋 78311bc~ed7f6c8) · 인증 필요 QA 항목 대기
+>   - 배포 확인: 사이트 200, /store-analysis·/business SPA 200, analysis.storeTrends/targetAttainment/operationalHealth 3개 프로시저 모두 401(미인증) 응답 — 라우팅 정상 등록 확인
+>   - 미검증(로그인 필요): master 그룹필터/그룹간비교 동작, admin 그룹UI 미노출, manager 이하 네비 미노출, /business 당월 KPI 회귀 동일성, 목표 미설정 매장 표기, 모바일 실기기 렌더
 > 대상: master / admin 계정 전용 신규 분석 페이지 + 기존 `/business` 중복 제거
 
 ---
