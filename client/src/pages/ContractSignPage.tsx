@@ -55,6 +55,18 @@ export default function ContractSignPage({ token }: { token: string }) {
     };
   }, []);
 
+  // ─── 갱신/재계약 자동완성: 직전 서명 계약서의 주민번호·계좌 prefill ──────────
+  // 미서명 상태에서 아직 값을 입력하지 않았을 때만 채운다 (입력 중이면 덮어쓰지 않음).
+  const [prefillApplied, setPrefillApplied] = useState(false);
+  useEffect(() => {
+    const pf = (contract as any)?.prefill;
+    if (!pf || prefillApplied) return;
+    setBankName((v) => v || pf.bankName || "");
+    setBankAccount((v) => v || pf.bankAccount || "");
+    setResidentNumber((v) => v || pf.residentNumber || "");
+    setPrefillApplied(true);
+  }, [contract, prefillApplied]);
+
   // ─── 로딩 / 에러 분기 ────────────────────────────────────────────────────
 
   if (isLoading) {
@@ -569,6 +581,11 @@ export default function ContractSignPage({ token }: { token: string }) {
             {/* 직원 정보 입력 */}
             <div className="space-y-3 mb-5 p-4 rounded-lg" style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
               <p className="text-xs font-medium" style={{ color: "#374151" }}>급여 지급을 위해 아래 정보를 입력해주세요</p>
+              {(contract as any)?.prefill && (
+                <p className="text-[11px]" style={{ color: "#2563eb" }}>
+                  이전 계약서 정보를 자동으로 불러왔습니다. 변경된 내용이 있으면 수정해주세요.
+                </p>
+              )}
               <div className="grid grid-cols-3 gap-2">
                 <div className="col-span-1">
                   <label className="text-xs" style={{ color: "#6b7280" }}>은행명</label>

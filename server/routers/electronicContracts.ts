@@ -148,7 +148,37 @@ export const electronicContractsRouter = router({
         .where(eq(employmentElectronicContracts.token, input.token))
         .limit(1);
       if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "유효하지 않은 링크입니다" });
-      return { ...rows[0].contract, restaurantName: rows[0].restaurantName };
+      const contract = rows[0].contract;
+
+      // 갱신/재계약 자동완성: 아직 미서명(draft/sent) 계약이면, 같은 직원의 직전 서명 계약서에서
+      // 주민번호·은행명·계좌번호를 prefill 값으로 반환 (서명 시 직원이 다시 입력할 필요 없음).
+      let prefill: { residentNumber: string | null; bankName: string | null; bankAccount: string | null } | null = null;
+      if (contract.employeeId && (contract.status === "draft" || contract.status === "sent")) {
+        const [prev] = await db
+          .select({
+            residentNumber: employmentElectronicContracts.employeeResidentNumber,
+            bankName: employmentElectronicContracts.bankName,
+            bankAccount: employmentElectronicContracts.employeeBankAccount,
+          })
+          .from(employmentElectronicContracts)
+          .where(and(
+            eq(employmentElectronicContracts.employeeId, contract.employeeId),
+            eq(employmentElectronicContracts.restaurantId, contract.restaurantId),
+            eq(employmentElectronicContracts.status, "signed"),
+            ne(employmentElectronicContracts.id, contract.id),
+          ))
+          .orderBy(desc(employmentElectronicContracts.signedAt))
+          .limit(1);
+        if (prev && (prev.residentNumber || prev.bankName || prev.bankAccount)) {
+          prefill = {
+            residentNumber: prev.residentNumber ?? null,
+            bankName: prev.bankName ?? null,
+            bankAccount: prev.bankAccount ?? null,
+          };
+        }
+      }
+
+      return { ...contract, restaurantName: rows[0].restaurantName, prefill };
     }),
 
   /** 매장 내 기존 계약서의 소속회사 목록 (중복 제거) */
@@ -255,6 +285,7 @@ export const electronicContractsRouter = router({
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const cols = {
+          employeePhone: employmentElectronicContracts.employeePhone,
           contractType: employmentElectronicContracts.contractType,
           wageType: employmentElectronicContracts.wageType,
           wageAmount: employmentElectronicContracts.wageAmount,

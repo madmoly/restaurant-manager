@@ -1678,6 +1678,8 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         const sel = affiliatedCompaniesMaster.find((c: any) => c.companyName === company);
         return {
           ...prev,
+          // 갱신/재계약 시 직원 연락처 자동완성 (폼에 이미 입력된 값이 있으면 유지)
+          employeePhone: prev.employeePhone || (latestTemplate as any).employeePhone || "",
           contractType: (latestTemplate.contractType as any) || prev.contractType,
           wageType: (latestTemplate.wageType as any) || prev.wageType,
           wageAmount: latestTemplate.wageAmount || prev.wageAmount,
