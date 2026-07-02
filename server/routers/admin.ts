@@ -1,18 +1,17 @@
 import { z } from "zod";
-import { eq, and, between, sql, isNull, isNotNull, desc } from "drizzle-orm";
+import { eq, and, sql, isNull, isNotNull, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, adminProcedure, protectedProcedure, masterProcedure } from "../trpc";
 import { db } from "../db";
 import {
   restaurants, restaurantUsers, users, sales, purchaseOrders,
-  dailyClosings, dailyOperations, intermediateSales,
-  schedules, dailySalesDetail, businessGroups, dailyExpenses,
+  dailyOperations, intermediateSales,
+  schedules, dailySalesDetail, businessGroups,
   employeeWageHistory, auditLogs, notifications,
 } from "../../drizzle/schema";
 import { ROLE_LEVEL } from "@shared/permissions";
 import { getOwnedRestaurants, getOwnedRestaurantIds, realStoreCondition } from "../helpers/restaurantScope";
-import { calcMonthlyFixedCosts } from "../helpers/fixedCostCalc";
-import { sumLaborByCompany, sumSalesByMethod, sumPurchasesByCP } from "./monthlyClosings";
+import { computeStoreMonthlyAggregate } from "../helpers/monthlyAggregate";
 
 export const adminRouter = router({
   /**
@@ -22,9 +21,6 @@ export const adminRouter = router({
   multiStoreMonthlySummary: adminProcedure
     .input(z.object({ year: z.number(), month: z.number() }))
     .query(async ({ input, ctx }) => {
-      const start = new Date(input.year, input.month - 1, 1);
-      const end = new Date(input.year, input.month, 0);
-
       // 소유 매장 목록
       const realStores = await getOwnedRestaurants(ctx.user.userId, ctx.user.role);
 
@@ -46,46 +42,7 @@ export const adminRouter = router({
 
       const storeData = await Promise.all(
         allRestaurants.map(async (r) => {
-          // 일마감 날짜 목록 (마감 기준 집계용)
-          const closingRows = await db
-            .select({ closingDate: dailyClosings.closingDate })
-            .from(dailyClosings)
-            .where(and(eq(dailyClosings.restaurantId, r.id), between(dailyClosings.closingDate, start, end)));
-          const closedDateStrs = closingRows.map(c => {
-            const d = new Date(c.closingDate);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-          });
-
-          const startDateStr = `${input.year}-${String(input.month).padStart(2, "0")}-01`;
-          const endDateStr = `${input.year}-${String(input.month).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
-
-          // 매출 (일마감 기준 — 수익분석과 동일)
-          const confirmedSales = await sumSalesByMethod(r.id, closedDateStrs, startDateStr, endDateStr);
-          const salesTotal = confirmedSales.salesTotal;
-
-          // 매입 (일마감 기준 — 수익분석과 동일)
-          const confirmedPurchases = await sumPurchasesByCP(r.id, startDateStr, endDateStr, true);
-          const purchasesTotal = confirmedPurchases.total;
-
-          // 인건비: 시프트 재계산 (수익분석과 동일 산식)
-          const laborResult = await sumLaborByCompany(r.id, input.year, input.month, closedDateStrs);
-          const laborCost = laborResult.totalCost;
-
-          // 즉시 지출 (날짜 기반, 일마감 무관 — 수익분석과 동일)
-          const [expRow] = await db
-            .select({ total: sql<string>`COALESCE(SUM(CAST(${dailyExpenses.amount} AS DECIMAL(14,2))), 0)` })
-            .from(dailyExpenses)
-            .where(and(eq(dailyExpenses.restaurantId, r.id), between(dailyExpenses.date, start, end)));
-          const expensesTotal = Math.round(Number(expRow?.total ?? 0));
-
-          // 고정비 합계 (sales_ratio + profit_ratio closed-form 적용)
-          const fixedResult = await calcMonthlyFixedCosts(
-            r.id, input.year, input.month, salesTotal,
-            { purchases: purchasesTotal, labor: laborCost, expenses: expensesTotal },
-          );
-          const fixedCostTotal = fixedResult.totalWithRatio;
-          const profit = salesTotal - purchasesTotal - laborCost - fixedCostTotal - expensesTotal;
-
+          const agg = await computeStoreMonthlyAggregate(r.id, input.year, input.month);
           return {
             restaurantId: r.id,
             restaurantName: r.name,
@@ -93,15 +50,7 @@ export const adminRouter = router({
             isActive: r.isActive,
             ownerAdminId: r.ownerAdminId,
             groupName: r.isTutorial ? "Tutorial" : (r.ownerAdminId ? (groupMap.get(r.ownerAdminId) ?? null) : null),
-            salesTotal,
-            purchasesTotal,
-            laborCost,
-            fixedCostTotal,
-            expensesTotal,
-            profit,
-            profitRate: salesTotal > 0 ? (profit / salesTotal * 100) : 0,
-            closedDays: closingRows.length,
-            daysInMonth: end.getDate(),
+            ...agg,
           };
         })
       );
