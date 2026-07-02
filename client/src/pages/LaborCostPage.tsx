@@ -49,6 +49,22 @@ function fmtPct(p: number | null): string {
   return `${sign}${p.toFixed(1)}%`;
 }
 
+/** 파일명에 쓸 수 없는 문자 제거 (Windows/Mac 공통) */
+function sanitizeFileName(s: string) {
+  return s.replace(/[\\/:*?"<>|]/g, "_").trim();
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export default function LaborCostPage() {
   const { selectedRestaurant: current } = useRestaurant();
   const restaurantId = current?.id ?? 0;
@@ -164,9 +180,11 @@ export default function LaborCostPage() {
   // 헤더 (단어 단축으로 1줄 정렬) — 3.3%공제 컬럼 제거(시스템 미계산), 근무시간 컬럼 추가
   const fullHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "계약휴무", "출근일수", "근무시간", "실휴무일", "대휴잔여", "연차잔여", "보험", "인건비", "은행명", "계좌번호", "주민번호", "입사일", "계약시작", "종료"];
   const consultantHeaders = ["소속회사", "이름", "직위", "유형", "계약급여", "보험", "출근일수", "실휴무일", "계약휴무", "대휴사용", "대휴잔여", "연차사용", "연차잔여", "은행명", "계좌번호", "주민번호", "입사일", "계약시작", "종료"];
-  const fileName = consultantMode
-    ? `노무사전송_${year}년${month}월_${current?.name ?? ""}`
-    : `인건비정산_${year}년${month}월_${current?.name ?? ""}`;
+  const fileName = sanitizeFileName(
+    consultantMode
+      ? `노무사전송_${year}년${month}월_${current?.name ?? ""}`
+      : `인건비정산_${year}년${month}월_${current?.name ?? ""}`
+  );
 
   const handleExportExcel = async () => {
     setShowExportMenu(false);
@@ -253,8 +271,7 @@ export default function LaborCostPage() {
       });
 
       const pdfBlob = doc.output("blob");
-      const pdfUrl = URL.createObjectURL(pdfBlob);
-      window.open(pdfUrl, "_blank");
+      triggerDownload(pdfBlob, `${fileName}.pdf`);
     } catch (err: any) {
       console.error("PDF export error:", err);
       alert(`PDF 내보내기 실패: ${err.message || "알 수 없는 오류"}`);
