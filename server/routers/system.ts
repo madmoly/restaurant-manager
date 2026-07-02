@@ -572,6 +572,7 @@ export const systemRouter = router({
         snapshotHireDate: employmentElectronicContracts.snapshotHireDate,
         snapshotWeeklyOffDays: employmentElectronicContracts.snapshotWeeklyOffDays,
         snapshotContractOffDays: employmentElectronicContracts.snapshotContractOffDays,
+        contractOffDays: employmentElectronicContracts.contractOffDays,
         snapshotOver5Employees: employmentElectronicContracts.snapshotOver5Employees,
         snapshotTaxMode: employmentElectronicContracts.snapshotTaxMode,
       })
@@ -603,7 +604,8 @@ export const systemRouter = router({
       if (snap) {
         if ((snap.snapshotAffiliatedCompany ?? "") !== (r.affiliatedCompany ?? "")) fields.push("소속회사");
         if (dateIso(snap.snapshotHireDate) !== dateIso(r.hireDate)) fields.push("입사일");
-        if ((snap.snapshotContractOffDays ?? null) !== (r.contractOffDays ?? null)) fields.push("계약휴무일수");
+        // 서명 계약서가 계약휴무일수를 실제로 계약한 경우에만 비교 (legacy 백필 환산값 오탐 방지)
+        if (snap.contractOffDays != null && (snap.snapshotContractOffDays ?? null) !== (r.contractOffDays ?? null)) fields.push("계약휴무일수");
         if (snap.snapshotOver5Employees != null && Boolean(snap.snapshotOver5Employees) !== Boolean(effectiveOver5)) fields.push("5인 여부");
       }
       return {

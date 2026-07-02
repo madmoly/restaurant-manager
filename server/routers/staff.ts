@@ -89,6 +89,9 @@ function computeNeedsRenewal(
     snapshotAffiliatedCompany?: string | null;
     snapshotHireDate?: string | Date | null;
     snapshotContractOffDays?: number | null;
+    // 서명 계약서 본문의 계약휴무일수(폼 입력값). null = legacy 서명본(주당 시대) →
+    // snapshotContractOffDays는 백필 환산값(주당×4.345)이므로 비교 대상 아님
+    contractOffDays?: number | null;
     snapshotOver5Employees?: boolean | null;
     snapshotContractType?: string | null;
     snapshotContractStart?: string | Date | null;
@@ -147,7 +150,8 @@ function computeNeedsRenewal(
   if (current.hireDate != null || snapshot.snapshotHireDate != null) {
     if (!dateEq(current.hireDate, snapshot.snapshotHireDate)) diff.push("hireDate");
   }
-  if (current.contractOffDays != null || snapshot.snapshotContractOffDays != null) {
+  // 계약휴무일수: 서명 계약서가 이 필드를 실제로 계약한 경우에만 비교 (오탐 방지, TASK §QA)
+  if (snapshot.contractOffDays != null) {
     if (!numEq(current.contractOffDays, snapshot.snapshotContractOffDays))
       diff.push("contractOffDays");
   }
@@ -302,6 +306,7 @@ export const staffRouter = router({
             snapshotAffiliatedCompany: employmentElectronicContracts.snapshotAffiliatedCompany,
             snapshotWeeklyOffDays: employmentElectronicContracts.snapshotWeeklyOffDays,
             snapshotContractOffDays: employmentElectronicContracts.snapshotContractOffDays,
+            contractOffDays: employmentElectronicContracts.contractOffDays,
             snapshotWeeklyHours: employmentElectronicContracts.snapshotWeeklyHours,
             snapshotWageType: employmentElectronicContracts.snapshotWageType,
             snapshotWage: employmentElectronicContracts.snapshotWage,
@@ -415,6 +420,7 @@ export const staffRouter = router({
           snapshotAffiliatedCompany: snap?.snapshotAffiliatedCompany ?? null,
           snapshotWeeklyOffDays: snap?.snapshotWeeklyOffDays ?? null,
           snapshotContractOffDays: snap?.snapshotContractOffDays ?? null,
+          latestSignedContractOffDays: snap?.contractOffDays ?? null,
           snapshotWageType: snap?.snapshotWageType ?? null,
           snapshotWage: snap?.snapshotWage ?? null,
           snapshotContractType: snap?.snapshotContractType ?? null,

@@ -330,7 +330,9 @@ export default function StaffPage() {
     // 기본
     if ((s.snapshotAffiliatedCompany ?? null) !== (s.affiliatedCompany ?? null)) f.push("소속회사");
     if (s.snapshotHireDate != null && !dateEq(s.snapshotHireDate, s.hireDate)) f.push("입사일");
-    if ((s.snapshotContractOffDays ?? null) !== (s.contractOffDays ?? null)) f.push("계약휴무일수");
+    // 계약휴무일수: 서명 계약서가 이 필드를 실제로 계약한 경우에만 비교.
+    // legacy 서명본의 snapshotContractOffDays는 백필 환산값(주당×4.345)이라 오탐됨
+    if (s.latestSignedContractOffDays != null && !numEq(s.snapshotContractOffDays, s.contractOffDays)) f.push("계약휴무일수");
     if (s.snapshotOver5Employees != null && !boolEq(s.snapshotOver5Employees, s.effectiveOver5)) f.push("5인 여부");
     // 계약
     if ((s.snapshotContractType ?? null) != null || (s.contractType ?? null) != null) {
