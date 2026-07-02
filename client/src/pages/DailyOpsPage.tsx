@@ -970,6 +970,10 @@ function PurchaseTab({
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [attachmentUrl, setAttachmentUrl] = useState<string | undefined>(undefined);
 
+  // ── 입고 완료 전표 품목 수정 state ──
+  const [editingItemsOrderId, setEditingItemsOrderId] = useState<number | null>(null);
+  const [editRows, setEditRows] = useState<PurchaseItemRow[]>([]);
+
   // OCR 상태
   const [ocrProcessing, setOcrProcessing] = useState(false);
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
@@ -1100,6 +1104,18 @@ function PurchaseTab({
       setExpandedId(null);
     },
     onError(err: any) { toast.error(`삭제 실패: ${err.message}`); },
+  });
+
+  const updateReceivedItems = trpc.purchasesV2.updateReceivedItems.useMutation({
+    onSuccess() {
+      toast.success('품목이 수정되었습니다.');
+      utils.purchasesV2.listByDate.invalidate();
+      utils.purchasesV2.getOrderItems.invalidate();
+      utils.monthlyClosings.settlementData.invalidate();
+      setEditingItemsOrderId(null);
+      setEditRows([]);
+    },
+    onError(err: any) { toast.error(`수정 실패: ${err.message}`); },
   });
 
   // ── 즉시지출 mutations ──
@@ -1262,6 +1278,64 @@ function PurchaseTab({
       }
     }
     setPurchaseItems(newItems);
+  };
+
+  const updateEditRow = (idx: number, field: keyof PurchaseItemRow, value: string) => {
+    const newRows = [...editRows];
+    newRows[idx] = { ...newRows[idx], [field]: value };
+    if (field === 'quantity' || field === 'unitPrice') {
+      const qty = parseFloat(newRows[idx].quantity || '0');
+      const price = parseFloat(newRows[idx].unitPrice || '0');
+      if (qty > 0 && price > 0) {
+        newRows[idx].lineTotal = String(Math.round(qty * price));
+      }
+    }
+    setEditRows(newRows);
+  };
+
+  const handleStartEditItems = (order: any) => {
+    const rows: PurchaseItemRow[] = (orderItemsQuery.data || []).map((item: any) => ({
+      rawItemName: item.rawItemName || item.itemName || '',
+      quantity: item.quantity != null ? String(item.quantity) : '',
+      unitName: item.unitName || '개',
+      unitPrice: item.unitPrice != null ? String(item.unitPrice) : '',
+      lineTotal: item.lineTotal != null ? String(item.lineTotal) : '0',
+      counterpartyItemId: item.counterpartyItemId ?? undefined,
+      matchedItemId: item.itemId ?? undefined,
+    }));
+    setEditRows(rows.length > 0 ? rows : [emptyPurchaseItem()]);
+    setEditingItemsOrderId(order.id);
+  };
+
+  const handleSaveItems = async (order: any) => {
+    const validRows = editRows.filter(r => r.rawItemName.trim() || r.lineTotal);
+    if (validRows.length === 0) {
+      toast.error('최소 1개 항목을 입력하세요.');
+      return;
+    }
+    const [y, m] = String(order.purchaseDate).slice(0, 7).split('-').map(Number);
+    try {
+      const closed = await utils.monthlyClosings.get.fetch({ restaurantId, year: y, month: m });
+      if (closed) {
+        const msg = `${y}년 ${m}월은 월마감이 확정된 달입니다.\n확정된 스냅샷은 자동으로 재계산되지 않고, 다음 월마감 재확정 시 반영됩니다.\n계속할까요?`;
+        if (!window.confirm(msg)) return;
+      }
+    } catch {
+      // 조회 실패는 무시하고 진행
+    }
+    updateReceivedItems.mutate({
+      restaurantId,
+      id: order.id,
+      items: validRows.map(r => ({
+        rawItemName: r.rawItemName,
+        itemId: r.matchedItemId,
+        counterpartyItemId: r.counterpartyItemId,
+        quantity: r.quantity || undefined,
+        unitName: r.unitName || undefined,
+        unitPrice: r.unitPrice || undefined,
+        lineTotal: r.lineTotal || '0',
+      })),
+    });
   };
 
   // ── STEP 1: 사진 업로드 + Tesseract 방향감지 1회 ───────────────
@@ -1993,7 +2067,11 @@ function PurchaseTab({
             {receivedOrders.map((order: any) => (
               <div key={order.id} className="border border-border rounded-lg overflow-hidden">
                 <button
-                  onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
+                  onClick={() => {
+                    setExpandedId(expandedId === order.id ? null : order.id);
+                    setEditingItemsOrderId(null);
+                    setEditRows([]);
+                  }}
                   className="w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-muted/30 transition-colors"
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -2007,7 +2085,7 @@ function PurchaseTab({
                     <svg className={`w-4 h-4 text-muted-foreground transition-transform ${expandedId === order.id ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                   </div>
                 </button>
-                {expandedId === order.id && (
+                {expandedId === order.id && editingItemsOrderId !== order.id && (
                   <div className="px-3 pb-3 border-t border-border pt-2 space-y-1.5">
                     {orderItemsQuery.isLoading ? (
                       <p className="text-xs text-muted-foreground">로딩 중...</p>
@@ -2021,9 +2099,85 @@ function PurchaseTab({
                       </div>
                     ))}
                     {order.note && <p className="text-xs text-muted-foreground mt-1">메모: {order.note}</p>}
-                    <div className="flex justify-end pt-1">
+                    <div className="flex justify-end gap-1 pt-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={orderItemsQuery.isLoading}
+                        onClick={() => handleStartEditItems(order)}
+                        className="text-xs h-7"
+                      >
+                        수정
+                      </Button>
                       <Button variant="ghost" size="sm" onClick={() => { if (confirm('이 매입 기록을 삭제할까요?')) deleteOrder.mutate({ restaurantId, id: order.id }); }} disabled={deleteOrder.isPending}>
                         <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {expandedId === order.id && editingItemsOrderId === order.id && (
+                  <div className="px-3 pb-3 border-t border-border pt-2 space-y-2">
+                    {editRows.map((row, idx) => (
+                      <div key={idx} className="border border-border rounded-lg p-2 space-y-1.5">
+                        <div className="flex gap-1.5">
+                          <Input
+                            placeholder="품목명"
+                            value={row.rawItemName}
+                            onChange={(e) => updateEditRow(idx, 'rawItemName', e.target.value)}
+                            className="text-sm h-9 flex-1"
+                          />
+                          {editRows.length > 1 && (
+                            <button
+                              onClick={() => setEditRows(editRows.filter((_, i) => i !== idx))}
+                              className="px-2 rounded-md border border-dashed border-red-200 dark:border-red-800 text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                              title="이 항목 삭제"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div>
+                            <span className="text-[10px] text-muted-foreground mb-0.5 block">수량</span>
+                            <Input placeholder="0" type="number" step="0.01" value={row.quantity} onChange={(e) => updateEditRow(idx, 'quantity', e.target.value)} className="text-sm h-9" />
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-muted-foreground mb-0.5 block">단위</span>
+                            <Input placeholder="단위" value={row.unitName} onChange={(e) => updateEditRow(idx, 'unitName', e.target.value)} className="text-sm h-9" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div>
+                            <span className="text-[10px] text-muted-foreground mb-0.5 block">단가</span>
+                            <Input placeholder="0" type="number" value={row.unitPrice} onChange={(e) => updateEditRow(idx, 'unitPrice', e.target.value)} className="text-sm h-9" />
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-muted-foreground mb-0.5 block">합계</span>
+                            <Input placeholder="0" type="number" value={row.lineTotal} onChange={(e) => updateEditRow(idx, 'lineTotal', e.target.value)} className="text-sm h-9 font-semibold" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <Button variant="secondary" size="sm" onClick={() => setEditRows([...editRows, emptyPurchaseItem()])} className="w-full">
+                      <Plus className="w-3 h-3 mr-1" /> 항목 추가
+                    </Button>
+                    <div className="flex justify-end gap-1.5 pt-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setEditingItemsOrderId(null); setEditRows([]); }}
+                        disabled={updateReceivedItems.isPending}
+                        className="text-xs h-8"
+                      >
+                        취소
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => handleSaveItems(order)}
+                        disabled={updateReceivedItems.isPending}
+                        className="text-xs h-8"
+                      >
+                        {updateReceivedItems.isPending ? '저장 중...' : '저장'}
                       </Button>
                     </div>
                   </div>

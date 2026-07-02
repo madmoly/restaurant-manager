@@ -418,6 +418,102 @@ export const purchasesV2Router = router({
       return { ok: true };
     }),
 
+  /** 입고 완료 전표의 품목 라인 수정 (delete-all + re-insert, 합계 재계산, lastPrice 갱신) */
+  updateReceivedItems: storeWriteProcedure
+    .input(
+      z.object({
+        id: z.number(),
+        items: z.array(
+          z.object({
+            itemId: z.number().optional(),
+            counterpartyItemId: z.number().optional(),
+            rawItemName: z.string().optional(),
+            itemType: z.enum(["product", "service", "misc"]).default("product"),
+            quantity: z.string().optional(),
+            unitName: z.string().optional(),
+            unitPrice: z.string().optional(),
+            lineTotal: z.string().default("0"),
+            costingCategory: z.string().optional(),
+            note: z.string().optional(),
+          }),
+        ).min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // restaurantId 일치 검증 (cross-store 누수 차단)
+      const [existing] = await db
+        .select()
+        .from(purchaseOrdersV2)
+        .where(and(
+          eq(purchaseOrdersV2.id, input.id),
+          eq(purchaseOrdersV2.restaurantId, input.restaurantId),
+        ))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "전표를 찾을 수 없습니다" });
+      }
+      // 확정 전표만 대상 (발주는 receiveOrder 경로)
+      if (existing.status !== "received") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "입고 완료된 전표만 품목 수정이 가능합니다" });
+      }
+
+      // 품목 교체
+      await db
+        .delete(purchaseOrderItemsV2)
+        .where(eq(purchaseOrderItemsV2.purchaseOrderId, input.id));
+      await db.insert(purchaseOrderItemsV2).values(
+        input.items.map((item) => ({
+          purchaseOrderId: input.id,
+          itemId: item.itemId,
+          counterpartyItemId: item.counterpartyItemId,
+          rawItemName: item.rawItemName,
+          itemType: item.itemType,
+          quantity: item.quantity,
+          unitName: item.unitName,
+          unitPrice: item.unitPrice,
+          lineTotal: item.lineTotal,
+          costingCategory: item.costingCategory,
+          note: item.note,
+        })),
+      );
+
+      // lastPrice 갱신 (received 전제)
+      for (const item of input.items) {
+        if (item.counterpartyItemId && item.unitPrice) {
+          await db
+            .update(counterpartyItems)
+            .set({ lastPrice: item.unitPrice })
+            .where(eq(counterpartyItems.id, item.counterpartyItemId));
+        }
+      }
+
+      // 합계 재계산 + 이력
+      const newTotal = input.items.reduce(
+        (sum, it) => sum + parseFloat(it.lineTotal || "0"),
+        0,
+      );
+      const prevHistory = (existing.editHistory as any[]) ?? [];
+      const newEntry = {
+        userId: ctx.user.userId,
+        userName: ctx.user.username ?? String(ctx.user.userId),
+        at: new Date().toISOString(),
+        summary: `품목 수정 (${Number(existing.totalAmount).toLocaleString()}원 → ${newTotal.toLocaleString()}원)`,
+      };
+
+      await db
+        .update(purchaseOrdersV2)
+        .set({
+          totalAmount: String(newTotal),
+          lastModifiedBy: ctx.user.userId,
+          lastModifiedAt: new Date(),
+          editHistory: [...prevHistory, newEntry],
+        })
+        .where(eq(purchaseOrdersV2.id, input.id));
+
+      triggerDatasetExport();
+      return { ok: true, totalAmount: newTotal };
+    }),
+
   /** 전표 헤더 수정 + 수정이력 기록 */
   updateOrder: storeWriteProcedure
     .input(
