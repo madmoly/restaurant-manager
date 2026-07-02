@@ -26,6 +26,7 @@ import {
   LayoutGrid, Activity, CalendarRange, ListChecks, Clock,
   UsersRound, Coins, BarChart3, Receipt, ShoppingCart, ShieldCheck,
   Store, Bell, ChefHat, ClipboardList, CalendarClock, MessageSquareWarning,
+  LineChart,
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -55,6 +56,12 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
     mobileIcon: <Building2 className="h-5 w-5" />,
     roles: ["master", "admin"],
     mobileTabPriority: { master: 1, admin: 1 },
+  },
+  {
+    label: "매장 분석", href: "/store-analysis",
+    icon: <LineChart className="h-4 w-4" />,
+    mobileIcon: <LineChart className="h-5 w-5" />,
+    roles: ["master", "admin"],
   },
   {
     label: "사용자 관리", href: "/users",

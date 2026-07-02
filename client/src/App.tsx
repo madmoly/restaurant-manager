@@ -32,6 +32,7 @@ import SystemPage from "./pages/SystemPage";
 import FeedbackListPage from "./pages/FeedbackListPage";
 import RecipesPage from "./pages/RecipesPage";
 import StoreInfoPage from "./pages/StoreInfoPage";
+import StoreAnalysisPage from "./pages/StoreAnalysisPage";
 import AppLayout from "./components/AppLayout";
 
 function RoleRouter() {
@@ -73,6 +74,7 @@ function RoleRouter() {
           <>
             <Route path="/" component={ManagerDashboard} />
             <Route path="/business" component={AdminDashboard} />
+            <Route path="/store-analysis" component={StoreAnalysisPage} />
             <Route path="/groups" component={MasterDashboard} />
             <Route path="/users" component={UsersPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
@@ -100,6 +102,7 @@ function RoleRouter() {
           <>
             <Route path="/" component={ManagerDashboard} />
             <Route path="/business" component={AdminDashboard} />
+            <Route path="/store-analysis" component={StoreAnalysisPage} />
             <Route path="/users" component={UsersPage} />
             <Route path="/restaurants" component={RestaurantsPage} />
             <Route path="/monthly-settlement" component={MonthlySettlementPage} />
