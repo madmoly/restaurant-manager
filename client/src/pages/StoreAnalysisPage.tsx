@@ -141,18 +141,20 @@ export default function StoreAnalysisPage() {
       if (viewMode === "group") {
         for (const s of relevantStores) {
           const key = s.groupName ?? "미배정";
-          if (!denomAgg[key]) denomAgg[key] = { sales: 0, profit: 0, confirmed: true };
+          if (!denomAgg[key]) denomAgg[key] = { sales: 0, profit: 0, confirmed: false };
           denomAgg[key].sales += s.salesTotal;
           denomAgg[key].profit += s.profit;
-          denomAgg[key].confirmed = denomAgg[key].confirmed && s.confirmed;
+          // 그룹 집계는 매장 1곳이라도 확정이면 유효 포인트로 표시 (전원 확정을 요구하면
+          // 미확정 매장 1곳만 있어도 그룹 전체 라인이 끊겨 사실상 그래프가 비어 보임 — F1)
+          denomAgg[key].confirmed = denomAgg[key].confirmed || s.confirmed;
         }
       } else if (forceCombined) {
         const key = "선택 매장 합계";
-        denomAgg[key] = { sales: 0, profit: 0, confirmed: true };
+        denomAgg[key] = { sales: 0, profit: 0, confirmed: false };
         for (const s of relevantStores) {
           denomAgg[key].sales += s.salesTotal;
           denomAgg[key].profit += s.profit;
-          denomAgg[key].confirmed = denomAgg[key].confirmed && s.confirmed;
+          denomAgg[key].confirmed = denomAgg[key].confirmed || s.confirmed;
         }
       } else {
         for (const s of relevantStores) {

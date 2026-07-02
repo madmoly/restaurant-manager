@@ -261,7 +261,7 @@ export default function AdminDashboard() {
           label="영업이익률"
           value={profitRate.toFixed(1)}
           unit="%"
-          trend={{ value: totalProfit >= 0 ? Math.abs(profitRate) : -Math.abs(profitRate) }}
+          trend={{ value: Math.round(profitRate * 10) / 10 }}
           className={totalProfit >= 0 ? "border-emerald-500/20" : "border-red-500/20"}
         />
       </div>
