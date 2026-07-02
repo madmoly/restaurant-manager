@@ -969,7 +969,10 @@ export const schedulesRouter = router({
 
       // 박제 계약서 batch fetch (2026-05-02 노무사전송 누락 보완):
       //   restaurant_users.position이 NULL인 직원의 직위 / 직원 신원(주민·계좌)을 박제 계약서에서 채움.
-      //   매칭: restaurantId + employeeId + status IN ('signed','superseded') (이력 토글에도 superseded 포함).
+      //   매칭: restaurantId + employeeId + [서명 이력 전체]. superseded(서명으로 대체)뿐 아니라
+      //   expired+signedAt(갱신 계약 "발급" 시점에 expired로 밀려난 직전 서명본)도 포함해야
+      //   과거 정산월의 계약기간 커버가 소급 소실되지 않음(2026-07-03 6월 계약미연결 오탐).
+      //   미서명 만료본(draft/sent→expired, signedAt NULL)은 제외.
       //   snapshot* 컬럼 우선 (서명 시점 박제), NULL이면 본 컬럼 fallback (Phase E 박제 전 서명분).
       // 정산월 활성 계약 (2026-05-03):
       //   카드에 "현재 활성 계약"이 아닌 "정산월에 활성이었던 계약"을 노출. 진재이 사례 대응.
@@ -1010,7 +1013,7 @@ export const schedulesRouter = router({
           .from(employmentElectronicContracts)
           .where(and(
             eq(employmentElectronicContracts.restaurantId, input.restaurantId),
-            sql`${employmentElectronicContracts.status} IN ('signed', 'superseded')`,
+            sql`(${employmentElectronicContracts.status} IN ('signed', 'superseded') OR (${employmentElectronicContracts.status} = 'expired' AND ${employmentElectronicContracts.signedAt} IS NOT NULL))`,
             sql`${employmentElectronicContracts.employeeId} IN (${sql.join(empIds.map(id => sql`${id}`), sql`, `)})`,
           ))
           .orderBy(desc(employmentElectronicContracts.signedAt));
