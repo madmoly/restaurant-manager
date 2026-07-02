@@ -1380,29 +1380,16 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
           />
 
           {expBreakdown.length > 0 && (() => {
-            type Row = { title: string; categoryName: string; total: number; count: number };
-            const map = new Map<string, Row>();
+            type Row = { date: string; title: string; categoryName: string; amount: number };
+            const rows: Row[] = [];
             for (const cat of expBreakdown) {
               for (const it of cat.items) {
-                const key = `${cat.categoryName}__${it.title}`;
-                if (!map.has(key)) {
-                  map.set(key, { title: it.title, categoryName: cat.categoryName, total: 0, count: 0 });
-                }
-                const r = map.get(key)!;
-                r.total += it.amount;
-                r.count += 1;
+                rows.push({ date: it.date, title: it.title, categoryName: cat.categoryName, amount: it.amount });
               }
             }
-            const catTotals = new Map<string, number>();
-            for (const r of map.values()) {
-              catTotals.set(r.categoryName, (catTotals.get(r.categoryName) ?? 0) + r.total);
-            }
-            const rows = Array.from(map.values()).sort((a, b) => {
-              const ca = catTotals.get(a.categoryName) ?? 0;
-              const cb = catTotals.get(b.categoryName) ?? 0;
-              if (cb !== ca) return cb - ca;
-              if (a.categoryName !== b.categoryName) return a.categoryName.localeCompare(b.categoryName);
-              return b.total - a.total;
+            rows.sort((a, b) => {
+              if (a.date !== b.date) return b.date.localeCompare(a.date);
+              return b.amount - a.amount;
             });
 
             return (
@@ -1410,17 +1397,17 @@ function MonthlyPurchaseTab({ restaurantId }: { restaurantId: number }) {
                 <div className="text-xs font-medium text-muted-foreground px-1 pt-3">즉시지출</div>
                 <Card className="divide-y divide-border">
                   {rows.map((row, idx) => {
-                    const pct = expenseTotal > 0 ? ((row.total / expenseTotal) * 100).toFixed(1) : "0";
+                    const pct = expenseTotal > 0 ? ((row.amount / expenseTotal) * 100).toFixed(1) : "0";
                     return (
                       <div key={idx} className="px-4 py-2.5 flex items-center justify-between">
                         <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-xs text-muted-foreground tabular-nums shrink-0">{row.date.slice(5)}</span>
                           <span className="font-medium text-foreground text-sm truncate">{row.title}</span>
-                          <span className="text-xs text-muted-foreground shrink-0">({row.count})</span>
                           <span className="text-[10px] text-muted-foreground shrink-0 truncate">· {row.categoryName}</span>
                         </div>
                         <div className="text-right shrink-0">
                           <span className="text-sm font-bold text-foreground tabular-nums">
-                            {formatKRW(row.total)}
+                            {formatKRW(row.amount)}
                           </span>
                           <span className="text-[10px] text-muted-foreground ml-1">({pct}%)</span>
                         </div>
