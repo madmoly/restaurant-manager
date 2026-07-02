@@ -1,9 +1,10 @@
 import { useState, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import { useAuth } from "../hooks/useAuth";
+import { useLocation } from "wouter";
 import {
   TrendingUp, BarChart3, Filter, Store, Wallet,
-  ArrowUpDown,
+  ArrowUpDown, Target, ClipboardCheck, ChevronRight,
 } from "lucide-react";
 import { Card, PageHeader } from "@/components/ui/compat";
 import { DashboardSkeleton } from "@/components/ui/skeletons";
@@ -16,11 +17,20 @@ import { formatKRW, formatCompactKRW, formatPercent, cn } from "@/lib/utils";
 
 const LINE_COLORS = ["#4f46e5", "#ec4899", "#f59e0b", "#10b981", "#06b6d4", "#8b5cf6", "#ef4444", "#84cc16"];
 
+/** 운영 건전성 3지표 색상 규칙: 60% 미만 적색, 60~90% 황색, 90%+ 녹색 */
+function healthBadgeClass(value: number | null): string {
+  if (value == null) return "bg-muted text-muted-foreground";
+  if (value < 60) return "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300";
+  if (value < 90) return "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300";
+  return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300";
+}
+
 type ViewMode = "store" | "group";
 type SortKey = "salesTotal" | "profit" | "profitRate" | "laborRatio" | "costRatio" | "closingRate";
 
 export default function StoreAnalysisPage() {
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const isMaster = user?.role === "master";
   const today = new Date();
 
@@ -83,6 +93,15 @@ export default function StoreAnalysisPage() {
     }
     return new Set(availableStores.map((s) => s.id));
   }, [manualSelectedIds, availableStores]);
+
+  const filteredTargetRows = useMemo(
+    () => (targetData ?? []).filter((t) => selectedIds.has(t.restaurantId)),
+    [targetData, selectedIds],
+  );
+  const filteredHealthRows = useMemo(
+    () => (healthData ?? []).filter((h) => selectedIds.has(h.restaurantId)),
+    [healthData, selectedIds],
+  );
 
   const toggleStore = (id: number) => {
     const next = new Set(selectedIds);
@@ -592,6 +611,101 @@ export default function StoreAnalysisPage() {
           )}
         </Card>
       </div>
+
+      {/* ② 목표 대비 달성률 */}
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
+          <Target size={14} className="text-primary" />
+          목표 대비 달성률 · {endYear}.{endMonth}
+        </h3>
+        <div className="space-y-3">
+          {filteredTargetRows.map((t) => {
+            const barPct = t.salesAttainment != null ? Math.min(150, Math.max(0, t.salesAttainment)) : 0;
+            const laborOver = t.laborRatio > t.targetLaborRatio;
+            const costOver = t.costRatio > t.targetCostRatio;
+            return (
+              <div key={t.restaurantId} className="p-3 rounded-lg border border-border">
+                <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                  <span className="text-sm font-medium text-foreground">
+                    {t.restaurantName}
+                    {!t.confirmed && <span className="ml-1.5 text-[10px] text-muted-foreground">(미확정)</span>}
+                  </span>
+                  {t.targetSet ? (
+                    <span className={cn("text-sm font-semibold tabular-nums", (t.salesAttainment ?? 0) >= 100 ? "text-emerald-600 dark:text-emerald-400" : "text-foreground")}>
+                      {formatPercent(t.salesAttainment ?? 0)}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setLocation("/restaurants")}
+                      className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full hover:bg-accent flex items-center gap-0.5"
+                    >
+                      목표 미설정 <ChevronRight size={10} />
+                    </button>
+                  )}
+                </div>
+                {t.targetSet && (
+                  <div className="relative h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={cn("absolute inset-y-0 left-0 rounded-full", (t.salesAttainment ?? 0) >= 100 ? "bg-emerald-500" : "bg-primary")}
+                      style={{ width: `${Math.min(100, barPct)}%` }}
+                    />
+                    <div className="absolute inset-y-0 border-l-2 border-foreground/30" style={{ left: "66.6%" }} title="100% 기준선" />
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2 mt-2 text-[11px]">
+                  <span className={cn("px-1.5 py-0.5 rounded", laborOver ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300" : "bg-muted/40 text-muted-foreground")}>
+                    인건비율 {formatPercent(t.laborRatio)} / 목표 {formatPercent(t.targetLaborRatio)}
+                  </span>
+                  <span className={cn("px-1.5 py-0.5 rounded", costOver ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300" : "bg-muted/40 text-muted-foreground")}>
+                    매입비율 {formatPercent(t.costRatio)} / 목표 {formatPercent(t.targetCostRatio)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          {filteredTargetRows.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-6">데이터가 없습니다</p>
+          )}
+        </div>
+      </Card>
+
+      {/* ④ 운영 건전성 */}
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
+          <ClipboardCheck size={14} className="text-primary" />
+          운영 건전성 · {endYear}.{endMonth}
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filteredHealthRows.map((h) => (
+            <div key={h.restaurantId} className="p-3 rounded-lg border border-border">
+              <p className="text-sm font-medium text-foreground mb-2">{h.restaurantName}</p>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">일마감 이행률</span>
+                  <span className={cn("px-1.5 py-0.5 rounded-full font-medium tabular-nums", healthBadgeClass(h.closingRate))}>
+                    {formatPercent(h.closingRate, 0)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">체크리스트 완료율</span>
+                  <span className={cn("px-1.5 py-0.5 rounded-full font-medium tabular-nums", healthBadgeClass(h.checklistRate))}>
+                    {h.checklistRate == null ? "템플릿 없음" : formatPercent(h.checklistRate, 0)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">스케줄 커버리지</span>
+                  <span className={cn("px-1.5 py-0.5 rounded-full font-medium tabular-nums", healthBadgeClass(h.scheduleCoverage))}>
+                    {formatPercent(h.scheduleCoverage, 0)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+          {filteredHealthRows.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-6 col-span-full">데이터가 없습니다</p>
+          )}
+        </div>
+      </Card>
     </div>
   );
 }
