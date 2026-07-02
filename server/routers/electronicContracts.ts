@@ -150,8 +150,10 @@ export const electronicContractsRouter = router({
       if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "유효하지 않은 링크입니다" });
       const contract = rows[0].contract;
 
-      // 갱신/재계약 자동완성: 아직 미서명(draft/sent) 계약이면, 같은 직원의 직전 서명 계약서에서
+      // 갱신/재계약 자동완성: 아직 미서명(draft/sent) 계약이면, 같은 직원의 과거 서명 계약서에서
       // 주민번호·은행명·계좌번호를 prefill 값으로 반환 (서명 시 직원이 다시 입력할 필요 없음).
+      // 주의: 갱신 계약 생성 시 직전 계약은 'signed'→'expired'로 만료되므로 status 조건을 걸지 않고,
+      //       서명 이력(signedAt)이 있고 개인정보가 채워진 가장 최근 계약을 찾는다.
       let prefill: { residentNumber: string | null; bankName: string | null; bankAccount: string | null } | null = null;
       if (contract.employeeId && (contract.status === "draft" || contract.status === "sent")) {
         const [prev] = await db
@@ -164,8 +166,8 @@ export const electronicContractsRouter = router({
           .where(and(
             eq(employmentElectronicContracts.employeeId, contract.employeeId),
             eq(employmentElectronicContracts.restaurantId, contract.restaurantId),
-            eq(employmentElectronicContracts.status, "signed"),
             ne(employmentElectronicContracts.id, contract.id),
+            isNotNull(employmentElectronicContracts.signedAt),
           ))
           .orderBy(desc(employmentElectronicContracts.signedAt))
           .limit(1);
