@@ -19,14 +19,20 @@ app.use(express.json({ limit: "10mb" }));
     const conn = await mysql2.createConnection(process.env.DATABASE_URL!);
 
     // 헬퍼: 컬럼 존재 여부 확인 후 추가
+    // 개별 실패는 로그만 남기고 계속 — 한 구문의 throw가 이후 마이그레이션 전체를 중단시키면
+    // 배포 코드와 DB 스키마가 어긋난 채 서비스됨 (2026-07-02 contractOffDays 누락 장애)
     const addColumnIfNotExists = async (table: string, column: string, definition: string) => {
-      const [rows] = await conn.query(
-        `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
-        [table, column]
-      ) as any[];
-      if (rows[0].cnt === 0) {
-        await conn.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
-        console.log(`[migrate] added ${table}.${column}`);
+      try {
+        const [rows] = await conn.query(
+          `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+          [table, column]
+        ) as any[];
+        if (rows[0].cnt === 0) {
+          await conn.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+          console.log(`[migrate] added ${table}.${column}`);
+        }
+      } catch (e: any) {
+        console.error(`[migrate] FAILED ${table}.${column}:`, e.message);
       }
     };
 
