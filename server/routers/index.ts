@@ -42,6 +42,8 @@ import { settlementStatementsRouter } from "./settlementStatements";
 import { affiliatedCompaniesRouter } from "./affiliatedCompanies";
 // 피드백/버그 제보
 import { feedbackRouter } from "./feedback";
+// 매장 분석 (2026-07-02)
+import { analysisRouter } from "./analysis";
 
 export const appRouter = router({
   auth: authRouter,
@@ -87,6 +89,8 @@ export const appRouter = router({
   affiliatedCompanies: affiliatedCompaniesRouter,
   // 피드백/버그 제보
   feedback: feedbackRouter,
+  // 매장 분석
+  analysis: analysisRouter,
 });
 
 export type AppRouter = typeof appRouter;
