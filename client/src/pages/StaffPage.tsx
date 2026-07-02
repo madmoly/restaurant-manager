@@ -174,8 +174,8 @@ export default function StaffPage() {
     onError(err) { toast.error(err.message); },
   });
 
-  const updateWeeklyOffDays = trpc.restaurants.updateWeeklyOffDays.useMutation({
-    onSuccess() { toast.success("주당 휴무일수 변경됨"); setEditingOffDays(null); utils.restaurants.getStaff.invalidate(); },
+  const updateContractOffDays = trpc.restaurants.updateContractOffDays.useMutation({
+    onSuccess() { toast.success("계약휴무일수 변경됨"); setEditingOffDays(null); utils.restaurants.getStaff.invalidate(); },
     onError(err) { toast.error(err.message); },
   });
 
@@ -330,7 +330,7 @@ export default function StaffPage() {
     // 기본
     if ((s.snapshotAffiliatedCompany ?? null) !== (s.affiliatedCompany ?? null)) f.push("소속회사");
     if (s.snapshotHireDate != null && !dateEq(s.snapshotHireDate, s.hireDate)) f.push("입사일");
-    if ((s.snapshotWeeklyOffDays ?? null) !== (s.weeklyOffDays ?? null)) f.push("주휴무일수");
+    if ((s.snapshotContractOffDays ?? null) !== (s.contractOffDays ?? null)) f.push("계약휴무일수");
     if (s.snapshotOver5Employees != null && !boolEq(s.snapshotOver5Employees, s.effectiveOver5)) f.push("5인 여부");
     // 계약
     if ((s.snapshotContractType ?? null) != null || (s.contractType ?? null) != null) {
@@ -793,7 +793,7 @@ export default function StaffPage() {
                       )}
                     </div>
 
-                    {/* 주당 휴무 (재설계 2026-05-02: 1·2·3) */}
+                    {/* 계약휴무일수 (2026-07-02: 월 4~15, 주당은 파생 가이드로만 표시) */}
                     <div className="flex items-center gap-3">
                       <label className="text-xs font-medium text-muted-foreground w-16 flex items-center gap-1">
                         <CalendarDays className="w-3 h-3" /> 휴무
@@ -806,12 +806,13 @@ export default function StaffPage() {
                             onChange={(e) => setEditingOffDays({ userId: s.userId, value: Number(e.target.value) })}
                             autoFocus
                           >
-                            {[1,2,3].map(v => (
-                              <option key={v} value={v}>주 {v}일</option>
+                            {Array.from({ length: 12 }, (_, i) => i + 4).map(v => (
+                              <option key={v} value={v}>계약휴무 {v}일</option>
                             ))}
                           </select>
+                          <span className="text-[10px] text-muted-foreground">≈ 주 {Math.round(editingOffDays!.value / 4.345 * 10) / 10}일</span>
                           <button
-                            onClick={() => updateWeeklyOffDays.mutate({ restaurantId, userId: s.userId, weeklyOffDays: editingOffDays!.value })}
+                            onClick={() => updateContractOffDays.mutate({ restaurantId, userId: s.userId, contractOffDays: editingOffDays!.value })}
                             className="p-1 rounded hover:bg-accent text-green-600"
                           ><Check className="w-3.5 h-3.5" /></button>
                           <button onClick={() => setEditingOffDays(null)} className="p-1 rounded hover:bg-accent text-muted-foreground">
@@ -820,11 +821,12 @@ export default function StaffPage() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-foreground">주 {s.weeklyOffDays ?? 1}일</span>
+                          <span className="text-xs text-foreground">계약휴무 {s.contractOffDays ?? 4}일</span>
+                          <span className="text-[10px] text-muted-foreground">≈ 주 {Math.round((s.contractOffDays ?? 4) / 4.345 * 10) / 10}일 (참고)</span>
                           <button
                             onClick={() => {
-                              const v = s.weeklyOffDays ?? 1;
-                              setEditingOffDays({ userId: s.userId, value: v >= 1 && v <= 3 ? v : 1 });
+                              const v = s.contractOffDays ?? 4;
+                              setEditingOffDays({ userId: s.userId, value: v >= 4 && v <= 15 ? v : 4 });
                             }}
                             className="p-1 rounded hover:bg-accent text-muted-foreground"
                           ><Edit3 className="w-3 h-3" /></button>
@@ -1630,9 +1632,9 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
     jobDescription: ec?.jobDescription ?? "",
     specialTerms: ec?.specialTerms ?? "",
     employerBusinessNumber: ec?.employerBusinessNumber ?? "",
-    weeklyOffDays: (() => {
-      const v = (ec?.weeklyOffDays ?? 1) as number;
-      return v >= 1 && v <= 3 ? v : 1;
+    contractOffDays: (() => {
+      const v = ((ec as any)?.contractOffDays ?? 4) as number;
+      return v >= 4 && v <= 15 ? v : 4;
     })(),
   });
 
@@ -1654,9 +1656,9 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
         workEndTime: empSSOT.workEndTime || prev.workEndTime,
         breakMinutes: empSSOT.breakMinutes ?? prev.breakMinutes,
         weeklyHours: empSSOT.weeklyHours || prev.weeklyHours,
-        weeklyOffDays: (() => {
-          const v = (empSSOT.weeklyOffDays ?? prev.weeklyOffDays) as number;
-          return v >= 1 && v <= 3 ? v : 1;
+        contractOffDays: (() => {
+          const v = ((empSSOT as any).contractOffDays ?? prev.contractOffDays) as number;
+          return v >= 4 && v <= 15 ? v : 4;
         })(),
         taxMode: ((empSSOT.taxMode as any) || prev.taxMode),
         hourlyWageIncludesHolidayPay: empSSOT.hourlyWageIncludesHolidayPay ?? prev.hourlyWageIncludesHolidayPay,
@@ -1687,9 +1689,9 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
           workStartTime: latestTemplate.workStartTime || prev.workStartTime,
           workEndTime: latestTemplate.workEndTime || prev.workEndTime,
           breakMinutes: latestTemplate.breakMinutes ?? prev.breakMinutes,
-          weeklyOffDays: (() => {
-            const v = ((latestTemplate as any).weeklyOffDays ?? prev.weeklyOffDays) as number;
-            return v >= 1 && v <= 3 ? v : 1;
+          contractOffDays: (() => {
+            const v = ((latestTemplate as any).contractOffDays ?? prev.contractOffDays) as number;
+            return v >= 4 && v <= 15 ? v : 4;
           })(),
           payDay: latestTemplate.payDay ?? prev.payDay,
           payMethod: (latestTemplate.payMethod as any) || prev.payMethod,
@@ -2016,13 +2018,14 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
               )}
             </div>
             <div>
-              <label className={labelCls}>주당 휴무일수</label>
-              <select className={inputCls} value={form.weeklyOffDays}
-                onChange={(e) => setForm({ ...form, weeklyOffDays: Number(e.target.value) })}>
-                <option value={1}>1일</option>
-                <option value={2}>2일</option>
-                <option value={3}>3일</option>
+              <label className={labelCls}>계약휴무일수</label>
+              <select className={inputCls} value={form.contractOffDays}
+                onChange={(e) => setForm({ ...form, contractOffDays: Number(e.target.value) })}>
+                {Array.from({ length: 12 }, (_, i) => i + 4).map(v => (
+                  <option key={v} value={v}>{v}일</option>
+                ))}
               </select>
+              <p className="text-[10px] text-muted-foreground mt-0.5">≈ 주 {Math.round(form.contractOffDays / 4.345 * 10) / 10}일 (참고)</p>
             </div>
           </div>
 
@@ -2246,7 +2249,7 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
                 workStartTime: form.workStartTime,
                 workEndTime: form.workEndTime,
                 breakMinutes: form.breakMinutes,
-                weeklyOffDays: form.weeklyOffDays,
+                contractOffDays: form.contractOffDays,
                 payDay: form.payDay,
                 payMethod: form.payMethod,
                 // 재설계 2026-05-02 폐기: position·weeklyHoliday·nightShiftConsent (계약서 박제도 제거)

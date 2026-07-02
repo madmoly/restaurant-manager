@@ -88,6 +88,23 @@ app.use(express.json({ limit: "10mb" }));
     // 재설계 2026-05-02 (Phase B 보강): weeklyOffDays SSOT를 restaurant_users로 일원화
     await addColumnIfNotExists("restaurant_users", "weeklyOffDays", "INT NOT NULL DEFAULT 1");
     await addColumnIfNotExists("employee_contracts", "weeklyOffDays", "INT DEFAULT 1");
+    // 2026-07-02: 주당 휴무 → 계약휴무일수(월, 4~15) 전환. nullable additive + 1회 백필 후 코드 ?? 4 폴백
+    await addColumnIfNotExists("restaurant_users", "contractOffDays", "INT DEFAULT NULL");
+    await addColumnIfNotExists("employee_contracts", "contractOffDays", "INT DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "contractOffDays", "INT DEFAULT NULL");
+    await addColumnIfNotExists("employment_electronic_contracts", "snapshotContractOffDays", "INT DEFAULT NULL");
+    // 가드형 1회 백필: 주당 휴무 → 계약휴무일수 환산(×4.345, 4~15 clamp). IS NULL 가드로 재배포 시 0행.
+    // employee_contracts는 폐기 테이블이라 백필 대상 제외.
+    await conn.query(`
+      UPDATE restaurant_users
+         SET contractOffDays = LEAST(15, GREATEST(4, ROUND(COALESCE(weeklyOffDays,1)*4.345)))
+       WHERE contractOffDays IS NULL
+    `).catch(() => {});
+    await conn.query(`
+      UPDATE employment_electronic_contracts
+         SET snapshotContractOffDays = LEAST(15, GREATEST(4, ROUND(COALESCE(snapshotWeeklyOffDays,1)*4.345)))
+       WHERE snapshotContractOffDays IS NULL AND snapshotWeeklyOffDays IS NOT NULL
+    `).catch(() => {});
 
     // employment_electronic_contracts 소속회사 + 사업자등록번호 + 근무장소 주소
     await addColumnIfNotExists("employment_electronic_contracts", "affiliatedCompany", "VARCHAR(100) DEFAULT NULL");

@@ -288,6 +288,7 @@ export const electronicContractsRouter = router({
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const cols = {
           employeePhone: employmentElectronicContracts.employeePhone,
+          contractOffDays: employmentElectronicContracts.contractOffDays,
           contractType: employmentElectronicContracts.contractType,
           wageType: employmentElectronicContracts.wageType,
           wageAmount: employmentElectronicContracts.wageAmount,
@@ -364,7 +365,7 @@ export const electronicContractsRouter = router({
         workStartTime: z.string().default("09:00"),
         workEndTime: z.string().default("18:00"),
         breakMinutes: z.number().default(60),
-        weeklyOffDays: z.number().int().min(1).max(3).default(1),
+        contractOffDays: z.number().int().min(4).max(15).default(4),
         payDay: z.number().default(20),
         // 4대보험 / 3.3% 사업소득 — 둘 중 하나 필수 (라디오)
         taxMode: z.enum(TAX_MODE_VALUES),
@@ -443,7 +444,7 @@ export const electronicContractsRouter = router({
           workStartTime: input.workStartTime,
           workEndTime: input.workEndTime,
           breakMinutes: input.breakMinutes,
-          weeklyOffDays: input.weeklyOffDays,
+          contractOffDays: input.contractOffDays,
           payDay: input.payDay,
           taxMode: input.taxMode,
           hourlyWageIncludesHolidayPay: input.hourlyWageIncludesHolidayPay,
@@ -501,7 +502,7 @@ export const electronicContractsRouter = router({
         workStartTime: z.string().optional(),
         workEndTime: z.string().optional(),
         breakMinutes: z.number().optional(),
-        weeklyOffDays: z.number().int().min(1).max(3).optional(),
+        contractOffDays: z.number().int().min(4).max(15).optional(),
         payDay: z.number().optional(),
         taxMode: z.enum(TAX_MODE_VALUES).optional(),
         hourlyWageIncludesHolidayPay: z.boolean().optional(),
@@ -593,7 +594,7 @@ export const electronicContractsRouter = router({
         const ruUpdate: Record<string, any> = {};
         if (updates.affiliatedCompany !== undefined) ruUpdate.affiliatedCompany = updates.affiliatedCompany || null;
         if (updates.hireDate) ruUpdate.hireDate = updates.hireDate;
-        if (updates.weeklyOffDays !== undefined) ruUpdate.weeklyOffDays = updates.weeklyOffDays;
+        if (updates.contractOffDays !== undefined) ruUpdate.contractOffDays = updates.contractOffDays;
         if (Object.keys(ruUpdate).length > 0) {
           await db
             .update(restaurantUsers)
@@ -762,6 +763,7 @@ export const electronicContractsRouter = router({
               snapshotWageType: contract.wageType ?? null,
               snapshotWeeklyHours: contract.weeklyHours ?? null,
               snapshotWeeklyOffDays: contract.weeklyOffDays ?? 1,
+              snapshotContractOffDays: contract.contractOffDays ?? 4,
               snapshotContractStart: toDateString(contract.contractStart),
               snapshotContractEnd: toDateString(contract.contractEnd),
               snapshotAffiliatedCompany: finalAffiliatedCompany,

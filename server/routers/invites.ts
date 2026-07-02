@@ -149,6 +149,7 @@ export const invitesRouter = router({
         restaurantId: invite.restaurantId,
         userId,
         role: invite.role,
+        contractOffDays: 4, // 2026-07-02: 계약휴무일수 기본 4일
       } as any);
 
       // 5. 초대코드 사용 처리

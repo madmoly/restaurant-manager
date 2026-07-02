@@ -290,6 +290,8 @@ export const restaurantsRouter = router({
           hireDate: restaurantUsers.hireDate,
           // 재설계 2026-05-02 (Phase B): weeklyOffDays SSOT는 restaurant_users
           weeklyOffDays: restaurantUsers.weeklyOffDays,
+          // 2026-07-02: 계약휴무일수(월) SSOT
+          contractOffDays: restaurantUsers.contractOffDays,
           resignedAt: restaurantUsers.resignedAt,
           resignReason: restaurantUsers.resignReason,
           createdAt: restaurantUsers.createdAt,
@@ -542,18 +544,18 @@ export const restaurantsRouter = router({
       return { ok: true };
     }),
 
-  /** 주당 휴무일수 수정 (재설계 2026-05-02: SSOT는 restaurant_users.weeklyOffDays) */
-  updateWeeklyOffDays: managerProcedure
+  /** 계약휴무일수(월) 수정 (2026-07-02: 주당 휴무 편집 동결, SSOT는 restaurant_users.contractOffDays) */
+  updateContractOffDays: managerProcedure
     .input(z.object({
       restaurantId: z.number(),
       userId: z.number(),
-      weeklyOffDays: z.number().int().min(1).max(3),
+      contractOffDays: z.number().int().min(4).max(15),
     }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
       await db
         .update(restaurantUsers)
-        .set({ weeklyOffDays: input.weeklyOffDays })
+        .set({ contractOffDays: input.contractOffDays })
         .where(and(
           eq(restaurantUsers.restaurantId, input.restaurantId),
           eq(restaurantUsers.userId, input.userId)

@@ -58,7 +58,7 @@ function generateInviteCode(): string {
 /**
  * 운영 SSOT vs 가장 최근 박제 비교 (Phase E, 2026-05-02; 2026-05-02 폐기 항목 반영).
  * 항목 (12):
- *  기본 4: affiliatedCompany, hireDate, weeklyOffDays, over5Employees
+ *  기본 4: affiliatedCompany, hireDate, contractOffDays, over5Employees
  *  계약 3: contractType, contractStart, contractEnd
  *  근무 4: workStartTime, workEndTime, breakMinutes, weeklyHours
  *  세무 2: taxMode, hourlyWageIncludesHolidayPay
@@ -71,7 +71,7 @@ function computeNeedsRenewal(
   current: {
     affiliatedCompany?: string | null;
     hireDate?: string | Date | null;
-    weeklyOffDays?: number | null;
+    contractOffDays?: number | null;
     contractType?: string | null;
     contractStart?: string | Date | null;
     contractEnd?: string | Date | null;
@@ -88,7 +88,7 @@ function computeNeedsRenewal(
   snapshot: {
     snapshotAffiliatedCompany?: string | null;
     snapshotHireDate?: string | Date | null;
-    snapshotWeeklyOffDays?: number | null;
+    snapshotContractOffDays?: number | null;
     snapshotOver5Employees?: boolean | null;
     snapshotContractType?: string | null;
     snapshotContractStart?: string | Date | null;
@@ -147,9 +147,9 @@ function computeNeedsRenewal(
   if (current.hireDate != null || snapshot.snapshotHireDate != null) {
     if (!dateEq(current.hireDate, snapshot.snapshotHireDate)) diff.push("hireDate");
   }
-  if (current.weeklyOffDays != null || snapshot.snapshotWeeklyOffDays != null) {
-    if (!numEq(current.weeklyOffDays, snapshot.snapshotWeeklyOffDays))
-      diff.push("weeklyOffDays");
+  if (current.contractOffDays != null || snapshot.snapshotContractOffDays != null) {
+    if (!numEq(current.contractOffDays, snapshot.snapshotContractOffDays))
+      diff.push("contractOffDays");
   }
   if (effectiveOver5 != null && snapshot.snapshotOver5Employees != null) {
     if (!boolEq(effectiveOver5, snapshot.snapshotOver5Employees)) diff.push("over5Employees");
@@ -234,6 +234,7 @@ export const staffRouter = router({
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
           weeklyOffDays: restaurantUsers.weeklyOffDays,
+          contractOffDays: restaurantUsers.contractOffDays,
           rehiredAt: restaurantUsers.rehiredAt,
           // Phase E 운영 데이터 (2026-05-02 폐기 5건 제외): contractType, contractStart, contractEnd, workStartTime, workEndTime, breakMinutes, weeklyHours, taxMode, hourlyWageIncludesHolidayPay, specialTerms
           contractType: restaurantUsers.contractType,
@@ -300,6 +301,7 @@ export const staffRouter = router({
             snapshotBankName: employmentElectronicContracts.snapshotBankName,
             snapshotAffiliatedCompany: employmentElectronicContracts.snapshotAffiliatedCompany,
             snapshotWeeklyOffDays: employmentElectronicContracts.snapshotWeeklyOffDays,
+            snapshotContractOffDays: employmentElectronicContracts.snapshotContractOffDays,
             snapshotWeeklyHours: employmentElectronicContracts.snapshotWeeklyHours,
             snapshotWageType: employmentElectronicContracts.snapshotWageType,
             snapshotWage: employmentElectronicContracts.snapshotWage,
@@ -374,7 +376,7 @@ export const staffRouter = router({
           {
             affiliatedCompany: r.affiliatedCompany,
             hireDate: r.hireDate,
-            weeklyOffDays: r.weeklyOffDays,
+            contractOffDays: r.contractOffDays,
             contractType: r.contractType,
             contractStart: r.contractStart,
             contractEnd: r.contractEnd,
@@ -412,6 +414,7 @@ export const staffRouter = router({
           snapshotTaxMode: snap?.snapshotTaxMode ?? null,
           snapshotAffiliatedCompany: snap?.snapshotAffiliatedCompany ?? null,
           snapshotWeeklyOffDays: snap?.snapshotWeeklyOffDays ?? null,
+          snapshotContractOffDays: snap?.snapshotContractOffDays ?? null,
           snapshotWageType: snap?.snapshotWageType ?? null,
           snapshotWage: snap?.snapshotWage ?? null,
           snapshotContractType: snap?.snapshotContractType ?? null,
@@ -673,6 +676,7 @@ export const staffRouter = router({
         userId,
         role: input.role,
         contractMigrated: false,
+        contractOffDays: 4, // 2026-07-02: 계약휴무일수 기본 4일 (이후 직원 카드/계약서에서 조정)
       } as any).$returningId();
 
       // audit
@@ -893,7 +897,7 @@ export const staffRouter = router({
       email: z.string().email().optional().or(z.literal("")),
       affiliatedCompany: z.string().nullable().optional(),
       hireDate: z.string().nullable().optional(),
-      weeklyOffDays: z.number().int().min(1).max(3).optional(),
+      contractOffDays: z.number().int().min(4).max(15).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
@@ -925,7 +929,7 @@ export const staffRouter = router({
       const ruUpdate: Record<string, any> = {};
       if (input.affiliatedCompany !== undefined) ruUpdate.affiliatedCompany = input.affiliatedCompany;
       if (input.hireDate !== undefined) ruUpdate.hireDate = input.hireDate;
-      if (input.weeklyOffDays !== undefined) ruUpdate.weeklyOffDays = input.weeklyOffDays;
+      if (input.contractOffDays !== undefined) ruUpdate.contractOffDays = input.contractOffDays;
       if (Object.keys(ruUpdate).length > 0) {
         await db.update(restaurantUsers).set(ruUpdate).where(eq(restaurantUsers.id, ru.id));
       }
@@ -1120,6 +1124,7 @@ export const staffRouter = router({
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
           weeklyOffDays: restaurantUsers.weeklyOffDays,
+          contractOffDays: restaurantUsers.contractOffDays,
           contractType: restaurantUsers.contractType,
           contractStart: restaurantUsers.contractStart,
           contractEnd: restaurantUsers.contractEnd,
@@ -1187,7 +1192,12 @@ export const staffRouter = router({
       const ruUpdate: Record<string, any> = {};
       if (c.snapshotAffiliatedCompany != null) ruUpdate.affiliatedCompany = c.snapshotAffiliatedCompany;
       if (c.snapshotHireDate != null) ruUpdate.hireDate = c.snapshotHireDate;
-      if (c.snapshotWeeklyOffDays != null) ruUpdate.weeklyOffDays = c.snapshotWeeklyOffDays;
+      // 2026-07-02: 계약휴무일수 복원. 박제값 우선, 백필 이전 박제는 주당→계약휴무 환산 폴백
+      if (c.snapshotContractOffDays != null) {
+        ruUpdate.contractOffDays = c.snapshotContractOffDays;
+      } else if (c.snapshotWeeklyOffDays != null) {
+        ruUpdate.contractOffDays = Math.min(15, Math.max(4, Math.round(c.snapshotWeeklyOffDays * 4.345)));
+      }
       if (c.snapshotContractType != null) ruUpdate.contractType = c.snapshotContractType;
       if (c.snapshotContractStart != null) ruUpdate.contractStart = c.snapshotContractStart;
       ruUpdate.contractEnd = c.snapshotContractEnd ?? null;

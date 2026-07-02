@@ -40,7 +40,7 @@ export const C_FIELDS = [
   "bankAccount",
   "affiliatedCompany",
   "hireDate",
-  "weeklyOffDays",
+  "contractOffDays",
 ] as const;
 
 export type AField = (typeof A_FIELDS)[number];

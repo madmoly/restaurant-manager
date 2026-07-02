@@ -536,6 +536,7 @@ export const systemRouter = router({
         affiliatedCompany: restaurantUsers.affiliatedCompany,
         hireDate: restaurantUsers.hireDate,
         weeklyOffDays: restaurantUsers.weeklyOffDays,
+        contractOffDays: restaurantUsers.contractOffDays,
       })
       .from(restaurantUsers)
       .innerJoin(users, eq(users.id, restaurantUsers.userId))
@@ -570,6 +571,7 @@ export const systemRouter = router({
         snapshotAffiliatedCompany: employmentElectronicContracts.snapshotAffiliatedCompany,
         snapshotHireDate: employmentElectronicContracts.snapshotHireDate,
         snapshotWeeklyOffDays: employmentElectronicContracts.snapshotWeeklyOffDays,
+        snapshotContractOffDays: employmentElectronicContracts.snapshotContractOffDays,
         snapshotOver5Employees: employmentElectronicContracts.snapshotOver5Employees,
         snapshotTaxMode: employmentElectronicContracts.snapshotTaxMode,
       })
@@ -601,7 +603,7 @@ export const systemRouter = router({
       if (snap) {
         if ((snap.snapshotAffiliatedCompany ?? "") !== (r.affiliatedCompany ?? "")) fields.push("소속회사");
         if (dateIso(snap.snapshotHireDate) !== dateIso(r.hireDate)) fields.push("입사일");
-        if ((snap.snapshotWeeklyOffDays ?? null) !== (r.weeklyOffDays ?? null)) fields.push("주휴무일수");
+        if ((snap.snapshotContractOffDays ?? null) !== (r.contractOffDays ?? null)) fields.push("계약휴무일수");
         if (snap.snapshotOver5Employees != null && Boolean(snap.snapshotOver5Employees) !== Boolean(effectiveOver5)) fields.push("5인 여부");
       }
       return {
@@ -614,6 +616,7 @@ export const systemRouter = router({
           affiliatedCompany: r.affiliatedCompany,
           hireDate: r.hireDate ? dateIso(r.hireDate) : null,
           weeklyOffDays: r.weeklyOffDays,
+          contractOffDays: r.contractOffDays,
           effectiveOver5,
         },
         snapshot: snap ? {
@@ -621,6 +624,7 @@ export const systemRouter = router({
           affiliatedCompany: snap.snapshotAffiliatedCompany,
           hireDate: dateIso(snap.snapshotHireDate),
           weeklyOffDays: snap.snapshotWeeklyOffDays,
+          contractOffDays: snap.snapshotContractOffDays,
           over5Employees: snap.snapshotOver5Employees,
           taxMode: snap.snapshotTaxMode,
         } : null,

@@ -1676,14 +1676,14 @@ function ContractSnapshotAuditTab() {
                       <div className="text-muted-foreground font-medium">SSOT (직원정보)</div>
                       <div>소속회사: <span className="text-foreground">{r.ssot.affiliatedCompany ?? "(미지정)"}</span></div>
                       <div>입사일: <span className="text-foreground">{r.ssot.hireDate ?? "(미설정)"}</span></div>
-                      <div>주휴무: <span className="text-foreground">{r.ssot.weeklyOffDays ?? "-"}일</span></div>
+                      <div>계약휴무: <span className="text-foreground">{r.ssot.contractOffDays ?? "-"}일</span></div>
                       <div>5인 여부: <span className="text-foreground">{r.ssot.effectiveOver5 ? "5인 이상" : "5인 미만"}</span></div>
                     </div>
                     <div className="space-y-0.5">
                       <div className="text-muted-foreground font-medium">박제 (최신 서명 계약서)</div>
                       <div>소속회사: <span className={r.mismatchedFields.includes("소속회사") ? "text-amber-600 dark:text-amber-400 font-medium" : "text-foreground"}>{r.snapshot.affiliatedCompany ?? "-"}</span></div>
                       <div>입사일: <span className={r.mismatchedFields.includes("입사일") ? "text-amber-600 dark:text-amber-400 font-medium" : "text-foreground"}>{r.snapshot.hireDate ?? "-"}</span></div>
-                      <div>주휴무: <span className={r.mismatchedFields.includes("주휴무일수") ? "text-amber-600 dark:text-amber-400 font-medium" : "text-foreground"}>{r.snapshot.weeklyOffDays ?? "-"}일</span></div>
+                      <div>계약휴무: <span className={r.mismatchedFields.includes("계약휴무일수") ? "text-amber-600 dark:text-amber-400 font-medium" : "text-foreground"}>{r.snapshot.contractOffDays ?? "-"}일</span></div>
                       <div>5인 여부: <span className={r.mismatchedFields.includes("5인 여부") ? "text-amber-600 dark:text-amber-400 font-medium" : "text-foreground"}>{r.snapshot.over5Employees ? "5인 이상" : "5인 미만"}</span></div>
                       <div className="text-muted-foreground text-[10px]">서명일: {r.snapshot.signedAt ? new Date(r.snapshot.signedAt).toLocaleDateString("ko-KR") : "-"}</div>
                     </div>

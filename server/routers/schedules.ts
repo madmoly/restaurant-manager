@@ -918,6 +918,7 @@ export const schedulesRouter = router({
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
           weeklyOffDays: restaurantUsers.weeklyOffDays,
+          contractOffDays: restaurantUsers.contractOffDays,
           // Phase E: 운영 SSOT
           position: restaurantUsers.position,
           contractStart: restaurantUsers.contractStart,
@@ -1102,9 +1103,7 @@ export const schedulesRouter = router({
         operatingDays++;
       }
 
-      // ── 계약휴무 계산: weeklyOffDays × 해당 월 주 수 ──
-      // 주 수 = 해당 월 일수 / 7 (소수점 포함, 최종 반올림)
-      const weeksInMonth = daysInMonth / 7;
+      // ── 계약휴무: contractOffDays(월 SSOT) 직접 사용 (2026-07-02: 주당×주수 곱셈 제거) ──
 
       // 소속회사별 그룹핑
       const companyMap: Record<string, {
@@ -1159,7 +1158,7 @@ export const schedulesRouter = router({
             contractStart: r.contractStart ? String(r.contractStart) : null,
             contractEnd: r.contractEnd ? String(r.contractEnd) : null,
             daysOff: 0, // 아래에서 최종 계산
-            contractDaysOff: Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
+            contractDaysOff: r.contractOffDays ?? 4,
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: uid,
             recheckRequired: false,
@@ -1623,6 +1622,7 @@ export const schedulesRouter = router({
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
           weeklyOffDays: restaurantUsers.weeklyOffDays,
+          contractOffDays: restaurantUsers.contractOffDays,
           position: restaurantUsers.position,
           payrollRecheckRequired: schedules.payrollRecheckRequired,
         })
@@ -1667,7 +1667,7 @@ export const schedulesRouter = router({
         if (closedWeekdays.has(jsDay) || closedDateSet.has(dateStr)) continue;
         operatingDays++;
       }
-      const weeksInMonth = daysInMonth / 7;
+      // 계약휴무: contractOffDays 직접 사용 (2026-07-02)
 
       // 소속회사별 그룹핑 (급여 없음)
       const companyMap: Record<string, {
@@ -1707,7 +1707,7 @@ export const schedulesRouter = router({
             shifts: 0,
             totalHours: 0,
             daysOff: 0,
-            contractDaysOff: Math.round((r.weeklyOffDays ?? 1) * weeksInMonth),
+            contractDaysOff: r.contractOffDays ?? 4,
             recheckRequired: false,
             isNoHolidayPayWorker: false,
             dailyMap: new Map<string, { hours: number; shifts: number }>(),

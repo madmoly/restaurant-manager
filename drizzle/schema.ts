@@ -129,8 +129,10 @@ export const restaurantUsers = mysqlTable(
   role: mysqlEnum("role", ["owner", "supervisor", "staff", "store_manager", "manager", "employee"]).notNull().default("staff"),
     affiliatedCompany: varchar("affiliatedCompany", { length: 100 }),
     hireDate: date("hireDate"),
-    // 주당 휴무일수 (1·2·3) — 재설계 2026-05-02: SSOT는 restaurant_users (Phase B 보강)
+    // [DEPRECATED 2026-07-02] 주당 휴무일수. 편집 동결 → contractOffDays로 대체(파생 가이드 표시에만 사용)
     weeklyOffDays: int("weeklyOffDays").default(1).notNull(),
+    // 계약휴무일수(월) — SSOT (2026-07-02). 범위 4~15. nullable + 코드 ?? 4 폴백, 1회 백필
+    contractOffDays: int("contractOffDays"),
     // 재입사 처리 시 기록 (퇴사 → 복귀)
     rehiredAt: timestamp("rehiredAt"),
     resignedAt: date("resignedAt"),
@@ -742,7 +744,8 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   workEndTime: varchar("workEndTime", { length: 5 }).default("18:00"),
   breakMinutes: int("breakMinutes").default(60),
   weeklyHoliday: varchar("weeklyHoliday", { length: 20 }).default("일요일"),
-  weeklyOffDays: int("weeklyOffDays").default(1), // 주당 휴무일수
+  weeklyOffDays: int("weeklyOffDays").default(1), // [DEPRECATED 2026-07-02] 주당 휴무일수 → contractOffDays
+  contractOffDays: int("contractOffDays"), // 계약휴무일수(월) 4~15 (2026-07-02)
   payDay: int("payDay").default(20),
   payMethod: mysqlEnum("payMethod", ["bank_transfer", "cash"]).default("bank_transfer"),
   mealProvided: boolean("mealProvided").default(false).notNull(),
@@ -791,7 +794,8 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   snapshotWage: decimal("snapshotWage", { precision: 12, scale: 2 }),
   snapshotWageType: varchar("snapshotWageType", { length: 20 }),
   snapshotWeeklyHours: decimal("snapshotWeeklyHours", { precision: 5, scale: 2 }),
-  snapshotWeeklyOffDays: int("snapshotWeeklyOffDays"),
+  snapshotWeeklyOffDays: int("snapshotWeeklyOffDays"), // [DEPRECATED 2026-07-02] → snapshotContractOffDays
+  snapshotContractOffDays: int("snapshotContractOffDays"), // 계약휴무일수 박제 (2026-07-02)
   snapshotContractStart: date("snapshotContractStart"),
   snapshotContractEnd: date("snapshotContractEnd"),
   snapshotAffiliatedCompany: varchar("snapshotAffiliatedCompany", { length: 100 }),
