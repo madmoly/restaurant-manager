@@ -26,7 +26,7 @@ import {
   LayoutGrid, Activity, CalendarRange, ListChecks, Clock,
   UsersRound, Coins, BarChart3, Receipt, ShoppingCart, ShieldCheck,
   Store, Bell, ChefHat, ClipboardList, CalendarClock, MessageSquareWarning,
-  LineChart,
+  LineChart, SquareMenu,
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -215,8 +215,18 @@ const STORE_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-// 모든 아이템 = 시스템 + 매장 (모바일 탭 계산용)
-const ALL_NAV_ITEMS: NavItem[] = [...SYSTEM_NAV_ITEMS, ...STORE_NAV_GROUPS.flatMap(g => g.items)];
+// ─── POS 메뉴 그룹 (posEnabled 매장에서만 노출) ──────────────────────────────
+const POS_NAV_GROUP: NavGroup = {
+  label: "POS",
+  items: [
+    {
+      label: "메뉴 관리", href: "/pos/menu",
+      icon: <SquareMenu className="h-4 w-4" />,
+      mobileIcon: <SquareMenu className="h-5 w-5" />,
+      roles: ["master", "admin", "manager"],
+    },
+  ],
+};
 
 // ─── 역할 색상 ───────────────────────────────────────────────────────────────
 const ROLE_COLORS: Record<string, string> = {
@@ -273,9 +283,21 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
     localStorage.setItem("staff-zoom", String(next.value));
   };
 
+  // POS 활성화 여부 — POS 네비 그룹 노출 게이트 (Q-P2-5: 활성 매장만 표시)
+  const posStatusQuery = trpc.pos.settings.getStatus.useQuery(
+    { restaurantId: selectedRestaurantId! },
+    { enabled: !!user && !!selectedRestaurantId, staleTime: 60_000, retry: false },
+  );
+  const posEnabled = posStatusQuery.data?.posEnabled === true;
+
   if (!user) return null;
 
   const isAdminLevel = effectiveRole === "master" || effectiveRole === "admin";
+
+  // 매장 네비 그룹 (POS 활성 매장이면 POS 그룹 추가)
+  const storeNavGroups = posEnabled ? [...STORE_NAV_GROUPS, POS_NAV_GROUP] : STORE_NAV_GROUPS;
+  // 모든 아이템 = 시스템 + 매장 (모바일 탭 계산용)
+  const allNavItems: NavItem[] = [...SYSTEM_NAV_ITEMS, ...storeNavGroups.flatMap(g => g.items)];
 
   // 시스템 전역 메뉴 (master/admin만)
   const visibleSystemItems = isAdminLevel
@@ -294,7 +316,7 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
     return !!storeRole && item.requireStoreRole.includes(storeRole);
   };
 
-  const visibleStoreGroups: NavGroup[] = STORE_NAV_GROUPS.map(group => ({
+  const visibleStoreGroups: NavGroup[] = storeNavGroups.map(group => ({
     ...group,
     items: group.items.filter(item => {
       if (!item.roles.includes(effectiveRole)) return false;
@@ -308,7 +330,7 @@ export default function AppLayout({ children, effectiveRole, storeRole }: AppLay
 
   // flat list for mobile (시스템 + 매장)
   const seenMobile = new Set<string>();
-  const visibleNav = ALL_NAV_ITEMS.filter(n => {
+  const visibleNav = allNavItems.filter(n => {
     if (!n.roles.includes(effectiveRole)) return false;
     if (!passesStoreRoleFilter(n)) return false;
     if (seenMobile.has(n.href)) return false;

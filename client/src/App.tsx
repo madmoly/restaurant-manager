@@ -1,3 +1,4 @@
+import { lazy, Suspense, type ComponentType } from "react";
 import { Route, Switch, Redirect } from "wouter";
 import { useAuth } from "./hooks/useAuth";
 import { RestaurantProvider, useRestaurant } from "./contexts/RestaurantContext";
@@ -34,6 +35,25 @@ import RecipesPage from "./pages/RecipesPage";
 import StoreInfoPage from "./pages/StoreInfoPage";
 import StoreAnalysisPage from "./pages/StoreAnalysisPage";
 import AppLayout from "./components/AppLayout";
+
+// POS 페이지 — 번들 분리(동적 import). 클라이언트 번들 1.5MB 부채 악화 방지.
+const PosMenuPage = lazy(() => import("./pages/pos/PosMenuPage"));
+
+function LazyPage({ Component }: { Component: ComponentType }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      }
+    >
+      <Component />
+    </Suspense>
+  );
+}
+
+const PosMenuRoute = () => <LazyPage Component={PosMenuPage} />;
 
 function RoleRouter() {
   const { user } = useAuth();
@@ -92,6 +112,7 @@ function RoleRouter() {
             <Route path="/staff" component={StaffPage} />
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />
+            <Route path="/pos/menu" component={PosMenuRoute} />
             <Route path="/system" component={SystemPage} />
             <Route path="/feedback" component={FeedbackListPage} />
           </>
@@ -122,6 +143,7 @@ function RoleRouter() {
             <Route path="/staff" component={StaffPage} />
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />
+            <Route path="/pos/menu" component={PosMenuRoute} />
           </>
         )}
 
@@ -146,6 +168,7 @@ function RoleRouter() {
             <Route path="/staff" component={StaffPage} />
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />
+            <Route path="/pos/menu" component={PosMenuRoute} />
           </>
         )}
 
