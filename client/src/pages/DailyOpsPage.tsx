@@ -3763,6 +3763,7 @@ const SHIFT_LABELS: Record<string, string> = { open: '오픈', close: '마감', 
 
 /** 스케줄 행의 매장 역할을 한국어 라벨로 변환 */
 function getRoleLabel(s: any): string {
+  if (s?.tempWorkerName) return '임시';
   const storeRole = s?.storeRole;
   if (storeRole === 'owner' || storeRole === 'store_manager') return '점장';
   if (storeRole === 'supervisor' || storeRole === 'manager') return '매니져';

@@ -239,7 +239,7 @@ export const schedulesRouter = router({
     .input(
       z.object({
         restaurantId: z.number(),
-        tempWorkerName: z.string().min(1),
+        tempWorkerName: z.string().trim().min(1),
         workDate: z.string(),
         startTime: z.string(),
         endTime: z.string(),
@@ -815,6 +815,7 @@ export const schedulesRouter = router({
           id: schedules.id,
           userId: schedules.userId,
           userName: users.name,
+          tempWorkerName: schedules.tempWorkerName,
           startTime: schedules.startTime,
           endTime: schedules.endTime,
           status: schedules.status,

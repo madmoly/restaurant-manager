@@ -735,8 +735,10 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                       <div className="flex items-center gap-1">
                         <span className={`font-medium truncate text-[11px] md:text-xs ${s.tempWorkerName ? "text-orange-600 dark:text-orange-400" : "text-foreground"}`}>
                           {(() => {
-                            const rawName = s.userName ?? s.tempWorkerName ?? "미배정";
-                            return rawName.length >= 2 ? rawName.slice(1) : rawName;
+                            if (s.userName) {
+                              return s.userName.length >= 2 ? s.userName.slice(1) : s.userName;
+                            }
+                            return s.tempWorkerName ?? "미배정";
                           })()}
                         </span>
                         <span className={`shrink-0 px-1 py-0 rounded text-[9px] md:text-[10px] font-medium leading-tight ${st.color}`}>

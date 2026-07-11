@@ -453,7 +453,7 @@ function buildFiveDaySchedule(
       label,
       isToday: i === 0,
       count: daySchedules.length,
-      names: daySchedules.map(s => s.userName ?? "").filter(Boolean).slice(0, 3),
+      names: daySchedules.map(s => s.userName ?? s.tempWorkerName ?? "").filter(Boolean).slice(0, 3),
     });
   }
   return days;
