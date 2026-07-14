@@ -26,7 +26,7 @@ import {
   LayoutGrid, Activity, CalendarRange, ListChecks, Clock,
   UsersRound, Coins, BarChart3, Receipt, ShoppingCart, ShieldCheck,
   Store, Bell, ChefHat, ClipboardList, CalendarClock, MessageSquareWarning,
-  LineChart, SquareMenu,
+  LineChart, SquareMenu, ConciergeBell,
 } from "lucide-react";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -219,6 +219,12 @@ const STORE_NAV_GROUPS: NavGroup[] = [
 const POS_NAV_GROUP: NavGroup = {
   label: "POS",
   items: [
+    {
+      label: "카운터", href: "/pos/counter",
+      icon: <ConciergeBell className="h-4 w-4" />,
+      mobileIcon: <ConciergeBell className="h-5 w-5" />,
+      roles: ["master", "admin", "manager", "staff"],
+    },
     {
       label: "메뉴 관리", href: "/pos/menu",
       icon: <SquareMenu className="h-4 w-4" />,
