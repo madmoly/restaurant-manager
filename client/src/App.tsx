@@ -39,6 +39,8 @@ import AppLayout from "./components/AppLayout";
 // POS 페이지 — 번들 분리(동적 import). 클라이언트 번들 1.5MB 부채 악화 방지.
 const PosMenuPage = lazy(() => import("./pages/pos/PosMenuPage"));
 const PosCounterPage = lazy(() => import("./pages/pos/PosCounterPage"));
+const PosOrdersPage = lazy(() => import("./pages/pos/PosOrdersPage"));
+const PosReconciliationPage = lazy(() => import("./pages/pos/PosReconciliationPage"));
 
 function LazyPage({ Component }: { Component: ComponentType }) {
   return (
@@ -56,6 +58,8 @@ function LazyPage({ Component }: { Component: ComponentType }) {
 
 const PosMenuRoute = () => <LazyPage Component={PosMenuPage} />;
 const PosCounterRoute = () => <LazyPage Component={PosCounterPage} />;
+const PosOrdersRoute = () => <LazyPage Component={PosOrdersPage} />;
+const PosReconciliationRoute = () => <LazyPage Component={PosReconciliationPage} />;
 
 function RoleRouter() {
   const { user } = useAuth();
@@ -116,6 +120,8 @@ function RoleRouter() {
             <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/pos/menu" component={PosMenuRoute} />
             <Route path="/pos/counter" component={PosCounterRoute} />
+            <Route path="/pos/orders" component={PosOrdersRoute} />
+            <Route path="/pos/reconciliation" component={PosReconciliationRoute} />
             <Route path="/system" component={SystemPage} />
             <Route path="/feedback" component={FeedbackListPage} />
           </>
@@ -148,6 +154,8 @@ function RoleRouter() {
             <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/pos/menu" component={PosMenuRoute} />
             <Route path="/pos/counter" component={PosCounterRoute} />
+            <Route path="/pos/orders" component={PosOrdersRoute} />
+            <Route path="/pos/reconciliation" component={PosReconciliationRoute} />
           </>
         )}
 
@@ -174,6 +182,8 @@ function RoleRouter() {
             <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/pos/menu" component={PosMenuRoute} />
             <Route path="/pos/counter" component={PosCounterRoute} />
+            <Route path="/pos/orders" component={PosOrdersRoute} />
+            <Route path="/pos/reconciliation" component={PosReconciliationRoute} />
           </>
         )}
 
@@ -190,6 +200,8 @@ function RoleRouter() {
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/pos/counter" component={PosCounterRoute} />
+            <Route path="/pos/orders" component={PosOrdersRoute} />
+            <Route path="/pos/reconciliation" component={PosReconciliationRoute} />
           </>
         )}
 

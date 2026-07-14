@@ -38,6 +38,26 @@ export const KITCHEN_ROUTER_LABEL: Record<string, string> = {
   none: "사용 안 함",
 };
 
+export const ORDER_STATUS_LABEL: Record<string, string> = {
+  open: "결제 대기",
+  paid: "결제완료",
+  ready: "준비완료",
+  served: "전달완료",
+  voided: "취소됨",
+  refunded: "환불됨",
+};
+
+export const PAY_METHOD_LABEL: Record<string, string> = {
+  card: "카드",
+  cash: "현금",
+  samsungpay: "삼성페이",
+  kakaopay: "카카오페이",
+  naverpay: "네이버페이",
+  gift: "상품권",
+  external: "외부 결제",
+  etc: "기타",
+};
+
 export const DEVICE_TYPE_LABEL: Record<string, string> = {
   staff_counter: "스태프 카운터",
   staff_table: "스태프 테이블",
