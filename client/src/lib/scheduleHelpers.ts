@@ -119,6 +119,17 @@ export function timeToMinutes(t: string): number {
   return h * 60 + (m || 0);
 }
 
+/**
+ * 근로기준법 §54 기반 휴게 기본값: 8h 이상 60분, 4h 이상 30분, 미만 0분.
+ * 서버 동일 규칙: server/helpers/labor.ts defaultBreakMinutes — 변경 시 양쪽 동기 필수.
+ */
+export function defaultBreakMinutes(grossHours: number): number {
+  if (grossHours >= 8) return 60;
+  if (grossHours >= 4) return 30;
+  return 0;
+}
+
+// 인원 가중치는 의도적으로 gross(휴게 미차감) 체류시간 기준 — 휴게 중에도 매장 체류 인원으로 본다
 export function calcHeadcountWeight(
   startTime: string | Date,
   endTime: string | Date,

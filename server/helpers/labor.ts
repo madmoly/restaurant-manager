@@ -23,6 +23,17 @@ import {
 const FULLTIME_STANDARD_HOURS = 209; // 풀타임 표준 분모 (월급제 정산 정책 재설계 2026-05-02 §2.1: 5인 무관 209h 통일)
 
 /**
+ * 근로기준법 §54 기반 휴게 기본값: 8h 이상 60분, 4h 이상 30분, 미만 0분.
+ * 스케줄 등록 시 breakMinutes 미입력 폴백 전용. 커스텀 프리셋이 있으면 프리셋 값이 항상 우선.
+ * 클라이언트 동일 규칙: client/src/lib/scheduleHelpers.ts defaultBreakMinutes — 변경 시 양쪽 동기 필수.
+ */
+export function defaultBreakMinutes(grossHours: number): number {
+  if (grossHours >= 8) return 60;
+  if (grossHours >= 4) return 30;
+  return 0;
+}
+
+/**
  * 소속회사 마스터에서 5인 이상 여부 조회.
  * 매장 + 회사명 매칭. 매칭 없거나 회사명 비어있으면 false (보수적 기본).
  */

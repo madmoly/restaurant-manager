@@ -28,6 +28,7 @@ import {
   computeMonthlyStandardHours,
   groupHoursByWeek,
   computeWeeklyHolidayPay,
+  defaultBreakMinutes,
 } from "../helpers/labor";
 import { computeAnnualAccrual } from "../helpers/leave";
 
@@ -193,7 +194,7 @@ export const schedulesRouter = router({
         workDate: z.string(), // YYYY-MM-DD
         startTime: z.string(), // HH:MM
         endTime: z.string(),
-        breakMinutes: z.number().optional(),
+        breakMinutes: z.number().min(0).max(240).optional(),
         note: z.string().optional(),
       })
     )
@@ -215,11 +216,11 @@ export const schedulesRouter = router({
       if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { userId: input.userId })) {
         throw new TRPCError({ code: "CONFLICT", message: "해당 직원은 이 날짜에 이미 스케줄이 등록되어 있습니다." });
       }
-      // breakMinutes 기본값: 명시적 입력 없으면 근무 6시간 이상 시 60분, 미만 시 0분
+      // breakMinutes 기본값: 명시적 입력 없으면 근로기준법 §54 기준 자동 계산
       const start = new Date(`${input.workDate}T${input.startTime}:00+09:00`);
       const end = new Date(`${input.workDate}T${input.endTime}:00+09:00`);
       const grossHours = (end.getTime() - start.getTime()) / 3600000;
-      const breakMin = input.breakMinutes ?? (grossHours >= 6 ? 60 : 0);
+      const breakMin = input.breakMinutes ?? defaultBreakMinutes(grossHours);
 
       const [result] = await db.insert(schedules).values({
         userId: input.userId,
@@ -245,6 +246,7 @@ export const schedulesRouter = router({
         endTime: z.string(),
         wageType: z.enum(["hourly", "daily"]).optional(),
         wageAmount: z.number().optional(),
+        breakMinutes: z.number().min(0).max(240).optional(),
         note: z.string().optional(),
       })
     )
@@ -256,14 +258,19 @@ export const schedulesRouter = router({
       if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { tempWorkerName: input.tempWorkerName })) {
         throw new TRPCError({ code: "CONFLICT", message: `임시직원 "${input.tempWorkerName}"은(는) 이 날짜에 이미 등록되어 있습니다.` });
       }
+      const start = new Date(`${input.workDate}T${input.startTime}:00+09:00`);
+      const end = new Date(`${input.workDate}T${input.endTime}:00+09:00`);
+      const grossHours = (end.getTime() - start.getTime()) / 3600000;
+      const breakMin = input.breakMinutes ?? defaultBreakMinutes(grossHours);
       const [result] = await db.insert(schedules).values({
         userId: null as any,
         tempWorkerName: input.tempWorkerName,
         tempWageType: input.wageType ?? null,
         tempWageAmount: input.wageAmount ? String(input.wageAmount) : null,
         restaurantId: input.restaurantId,
-        startTime: new Date(`${input.workDate}T${input.startTime}:00+09:00`),
-        endTime: new Date(`${input.workDate}T${input.endTime}:00+09:00`),
+        startTime: start,
+        endTime: end,
+        breakMinutes: breakMin,
         status: "draft",
         note: input.note,
         createdBy: ctx.user.userId,
@@ -338,7 +345,10 @@ export const schedulesRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: `프리셋 "${input.preset}"에 대한 시간 설정이 없습니다. 매장 설정에서 해당 근무유형의 시간을 먼저 설정해주세요.` });
         }
         p = fallback;
-        breakMinutes = presetKey === "full" ? 60 : 0;
+        // 폴백 시프트 gross 시간 기준 법정 휴게 자동 계산 (커스텀 프리셋 존재 시엔 위에서 프리셋 값 우선)
+        const [fsh, fsm] = p.start.split(":").map(Number);
+        const [feh, fem] = p.end.split(":").map(Number);
+        breakMinutes = defaultBreakMinutes((feh * 60 + fem - fsh * 60 - fsm) / 60);
       }
 
       const [result] = await db.insert(schedules).values({
@@ -418,7 +428,10 @@ export const schedulesRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: `프리셋 "${input.preset}"에 대한 시간 설정이 없습니다.` });
         }
         p = fallback;
-        breakMinutes = presetKey === "full" ? 60 : 0;
+        // 폴백 시프트 gross 시간 기준 법정 휴게 자동 계산 (커스텀 프리셋 존재 시엔 위에서 프리셋 값 우선)
+        const [fsh, fsm] = p.start.split(":").map(Number);
+        const [feh, fem] = p.end.split(":").map(Number);
+        breakMinutes = defaultBreakMinutes((feh * 60 + fem - fsh * 60 - fsm) / 60);
       }
 
       // 각 직원별 중복 체크 + INSERT

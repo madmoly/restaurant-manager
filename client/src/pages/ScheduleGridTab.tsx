@@ -32,6 +32,8 @@ import {
   STATUS_LABELS,
   resolvePresetLabel,
   calcHeadcountWeight,
+  defaultBreakMinutes,
+  timeToMinutes,
 } from "@/lib/scheduleHelpers";
 
 interface ScheduleGridTabProps {
@@ -166,6 +168,55 @@ function MonthlyMinimap({
   );
 }
 
+// ─── 휴게시간 입력 필드 (등록 폼 공용) ──────────────────────────────────────
+
+function BreakMinutesInput({
+  value,
+  onChange,
+  startTime,
+  endTime,
+  showDailyNotice,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  startTime: string;
+  endTime: string;
+  showDailyNotice?: boolean;
+}) {
+  const netPreview = (() => {
+    if (value === "") return null;
+    const totalMin = timeToMinutes(endTime) - timeToMinutes(startTime);
+    const netMin = totalMin - Number(value);
+    if (netMin <= 0) return null;
+    const h = Math.floor(netMin / 60);
+    const m = netMin % 60;
+    return `실근무 ${h}시간${m > 0 ? ` ${m}분` : ""}`;
+  })();
+  return (
+    <div>
+      <label className="text-xs font-medium text-muted-foreground">휴게시간 (분)</label>
+      <div className="flex items-center gap-2 mt-1">
+        <input
+          type="number"
+          min={0}
+          max={240}
+          step={10}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="자동 (8시간↑ 60분, 4시간↑ 30분)"
+        />
+        {netPreview && <span className="text-xs text-muted-foreground shrink-0">({netPreview})</span>}
+      </div>
+      {showDailyNotice && (
+        <p className="text-[11px] text-muted-foreground mt-1">
+          일급은 정액이라 휴게시간이 급여에 영향을 주지 않습니다 (근무시간 기록에만 반영)
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── 메인 ScheduleGridTab ───────────────────────────────────────────────────
 
 export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets, current }: ScheduleGridTabProps) {
@@ -192,13 +243,15 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   // 하위 호환: 단일 선택이 필요한 곳용
   const assignUserId = assignUserIds.size === 1 ? [...assignUserIds][0] : 0;
   const assignUserName = assignUserIds.size === 1 ? (assignUserNames.get([...assignUserIds][0]) ?? "") : `${assignUserIds.size}명 선택`;
-  const [customTime, setCustomTime] = useState({ startTime: "09:00", endTime: "18:00", note: "" });
+  // breakMinutes: 빈 문자열 = 자동 (서버에서 법정 기준 계산)
+  const [customTime, setCustomTime] = useState({ startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
   const [tempForm, setTempForm] = useState({
     name: "",
     wageType: "hourly" as "hourly" | "daily",
     wageAmount: "",
     startTime: "09:00",
     endTime: "18:00",
+    breakMinutes: "",
     note: "",
   });
   const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
@@ -447,8 +500,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     setAssignStep("employee");
     setAssignUserIds(new Set());
     setAssignUserNames(new Map());
-    setCustomTime({ startTime: "09:00", endTime: "18:00", note: "" });
-    setTempForm({ name: "", wageType: "hourly", wageAmount: "", startTime: "09:00", endTime: "18:00", note: "" });
+    setCustomTime({ startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
+    setTempForm({ name: "", wageType: "hourly", wageAmount: "", startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
   };
   const closeAssignModal = () => { setAssignDate(null); setAssignStep("employee"); };
 
@@ -489,6 +542,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       workDate: assignDate,
       startTime: customTime.startTime,
       endTime: customTime.endTime,
+      breakMinutes: customTime.breakMinutes === "" ? undefined : Math.max(0, Number(customTime.breakMinutes)),
       note: customTime.note || undefined,
     });
   };
@@ -503,6 +557,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       endTime: tempForm.endTime,
       wageType: tempForm.wageType,
       wageAmount: tempForm.wageAmount ? Number(tempForm.wageAmount) : undefined,
+      breakMinutes: tempForm.breakMinutes === "" ? undefined : Math.max(0, Number(tempForm.breakMinutes)),
       note: tempForm.note || undefined,
     });
   };
@@ -1068,6 +1123,13 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   </div>
                 </div>
 
+                <BreakMinutesInput
+                  value={customTime.breakMinutes}
+                  onChange={(v) => setCustomTime({ ...customTime, breakMinutes: v })}
+                  startTime={customTime.startTime}
+                  endTime={customTime.endTime}
+                />
+
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">메모</label>
                   <input
@@ -1170,6 +1232,14 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   </div>
                 </div>
 
+                <BreakMinutesInput
+                  value={tempForm.breakMinutes}
+                  onChange={(v) => setTempForm({ ...tempForm, breakMinutes: v })}
+                  startTime={tempForm.startTime}
+                  endTime={tempForm.endTime}
+                  showDailyNotice={tempForm.wageType === "daily"}
+                />
+
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">메모</label>
                   <input
@@ -1270,11 +1340,15 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                         onClick={() => {
                           const editDateStr = editSchedule ? fmtDate(new Date(editSchedule.startTime)) : undefined;
                           const times = getPresetTimes(key, editDateStr);
-                          const brk = times?.breakMinutes ?? (key === "full" ? 60 : 0);
                           if (times) {
+                            // 커스텀 프리셋의 명시 휴게 우선, 없으면(운영시간 폴백) 법정 기준 자동
+                            const gross = (timeToMinutes(times.endTime) - timeToMinutes(times.startTime)) / 60;
+                            const brk = times.breakMinutes ?? defaultBreakMinutes(gross);
                             setEditForm({ ...editForm, shiftPreset: key, startTime: times.startTime, endTime: times.endTime, breakMinutes: brk });
                           } else {
-                            setEditForm({ ...editForm, shiftPreset: key, breakMinutes: brk });
+                            // 직접입력 등 프리셋 시간 없음 — 현재 폼 시간 기준 법정 기본값
+                            const gross = (timeToMinutes(editForm.endTime) - timeToMinutes(editForm.startTime)) / 60;
+                            setEditForm({ ...editForm, shiftPreset: key, breakMinutes: defaultBreakMinutes(gross) });
                           }
                         }}
                         className={`flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg border text-xs font-medium transition-colors ${

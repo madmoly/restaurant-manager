@@ -150,7 +150,7 @@ export const restaurantUsers = mysqlTable(
     // 근무
     workStartTime: varchar("workStartTime", { length: 5 }).default("09:00"),
     workEndTime: varchar("workEndTime", { length: 5 }).default("18:00"),
-    breakMinutes: int("breakMinutes").default(60),
+    breakMinutes: int("breakMinutes").default(60), // 계약 축: 소정근로 표준 휴게 (스케줄 축 schedules.breakMinutes와 별개)
     weeklyHoliday: varchar("weeklyHoliday", { length: 20 }).default("일요일"),
     weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }).default("40"),
     // 세무
@@ -366,7 +366,7 @@ export const schedules = mysqlTable("schedules", {
   // DB enum에 published/scheduled 잔존 (하위호환), 신규 코드에서는 사용하지 않음
   status: mysqlEnum("status", ["draft", "scheduled", "published", "completed", "confirmed", "canceled"]).default("draft").notNull(),
   shiftPreset: varchar("shiftPreset", { length: 30 }).default("custom"),
-  breakMinutes: int("breakMinutes").default(0),
+  breakMinutes: int("breakMinutes").default(0), // 스케줄 축: 시프트별 실적 휴게 (계약 축 restaurant_users.breakMinutes와 별개, 미입력 시 법정 기준 자동)
   note: text("note"),
   editReason: text("editReason"),
   payrollRecheckRequired: boolean("payrollRecheckRequired").default(false).notNull(),
@@ -742,7 +742,7 @@ export const employmentElectronicContracts = mysqlTable("employment_electronic_c
   weeklyHours: decimal("weeklyHours", { precision: 5, scale: 2 }).notNull().default("40"),
   workStartTime: varchar("workStartTime", { length: 5 }).default("09:00"),
   workEndTime: varchar("workEndTime", { length: 5 }).default("18:00"),
-  breakMinutes: int("breakMinutes").default(60),
+  breakMinutes: int("breakMinutes").default(60), // 계약 축: 계약서 스냅샷용 소정근로 표준 휴게
   weeklyHoliday: varchar("weeklyHoliday", { length: 20 }).default("일요일"),
   weeklyOffDays: int("weeklyOffDays").default(1), // [DEPRECATED 2026-07-02] 주당 휴무일수 → contractOffDays
   contractOffDays: int("contractOffDays"), // 계약휴무일수(월) 4~15 (2026-07-02)

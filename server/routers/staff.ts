@@ -966,7 +966,7 @@ export const staffRouter = router({
       contractEnd: z.string().nullable().optional(),
       workStartTime: z.string().optional(),
       workEndTime: z.string().optional(),
-      breakMinutes: z.number().int().min(0).max(480).optional(),
+      breakMinutes: z.number().int().min(0).max(240).optional(), // 상한 240 — schedules.update와 통일 (2026-07-14)
       weeklyHours: z.string().optional(),
       taxMode: z.enum(["social_insurance", "biz_income_3_3"]).optional(),
       hourlyWageIncludesHolidayPay: z.boolean().optional(),
