@@ -582,9 +582,10 @@ export default function PosCounterPage() {
                 {state.done.pagerNo && ` · 진동벨 ${state.done.pagerNo}번`}
               </p>
             </div>
+            {/* ④ KDS 구현 전까지는 전송됐다고 표시하지 않는다 (거짓 표시 방지) */}
             {status?.posKitchenRouter === "kds" && (
-              <p className="text-sm font-medium text-primary flex items-center justify-center gap-1.5">
-                <MonitorUp className="w-4 h-4" /> 주방 KDS로 전송됨
+              <p className="text-sm font-medium text-amber-600 flex items-center justify-center gap-1.5">
+                <MonitorUp className="w-4 h-4" /> 주문 접수됨 · 주방 전달은 아직 수동입니다
               </p>
             )}
             <p className="text-xs text-muted-foreground">3초 후 메뉴 화면으로 돌아갑니다</p>
