@@ -41,6 +41,7 @@ const PosMenuPage = lazy(() => import("./pages/pos/PosMenuPage"));
 const PosCounterPage = lazy(() => import("./pages/pos/PosCounterPage"));
 const PosOrdersPage = lazy(() => import("./pages/pos/PosOrdersPage"));
 const PosReconciliationPage = lazy(() => import("./pages/pos/PosReconciliationPage"));
+const PosKdsPage = lazy(() => import("./pages/pos/PosKdsPage"));
 
 function LazyPage({ Component }: { Component: ComponentType }) {
   return (
@@ -60,6 +61,7 @@ const PosMenuRoute = () => <LazyPage Component={PosMenuPage} />;
 const PosCounterRoute = () => <LazyPage Component={PosCounterPage} />;
 const PosOrdersRoute = () => <LazyPage Component={PosOrdersPage} />;
 const PosReconciliationRoute = () => <LazyPage Component={PosReconciliationPage} />;
+const PosKdsRoute = () => <LazyPage Component={PosKdsPage} />;
 
 function RoleRouter() {
   const { user } = useAuth();
@@ -120,6 +122,7 @@ function RoleRouter() {
             <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/pos/menu" component={PosMenuRoute} />
             <Route path="/pos/counter" component={PosCounterRoute} />
+            <Route path="/pos/kds" component={PosKdsRoute} />
             <Route path="/pos/orders" component={PosOrdersRoute} />
             <Route path="/pos/reconciliation" component={PosReconciliationRoute} />
             <Route path="/system" component={SystemPage} />
@@ -154,6 +157,7 @@ function RoleRouter() {
             <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/pos/menu" component={PosMenuRoute} />
             <Route path="/pos/counter" component={PosCounterRoute} />
+            <Route path="/pos/kds" component={PosKdsRoute} />
             <Route path="/pos/orders" component={PosOrdersRoute} />
             <Route path="/pos/reconciliation" component={PosReconciliationRoute} />
           </>
@@ -182,6 +186,7 @@ function RoleRouter() {
             <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/pos/menu" component={PosMenuRoute} />
             <Route path="/pos/counter" component={PosCounterRoute} />
+            <Route path="/pos/kds" component={PosKdsRoute} />
             <Route path="/pos/orders" component={PosOrdersRoute} />
             <Route path="/pos/reconciliation" component={PosReconciliationRoute} />
           </>
@@ -200,6 +205,7 @@ function RoleRouter() {
             <Route path="/recipes" component={RecipesPage} />
             <Route path="/store-info" component={StoreInfoPage} />
             <Route path="/pos/counter" component={PosCounterRoute} />
+            <Route path="/pos/kds" component={PosKdsRoute} />
             <Route path="/pos/orders" component={PosOrdersRoute} />
             <Route path="/pos/reconciliation" component={PosReconciliationRoute} />
           </>

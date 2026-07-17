@@ -943,6 +943,55 @@ const orderRouter = router({
         .limit(input.limit);
     }),
 
+  // ─── KDS 보드 (④): 조리 대기(paid)/준비완료(ready) + 품목 일괄 조회 ──────
+  //   - 3쿼리 고정(orders → items → options)으로 N+1 회피 (⑤ G3와 동일 원칙)
+  //   - 정렬: paidAt asc — 주방은 오래된 주문부터 처리
+  //   - voided 품목 제외 (조리 대상 아님)
+  kdsBoard: posStoreReadProcedure.query(async ({ ctx }) => {
+    const orders = await db
+      .select()
+      .from(posOrders)
+      .where(
+        and(
+          eq(posOrders.restaurantId, ctx.restaurantId),
+          inArray(posOrders.status, ["paid", "ready"])
+        )
+      )
+      .orderBy(posOrders.paidAt)
+      .limit(100);
+    const orderIds = orders.map((o) => o.id);
+    const items =
+      orderIds.length === 0
+        ? []
+        : await db
+            .select()
+            .from(posOrderItems)
+            .where(
+              and(
+                inArray(posOrderItems.orderId, orderIds),
+                eq(posOrderItems.status, "active")
+              )
+            )
+            .orderBy(posOrderItems.id);
+    const itemIds = items.map((i) => i.id);
+    const opts =
+      itemIds.length === 0
+        ? []
+        : await db
+            .select()
+            .from(posOrderItemOptions)
+            .where(inArray(posOrderItemOptions.orderItemId, itemIds));
+    return orders.map((o) => ({
+      ...o,
+      items: items
+        .filter((it) => it.orderId === o.id)
+        .map((it) => ({
+          ...it,
+          options: opts.filter((op) => op.orderItemId === it.id),
+        })),
+    }));
+  }),
+
   // ─── 상태 전이 (paid 진입은 payment.record가 담당) ────────────────
   markReady: posStoreWriteProcedure
     .input(z.object({ id: z.number().int().positive() }))
