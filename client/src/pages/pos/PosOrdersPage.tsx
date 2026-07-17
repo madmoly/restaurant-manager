@@ -77,6 +77,7 @@ export default function PosOrdersPage() {
 
   const [date, setDate] = useState(todayStr());
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [incompleteOnly, setIncompleteOnly] = useState(false);
   const [detailOrderId, setDetailOrderId] = useState<number | null>(null);
 
   // G2: 페이지네이션 부재 — 날짜 범위는 항상 하루(기본 오늘), limit 200 고정
@@ -116,8 +117,22 @@ export default function PosOrdersPage() {
   }
 
   const allOrders = orders ?? [];
-  const visible =
-    statusFilter === "all"
+  // 미완료만(날짜무시) 모드: 전역 open/paid/ready 3쿼리를 합쳐 노출 →
+  //   흩어진 날짜의 orphan open 주문을 목록에 띄워 void/전달완료로 정리 가능 (D2 잔재 청소)
+  const incompleteOrders = (() => {
+    const merged = [
+      ...(openQ.data ?? []),
+      ...(paidQ.data ?? []),
+      ...(readyQ.data ?? []),
+    ];
+    const seen = new Set<number>();
+    return merged
+      .filter((o) => (seen.has(o.id) ? false : (seen.add(o.id), true)))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  })();
+  const visible = incompleteOnly
+    ? incompleteOrders
+    : statusFilter === "all"
       ? allOrders
       : allOrders.filter((o) => o.status === statusFilter);
   // 유효 매출은 상태 필터와 무관하게 그 날짜 전체 기준
@@ -138,39 +153,64 @@ export default function PosOrdersPage() {
       {incompleteCount > 0 && (
         <div className="flex items-start gap-2 border border-amber-500/40 bg-amber-500/10 rounded-xl px-4 py-3">
           <TriangleAlert className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            미완료 주문 <b>{incompleteCapped ? "200+" : incompleteCount}건</b> (결제 대기·결제완료·준비완료, 전체 기간) —
-            미완료가 남아 있으면 POS 비활성화가 차단됩니다. 전달이 끝난 주문은 [전달완료] 처리하세요.
-          </p>
+          <div className="flex-1 space-y-1.5">
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              미완료 주문 <b>{incompleteCapped ? "200+" : incompleteCount}건</b> (결제 대기·결제완료·준비완료, 전체 기간) —
+              미완료가 남아 있으면 POS 비활성화가 차단됩니다. 전달이 끝난 주문은 [전달완료] 처리하세요.
+            </p>
+            {!incompleteOnly && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs border-amber-500/50"
+                onClick={() => setIncompleteOnly(true)}
+              >
+                미완료만 모아보기 (날짜 무시)
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
       {/* 필터 */}
       <div className="flex items-center gap-2 flex-wrap">
-        <Input
-          type="date"
-          className="h-9 w-40"
-          value={date}
-          onChange={(e) => e.target.value && setDate(e.target.value)}
-        />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">전체 상태</SelectItem>
-            {ALL_STATUSES.map((s) => (
-              <SelectItem key={s} value={s}>{ORDER_STATUS_LABEL[s]}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {incompleteOnly ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-9"
+            onClick={() => setIncompleteOnly(false)}
+          >
+            ← 날짜별 보기로 돌아가기
+          </Button>
+        ) : (
+          <>
+            <Input
+              type="date"
+              className="h-9 w-40"
+              value={date}
+              onChange={(e) => e.target.value && setDate(e.target.value)}
+            />
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-9 w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 상태</SelectItem>
+                {ALL_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>{ORDER_STATUS_LABEL[s]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        )}
         <span className="text-xs text-muted-foreground ml-auto tabular-nums">
-          유효 매출 {formatWon(dayTotal)}
+          {incompleteOnly ? "미완료만 표시 · 날짜 무관" : `유효 매출 ${formatWon(dayTotal)}`}
         </span>
       </div>
 
       {/* 목록 (G3: 요약만 — 상세는 행 클릭 시 order.get) */}
-      {listLoading ? (
+      {(incompleteOnly ? openQ.isLoading || paidQ.isLoading || readyQ.isLoading : listLoading) ? (
         <div className="text-center py-12 text-muted-foreground text-sm">로딩 중...</div>
       ) : visible.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
@@ -186,7 +226,11 @@ export default function PosOrdersPage() {
               onClick={() => setDetailOrderId(o.id)}
             >
               <span className="font-bold tabular-nums text-sm">#{o.orderNo}</span>
-              <span className="text-xs text-muted-foreground tabular-nums">{timeOf(o.createdAt)}</span>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {incompleteOnly
+                  ? `${new Date(o.createdAt).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })} ${timeOf(o.createdAt)}`
+                  : timeOf(o.createdAt)}
+              </span>
               <Badge className={`text-[11px] px-1.5 py-0 border-0 ${STATUS_BADGE[o.status] ?? ""}`}>
                 {ORDER_STATUS_LABEL[o.status] ?? o.status}
               </Badge>
