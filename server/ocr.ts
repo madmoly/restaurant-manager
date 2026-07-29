@@ -317,22 +317,31 @@ export function extractText(message: Anthropic.Message): string | null {
  *  uncertain=true를 강제해 UI에서 확인 필요 카드로 노출시킨다 (조용히 삼키지 않음). */
 export function mergeWrappedNameRows(items: any[]): any[] {
   const NUM_KEYS = ["quantity", "unitPrice", "lineTotal", "supplyAmount", "vatAmount"];
-  const SUMMARY_RE = /^(합\s*계|소\s*계|총\s*계|총\s*합|부가세|공급가액|이월|잔액|total|subtotal)/i;
+  const SUMMARY_RE = /^(합\s*계|소\s*계|총\s*계|총\s*합|부가세|공급가액|이월|잔액|미수금|total|subtotal)/i;
+  const num = (v: any) => {
+    const s = String(v ?? "").replace(/[,\s원]/g, "");
+    return s !== "" && Number.isFinite(Number(s)) && Number(s) !== 0;
+  };
   const out: any[] = [];
   for (const it of items) {
-    const hasNum = NUM_KEYS.some((k) => {
-      const v = String(it?.[k] ?? "").replace(/[,\s원]/g, "");
-      return v !== "" && Number.isFinite(Number(v)) && Number(v) !== 0;
-    });
     const name = String(it?.shortName || it?.name || "").replace(/\s+/g, " ").trim();
-    if (!hasNum && name && !SUMMARY_RE.test(name) && out.length > 0) {
-      const prev = out[out.length - 1];
-      const fragment = name;
-      prev.shortName = `${String(prev.shortName || "").trim()}${fragment}`;
-      prev.originalName = `${String(prev.originalName || "").trim()}${fragment}`;
+    if (!name || SUMMARY_RE.test(name) || out.length === 0) { out.push(it); continue; }
+    const prev = out[out.length - 1];
+    const prevName = String(prev.shortName || "").trim();
+    const filled = NUM_KEYS.filter((k) => num(it[k])).length;
+    // 병합 신호 (실물 검증: "손칼국수...(1kg*" + "12)" 같은 숫자 시작 파편 대응)
+    const prevOpen = (prevName.match(/\(/g) || []).length > (prevName.match(/\)/g) || []).length; // ③ 여는 괄호 초과
+    const prevDangling = /[*/(\-]$/.test(prevName);                                               // ② 구분자로 끝남
+    const selfCloser = /\)$/.test(name) && !name.includes("(");                                   // ④ ")"로 끝나는데 여는 괄호 없음
+    const continuation =
+      filled === 0 ||                                            // ① 숫자 칸 전무
+      ((prevOpen || prevDangling || selfCloser) && filled <= 1); // ②③④ + 숫자 파편 1개 이하
+    if (continuation) {
+      prev.shortName = `${prevName}${name}`;
+      prev.originalName = `${String(prev.originalName || "").trim()}${name}`;
       prev.uncertain = true;
       prev.mergedFrom = [prev.mergedFrom, "H6-server"].filter(Boolean).join(",");
-      console.log(`[OCR] H6 서버 병합: "${fragment}" → "${prev.shortName}"`);
+      console.log(`[OCR] H6 서버 병합: "${name}" → "${prev.shortName}"`);
       continue;
     }
     out.push(it);
@@ -358,6 +367,13 @@ interface OcrItem {
 }
 
 export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; grandTotal?: string } | null): OcrItem[] {
+  // 표에 행별 부가세 값이 하나라도 있는가 — 면세 안전망의 발화 조건.
+  // 부가세 컬럼 자체가 없는 전표에서 "공급가=결제금액 → 면세" 안전망이 전 행을
+  // exempt로 오판하는 것을 막는다 (그런 전표는 근거 없음 = unknown이 정답).
+  const anyRowVat = items.some((it: any) => {
+    const v = String(it?.vatAmount ?? "").replace(/,/g, "").trim();
+    return v !== "" && Number.isFinite(Number(v)) && Number(v) > 0;
+  });
   const enriched = items.map((item: any) => {
     const shortName = String(item.shortName || item.name || "");
     const spec = String(item.spec || "");
@@ -470,32 +486,46 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
       }
     }
 
-    // ── 과세/면세 보정 ────────────────────────────────────────────────
+    // ── 과세/면세 보정 (부가세 칸 값이 1차 신호 — 모델 판정보다 우선) ────
     let taxType: "taxable" | "exempt" | "unknown" =
       ["taxable", "exempt", "unknown"].includes(item.taxType) ? item.taxType : "unknown";
     const supply = item.supplyAmount != null && String(item.supplyAmount) !== ""
       ? parseFloat(String(item.supplyAmount).replace(/,/g, "")) : null;
     const vat = item.vatAmount != null && String(item.vatAmount) !== ""
       ? parseFloat(String(item.vatAmount).replace(/,/g, "")) : null;
-    let vatEstimated = false;
-    // 모델이 unknown으로 뒀지만 부가세 값이 있으면 계산으로 확정
-    if (taxType === "unknown" && vat != null) taxType = vat > 0 ? "taxable" : "exempt";
-    // taxable인데 부가세 결측 → 공급가 기준 추정 (플래그 필수)
-    let vatFinal = vat;
-    if (taxType === "taxable" && vat == null && supply != null && supply > 0) {
-      vatFinal = Math.round(supply * 0.1);
-      vatEstimated = true;
+    // 행 결제금액: 0855 계열은 단가가 부가세 포함 → 수량×단가 = 결제금액. 없으면 lineTotal.
+    const gross = qty > 0 && price > 0 ? Math.round(qty * price) : Math.round(parseFloat(finalTotal) || 0);
+    if (vat != null) {
+      taxType = vat > 0 ? "taxable" : "exempt";
+    } else if (anyRowVat && supply != null && gross > 0 && Math.abs(supply - gross) <= 1) {
+      // 안전망: 부가세 컬럼이 존재하는 표에서 공급가액 = 결제금액이면 면세.
+      // 품목명에 "(면세)" 표기가 없는 면세 대응 (실물 예: "백합/냉동/1kg(1kg*5개/박스)")
+      // anyRowVat 게이트: 부가세 컬럼 자체가 없는 전표는 근거 없음 → unknown 유지
+      taxType = "exempt";
     }
-    // 공급가 결측 + lineTotal 존재 시 역산
     let supplyFinal = supply;
-    if (supplyFinal == null && parseFloat(finalTotal) > 0) {
-      const t = parseFloat(finalTotal);
+    let vatFinal = vat;
+    let vatEstimated = false;
+    if (gross > 0) {
       if (taxType === "exempt") {
-        supplyFinal = t;
+        supplyFinal = gross;
+        vatFinal = 0;
       } else if (taxType === "taxable") {
-        supplyFinal = Math.round(t / 1.1);
-        vatEstimated = vatFinal == null || vatEstimated;
-        if (vatFinal == null) vatFinal = t - supplyFinal;
+        // 실물 검증 결과 반올림은 올림(ceil). 서버 검증은 ±1원 허용 (거래처별 ROUND 가능성)
+        if (supplyFinal == null) { supplyFinal = Math.ceil(gross / 1.1); vatEstimated = true; }
+        if (vatFinal == null) { vatFinal = gross - supplyFinal; vatEstimated = true; }
+        // 정합성 검사: 공급가액 + 부가세 = 결제금액
+        if (Math.abs(supplyFinal + vatFinal - gross) > 1) confidence = "low";
+      }
+      // 관계식 기반 결제금액 교정: 공급가+부가세 = 수량×단가가 성립하는데 lineTotal만
+      // 어긋나면 lineTotal 오독이다 (0855 계열: 단가 세후). 단가 세전 양식에서는
+      // 공급가+부가세 ≠ 수량×단가라 이 조건이 성립하지 않으므로 오발화하지 않는다.
+      if (qty > 0 && price > 0 && supplyFinal != null && vatFinal != null
+          && Math.abs(supplyFinal + vatFinal - gross) <= 1
+          && Math.abs((parseFloat(finalTotal) || 0) - gross) > 1) {
+        console.log(`[OCR] lineTotal 관계식 교정: ${shortName} ${finalTotal} → ${gross}`);
+        finalTotal = String(gross);
+        if (confidence === "high") confidence = "medium";
       }
     }
 
@@ -517,8 +547,9 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
   });
 
   // ── summary 크로스체크: 아이템 합산 vs 문서 합계 ──────────────────────
+  // 기준을 reconcileTotals와 동일하게 resolveDocGrand로 통일 (배너/confidence 엇갈림 방지)
   if (summary) {
-    const docTotal = parseFloat(String(summary.grandTotal || summary.totalSupply || "").replace(/,/g, "")) || 0;
+    const docTotal = resolveDocGrand(summary) ?? 0;
     if (docTotal > 0 && enriched.length > 0) {
       const itemSum = enriched.reduce((sum, it) => sum + (parseFloat(it.lineTotal) || 0), 0);
       const totalDiff = Math.abs(itemSum - docTotal);
@@ -535,6 +566,31 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
   return enriched;
 }
 
+// ─── 헬퍼: 문서 결제합계 판별 ───────────────────────────────────────────────
+/** 문서 합계의 신뢰 우선순위: 공급가액합 + 부가세합 → grandTotal → 공급가액합.
+ *  거래명세표 0855 계열의 하단 합계행에는 "①+② 합계"(누적 미수금)가 있어
+ *  모델이 이를 grandTotal로 오독하면 합계 검증이 통째로 무력화된다.
+ *  공급가+부가세 합성은 이 오독에 면역이므로 1순위로 쓴다. */
+export function resolveDocGrand(s: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null | undefined): number | null {
+  const n = (v: any): number | null => {
+    if (v == null || String(v).trim() === "") return null;
+    const x = parseFloat(String(v).replace(/,/g, ""));
+    return Number.isFinite(x) ? x : null;
+  };
+  const supply = n(s?.totalSupply);
+  const tax = n(s?.totalTax);
+  const grand = n(s?.grandTotal);
+  if (supply != null && supply > 0 && tax != null) {
+    if (grand != null && Math.abs(grand - (supply + tax)) > 10) {
+      console.warn(`[OCR] grandTotal(${grand}) 무시 — 공급가+부가세(${supply + tax})와 불일치. 누적미수금 오독 의심`);
+    }
+    return supply + tax;
+  }
+  if (grand != null && grand > 0) return grand;
+  if (supply != null && supply > 0) return supply;
+  return null;
+}
+
 // ─── 헬퍼: 합계 정합 검증 + 결정론적 자동보정 ───────────────────────────────
 export interface OcrTotals {
   docSupply: number | null;   // summary.totalSupply
@@ -547,9 +603,32 @@ export interface OcrTotals {
 }
 
 /** 문서 합계 vs 항목 합산 정합 검증. 순수 산술 자동보정(추가 API 호출 없음).
- *  순서대로 시도하고 ±10원 이내로 정확히 맞는 첫 후보에서 종료.
+ *  순서대로 시도하고 허용오차 내로 정확히 맞는 첫 후보에서 종료.
  *  모든 보정은 fixes[]에 한글로 기록 — 조용한 보정 금지. */
 export function reconcileTotals(
+  items: OcrItem[],
+  summary?: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null
+): OcrTotals {
+  const totals = reconcileCore(items, summary);
+
+  // ── 독립 축 검증: 결제 합계가 맞아도 공급가/부가세 축이 어긋나면 세구분 오판정 의심 ──
+  const axisTol = (doc: number) => Math.max(10, Math.abs(doc) * 0.001);
+  if (totals.docSupply != null && totals.docSupply > 0 && items.length > 0 && items.every((it) => it.supplyAmount != null)) {
+    const supplySum = Math.round(items.reduce((s, it) => s + (parseFloat(it.supplyAmount ?? "") || 0), 0));
+    if (Math.abs(supplySum - totals.docSupply) > axisTol(totals.docSupply)) {
+      totals.fixes.push(`공급가액 합계 불일치 (문서 ${totals.docSupply.toLocaleString()}원 / 항목 합산 ${supplySum.toLocaleString()}원) — 과세/면세 분류를 확인해주세요`);
+    }
+  }
+  if (totals.docTax != null && items.length > 0 && items.every((it) => it.vatAmount != null)) {
+    const vatSum = Math.round(items.reduce((s, it) => s + (parseFloat(it.vatAmount ?? "") || 0), 0));
+    if (Math.abs(vatSum - totals.docTax) > axisTol(totals.docTax)) {
+      totals.fixes.push(`부가세 합계 불일치 (문서 ${totals.docTax.toLocaleString()}원 / 항목 합산 ${vatSum.toLocaleString()}원) — 과세/면세 분류를 확인해주세요`);
+    }
+  }
+  return totals;
+}
+
+function reconcileCore(
   items: OcrItem[],
   summary?: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null
 ): OcrTotals {
@@ -562,7 +641,8 @@ export function reconcileTotals(
   const docTax = summary?.totalTax != null && String(summary.totalTax).trim() !== ""
     ? (Number.isFinite(parseFloat(String(summary.totalTax).replace(/,/g, ""))) ? parseFloat(String(summary.totalTax).replace(/,/g, "")) : null)
     : null; // 부가세 0은 유효값
-  const docGrand = num(summary?.grandTotal) ?? (docSupply != null ? docSupply + (docTax ?? 0) : null);
+  // 우선순위: 공급가+부가세 합성 → grandTotal (누적미수금 오독 면역 — resolveDocGrand 참조)
+  const docGrand = resolveDocGrand(summary);
 
   const sumOf = (list: OcrItem[]) => list.reduce((s, it) => s + (parseFloat(it.lineTotal) || 0), 0);
   let itemSum = Math.round(sumOf(items));
@@ -577,6 +657,29 @@ export function reconcileTotals(
 
   if (within(itemSum)) {
     return { docSupply, docTax, docGrand, itemSum, diff: itemSum - docGrand, status: "match", fixes };
+  }
+
+  // (a0) 행 결제금액을 공급가액으로 읽음 — 0855 계열에서 가장 흔한 오독 유형
+  //      판정: Σ supplyAmount ≈ docSupply 이고 itemSum ≈ docSupply (결제금액이 공급가액 자리)
+  //      조치: 전 행 lineTotal = supplyAmount + vatAmount. 면세 행 오염 위험 없음.
+  if (docSupply != null && docSupply > 0 && items.every((it) => it.supplyAmount != null)) {
+    const supplySum = Math.round(items.reduce((s, it) => s + (parseFloat(it.supplyAmount ?? "") || 0), 0));
+    const tolS = Math.max(10, docSupply * 0.001);
+    if (Math.abs(supplySum - docSupply) <= tolS && Math.abs(itemSum - docSupply) <= tolS) {
+      for (const it of items) {
+        const s = parseFloat(it.supplyAmount ?? "") || 0;
+        const v = parseFloat(it.vatAmount ?? "") || 0;
+        if (s > 0) {
+          it.lineTotal = String(Math.round(s + v));
+          if (it.confidence === "high") it.confidence = "medium";
+        }
+      }
+      itemSum = Math.round(sumOf(items));
+      fixes.push("각 행 금액을 공급가액으로 읽은 것으로 판단해 공급가액+부가세로 재계산했습니다");
+      if (within(itemSum)) {
+        return { docSupply, docTax, docGrand, itemSum, diff: itemSum - docGrand, status: "auto_fixed", fixes };
+      }
+    }
   }
 
   // (a) 부가세 미합산: taxable/unknown 행 ×1.1 + exempt 행 그대로 ≈ docGrand

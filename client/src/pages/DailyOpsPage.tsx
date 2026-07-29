@@ -2634,8 +2634,13 @@ function PurchaseTab({
                   </span>
                 </div>
                 {liveTotalsStatus === 'match' && (
-                  <div className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 px-1">
-                    <Check className="w-3 h-3" /> 전표 합계와 일치
+                  <div className="space-y-0.5 px-1">
+                    <div className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                      <Check className="w-3 h-3" /> 전표 합계와 일치
+                    </div>
+                    {ocrTotals?.fixes.map((f, i) => (
+                      <p key={i} className="text-[11px] text-amber-700 dark:text-amber-400">· {f}</p>
+                    ))}
                   </div>
                 )}
                 {liveTotalsStatus === 'auto_fixed' && ocrTotals && (
