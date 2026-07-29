@@ -375,13 +375,26 @@ export function extractTotalsFromTables(tablesHtml: string[]): { totalSupply: st
         const v = parseFloat(longest.replace(/,/g, ""));
         if (Number.isFinite(v)) nums.push(v);
       }
+      // 행 안의 유효 삼중조를 전부 수집한 뒤 a가 최소인 것을 채택.
+      // 근거: 누적 잔액(전월이월/미수금/누계)은 정의상 당기 거래 이상이므로,
+      // 같은 행에 두 축이 섞여 있으면 a가 작은 쪽이 당기 거래 축이다.
+      // (숫자 배열 순서에 따라 "합계=이월+당기" 삼중조가 먼저 성립할 수 있어
+      //  첫 매치 반환은 우연에 기대는 것 — 순서 무관하게 결정론적으로 고른다)
+      const candidates: Array<{ a: number; b: number; c: number }> = [];
       for (let i = 0; i + 2 < nums.length; i++) {
         const [a, b, c] = [nums[i], nums[i + 1], nums[i + 2]];
         if (a >= 1000 && b >= 1000 && c >= 0 && Math.abs(a - (b + c)) <= 2) {
-          console.log(`[OCR] 합계 삼중조 표에서 직접 추출: grand=${a}, supply=${b}, tax=${c}`);
-          return { totalSupply: String(b), totalTax: String(c), grandTotal: String(a) };
+          candidates.push({ a, b, c });
         }
       }
+      if (candidates.length === 0) continue;
+      candidates.sort((x, y) => x.a - y.a); // 누적 잔액 ≥ 당기 거래
+      const { a, b, c } = candidates[0];
+      if (candidates.length > 1) {
+        console.log(`[OCR] 합계 삼중조 후보 ${candidates.length}건 → 최소 a=${a} 채택 (후보: ${candidates.map((t) => t.a).join(", ")})`);
+      }
+      console.log(`[OCR] 합계 삼중조 표 추출: grand=${a}, supply=${b}, tax=${c}`);
+      return { totalSupply: String(b), totalTax: String(c), grandTotal: String(a) };
     }
   }
   return null;
@@ -687,6 +700,7 @@ export interface OcrTotals {
   basis?: UnitPriceBasis;              // 단가 기준 (gross=부가세 포함 / net=별도)
   basisSource?: "document" | "profile" | "none"; // 판별 출처 (문서 판별 / 거래처 이력 폴백)
   basisEvidence?: string;              // 판별 근거 (디버깅·신뢰 형성용)
+  totalsSource?: "model" | "table_fallback";     // 합계 앵커 출처 (모델 summary / 표 삼중조 폴백)
 }
 
 /** 문서 합계 vs 항목 합산 정합 검증. 순수 산술 자동보정(추가 API 호출 없음).
@@ -695,9 +709,11 @@ export interface OcrTotals {
 export function reconcileTotals(
   items: OcrItem[],
   summary?: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null,
-  basis: UnitPriceBasis = "unknown"
+  basis: UnitPriceBasis = "unknown",
+  totalsSource: "model" | "table_fallback" = "model"
 ): OcrTotals {
-  const totals = reconcileCore(items, summary, basis);
+  const totals = reconcileCore(items, summary, basis, totalsSource);
+  totals.totalsSource = totalsSource;
 
   // ── 독립 축 검증: 결제 합계가 맞아도 공급가/부가세 축이 어긋나면 세구분 오판정 의심 ──
   const axisTol = (doc: number) => Math.max(10, Math.abs(doc) * 0.001);
@@ -719,7 +735,8 @@ export function reconcileTotals(
 function reconcileCore(
   items: OcrItem[],
   summary?: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null,
-  basis: UnitPriceBasis = "unknown"
+  basis: UnitPriceBasis = "unknown",
+  totalsSource: "model" | "table_fallback" = "model"
 ): OcrTotals {
   const num = (v: any): number | null => {
     if (v == null || String(v).trim() === "") return null;
@@ -774,7 +791,10 @@ function reconcileCore(
   // (a) 부가세 미합산: taxable 행만 ×1.1 ≈ docGrand
   //     basis 판별 실패(unknown) 시 건너뜀 — 근거 없는 ±10% 보정보다 mismatch로
   //     남겨 사용자에게 묻는 게 낫다 (v4 리스크 #4). taxType unknown 행도 제외.
-  if (basis !== "unknown") {
+  //     폴백 앵커(table_fallback)일 때도 건너뜀 — 모델이 summary를 비운 상황의
+  //     복원값이라 신뢰도가 한 단계 낮음. 잘못된 앵커에 우연히 맞아떨어지면
+  //     조용히 ±10%가 적용되므로 자동 변경 금지, 사용자 확인으로 위임.
+  if (basis !== "unknown" && totalsSource !== "table_fallback") {
     const candidate = Math.round(items.reduce((s, it) => {
       const lt = parseFloat(it.lineTotal) || 0;
       return s + (it.taxType === "taxable" ? Math.round(lt * 1.1) : lt);
@@ -795,8 +815,8 @@ function reconcileCore(
     }
   }
 
-  // (b) 부가세 이중합산: taxable 행만 ÷1.1 ≈ docGrand (basis unknown 시 건너뜀)
-  if (basis !== "unknown") {
+  // (b) 부가세 이중합산: taxable 행만 ÷1.1 ≈ docGrand (basis unknown·폴백 앵커 시 건너뜀)
+  if (basis !== "unknown" && totalsSource !== "table_fallback") {
     const candidate = Math.round(items.reduce((s, it) => {
       const lt = parseFloat(it.lineTotal) || 0;
       return s + (it.taxType === "taxable" ? Math.round(lt / 1.1) : lt);
@@ -1359,9 +1379,10 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 
     // ── 모델이 summary를 비웠으면 표 HTML에서 합계 삼중조 복원 ──────────
     let summaryEff = parsed.summary || null;
+    let totalsSource: "model" | "table_fallback" = "model";
     if (resolveDocGrand(summaryEff) == null && hybridOut.upstageParsed) {
       const extracted = extractTotalsFromTables(hybridOut.upstageParsed.tablesHtml);
-      if (extracted) summaryEff = extracted;
+      if (extracted) { summaryEff = extracted; totalsSource = "table_fallback"; }
     }
 
     // ── H6 서버 가드 → 단가 기준(basis) 판별 → 검증·보정 ────────────────
@@ -1424,7 +1445,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     updateOcrProfile(cpId, parsed.documentType || null, items, basisDet.basis === "unknown" ? null : basisDet.basis).catch(() => {});
 
     // ── 합계 정합 검증 + 산술 자동보정 ─────────────────────────────────
-    const totals = reconcileTotals(items, summaryEff, basis);
+    const totals = reconcileTotals(items, summaryEff, basis, totalsSource);
     totals.basis = basis;
     totals.basisSource = basisSource;
     totals.basisEvidence = basisDet.evidence;
@@ -1571,9 +1592,10 @@ ${prevLines}
 
     // ── extract-purchase와 동일한 후처리 (거래처 후보/프로파일 갱신은 생략) ──
     let summaryEff = parsedJson.summary || null;
+    let totalsSource: "model" | "table_fallback" = "model";
     if (resolveDocGrand(summaryEff) == null) {
       const extracted = extractTotalsFromTables(parsed.tablesHtml);
-      if (extracted) summaryEff = extracted;
+      if (extracted) { summaryEff = extracted; totalsSource = "table_fallback"; }
     }
     const mergedItems = mergeWrappedNameRows(Array.isArray(parsedJson.items) ? parsedJson.items : []);
     const basisDet = detectUnitPriceBasis(mergedItems);
@@ -1608,7 +1630,7 @@ ${prevLines}
       items = await findItemCandidates(rId, cpId, items);
     }
 
-    const totals = reconcileTotals(items, summaryEff, basis);
+    const totals = reconcileTotals(items, summaryEff, basis, totalsSource);
     totals.basis = basis;
     totals.basisSource = basisSource;
     totals.basisEvidence = basisDet.evidence;

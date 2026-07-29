@@ -911,6 +911,7 @@ interface OcrTotalsInfo {
   basis?: 'gross' | 'net' | 'unknown';           // 단가 기준 (부가세 포함/별도)
   basisSource?: 'document' | 'profile' | 'none'; // 판별 출처
   basisEvidence?: string;
+  totalsSource?: 'model' | 'table_fallback';     // 합계 앵커 출처 (표 삼중조 폴백이면 신뢰도 한 단계 낮음)
 }
 
 // 과세/면세 뱃지: 클릭 시 taxable → exempt → unknown 순환
@@ -1656,12 +1657,18 @@ function PurchaseTab({
     }
 
     // 합계 불일치 저장 게이트: 차단하지 않고 confirm 1회 (전표 자체가 틀린 경우도 존재)
+    // 폴백 앵커(표 삼중조 복원) 기반 자동보정도 confirm 1회 — 값이 조용히 바뀌는 것 방지
     if (ocrTotals && !totalsDismissed && ocrTotals.docGrand != null) {
       const itemSumNow = Math.round(validItems.reduce((s, i) => s + parseFloat(i.lineTotal || '0'), 0));
       const diffNow = itemSumNow - ocrTotals.docGrand;
       if (Math.abs(diffNow) > Math.max(10, ocrTotals.docGrand * 0.001)) {
         const proceed = window.confirm(
           `전표 합계(${fmtNum(ocrTotals.docGrand)}원)와 입력 합계(${fmtNum(itemSumNow)}원)가 ${fmtNum(Math.abs(diffNow))}원 차이 납니다.\n전표 자체 오류일 수도 있습니다. 그대로 저장할까요?`
+        );
+        if (!proceed) return;
+      } else if (ocrTotals.status === 'auto_fixed' && ocrTotals.totalsSource === 'table_fallback') {
+        const proceed = window.confirm(
+          `전표 합계(${fmtNum(ocrTotals.docGrand)}원)를 표에서 자동 복원해 금액을 보정했습니다.\n보정된 금액이 맞는지 확인 후 저장하세요. 저장할까요?`
         );
         if (!proceed) return;
       }
@@ -2655,6 +2662,9 @@ function PurchaseTab({
                 {liveTotalsStatus === 'auto_fixed' && ocrTotals && (
                   <div className="bg-amber-500/10 border border-amber-500/30 rounded-md p-2.5 space-y-1">
                     <p className="text-xs font-medium text-amber-700 dark:text-amber-400">합계가 자동 보정되었습니다 — 내용을 확인해주세요</p>
+                    {ocrTotals.totalsSource === 'table_fallback' && (
+                      <p className="text-[11px] text-amber-700/90 dark:text-amber-300/90">· 전표 합계를 표에서 자동 복원했습니다 — 금액을 확인해 주세요</p>
+                    )}
                     {ocrTotals.fixes.map((f, i) => (
                       <p key={i} className="text-[11px] text-amber-700/90 dark:text-amber-300/90">· {f}</p>
                     ))}
