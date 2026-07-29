@@ -908,6 +908,9 @@ interface OcrTotalsInfo {
   diff: number;
   status: 'match' | 'auto_fixed' | 'mismatch' | 'no_doc_total';
   fixes: string[];
+  basis?: 'gross' | 'net' | 'unknown';           // 단가 기준 (부가세 포함/별도)
+  basisSource?: 'document' | 'profile' | 'none'; // 판별 출처
+  basisEvidence?: string;
 }
 
 // 과세/면세 뱃지: 클릭 시 taxable → exempt → unknown 순환
@@ -2633,6 +2636,12 @@ function PurchaseTab({
                     합계 {formatKRW(formTotal)}
                   </span>
                 </div>
+                {ocrTotals?.basis && ocrTotals.basis !== 'unknown' && (
+                  <p className="text-[10px] text-muted-foreground px-1">
+                    단가 기준: {ocrTotals.basis === 'gross' ? '부가세 포함' : '부가세 별도'}
+                    {ocrTotals.basisSource === 'profile' ? ' · 거래처 이력 기반' : ' · 전표에서 판별'}
+                  </p>
+                )}
                 {liveTotalsStatus === 'match' && (
                   <div className="space-y-0.5 px-1">
                     <div className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">

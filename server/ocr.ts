@@ -317,7 +317,7 @@ export function extractText(message: Anthropic.Message): string | null {
  *  uncertain=true를 강제해 UI에서 확인 필요 카드로 노출시킨다 (조용히 삼키지 않음). */
 export function mergeWrappedNameRows(items: any[]): any[] {
   const NUM_KEYS = ["quantity", "unitPrice", "lineTotal", "supplyAmount", "vatAmount"];
-  const SUMMARY_RE = /^(합\s*계|소\s*계|총\s*계|총\s*합|부가세|공급가액|이월|잔액|미수금|total|subtotal)/i;
+  const SUMMARY_RE = /^(합\s*계|소\s*계|총\s*계|총\s*합|부가세|공급가액|이월|잔액|미수금|누계|수금|total|subtotal)/i;
   const num = (v: any) => {
     const s = String(v ?? "").replace(/[,\s원]/g, "");
     return s !== "" && Number.isFinite(Number(s)) && Number(s) !== 0;
@@ -349,6 +349,70 @@ export function mergeWrappedNameRows(items: any[]): any[] {
   return out;
 }
 
+// ─── 헬퍼: 표 HTML에서 합계 삼중조 결정론 추출 (모델 summary 누락 시 폴백) ──
+/** 합계행이 라벨 없는 별도 테이블로 오는 양식(월푸상사 등)에서 모델이 summary를
+ *  비우는 경우가 있다. 한 행의 연속 세 숫자가 a = b + c (±2)를 만족하면
+ *  (결제합계, 공급가액합, 부가세합) 삼중조로 판정한다. 채권 축 값(미수금/누계)은
+ *  이 관계식을 만족하지 않아 구조적으로 걸러진다. */
+export function extractTotalsFromTables(tablesHtml: string[]): { totalSupply: string; totalTax: string; grandTotal: string } | null {
+  // 합계행 키워드 게이트: gross 양식에서는 모든 과세 "품목 행"도 a=b+c를 만족하므로
+  // (결제금액=공급가+부가세), 합계행임을 나타내는 라벨이 있는 행만 후보로 삼는다.
+  const TOTAL_ROW_RE = /(합\s*계|미\s*수\s*금|누\s*계|총\s*계|당\s*일|소\s*계|②|㉒)/;
+  // 합계는 문서 하단에 있으므로 테이블·행 모두 역순 탐색
+  for (const html of [...tablesHtml].reverse()) {
+    const rows = (html.match(/<tr[\s\S]*?<\/tr>/gi) ?? []).reverse();
+    for (const row of rows) {
+      const rowText = row.replace(/<[^>]+>/g, " ");
+      if (!TOTAL_ROW_RE.test(rowText)) continue;
+      const cells = (row.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) ?? []).map((c) =>
+        c.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").trim()
+      );
+      const nums: number[] = [];
+      for (const cell of cells) {
+        const tokens = cell.match(/\d[\d,]*/g) ?? [];
+        if (tokens.length === 0) continue;
+        const longest = tokens.reduce((a, b) => (b.replace(/,/g, "").length > a.replace(/,/g, "").length ? b : a));
+        const v = parseFloat(longest.replace(/,/g, ""));
+        if (Number.isFinite(v)) nums.push(v);
+      }
+      for (let i = 0; i + 2 < nums.length; i++) {
+        const [a, b, c] = [nums[i], nums[i + 1], nums[i + 2]];
+        if (a >= 1000 && b >= 1000 && c >= 0 && Math.abs(a - (b + c)) <= 2) {
+          console.log(`[OCR] 합계 삼중조 표에서 직접 추출: grand=${a}, supply=${b}, tax=${c}`);
+          return { totalSupply: String(b), totalTax: String(c), grandTotal: String(a) };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// ─── 헬퍼: 단가 기준(basis) 판별 ────────────────────────────────────────────
+export type UnitPriceBasis = "gross" | "net" | "unknown";
+
+/** 부가세 값이 있는 과세 행으로 단가 기준을 판별. 양식/거래처 무관.
+ *  - gross: 단가가 부가세 포함 → 수량×단가 = 공급가액+부가세 (예: 월푸상사 0855)
+ *  - net:   단가가 부가세 별도 → 수량×단가 = 공급가액
+ *  면세 행은 두 유형 모두 공급가액 = 수량×단가라 판별 근거가 못 된다 (v=0 제외로 모호성 없음). */
+export function detectUnitPriceBasis(items: any[]): { basis: UnitPriceBasis; grossVotes: number; netVotes: number; evidence: string } {
+  const n = (v: any) => { const x = parseFloat(String(v ?? "").replace(/,/g, "")); return Number.isFinite(x) ? x : null; };
+  let grossVotes = 0, netVotes = 0;
+  for (const it of items) {
+    const q = n(it.quantity), p = n(it.unitPrice), s = n(it.supplyAmount), v = n(it.vatAmount);
+    if (q == null || p == null || s == null || v == null) continue;
+    if (q <= 0 || p <= 0 || v <= 0) continue; // 과세 행만 (면세는 두 식이 동시 성립 → 판별 불가)
+    const qp = q * p;
+    const tol = Math.max(2, qp * 0.005);
+    if (Math.abs(qp - (s + v)) <= tol) grossVotes++;
+    else if (Math.abs(qp - s) <= tol) netVotes++;
+  }
+  if (grossVotes > netVotes && grossVotes > 0)
+    return { basis: "gross", grossVotes, netVotes, evidence: `과세 ${grossVotes}행에서 수량×단가 = 공급가+부가세` };
+  if (netVotes > grossVotes && netVotes > 0)
+    return { basis: "net", grossVotes, netVotes, evidence: `과세 ${netVotes}행에서 수량×단가 = 공급가액` };
+  return { basis: "unknown", grossVotes, netVotes, evidence: "판별 근거 부족 (부가세 있는 과세 행 없음 또는 불일치)" };
+}
+
 // ─── 헬퍼: 합계 검증 + 신뢰도 산정 (서버사이드) ────────────────────────────
 interface OcrItem {
   shortName: string;
@@ -366,14 +430,11 @@ interface OcrItem {
   confidence: "high" | "medium" | "low";
 }
 
-export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: string; grandTotal?: string } | null): OcrItem[] {
-  // 표에 행별 부가세 값이 하나라도 있는가 — 면세 안전망의 발화 조건.
-  // 부가세 컬럼 자체가 없는 전표에서 "공급가=결제금액 → 면세" 안전망이 전 행을
-  // exempt로 오판하는 것을 막는다 (그런 전표는 근거 없음 = unknown이 정답).
-  const anyRowVat = items.some((it: any) => {
-    const v = String(it?.vatAmount ?? "").replace(/,/g, "").trim();
-    return v !== "" && Number.isFinite(Number(v)) && Number(v) > 0;
-  });
+export function validateAndEnrichItems(
+  items: any[],
+  summary?: { totalSupply?: string; grandTotal?: string } | null,
+  basis: UnitPriceBasis = "unknown"
+): OcrItem[] {
   const enriched = items.map((item: any) => {
     const shortName = String(item.shortName || item.name || "");
     const spec = String(item.spec || "");
@@ -493,38 +554,61 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
       ? parseFloat(String(item.supplyAmount).replace(/,/g, "")) : null;
     const vat = item.vatAmount != null && String(item.vatAmount) !== ""
       ? parseFloat(String(item.vatAmount).replace(/,/g, "")) : null;
-    // 행 결제금액: 0855 계열은 단가가 부가세 포함 → 수량×단가 = 결제금액. 없으면 lineTotal.
-    const gross = qty > 0 && price > 0 ? Math.round(qty * price) : Math.round(parseFloat(finalTotal) || 0);
+    // 수량×단가: basis=gross면 행 결제금액, net이면 공급가액에 해당. 없으면 lineTotal 폴백.
+    const qp = qty > 0 && price > 0 ? Math.round(qty * price) : Math.round(parseFloat(finalTotal) || 0);
     if (vat != null) {
       taxType = vat > 0 ? "taxable" : "exempt";
-    } else if (anyRowVat && supply != null && gross > 0 && Math.abs(supply - gross) <= 1) {
-      // 안전망: 부가세 컬럼이 존재하는 표에서 공급가액 = 결제금액이면 면세.
+    } else if (basis === "gross" && supply != null && qp > 0 && Math.abs(supply - qp) <= 1) {
+      // 안전망 — gross 유형에서만 유효. net 유형은 과세 행도 공급가액 = 수량×단가라
+      // 이 조건이 항상 참이 되어 전 항목이 면세로 오판된다 (v4 리스크 #2).
       // 품목명에 "(면세)" 표기가 없는 면세 대응 (실물 예: "백합/냉동/1kg(1kg*5개/박스)")
-      // anyRowVat 게이트: 부가세 컬럼 자체가 없는 전표는 근거 없음 → unknown 유지
       taxType = "exempt";
+    } else if (basis === "gross" && taxType === "unknown" && supply != null && qp > 0
+               && supply < qp && Math.abs(supply - Math.ceil(qp / 1.1)) <= 2) {
+      // 대칭 안전망: 공급가액 ≈ 수량×단가÷1.1이면 gross 과세 행의 관계식 서명.
+      // 모델이 부가세 값을 누락해 unknown으로 남긴 행을 결정론적으로 복원 (부가세는 아래에서 추정)
+      taxType = "taxable";
     }
     let supplyFinal = supply;
     let vatFinal = vat;
     let vatEstimated = false;
-    if (gross > 0) {
+    if (qp > 0) {
       if (taxType === "exempt") {
-        supplyFinal = gross;
-        vatFinal = 0;
+        // 문서에 적힌 값 우선, 결측 시에만 채움
+        supplyFinal = supplyFinal ?? qp;
+        vatFinal = vatFinal ?? 0;
       } else if (taxType === "taxable") {
-        // 실물 검증 결과 반올림은 올림(ceil). 서버 검증은 ±1원 허용 (거래처별 ROUND 가능성)
-        if (supplyFinal == null) { supplyFinal = Math.ceil(gross / 1.1); vatEstimated = true; }
-        if (vatFinal == null) { vatFinal = gross - supplyFinal; vatEstimated = true; }
-        // 정합성 검사: 공급가액 + 부가세 = 결제금액
-        if (Math.abs(supplyFinal + vatFinal - gross) > 1) confidence = "low";
+        // 문서 값 우선 신뢰, 결측 시에만 계산 (반올림 방식은 거래처마다 다름 → 검증 ±1원)
+        if (supplyFinal == null) {
+          supplyFinal = basis === "gross" ? Math.ceil(qp / 1.1) : qp;
+          vatEstimated = true;
+        }
+        if (vatFinal == null) {
+          vatFinal = basis === "gross" ? qp - supplyFinal : Math.round(supplyFinal * 0.1);
+          vatEstimated = true;
+        }
+        // 정합성 검사 (±1원): gross는 공급가+부가세=수량×단가, net은 공급가=수량×단가
+        if (basis === "gross" && Math.abs(supplyFinal + vatFinal - qp) > 1) confidence = "low";
+        if (basis === "net" && qty > 0 && price > 0 && Math.abs(supplyFinal - qp) > 1) confidence = "low";
       }
-      // 관계식 기반 결제금액 교정: 공급가+부가세 = 수량×단가가 성립하는데 lineTotal만
-      // 어긋나면 lineTotal 오독이다 (0855 계열: 단가 세후). 단가 세전 양식에서는
-      // 공급가+부가세 ≠ 수량×단가라 이 조건이 성립하지 않으므로 오발화하지 않는다.
+      // 관계식 기반 lineTotal 교정 ①: 공급가+부가세 = 수량×단가 성립(gross 서명)인데
+      // lineTotal만 어긋나면 lineTotal 오독 → 수량×단가로 교정.
+      // net 과세 행은 공급가+부가세 ≠ 수량×단가라 조건 불성립 → 오발화 없음.
       if (qty > 0 && price > 0 && supplyFinal != null && vatFinal != null
-          && Math.abs(supplyFinal + vatFinal - gross) <= 1
-          && Math.abs((parseFloat(finalTotal) || 0) - gross) > 1) {
-        console.log(`[OCR] lineTotal 관계식 교정: ${shortName} ${finalTotal} → ${gross}`);
-        finalTotal = String(gross);
+          && Math.abs(supplyFinal + vatFinal - qp) <= 1
+          && Math.abs((parseFloat(finalTotal) || 0) - qp) > 1) {
+        console.log(`[OCR] lineTotal 관계식 교정: ${shortName} ${finalTotal} → ${qp}`);
+        finalTotal = String(qp);
+        if (confidence === "high") confidence = "medium";
+      }
+      // 관계식 기반 lineTotal 교정 ② (net 전용): lineTotal을 공급가액으로 읽으면
+      // 결제금액이 10% 낮게 저장된다 (v4 리스크 #3) → 공급가+부가세로 교정.
+      if (basis === "net" && taxType === "taxable" && qty > 0 && price > 0
+          && supplyFinal != null && vatFinal != null && vatFinal > 0
+          && Math.abs(qp - supplyFinal) <= 1
+          && Math.abs((parseFloat(finalTotal) || 0) - supplyFinal) <= 1) {
+        console.log(`[OCR] lineTotal net 교정: ${shortName} ${finalTotal} → ${supplyFinal + vatFinal}`);
+        finalTotal = String(supplyFinal + vatFinal);
         if (confidence === "high") confidence = "medium";
       }
     }
@@ -600,6 +684,9 @@ export interface OcrTotals {
   diff: number;               // itemSum - docGrand
   status: "match" | "auto_fixed" | "mismatch" | "no_doc_total";
   fixes: string[];            // 사람이 읽는 보정 설명 (한글)
+  basis?: UnitPriceBasis;              // 단가 기준 (gross=부가세 포함 / net=별도)
+  basisSource?: "document" | "profile" | "none"; // 판별 출처 (문서 판별 / 거래처 이력 폴백)
+  basisEvidence?: string;              // 판별 근거 (디버깅·신뢰 형성용)
 }
 
 /** 문서 합계 vs 항목 합산 정합 검증. 순수 산술 자동보정(추가 API 호출 없음).
@@ -607,9 +694,10 @@ export interface OcrTotals {
  *  모든 보정은 fixes[]에 한글로 기록 — 조용한 보정 금지. */
 export function reconcileTotals(
   items: OcrItem[],
-  summary?: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null
+  summary?: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null,
+  basis: UnitPriceBasis = "unknown"
 ): OcrTotals {
-  const totals = reconcileCore(items, summary);
+  const totals = reconcileCore(items, summary, basis);
 
   // ── 독립 축 검증: 결제 합계가 맞아도 공급가/부가세 축이 어긋나면 세구분 오판정 의심 ──
   const axisTol = (doc: number) => Math.max(10, Math.abs(doc) * 0.001);
@@ -630,7 +718,8 @@ export function reconcileTotals(
 
 function reconcileCore(
   items: OcrItem[],
-  summary?: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null
+  summary?: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null,
+  basis: UnitPriceBasis = "unknown"
 ): OcrTotals {
   const num = (v: any): number | null => {
     if (v == null || String(v).trim() === "") return null;
@@ -682,16 +771,17 @@ function reconcileCore(
     }
   }
 
-  // (a) 부가세 미합산: taxable/unknown 행 ×1.1 + exempt 행 그대로 ≈ docGrand
-  //     행 단위 taxType이 있어 면세 혼합 전표에서도 안전 (exempt 행 제외)
-  {
+  // (a) 부가세 미합산: taxable 행만 ×1.1 ≈ docGrand
+  //     basis 판별 실패(unknown) 시 건너뜀 — 근거 없는 ±10% 보정보다 mismatch로
+  //     남겨 사용자에게 묻는 게 낫다 (v4 리스크 #4). taxType unknown 행도 제외.
+  if (basis !== "unknown") {
     const candidate = Math.round(items.reduce((s, it) => {
       const lt = parseFloat(it.lineTotal) || 0;
-      return s + (it.taxType === "exempt" ? lt : Math.round(lt * 1.1));
+      return s + (it.taxType === "taxable" ? Math.round(lt * 1.1) : lt);
     }, 0));
     if (within(candidate)) {
       for (const it of items) {
-        if (it.taxType === "exempt") continue;
+        if (it.taxType !== "taxable") continue;
         const lt = parseFloat(it.lineTotal) || 0;
         if (lt <= 0) continue;
         it.supplyAmount = it.supplyAmount ?? String(lt);
@@ -700,20 +790,20 @@ function reconcileCore(
         if (it.confidence === "high") it.confidence = "medium";
       }
       itemSum = Math.round(sumOf(items));
-      fixes.push(`부가세 미합산으로 판단해 과세 항목에 부가세 10%를 더했습니다 (면세 항목 제외)`);
+      fixes.push(`부가세 미합산으로 판단해 과세 항목에 부가세 10%를 더했습니다 (면세·미확인 항목 제외)`);
       return { docSupply, docTax, docGrand, itemSum, diff: itemSum - docGrand, status: "auto_fixed", fixes };
     }
   }
 
-  // (b) 부가세 이중합산: taxable/unknown 행 ÷1.1 ≈ docGrand
-  {
+  // (b) 부가세 이중합산: taxable 행만 ÷1.1 ≈ docGrand (basis unknown 시 건너뜀)
+  if (basis !== "unknown") {
     const candidate = Math.round(items.reduce((s, it) => {
       const lt = parseFloat(it.lineTotal) || 0;
-      return s + (it.taxType === "exempt" ? lt : Math.round(lt / 1.1));
+      return s + (it.taxType === "taxable" ? Math.round(lt / 1.1) : lt);
     }, 0));
     if (within(candidate)) {
       for (const it of items) {
-        if (it.taxType === "exempt") continue;
+        if (it.taxType !== "taxable") continue;
         const lt = parseFloat(it.lineTotal) || 0;
         if (lt <= 0) continue;
         it.lineTotal = String(Math.round(lt / 1.1));
@@ -1033,6 +1123,7 @@ export async function getOcrProfile(counterpartyId: number | null): Promise<{
   documentType?: string;
   columnOrder?: string;
   frequentItems?: { name: string; avgPrice: number; unit: string }[];
+  priceBasis?: "gross" | "net";
 } | null> {
   if (!counterpartyId) return null;
   try {
@@ -1047,6 +1138,7 @@ export async function getOcrProfile(counterpartyId: number | null): Promise<{
       documentType: profile.documentType || undefined,
       columnOrder: profile.columnOrder || undefined,
       frequentItems: (profile.frequentItems as any) || undefined,
+      priceBasis: profile.priceBasis || undefined,
     };
   } catch {
     return null;
@@ -1057,7 +1149,8 @@ export async function getOcrProfile(counterpartyId: number | null): Promise<{
 async function updateOcrProfile(
   counterpartyId: number | null,
   documentType: string | null,
-  items: OcrItem[]
+  items: OcrItem[],
+  detectedBasis: "gross" | "net" | null = null // 문서 단위 판별 성공 시에만 전달
 ): Promise<void> {
   if (!counterpartyId || items.length === 0) return;
   try {
@@ -1066,6 +1159,20 @@ async function updateOcrProfile(
       .from(counterpartyOcrProfiles)
       .where(eq(counterpartyOcrProfiles.counterpartyId, counterpartyId))
       .limit(1);
+
+    // basis 갱신 (히스테리시스): 동일 관측이면 count+1, 상충하면 count−1 후 0 이하일 때 전환
+    const calcBasisUpdate = (prev?: { priceBasis: "gross" | "net" | null; priceBasisCount: number }) => {
+      if (!detectedBasis) return {}; // 판별 실패 → 기존 유지
+      const curBasis = prev?.priceBasis ?? null;
+      const curCount = prev?.priceBasisCount ?? 0;
+      if (curBasis == null || curBasis === detectedBasis) {
+        return { priceBasis: detectedBasis, priceBasisCount: Math.min(curCount + 1, 100) };
+      }
+      const nextCount = curCount - 1;
+      return nextCount <= 0
+        ? { priceBasis: detectedBasis, priceBasisCount: 1 }
+        : { priceBasis: curBasis, priceBasisCount: nextCount };
+    };
 
     // 현재 품목 → frequentItems로 변환
     const currentItems = items
@@ -1084,8 +1191,9 @@ async function updateOcrProfile(
         frequentItems: currentItems,
         sampleCount: 1,
         lastUsedAt: new Date(),
+        ...calcBasisUpdate(),
       });
-      console.log(`[OCR] 프로파일 신규 생성: counterpartyId=${counterpartyId}`);
+      console.log(`[OCR] 프로파일 신규 생성: counterpartyId=${counterpartyId}${detectedBasis ? `, basis=${detectedBasis}` : ""}`);
     } else {
       // 기존 프로파일 업데이트: frequentItems 병합 (이동평균 단가)
       const oldItems = (existing[0].frequentItems as any[]) || [];
@@ -1109,6 +1217,7 @@ async function updateOcrProfile(
           frequentItems: trimmed,
           sampleCount: (existing[0].sampleCount || 0) + 1,
           lastUsedAt: new Date(),
+          ...calcBasisUpdate({ priceBasis: existing[0].priceBasis, priceBasisCount: existing[0].priceBasisCount ?? 0 }),
         })
         .where(eq(counterpartyOcrProfiles.counterpartyId, counterpartyId));
       console.log(`[OCR] 프로파일 업데이트: counterpartyId=${counterpartyId}, items=${trimmed.length}`);
@@ -1123,6 +1232,7 @@ export function buildProfileHint(profile: {
   documentType?: string;
   columnOrder?: string;
   frequentItems?: { name: string; avgPrice: number; unit: string }[];
+  priceBasis?: "gross" | "net";
 } | null): string {
   if (!profile) return "";
 
@@ -1134,6 +1244,9 @@ export function buildProfileHint(profile: {
   }
   if (profile.columnOrder) {
     parts.push(`- 열 구조: ${profile.columnOrder}`);
+  }
+  if (profile.priceBasis) {
+    parts.push(`- 이 거래처의 과거 전표는 단가가 부가세 ${profile.priceBasis === "gross" ? "포함" : "별도"} 기준이었습니다. 다만 이번 문서에서 직접 판별한 결과를 우선하세요.`);
   }
   if (profile.frequentItems && profile.frequentItems.length > 0) {
     parts.push("- 자주 등장하는 품목 (품명 → 평균 단가):");
@@ -1244,11 +1357,28 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       upstageCacheSet(imageUrl, hybridOut.upstageParsed);
     }
 
-    // ── 합계 검증 + 신뢰도 + summary 크로스체크 (H6 서버 가드 선적용) ────
-    let items = validateAndEnrichItems(
-      mergeWrappedNameRows(Array.isArray(parsed.items) ? parsed.items : []),
-      parsed.summary || null
-    );
+    // ── 모델이 summary를 비웠으면 표 HTML에서 합계 삼중조 복원 ──────────
+    let summaryEff = parsed.summary || null;
+    if (resolveDocGrand(summaryEff) == null && hybridOut.upstageParsed) {
+      const extracted = extractTotalsFromTables(hybridOut.upstageParsed.tablesHtml);
+      if (extracted) summaryEff = extracted;
+    }
+
+    // ── H6 서버 가드 → 단가 기준(basis) 판별 → 검증·보정 ────────────────
+    const mergedItems = mergeWrappedNameRows(Array.isArray(parsed.items) ? parsed.items : []);
+    const basisDet = detectUnitPriceBasis(mergedItems);
+    let basis: UnitPriceBasis = basisDet.basis;
+    let basisSource: "document" | "profile" | "none" = basis === "unknown" ? "none" : "document";
+    if (basis === "unknown" && clientCpId) {
+      // 문서 단위 판별 실패(전 품목 면세 등) → 거래처 이력 폴백
+      const prof = await getOcrProfile(Number(clientCpId));
+      if (prof?.priceBasis === "gross" || prof?.priceBasis === "net") {
+        basis = prof.priceBasis;
+        basisSource = "profile";
+      }
+    }
+    console.log(`[OCR] basis=${basis} source=${basisSource} (${basisDet.evidence})`);
+    let items = validateAndEnrichItems(mergedItems, summaryEff, basis);
 
     // ── 빈 항목 제거 + 완전 중복 제거 ──────────────────────────────────
     items = items.filter((item) => {
@@ -1290,11 +1420,14 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       items = await findItemCandidates(rId, cpId || (counterpartyCandidates[0]?.id ?? null), items);
     }
 
-    // ── 거래처 OCR 프로파일 자동 업데이트 (학습) ───────────────────────
-    updateOcrProfile(cpId, parsed.documentType || null, items).catch(() => {});
+    // ── 거래처 OCR 프로파일 자동 업데이트 (학습) — basis는 문서 판별 성공 시에만 ──
+    updateOcrProfile(cpId, parsed.documentType || null, items, basisDet.basis === "unknown" ? null : basisDet.basis).catch(() => {});
 
     // ── 합계 정합 검증 + 산술 자동보정 ─────────────────────────────────
-    const totals = reconcileTotals(items, parsed.summary || null);
+    const totals = reconcileTotals(items, summaryEff, basis);
+    totals.basis = basis;
+    totals.basisSource = basisSource;
+    totals.basisEvidence = basisDet.evidence;
     if (totals.status !== "match" && totals.status !== "no_doc_total") {
       console.log(`[OCR] 합계 정합: status=${totals.status}, doc=${totals.docGrand}, items=${totals.itemSum}, diff=${totals.diff}, fixes=${totals.fixes.join(" / ")}`);
     }
@@ -1437,10 +1570,24 @@ ${prevLines}
     }
 
     // ── extract-purchase와 동일한 후처리 (거래처 후보/프로파일 갱신은 생략) ──
-    let items = validateAndEnrichItems(
-      mergeWrappedNameRows(Array.isArray(parsedJson.items) ? parsedJson.items : []),
-      parsedJson.summary || null
-    );
+    let summaryEff = parsedJson.summary || null;
+    if (resolveDocGrand(summaryEff) == null) {
+      const extracted = extractTotalsFromTables(parsed.tablesHtml);
+      if (extracted) summaryEff = extracted;
+    }
+    const mergedItems = mergeWrappedNameRows(Array.isArray(parsedJson.items) ? parsedJson.items : []);
+    const basisDet = detectUnitPriceBasis(mergedItems);
+    let basis: UnitPriceBasis = basisDet.basis;
+    let basisSource: "document" | "profile" | "none" = basis === "unknown" ? "none" : "document";
+    if (basis === "unknown" && cpId) {
+      const prof = await getOcrProfile(cpId);
+      if (prof?.priceBasis === "gross" || prof?.priceBasis === "net") {
+        basis = prof.priceBasis;
+        basisSource = "profile";
+      }
+    }
+    console.log(`[OCR] 재분석 basis=${basis} source=${basisSource} (${basisDet.evidence})`);
+    let items = validateAndEnrichItems(mergedItems, summaryEff, basis);
     items = items.filter((item) => {
       if (!item.shortName.trim()) return false;
       const lowerName = item.shortName.trim().toLowerCase();
@@ -1461,7 +1608,10 @@ ${prevLines}
       items = await findItemCandidates(rId, cpId, items);
     }
 
-    const totals = reconcileTotals(items, parsedJson.summary || null);
+    const totals = reconcileTotals(items, summaryEff, basis);
+    totals.basis = basis;
+    totals.basisSource = basisSource;
+    totals.basisEvidence = basisDet.evidence;
     console.log(`[OCR] 재분석 결과: status=${totals.status}, doc=${totals.docGrand}, items=${totals.itemSum}, diff=${totals.diff}`);
 
     logOcrApiUsage({

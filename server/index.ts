@@ -1506,6 +1506,9 @@ app.use(express.json({ limit: "10mb" }));
     await addColumnIfNotExists("purchase_order_items_v2", "vatAmount", "DECIMAL(14,2) NULL");
     await addColumnIfNotExists("purchase_order_items_v2", "taxType",
       "ENUM('taxable','exempt','unknown') NOT NULL DEFAULT 'unknown'");
+    // 2026-07-29: 거래처별 단가 기준(gross=부가세 포함/net=별도) 학습 — 판별 불가 전표 폴백용
+    await addColumnIfNotExists("counterparty_ocr_profiles", "priceBasis", "ENUM('gross','net') NULL");
+    await addColumnIfNotExists("counterparty_ocr_profiles", "priceBasisCount", "INT NOT NULL DEFAULT 0");
 
     await conn.end();
     console.log("[migrate] all migrations complete");

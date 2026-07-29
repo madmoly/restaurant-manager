@@ -887,6 +887,10 @@ export const counterpartyOcrProfiles = mysqlTable("counterparty_ocr_profiles", {
   columnOrder: varchar("columnOrder", { length: 255 }),    // 열 순서 (예: "품목|수량|단가|공급가액")
   // 자주 등장하는 품목 목록 (JSON: [{name, avgPrice, unit}])
   frequentItems: json("frequentItems"),
+  // 단가 기준 (2026-07-29): gross=부가세 포함 단가, net=별도. NULL=미판별.
+  // 문서 단위 판별(detectUnitPriceBasis) 성공 시에만 갱신, 판별 불가 전표의 폴백으로 사용
+  priceBasis: mysqlEnum("priceBasis", ["gross", "net"]),
+  priceBasisCount: int("priceBasisCount").default(0).notNull(), // 동일 basis 연속 관측 횟수 (히스테리시스)
   sampleCount: int("sampleCount").default(0).notNull(),    // 누적 처리 건수
   lastUsedAt: timestamp("lastUsedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
