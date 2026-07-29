@@ -309,12 +309,12 @@ audit_logs · system_settings · api_usage_logs · db_backup_logs · restaurant_
 ## 13. 새 기능 추가 패턴
 
 1. **스키마**: `drizzle/schema.ts`에 테이블/컬럼 추가
-2. **자동 마이그레이션**: `server/index.ts` 시작 시 idempotent ALTER TABLE 추가
+2. **자동 마이그레이션**: `server/index.ts` 시작 시 `addColumnIfNotExists` 헬퍼 사용 (index.ts:24 정의)
    ```ts
-   await conn.query(`
-     ALTER TABLE 테이블명 ADD COLUMN IF NOT EXISTS 컬럼명 타입 DEFAULT NULL
-   `).catch(() => {});
+   await addColumnIfNotExists("테이블명", "컬럼명", "타입 DEFAULT NULL");
    ```
+   ⚠ `ADD COLUMN IF NOT EXISTS` 원시 SQL 금지 — MySQL 8은 이 문법을 지원하지 않으며,
+   `.catch(() => {})`가 syntax error를 조용히 삼켜 컬럼이 생기지 않는다 (2026-07-02 장애 원인).
 3. **라우터**: `server/routers/`에 tRPC 라우터 생성 → `server/routers/index.ts`에 등록
 4. **페이지**: `client/src/pages/`에 컴포넌트 생성 → `App.tsx` 라우트 + `AppLayout.tsx` 네비 추가
 

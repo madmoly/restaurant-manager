@@ -201,15 +201,16 @@ export async function extractWithUpstage(
 export function buildClaudeContext(parsed: UpstageParseResult): string {
   const parts: string[] = [];
 
-  parts.push("## 문서 전체 (Upstage Document Parse markdown)");
-  parts.push(parsed.markdown);
-
+  // 표 HTML을 먼저 배치 — 행/열 경계 판정의 1차 근거. markdown은 보조 문맥.
   if (parsed.tablesHtml.length > 0) {
-    parts.push("\n## 표 원본 HTML (셀 경계 기준)");
+    parts.push("## 표 원본 HTML (셀 경계 기준 — 행/열 판정은 반드시 이 HTML을 우선)");
     parsed.tablesHtml.forEach((html, i) => {
       parts.push(`### Table ${i + 1}\n${html}`);
     });
   }
+
+  parts.push("\n## 문서 전체 (Upstage markdown — 보조 문맥용. 행 경계 판정에는 사용 금지)");
+  parts.push(parsed.markdown);
 
   if (parsed.paragraphs.length > 0) {
     parts.push("\n## 비표 텍스트 블록 (낙서/메모 가능성 있음 — 품목으로 오인 금지)");

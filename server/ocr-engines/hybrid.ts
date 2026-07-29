@@ -15,6 +15,7 @@ import {
   extractWithUpstage,
   buildClaudeContext,
   type UpstageParseResult,
+  type UpstageParseError,
 } from "./upstage";
 import { OCR_MODELS } from "./models";
 
@@ -38,6 +39,17 @@ export interface HybridOcrInput {
   engineOverride?: OcrEngine;
 }
 
+export interface HybridDeps {
+  anthropic: Anthropic;
+  buildProfileHint: (profile: any) => string;
+  getOcrProfile: (counterpartyId: number | null) => Promise<any>;
+  promptV2Template: (upstageContext: string, profileHint: string, correctionNote?: string) => string;
+  promptV1ImageFallback: (profileHint: string) => string;
+  loadImageBase64Raw: (filePath: string) => { base64: string; mediaType: string };
+  extractText: (response: Anthropic.Message) => string | null;
+  parseAIJson: (text: string) => any | null;
+}
+
 export interface HybridOcrOutput {
   engine: OcrEngine;
   upstage?: {
@@ -53,6 +65,8 @@ export interface HybridOcrOutput {
   };
   rawJson: any;             // Claude가 뱉은 파싱된 JSON (정규화 전)
   totalElapsedMs: number;
+  /** Upstage 경로일 때 파싱 결과 원본 — 재분석 캐시용 (Vision 경로엔 없음) */
+  upstageParsed?: UpstageParseResult;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -78,16 +92,7 @@ export function resolveEngine(override?: OcrEngine): OcrEngine {
  */
 export async function runHybridOcr(
   input: HybridOcrInput,
-  deps: {
-    anthropic: Anthropic;
-    buildProfileHint: (profile: any) => string;
-    getOcrProfile: (counterpartyId: number | null) => Promise<any>;
-    promptV2Template: (upstageContext: string, profileHint: string) => string;
-    promptV1ImageFallback: (profileHint: string) => string;
-    loadImageBase64Raw: (filePath: string) => { base64: string; mediaType: string };
-    extractText: (response: Anthropic.Message) => string | null;
-    parseAIJson: (text: string) => any | null;
-  }
+  deps: HybridDeps
 ): Promise<HybridOcrOutput> {
   const started = Date.now();
   const engine = resolveEngine(input.engineOverride);
@@ -96,10 +101,10 @@ export async function runHybridOcr(
   const profileHint = deps.buildProfileHint(profile);
 
   if (engine === "upstage") {
-    const parsed = await extractWithUpstage(input.filePath, { ocrMode: "auto" });
+    const parsed = await runUpstageStage(input.filePath);
 
     if (parsed.ok === true) {
-      return await runClaudeTextStage(parsed, profileHint, deps, started);
+      return await runClaudeTextStage(parsed, profileHint, deps, { started });
     }
 
     // Upstage 실패 → Claude Vision fallback
@@ -114,17 +119,28 @@ export async function runHybridOcr(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Upstage 단계 (분리 export — 재분석 시 캐시된 결과로 이 단계를 건너뛰기 위함)
+// ────────────────────────────────────────────────────────────────────────────
+
+export async function runUpstageStage(
+  filePath: string
+): Promise<UpstageParseResult | UpstageParseError> {
+  return extractWithUpstage(filePath, { ocrMode: "auto" });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Claude 텍스트 해석 (Upstage 성공 경로)
 // ────────────────────────────────────────────────────────────────────────────
 
-async function runClaudeTextStage(
+export async function runClaudeTextStage(
   parsed: UpstageParseResult,
   profileHint: string,
-  deps: Parameters<typeof runHybridOcr>[1],
-  started: number
+  deps: HybridDeps,
+  opts?: { correctionNote?: string; started?: number }
 ): Promise<HybridOcrOutput> {
+  const started = opts?.started ?? Date.now();
   const context = buildClaudeContext(parsed);
-  const prompt = deps.promptV2Template(context, profileHint);
+  const prompt = deps.promptV2Template(context, profileHint, opts?.correctionNote);
 
   const claudeStarted = Date.now();
   const stream = deps.anthropic.messages.stream({
@@ -162,6 +178,7 @@ async function runClaudeTextStage(
     },
     rawJson,
     totalElapsedMs: Date.now() - started,
+    upstageParsed: parsed,
   };
 }
 

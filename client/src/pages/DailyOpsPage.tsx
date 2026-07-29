@@ -888,11 +888,59 @@ interface PurchaseItemRow {
   unitName: string;
   unitPrice: string;
   lineTotal: string;
+  supplyAmount?: string;  // 공급가액 (부가세 제외)
+  vatAmount?: string;     // 부가세액
+  taxType?: 'taxable' | 'exempt' | 'unknown';
+  vatEstimated?: boolean; // 부가세가 추정값(공급가×10%)인 경우
   counterpartyItemId?: number;
   confidence?: string;
   matchedItemId?: number;
   matchedItemName?: string;
   itemCandidates?: { itemId: number; itemName: string; score: number; source: string }[];
+}
+
+// 서버 /extract-purchase, /reanalyze-purchase 응답의 totals
+interface OcrTotalsInfo {
+  docSupply: number | null;
+  docTax: number | null;
+  docGrand: number | null;
+  itemSum: number;
+  diff: number;
+  status: 'match' | 'auto_fixed' | 'mismatch' | 'no_doc_total';
+  fixes: string[];
+}
+
+// 과세/면세 뱃지: 클릭 시 taxable → exempt → unknown 순환
+const TAX_TYPE_CYCLE: Record<string, 'taxable' | 'exempt' | 'unknown'> = {
+  taxable: 'exempt',
+  exempt: 'unknown',
+  unknown: 'taxable',
+};
+const TAX_TYPE_LABEL: Record<string, string> = { taxable: '과세', exempt: '면세', unknown: '미확인' };
+const TAX_TYPE_CLASS: Record<string, string> = {
+  taxable: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  exempt: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+  unknown: 'bg-muted text-muted-foreground',
+};
+
+function mapOcrItemsToRows(items: any[]): PurchaseItemRow[] {
+  return items.map((item: any) => ({
+    rawItemName: item.matchedItemName || item.shortName || item.name || '',
+    spec: item.spec || '',
+    originalName: item.originalName || item.name || '',
+    quantity: item.quantity ? String(Math.round(parseFloat(item.quantity) * 100) / 100) : '',
+    unitName: item.unit || '개',
+    unitPrice: item.unitPrice || '',
+    lineTotal: item.lineTotal || '',
+    supplyAmount: item.supplyAmount ?? undefined,
+    vatAmount: item.vatAmount ?? undefined,
+    taxType: item.taxType || 'unknown',
+    vatEstimated: item.vatEstimated === true,
+    confidence: item.confidence || 'high',
+    matchedItemId: item.matchedItemId,
+    matchedItemName: item.matchedItemName,
+    itemCandidates: item.itemCandidates,
+  }));
 }
 
 function emptyPurchaseItem(): PurchaseItemRow {
@@ -982,6 +1030,12 @@ function PurchaseTab({
   const [ocrRotation, setOcrRotation] = useState(0);
   const [ocrStep, setOcrStep] = useState<'idle' | 'uploaded' | 'analyzed'>('idle');
   const [ocrDateSuggestion, setOcrDateSuggestion] = useState<string | null>(null);
+  // 합계 정합 (Phase 3)
+  const [ocrTotals, setOcrTotals] = useState<OcrTotalsInfo | null>(null);
+  const [totalsDismissed, setTotalsDismissed] = useState(false); // "무시하고 진행" 선택
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [reanalyzeCooldown, setReanalyzeCooldown] = useState(false); // 30초 연타 방지
+  const reanalyzeCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ocrRetryRef = useRef(0);
   const ocrRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [viewerImage, setViewerImage] = useState<string | null>(null);
@@ -1263,6 +1317,11 @@ function PurchaseTab({
     setOcrRotation(0);
     setOcrStep('idle');
     setOcrDateSuggestion(null);
+    setOcrTotals(null);
+    setTotalsDismissed(false);
+    setReanalyzing(false);
+    setReanalyzeCooldown(false);
+    if (reanalyzeCooldownTimerRef.current) { clearTimeout(reanalyzeCooldownTimerRef.current); reanalyzeCooldownTimerRef.current = null; }
     ocrRetryRef.current = 0;
     if (ocrRetryTimerRef.current) { clearTimeout(ocrRetryTimerRef.current); ocrRetryTimerRef.current = null; }
   };
@@ -1300,6 +1359,9 @@ function PurchaseTab({
       unitName: item.unitName || '개',
       unitPrice: item.unitPrice != null ? String(item.unitPrice) : '',
       lineTotal: item.lineTotal != null ? String(item.lineTotal) : '0',
+      supplyAmount: item.supplyAmount != null ? String(item.supplyAmount) : undefined,
+      vatAmount: item.vatAmount != null ? String(item.vatAmount) : undefined,
+      taxType: item.taxType || 'unknown',
       counterpartyItemId: item.counterpartyItemId ?? undefined,
       matchedItemId: item.itemId ?? undefined,
     }));
@@ -1334,6 +1396,9 @@ function PurchaseTab({
         unitName: r.unitName || undefined,
         unitPrice: r.unitPrice || undefined,
         lineTotal: r.lineTotal || '0',
+        supplyAmount: r.supplyAmount || undefined,
+        vatAmount: r.vatAmount || undefined,
+        taxType: r.taxType || 'unknown',
       })),
     });
   };
@@ -1478,23 +1543,13 @@ function PurchaseTab({
         }
       }
 
+      // 합계 정합 결과
+      setOcrTotals(ocrData.totals || null);
+      setTotalsDismissed(false);
+
       // 품목 프리필
       if (ocrData.items && ocrData.items.length > 0) {
-        setPurchaseItems(
-          ocrData.items.map((item: any) => ({
-            rawItemName: item.matchedItemName || item.shortName || item.name || '',
-            spec: item.spec || '',
-            originalName: item.originalName || item.name || '',
-            quantity: item.quantity ? String(Math.round(parseFloat(item.quantity) * 100) / 100) : '',
-            unitName: item.unit || '개',
-            unitPrice: item.unitPrice || '',
-            lineTotal: item.lineTotal || '',
-            confidence: item.confidence || 'high',
-            matchedItemId: item.matchedItemId,
-            matchedItemName: item.matchedItemName,
-            itemCandidates: item.itemCandidates,
-          }))
-        );
+        setPurchaseItems(mapOcrItemsToRows(ocrData.items));
         const matchedCount = ocrData.items.filter((i: any) => i.matchedItemId).length;
         const candidateCount = ocrData.items.filter((i: any) => !i.matchedItemId && i.itemCandidates?.length > 0).length;
         const lowConfCount = ocrData.items.filter((i: any) => i.confidence === 'low').length;
@@ -1530,6 +1585,53 @@ function PurchaseTab({
     }
   };
 
+  // ── 합계 불일치 수동 재분석 (사용자 클릭 전용, 30초 쿨다운) ──
+  const handleOcrReanalyze = async () => {
+    if (!attachmentUrl || reanalyzing || reanalyzeCooldown || !ocrTotals || ocrTotals.docGrand == null) return;
+    const prevItemSum = Math.round(purchaseItems.reduce((s, i) => s + parseFloat(i.lineTotal || '0'), 0));
+    const prevDiff = Math.abs(prevItemSum - ocrTotals.docGrand);
+    try {
+      setReanalyzing(true);
+      toast.info('전표를 다시 분석하고 있습니다...');
+      const res = await fetch('/api/ocr/reanalyze-purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: attachmentUrl,
+          restaurantId,
+          counterpartyId: counterpartyId || undefined,
+          docTotal: ocrTotals.docGrand,
+          itemSum: prevItemSum,
+          previousItems: purchaseItems
+            .filter(i => i.rawItemName.trim())
+            .map(i => ({ rawItemName: i.rawItemName, quantity: i.quantity, unitPrice: i.unitPrice, lineTotal: i.lineTotal })),
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || '재분석 실패');
+      }
+      const data = await res.json();
+      const newTotals: OcrTotalsInfo | null = data.totals || null;
+      // 새 결과의 |diff|가 기존보다 작을 때만 교체 — 더 나빠지면 기존 결과 유지
+      if (newTotals && newTotals.docGrand != null && data.items?.length > 0 && Math.abs(newTotals.diff) < prevDiff) {
+        setPurchaseItems(mapOcrItemsToRows(data.items));
+        setOcrOriginalItems(data.items);
+        setOcrTotals(newTotals);
+        setTotalsDismissed(false);
+        toast.success(`재분석 완료 — 차이 ${fmtNum(prevDiff)}원 → ${fmtNum(Math.abs(newTotals.diff))}원`);
+      } else {
+        toast.info('재분석 결과가 더 정확하지 않아 기존 결과를 유지했습니다');
+      }
+    } catch (error: any) {
+      toast.error(error.message || '재분석에 실패했습니다');
+    } finally {
+      setReanalyzing(false);
+      setReanalyzeCooldown(true);
+      reanalyzeCooldownTimerRef.current = setTimeout(() => setReanalyzeCooldown(false), 30_000);
+    }
+  };
+
   // ── OCR 전표 저장 핸들러 ──
   const handleOcrCreate = () => {
     if (ocrDateSuggestion) {
@@ -1548,6 +1650,18 @@ function PurchaseTab({
     if (validItems.length === 0) {
       toast.error('최소 1개 항목 (품명+금액)을 입력하세요.');
       return;
+    }
+
+    // 합계 불일치 저장 게이트: 차단하지 않고 confirm 1회 (전표 자체가 틀린 경우도 존재)
+    if (ocrTotals && !totalsDismissed && ocrTotals.docGrand != null) {
+      const itemSumNow = Math.round(validItems.reduce((s, i) => s + parseFloat(i.lineTotal || '0'), 0));
+      const diffNow = itemSumNow - ocrTotals.docGrand;
+      if (Math.abs(diffNow) > Math.max(10, ocrTotals.docGrand * 0.001)) {
+        const proceed = window.confirm(
+          `전표 합계(${fmtNum(ocrTotals.docGrand)}원)와 입력 합계(${fmtNum(itemSumNow)}원)가 ${fmtNum(Math.abs(diffNow))}원 차이 납니다.\n전표 자체 오류일 수도 있습니다. 그대로 저장할까요?`
+        );
+        if (!proceed) return;
+      }
     }
 
     // P1-1: 미매칭 품목 경고
@@ -1574,6 +1688,9 @@ function PurchaseTab({
         unitName: i.unitName || undefined,
         unitPrice: i.unitPrice || undefined,
         lineTotal: i.lineTotal || '0',
+        supplyAmount: i.supplyAmount || undefined,
+        vatAmount: i.vatAmount || undefined,
+        taxType: i.taxType || 'unknown',
       })),
     });
 
@@ -1593,6 +1710,7 @@ function PurchaseTab({
             unitName: i.unitName || '',
             unitPrice: i.unitPrice || '',
             lineTotal: i.lineTotal || '',
+            taxType: i.taxType || 'unknown',
           })),
         }),
       }).catch(() => {});
@@ -1611,6 +1729,37 @@ function PurchaseTab({
   const receivedOrders = orders.filter((o: any) => o.status === 'received');
   const totalAmount = receivedOrders.reduce((sum, o: any) => sum + Number(o.totalAmount || 0), 0);
   const formTotal = purchaseItems.reduce((sum, i) => sum + parseFloat(i.lineTotal || '0'), 0);
+
+  // ── 합계 정합 실시간 상태: 항목 수정 시 itemSum 재계산 (docGrand는 OCR 값 고정) ──
+  const liveItemSum = Math.round(formTotal);
+  const liveDiff = ocrTotals?.docGrand != null ? liveItemSum - ocrTotals.docGrand : 0;
+  const liveTotalsStatus: OcrTotalsInfo['status'] | null = ocrTotals
+    ? (ocrTotals.docGrand == null
+        ? 'no_doc_total'
+        : Math.abs(liveDiff) <= Math.max(10, ocrTotals.docGrand * 0.001)
+          ? (ocrTotals.status === 'auto_fixed' ? 'auto_fixed' : 'match')
+          : 'mismatch')
+    : null;
+
+  // ── 과세/면세 뱃지 토글: taxable → exempt → unknown 순환 + 공급가/부가세 정합 재계산 ──
+  const cycleTaxType = (idx: number) => {
+    setPurchaseItems(prev => {
+      const updated = [...prev];
+      const cur = updated[idx];
+      if (!cur) return prev;
+      const next = TAX_TYPE_CYCLE[cur.taxType || 'unknown'];
+      const lt = Math.round(parseFloat(cur.lineTotal || '0')) || 0;
+      if (next === 'exempt') {
+        updated[idx] = { ...cur, taxType: next, supplyAmount: lt > 0 ? String(lt) : undefined, vatAmount: lt > 0 ? '0' : undefined, vatEstimated: false };
+      } else if (next === 'taxable') {
+        const supply = lt > 0 ? Math.round(lt / 1.1) : 0;
+        updated[idx] = { ...cur, taxType: next, supplyAmount: lt > 0 ? String(supply) : undefined, vatAmount: lt > 0 ? String(lt - supply) : undefined, vatEstimated: lt > 0 };
+      } else {
+        updated[idx] = { ...cur, taxType: next, supplyAmount: undefined, vatAmount: undefined, vatEstimated: false };
+      }
+      return updated;
+    });
+  };
 
   // ── OCR 품목 매칭 적용 (드롭다운 선택 + 추천 칩 공통) ──
   // 거래처 등록 품목(counterparty_items) 적용: 단가는 OCR 파싱 값 우선, 없으면 lastPrice/defaultPrice
@@ -2475,13 +2624,60 @@ function PurchaseTab({
               </div>
             )}
 
-            {/* 합계 표시 */}
+            {/* 합계 표시 + 전표 정합 배너 */}
             {purchaseItems.some(i => parseFloat(i.lineTotal || '0') > 0) && (
-              <div className="bg-blue-500/5 p-2.5 rounded flex justify-between items-center">
-                <span className="text-xs text-muted-foreground">{purchaseItems.filter(i => i.rawItemName.trim()).length}개 항목</span>
-                <span className="text-sm font-bold text-blue-600 tabular-nums">
-                  합계 {formatKRW(formTotal)}
-                </span>
+              <div className="space-y-1.5">
+                <div className="bg-blue-500/5 p-2.5 rounded flex justify-between items-center">
+                  <span className="text-xs text-muted-foreground">{purchaseItems.filter(i => i.rawItemName.trim()).length}개 항목</span>
+                  <span className="text-sm font-bold text-blue-600 tabular-nums">
+                    합계 {formatKRW(formTotal)}
+                  </span>
+                </div>
+                {liveTotalsStatus === 'match' && (
+                  <div className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 px-1">
+                    <Check className="w-3 h-3" /> 전표 합계와 일치
+                  </div>
+                )}
+                {liveTotalsStatus === 'auto_fixed' && ocrTotals && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-md p-2.5 space-y-1">
+                    <p className="text-xs font-medium text-amber-700 dark:text-amber-400">합계가 자동 보정되었습니다 — 내용을 확인해주세요</p>
+                    {ocrTotals.fixes.map((f, i) => (
+                      <p key={i} className="text-[11px] text-amber-700/90 dark:text-amber-300/90">· {f}</p>
+                    ))}
+                    {ocrTotals.docGrand != null && (
+                      <p className="text-[11px] text-amber-700/90 dark:text-amber-300/90 tabular-nums">
+                        전표 합계 {fmtNum(ocrTotals.docGrand)}원 / 보정 후 입력 합계 {fmtNum(liveItemSum)}원
+                      </p>
+                    )}
+                  </div>
+                )}
+                {liveTotalsStatus === 'mismatch' && !totalsDismissed && ocrTotals?.docGrand != null && (
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-md p-2.5 space-y-1.5">
+                    <p className="text-xs font-medium text-red-600 dark:text-red-400 tabular-nums">
+                      전표 합계 {fmtNum(ocrTotals.docGrand)}원 / 입력 합계 {fmtNum(liveItemSum)}원 — {fmtNum(Math.abs(liveDiff))}원 차이
+                    </p>
+                    {ocrTotals.fixes.map((f, i) => (
+                      <p key={i} className="text-[11px] text-red-600/80 dark:text-red-400/80">· {f}</p>
+                    ))}
+                    <div className="flex gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={reanalyzing || reanalyzeCooldown}
+                        onClick={handleOcrReanalyze}
+                        className="h-7 text-xs border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400"
+                      >
+                        {reanalyzing ? '재분석 중...' : reanalyzeCooldown ? '재분석 (30초 후 가능)' : '재분석'}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setTotalsDismissed(true)} className="h-7 text-xs text-muted-foreground">
+                        무시하고 진행
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {liveTotalsStatus === 'no_doc_total' && (
+                  <p className="text-[11px] text-muted-foreground px-1">전표에 합계가 없어 자동 검증을 할 수 없습니다</p>
+                )}
               </div>
             )}
 
@@ -2501,10 +2697,24 @@ function PurchaseTab({
                 return (
                 <div key={idx} className={`space-y-2 border rounded-lg p-3 ${cardBorder} relative`}>
                   <span className="absolute -top-2 -left-1 bg-primary text-primary-foreground text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full shadow-sm">{idx + 1}</span>
-                  {(isLowConf || isMedConf) && (
-                    <div className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded w-fit ${isLowConf ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'}`}>
-                      <AlertCircle className="w-3 h-3" />
-                      {isLowConf ? '판독 불확실 — 확인 필요' : '합계 보정됨 — 확인 필요'}
+                  {(isLowConf || isMedConf || item.taxType) && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {(isLowConf || isMedConf) && (
+                        <div className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded w-fit ${isLowConf ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'}`}>
+                          <AlertCircle className="w-3 h-3" />
+                          {isLowConf ? '판독 불확실 — 확인 필요' : '합계 보정됨 — 확인 필요'}
+                        </div>
+                      )}
+                      {item.taxType && (
+                        <button
+                          type="button"
+                          onClick={() => cycleTaxType(idx)}
+                          title="클릭하여 과세/면세/미확인 전환"
+                          className={`text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors ${TAX_TYPE_CLASS[item.taxType]}`}
+                        >
+                          {TAX_TYPE_LABEL[item.taxType]}{item.vatEstimated ? ' · 추정' : ''}
+                        </button>
+                      )}
                     </div>
                   )}
                   {/* 품명 Combobox + 규격 */}

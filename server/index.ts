@@ -1501,6 +1501,12 @@ app.use(express.json({ limit: "10mb" }));
     await addColumnIfNotExists("purchase_order_items_v2", "costingCategory", "VARCHAR(50) DEFAULT NULL");
     await addColumnIfNotExists("api_usage_logs", "timingBreakdown", "VARCHAR(120) NULL");
 
+    // 2026-07-29: OCR 과세/면세 세구분. NULL = 미분류 (0=면세 확정과 구분 — 집계 시 IFNULL(...,0) 금지)
+    await addColumnIfNotExists("purchase_order_items_v2", "supplyAmount", "DECIMAL(14,2) NULL");
+    await addColumnIfNotExists("purchase_order_items_v2", "vatAmount", "DECIMAL(14,2) NULL");
+    await addColumnIfNotExists("purchase_order_items_v2", "taxType",
+      "ENUM('taxable','exempt','unknown') NOT NULL DEFAULT 'unknown'");
+
     await conn.end();
     console.log("[migrate] all migrations complete");
   } catch (e: any) {

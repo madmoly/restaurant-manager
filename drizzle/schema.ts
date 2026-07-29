@@ -686,7 +686,11 @@ export const purchaseOrderItemsV2 = mysqlTable("purchase_order_items_v2", {
   unitName: varchar("unitName", { length: 30 }),
   conversionToBase: decimal("conversionToBase", { precision: 10, scale: 4 }),
   unitPrice: decimal("unitPrice", { precision: 14, scale: 2 }),
-  lineTotal: decimal("lineTotal", { precision: 14, scale: 2 }).notNull(),
+  lineTotal: decimal("lineTotal", { precision: 14, scale: 2 }).notNull(), // 공급가+부가세 (기존 정의 유지)
+  // 과세/면세 세구분 (2026-07-29): NULL = 미분류 (0=면세 확정과 구분해야 함)
+  supplyAmount: decimal("supplyAmount", { precision: 14, scale: 2 }),
+  vatAmount: decimal("vatAmount", { precision: 14, scale: 2 }),
+  taxType: mysqlEnum("taxType", ["taxable", "exempt", "unknown"]).default("unknown").notNull(),
   costingCategory: varchar("costingCategory", { length: 50 }),
   note: text("note"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

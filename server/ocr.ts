@@ -9,7 +9,8 @@ import { db } from "./db";
 import { counterpartyItems, counterparties, counterpartyOcrProfiles, ocrCorrections, errorLogs, apiUsageLogs, purchaseOrdersV2, purchaseOrderItemsV2, items, items as itemsTable, restaurants } from "../drizzle/schema";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { exportDatasetToGDrive, isGDriveConfigured, getLastExportResult } from "./gdrive";
-import { runHybridOcr } from "./ocr-engines/hybrid";
+import { runHybridOcr, runUpstageStage, runClaudeTextStage, type HybridDeps } from "./ocr-engines/hybrid";
+import type { UpstageParseResult } from "./ocr-engines/upstage";
 import { promptV2, promptV1ImageFallback } from "./ocr-engines/prompts";
 import { OCR_MODELS } from "./ocr-engines/models";
 
@@ -310,6 +311,35 @@ export function extractText(message: Anthropic.Message): string | null {
   return tc && tc.type === "text" ? tc.text : null;
 }
 
+// ─── 헬퍼: H6 서버 가드 — 줄바꿈으로 쪼개진 품목명 행 병합 ─────────────────
+/** 수량·단가·금액이 전부 비어 있고 품목명만 있는 행 → 직전 행 이름에 병합.
+ *  프롬프트 H6의 결정론적 백스톱. 수량/단가 판독 실패한 정상 행도 흡수될 수 있어
+ *  uncertain=true를 강제해 UI에서 확인 필요 카드로 노출시킨다 (조용히 삼키지 않음). */
+export function mergeWrappedNameRows(items: any[]): any[] {
+  const NUM_KEYS = ["quantity", "unitPrice", "lineTotal", "supplyAmount", "vatAmount"];
+  const SUMMARY_RE = /^(합\s*계|소\s*계|총\s*계|총\s*합|부가세|공급가액|이월|잔액|total|subtotal)/i;
+  const out: any[] = [];
+  for (const it of items) {
+    const hasNum = NUM_KEYS.some((k) => {
+      const v = String(it?.[k] ?? "").replace(/[,\s원]/g, "");
+      return v !== "" && Number.isFinite(Number(v)) && Number(v) !== 0;
+    });
+    const name = String(it?.shortName || it?.name || "").replace(/\s+/g, " ").trim();
+    if (!hasNum && name && !SUMMARY_RE.test(name) && out.length > 0) {
+      const prev = out[out.length - 1];
+      const fragment = name;
+      prev.shortName = `${String(prev.shortName || "").trim()}${fragment}`;
+      prev.originalName = `${String(prev.originalName || "").trim()}${fragment}`;
+      prev.uncertain = true;
+      prev.mergedFrom = [prev.mergedFrom, "H6-server"].filter(Boolean).join(",");
+      console.log(`[OCR] H6 서버 병합: "${fragment}" → "${prev.shortName}"`);
+      continue;
+    }
+    out.push(it);
+  }
+  return out;
+}
+
 // ─── 헬퍼: 합계 검증 + 신뢰도 산정 (서버사이드) ────────────────────────────
 interface OcrItem {
   shortName: string;
@@ -320,6 +350,10 @@ interface OcrItem {
   unit: string;
   unitPrice: string;
   lineTotal: string;
+  supplyAmount: string | null;
+  vatAmount: string | null;
+  taxType: "taxable" | "exempt" | "unknown";
+  vatEstimated?: boolean;
   confidence: "high" | "medium" | "low";
 }
 
@@ -436,6 +470,35 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
       }
     }
 
+    // ── 과세/면세 보정 ────────────────────────────────────────────────
+    let taxType: "taxable" | "exempt" | "unknown" =
+      ["taxable", "exempt", "unknown"].includes(item.taxType) ? item.taxType : "unknown";
+    const supply = item.supplyAmount != null && String(item.supplyAmount) !== ""
+      ? parseFloat(String(item.supplyAmount).replace(/,/g, "")) : null;
+    const vat = item.vatAmount != null && String(item.vatAmount) !== ""
+      ? parseFloat(String(item.vatAmount).replace(/,/g, "")) : null;
+    let vatEstimated = false;
+    // 모델이 unknown으로 뒀지만 부가세 값이 있으면 계산으로 확정
+    if (taxType === "unknown" && vat != null) taxType = vat > 0 ? "taxable" : "exempt";
+    // taxable인데 부가세 결측 → 공급가 기준 추정 (플래그 필수)
+    let vatFinal = vat;
+    if (taxType === "taxable" && vat == null && supply != null && supply > 0) {
+      vatFinal = Math.round(supply * 0.1);
+      vatEstimated = true;
+    }
+    // 공급가 결측 + lineTotal 존재 시 역산
+    let supplyFinal = supply;
+    if (supplyFinal == null && parseFloat(finalTotal) > 0) {
+      const t = parseFloat(finalTotal);
+      if (taxType === "exempt") {
+        supplyFinal = t;
+      } else if (taxType === "taxable") {
+        supplyFinal = Math.round(t / 1.1);
+        vatEstimated = vatFinal == null || vatEstimated;
+        if (vatFinal == null) vatFinal = t - supplyFinal;
+      }
+    }
+
     return {
       shortName: shortName.replace(/\[\?\]/g, "").trim(),
       spec: spec.trim(),
@@ -445,6 +508,10 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
       unit: String(item.unit || ""),
       unitPrice: priceStr,
       lineTotal: finalTotal,
+      supplyAmount: supplyFinal != null && Number.isFinite(supplyFinal) ? String(supplyFinal) : null,
+      vatAmount: vatFinal != null && Number.isFinite(vatFinal) ? String(vatFinal) : null,
+      taxType,
+      vatEstimated: vatEstimated || undefined,
       confidence,
     };
   });
@@ -466,6 +533,133 @@ export function validateAndEnrichItems(items: any[], summary?: { totalSupply?: s
   }
 
   return enriched;
+}
+
+// ─── 헬퍼: 합계 정합 검증 + 결정론적 자동보정 ───────────────────────────────
+export interface OcrTotals {
+  docSupply: number | null;   // summary.totalSupply
+  docTax: number | null;      // summary.totalTax
+  docGrand: number | null;    // summary.grandTotal ?? (docSupply + docTax)
+  itemSum: number;            // Σ lineTotal (보정 후)
+  diff: number;               // itemSum - docGrand
+  status: "match" | "auto_fixed" | "mismatch" | "no_doc_total";
+  fixes: string[];            // 사람이 읽는 보정 설명 (한글)
+}
+
+/** 문서 합계 vs 항목 합산 정합 검증. 순수 산술 자동보정(추가 API 호출 없음).
+ *  순서대로 시도하고 ±10원 이내로 정확히 맞는 첫 후보에서 종료.
+ *  모든 보정은 fixes[]에 한글로 기록 — 조용한 보정 금지. */
+export function reconcileTotals(
+  items: OcrItem[],
+  summary?: { totalSupply?: string | null; totalTax?: string | null; grandTotal?: string | null } | null
+): OcrTotals {
+  const num = (v: any): number | null => {
+    if (v == null || String(v).trim() === "") return null;
+    const n = parseFloat(String(v).replace(/,/g, ""));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const docSupply = num(summary?.totalSupply);
+  const docTax = summary?.totalTax != null && String(summary.totalTax).trim() !== ""
+    ? (Number.isFinite(parseFloat(String(summary.totalTax).replace(/,/g, ""))) ? parseFloat(String(summary.totalTax).replace(/,/g, "")) : null)
+    : null; // 부가세 0은 유효값
+  const docGrand = num(summary?.grandTotal) ?? (docSupply != null ? docSupply + (docTax ?? 0) : null);
+
+  const sumOf = (list: OcrItem[]) => list.reduce((s, it) => s + (parseFloat(it.lineTotal) || 0), 0);
+  let itemSum = Math.round(sumOf(items));
+  const fixes: string[] = [];
+
+  if (docGrand == null) {
+    return { docSupply, docTax, docGrand: null, itemSum, diff: 0, status: "no_doc_total", fixes };
+  }
+
+  const tol = Math.max(10, docGrand * 0.001);
+  const within = (v: number) => Math.abs(v - docGrand) <= tol;
+
+  if (within(itemSum)) {
+    return { docSupply, docTax, docGrand, itemSum, diff: itemSum - docGrand, status: "match", fixes };
+  }
+
+  // (a) 부가세 미합산: taxable/unknown 행 ×1.1 + exempt 행 그대로 ≈ docGrand
+  //     행 단위 taxType이 있어 면세 혼합 전표에서도 안전 (exempt 행 제외)
+  {
+    const candidate = Math.round(items.reduce((s, it) => {
+      const lt = parseFloat(it.lineTotal) || 0;
+      return s + (it.taxType === "exempt" ? lt : Math.round(lt * 1.1));
+    }, 0));
+    if (within(candidate)) {
+      for (const it of items) {
+        if (it.taxType === "exempt") continue;
+        const lt = parseFloat(it.lineTotal) || 0;
+        if (lt <= 0) continue;
+        it.supplyAmount = it.supplyAmount ?? String(lt);
+        it.lineTotal = String(Math.round(lt * 1.1));
+        it.vatAmount = it.vatAmount ?? String(Math.round(lt * 1.1) - lt);
+        if (it.confidence === "high") it.confidence = "medium";
+      }
+      itemSum = Math.round(sumOf(items));
+      fixes.push(`부가세 미합산으로 판단해 과세 항목에 부가세 10%를 더했습니다 (면세 항목 제외)`);
+      return { docSupply, docTax, docGrand, itemSum, diff: itemSum - docGrand, status: "auto_fixed", fixes };
+    }
+  }
+
+  // (b) 부가세 이중합산: taxable/unknown 행 ÷1.1 ≈ docGrand
+  {
+    const candidate = Math.round(items.reduce((s, it) => {
+      const lt = parseFloat(it.lineTotal) || 0;
+      return s + (it.taxType === "exempt" ? lt : Math.round(lt / 1.1));
+    }, 0));
+    if (within(candidate)) {
+      for (const it of items) {
+        if (it.taxType === "exempt") continue;
+        const lt = parseFloat(it.lineTotal) || 0;
+        if (lt <= 0) continue;
+        it.lineTotal = String(Math.round(lt / 1.1));
+        if (it.confidence === "high") it.confidence = "medium";
+      }
+      itemSum = Math.round(sumOf(items));
+      fixes.push(`부가세 이중합산으로 판단해 과세 항목 금액을 1.1로 나눠 되돌렸습니다`);
+      return { docSupply, docTax, docGrand, itemSum, diff: itemSum - docGrand, status: "auto_fixed", fixes };
+    }
+  }
+
+  // (c) 단일 행 자릿수 오독: 어떤 행 하나에 ×10/÷10/×100/÷100을 적용하면 정확히 맞음
+  for (let i = 0; i < items.length; i++) {
+    const lt = parseFloat(items[i].lineTotal) || 0;
+    if (lt <= 0) continue;
+    for (const factor of [10, 0.1, 100, 0.01]) {
+      const fixed = Math.round(lt * factor);
+      const candidate = itemSum - Math.round(lt) + fixed;
+      if (Math.abs(candidate - docGrand) <= 10) {
+        items[i].lineTotal = String(fixed);
+        items[i].confidence = "low";
+        itemSum = Math.round(sumOf(items));
+        fixes.push(`"${items[i].shortName}" 금액 자릿수 오독으로 판단해 ${Math.round(lt).toLocaleString()}원 → ${fixed.toLocaleString()}원으로 보정했습니다`);
+        return { docSupply, docTax, docGrand, itemSum, diff: itemSum - docGrand, status: "auto_fixed", fixes };
+      }
+    }
+  }
+
+  // (d) 중복 행: 초과분이 특정 행 금액과 정확히 일치 + 동일 품명 2회 이상 등장
+  if (itemSum > docGrand) {
+    const excess = itemSum - docGrand;
+    const nameCount = new Map<string, number>();
+    for (const it of items) nameCount.set(it.shortName, (nameCount.get(it.shortName) ?? 0) + 1);
+    const dupIdx = items.findIndex(
+      (it) => Math.abs((parseFloat(it.lineTotal) || 0) - excess) <= 10 && (nameCount.get(it.shortName) ?? 0) >= 2
+    );
+    if (dupIdx >= 0) {
+      const removed = items.splice(dupIdx, 1)[0];
+      itemSum = Math.round(sumOf(items));
+      fixes.push(`중복 계상된 항목 "${removed.shortName}" (${Math.round(parseFloat(removed.lineTotal) || 0).toLocaleString()}원) 1건을 제거했습니다`);
+      return { docSupply, docTax, docGrand, itemSum, diff: itemSum - docGrand, status: "auto_fixed", fixes };
+    }
+  }
+
+  // (e) 행 누락 의심 — 자동 추가 금지, 기록만
+  if (docGrand > itemSum) {
+    fixes.push(`행 누락 의심 (부족액 ${Math.round(docGrand - itemSum).toLocaleString()}원)`);
+  }
+  return { docSupply, docTax, docGrand, itemSum, diff: itemSum - docGrand, status: "mismatch", fixes };
 }
 
 // ─── 거래처 품목 매칭 (기존 DB 활용) ────────────────────────────────────────
@@ -849,6 +1043,32 @@ export function buildProfileHint(profile: {
   return parts.join("\n");
 }
 
+// ─── Upstage 파싱 결과 캐시 (재분석 시 Upstage 재호출 회피) ──────────────────
+// Railway 단일 인스턴스 전제의 인메모리 캐시. TTL 10분, LRU 최대 20건.
+const upstageCache = new Map<string, { parsed: UpstageParseResult; expiresAt: number }>();
+const UPSTAGE_CACHE_TTL_MS = 10 * 60_000;
+const UPSTAGE_CACHE_MAX = 20;
+
+function upstageCacheSet(key: string, parsed: UpstageParseResult) {
+  upstageCache.delete(key); // 재삽입으로 LRU 순서 갱신
+  upstageCache.set(key, { parsed, expiresAt: Date.now() + UPSTAGE_CACHE_TTL_MS });
+  while (upstageCache.size > UPSTAGE_CACHE_MAX) {
+    const oldest = upstageCache.keys().next().value;
+    if (oldest === undefined) break;
+    upstageCache.delete(oldest);
+  }
+}
+
+function upstageCacheGet(key: string): UpstageParseResult | null {
+  const entry = upstageCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    upstageCache.delete(key);
+    return null;
+  }
+  return entry.parsed;
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // POST /api/ocr/extract-purchase — 단일 Vision 직접 구조화
 // ═════════════════════════════════════════════════════════════════════════════
@@ -916,9 +1136,14 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       return;
     }
 
-    // ── 합계 검증 + 신뢰도 + summary 크로스체크 ──────────────────────────
+    // ── Upstage 파싱 결과 캐시 (재분석 시 Upstage 재호출 회피) ──────────
+    if (hybridOut.upstageParsed) {
+      upstageCacheSet(imageUrl, hybridOut.upstageParsed);
+    }
+
+    // ── 합계 검증 + 신뢰도 + summary 크로스체크 (H6 서버 가드 선적용) ────
     let items = validateAndEnrichItems(
-      Array.isArray(parsed.items) ? parsed.items : [],
+      mergeWrappedNameRows(Array.isArray(parsed.items) ? parsed.items : []),
       parsed.summary || null
     );
 
@@ -965,6 +1190,12 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     // ── 거래처 OCR 프로파일 자동 업데이트 (학습) ───────────────────────
     updateOcrProfile(cpId, parsed.documentType || null, items).catch(() => {});
 
+    // ── 합계 정합 검증 + 산술 자동보정 ─────────────────────────────────
+    const totals = reconcileTotals(items, parsed.summary || null);
+    if (totals.status !== "match" && totals.status !== "no_doc_total") {
+      console.log(`[OCR] 합계 정합: status=${totals.status}, doc=${totals.docGrand}, items=${totals.itemSum}, diff=${totals.diff}, fixes=${totals.fixes.join(" / ")}`);
+    }
+
     // ── 거래처 정보는 클라이언트에서 확인 후 별도 API로 업데이트 ──────
     const cpInfo = parsed.counterpartyInfo || {};
 
@@ -975,6 +1206,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
       transactionDate: parsed.transactionDate || null,
       counterpartyInfo: cpInfo.contactName || cpInfo.contactPhone ? cpInfo : null,
       items,
+      totals,
       note: parsed.note || null,
     };
 
@@ -1000,6 +1232,165 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
     const isRateLimited = err?.status === 429 || err?.response?.status === 429;
     res.status(500).json({
       error: `OCR 처리 중 오류가 발생했습니다.`,
+      retryable: true,
+      reason: isRateLimited ? "rate_limited" : "upstream_error",
+    });
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// POST /api/ocr/reanalyze-purchase — 합계 불일치 시 사용자 클릭 재분석 (2차 시도)
+// Upstage는 캐시 재사용(미스 시에만 1회 재호출), Claude 텍스트 단계만 재실행.
+// 자동 재시도(MAX_OCR_AUTO_RETRY) 경로와 완전 분리 — 사용자 명시 클릭 전용.
+// ═════════════════════════════════════════════════════════════════════════════
+ocrRouter.post("/reanalyze-purchase", async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  try {
+    const anthropic = getAnthropicClient();
+    if (!anthropic) {
+      res.status(500).json({ error: "ANTHROPIC_API_KEY가 설정되지 않았습니다." });
+      return;
+    }
+
+    const { imageUrl, restaurantId, counterpartyId: clientCpId, docTotal, itemSum: prevItemSum, previousItems } = req.body;
+    if (!imageUrl || typeof imageUrl !== "string") {
+      res.status(400).json({ error: "imageUrl이 필요합니다" });
+      return;
+    }
+
+    // ── Upstage 결과: 캐시 우선, 미스 시에만 재호출 ────────────────────
+    let parsed = upstageCacheGet(imageUrl);
+    let upstageElapsed = 0;
+    if (!parsed) {
+      const relativePath = imageUrl.replace(/^\/uploads\//, "");
+      const filePath = path.join(UPLOAD_ROOT, relativePath);
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ error: "이미지 파일을 찾을 수 없습니다" });
+        return;
+      }
+      console.log(`[OCR] 재분석 캐시 미스 — Upstage 재호출: ${imageUrl}`);
+      const fresh = await runUpstageStage(filePath);
+      if (!fresh.ok) {
+        res.status(500).json({
+          error: "재분석을 위한 문서 파싱에 실패했습니다. 잠시 후 다시 시도해주세요.",
+          retryable: true,
+          reason: fresh.status === 429 ? "rate_limited" : "upstream_error",
+        });
+        return;
+      }
+      parsed = fresh;
+      upstageElapsed = fresh.elapsedMs;
+      upstageCacheSet(imageUrl, fresh);
+    } else {
+      console.log(`[OCR] 재분석 캐시 적중 — Upstage 호출 생략: ${imageUrl}`);
+    }
+
+    const cpId = clientCpId ? Number(clientCpId) : null;
+    const profile = await getOcrProfile(cpId);
+    const profileHint = buildProfileHint(profile);
+
+    // ── 1차 결과 요약을 correctionNote로 주입 ──────────────────────────
+    const docTotalNum = Math.round(parseFloat(String(docTotal ?? "").replace(/,/g, "")) || 0);
+    const prevSumNum = Math.round(parseFloat(String(prevItemSum ?? "").replace(/,/g, "")) || 0);
+    const prevLines = Array.isArray(previousItems)
+      ? previousItems.slice(0, 60).map((it: any) =>
+          `- ${String(it.rawItemName || it.shortName || it.name || "?")} ${it.quantity || "?"}×${it.unitPrice || "?"}=${it.lineTotal || "?"}`
+        ).join("\n")
+      : "(없음)";
+    const correctionNote = `## 재검증 요청 (2차 시도)
+1차 추출 결과가 문서 합계와 ${(prevSumNum - docTotalNum).toLocaleString()}원 불일치했습니다.
+- 문서에 적힌 합계: ${docTotalNum.toLocaleString()}원
+- 1차 추출 항목 합산: ${prevSumNum.toLocaleString()}원
+- 1차 결과(참고):
+${prevLines}
+
+다음을 이 순서로 재점검하세요:
+1. 긴 품목명이 두 행으로 쪼개져 항목이 중복 계상되지 않았는가 (H6)
+2. 누락된 행이 없는가 (특히 표의 첫 행/마지막 행, 페이지 경계)
+3. 자릿수 오독은 없는가 (0 개수, 콤마 위치)
+4. 부가세를 빠뜨렸거나 이중으로 더하지 않았는가
+
+출력 직전에 반드시 Σ lineTotal 을 계산해 문서 합계와 비교하고,
+그래도 맞지 않으면 어느 행이 의심스러운지 note에 한글로 적으세요.`;
+
+    const deps: HybridDeps = {
+      anthropic,
+      buildProfileHint,
+      getOcrProfile,
+      promptV2Template: promptV2,
+      promptV1ImageFallback,
+      loadImageBase64Raw,
+      extractText,
+      parseAIJson,
+    };
+    const out = await runClaudeTextStage(parsed, profileHint, deps, { correctionNote });
+    const parsedJson = out.rawJson;
+    const elapsed = Date.now() - startedAt;
+
+    if (!parsedJson) {
+      logOcrApiUsage({ endpoint: "reanalyze-purchase", restaurantId: restaurantId ? Number(restaurantId) : undefined, responseTimeMs: elapsed, success: false, errorMessage: "AI 응답 파싱 실패", inputTokens: out.claude.inputTokens, outputTokens: out.claude.outputTokens, model: out.claude.model });
+      res.status(500).json({ error: "AI 응답을 처리하지 못했습니다. 다시 시도해주세요.", retryable: true, reason: "parse_failed" });
+      return;
+    }
+
+    // ── extract-purchase와 동일한 후처리 (거래처 후보/프로파일 갱신은 생략) ──
+    let items = validateAndEnrichItems(
+      mergeWrappedNameRows(Array.isArray(parsedJson.items) ? parsedJson.items : []),
+      parsedJson.summary || null
+    );
+    items = items.filter((item) => {
+      if (!item.shortName.trim()) return false;
+      const lowerName = item.shortName.trim().toLowerCase();
+      if (/^(합계|소계|총합|total|subtotal|합\s*계)$/i.test(lowerName)) return false;
+      return true;
+    });
+    const seen = new Set<string>();
+    items = items.filter((item) => {
+      const key = `${item.shortName}|${item.quantity}|${item.unitPrice}|${item.lineTotal}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    items = await matchCounterpartyItems(cpId, items);
+    const rId = restaurantId ? Number(restaurantId) : 0;
+    if (rId > 0) {
+      items = await findItemCandidates(rId, cpId, items);
+    }
+
+    const totals = reconcileTotals(items, parsedJson.summary || null);
+    console.log(`[OCR] 재분석 결과: status=${totals.status}, doc=${totals.docGrand}, items=${totals.itemSum}, diff=${totals.diff}`);
+
+    logOcrApiUsage({
+      endpoint: "reanalyze-purchase",
+      restaurantId: restaurantId ? Number(restaurantId) : undefined,
+      responseTimeMs: elapsed,
+      success: true,
+      inputTokens: out.claude.inputTokens,
+      outputTokens: out.claude.outputTokens,
+      model: out.claude.model,
+      itemCount: items.length,
+      timingBreakdown: `upstage=${upstageElapsed},claude=${out.claude.elapsedMs}`,
+    });
+
+    res.json({
+      counterpartyName: parsedJson.counterpartyName || null,
+      counterpartyId: cpId,
+      transactionDate: parsedJson.transactionDate || null,
+      counterpartyInfo: null,
+      items,
+      totals,
+      note: parsedJson.note || null,
+    });
+  } catch (err: any) {
+    console.error("[OCR] reanalyze-purchase error:", err);
+    await logOcrError(`OCR 재분석 오류: ${err.message}`, {
+      stack: err.stack?.substring(0, 1000),
+      imageUrl: req.body?.imageUrl,
+    }, req.body?.restaurantId ? Number(req.body.restaurantId) : undefined);
+    const isRateLimited = err?.status === 429 || err?.response?.status === 429;
+    res.status(500).json({
+      error: "OCR 재분석 중 오류가 발생했습니다.",
       retryable: true,
       reason: isRateLimited ? "rate_limited" : "upstream_error",
     });
