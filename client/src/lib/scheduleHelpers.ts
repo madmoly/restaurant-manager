@@ -64,6 +64,17 @@ export function fmtRangeCompact(start: Date | string, end: Date | string): strin
   return `${part(start)}~${part(end)}${suffix}`;
 }
 
+const WEEK_ORDINALS = ["첫째주", "둘째주", "셋째주", "넷째주", "다섯째주"];
+
+/**
+ * 주차 서수 라벨: 해당 주 월요일이 속한 달 기준, 그 달의 n번째 월요일 = n째주.
+ * 월요일이 8/31이고 주말이 9월이어도 "8월 다섯째주".
+ */
+export function weekOrdinalLabel(weekStart: Date): string {
+  const n = Math.ceil(weekStart.getDate() / 7);
+  return `${weekStart.getMonth() + 1}월 ${WEEK_ORDINALS[n - 1] ?? `${n}째주`}`;
+}
+
 // ─── 상수 ─────────────────────────────────────────────────────────────────────
 
 export const DAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"];

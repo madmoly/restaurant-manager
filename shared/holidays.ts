@@ -1,6 +1,6 @@
 /**
  * 한국 공휴일 유틸리티 (서버+클라이언트 공유)
- * 양력 고정 공휴일 + 음력 변환 공휴일 (2025~2027)
+ * 양력 고정 공휴일 + 음력 변환 공휴일 + 대체공휴일 (2025~2027)
  */
 
 // 양력 고정 공휴일
@@ -43,11 +43,32 @@ const LUNAR_HOLIDAYS: Record<string, string> = {
   "2027-10-16": "추석 다음날",
 };
 
+// 대체공휴일 (관공서의 공휴일에 관한 규정 §3 — 토·일 겹침 시 다음 평일)
+// 설·추석 연휴는 일요일 겹침만, 삼일절·어린이날·부처님오신날·광복절·개천절·한글날·크리스마스는 토·일 겹침 시 발생
+const SUBSTITUTE_HOLIDAYS: Record<string, string> = {
+  // 2025
+  "2025-03-03": "삼일절 대체", // 3/1 토
+  "2025-05-06": "어린이날 대체", // 5/5 어린이날·부처님오신날 중복
+  "2025-10-08": "추석 대체", // 추석 연휴 중 10/5 일
+  // 2026
+  "2026-03-02": "삼일절 대체", // 3/1 일
+  "2026-05-25": "부처님오신날 대체", // 5/24 일
+  "2026-08-17": "광복절 대체", // 8/15 토
+  "2026-10-05": "개천절 대체", // 10/3 토
+  // 2027
+  "2027-02-08": "설날 대체", // 연휴 중 2/7 일
+  "2027-08-16": "광복절 대체", // 8/15 일
+  "2027-10-04": "개천절 대체", // 10/3 일
+  "2027-10-11": "한글날 대체", // 10/9 토
+  "2027-12-27": "크리스마스 대체", // 12/25 토
+};
+
 /**
- * 주어진 날짜가 공휴일이면 명칭 반환, 아니면 null
+ * 주어진 날짜가 공휴일이면 명칭 반환, 아니면 null (대체공휴일 포함)
  */
 export function getHolidayName(dateStr: string): string | null {
   if (LUNAR_HOLIDAYS[dateStr]) return LUNAR_HOLIDAYS[dateStr];
+  if (SUBSTITUTE_HOLIDAYS[dateStr]) return SUBSTITUTE_HOLIDAYS[dateStr];
   const mmdd = dateStr.slice(5); // "MM-DD"
   if (FIXED_HOLIDAYS[mmdd]) return FIXED_HOLIDAYS[mmdd];
   return null;
@@ -71,10 +92,12 @@ export function getHolidaysForYear(year: number): Array<{ date: string; name: st
     result.push({ date: `${year}-${mmdd}`, name });
   }
 
-  // 음력 기반
-  for (const [dateStr, name] of Object.entries(LUNAR_HOLIDAYS)) {
-    if (dateStr.startsWith(`${year}-`)) {
-      result.push({ date: dateStr, name });
+  // 음력 기반 + 대체공휴일
+  for (const source of [LUNAR_HOLIDAYS, SUBSTITUTE_HOLIDAYS]) {
+    for (const [dateStr, name] of Object.entries(source)) {
+      if (dateStr.startsWith(`${year}-`)) {
+        result.push({ date: dateStr, name });
+      }
     }
   }
 

@@ -19,6 +19,7 @@ import {
   Zap,
   Check,
   Users,
+  Locate,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getHolidayName } from "@shared/holidays";
@@ -31,6 +32,7 @@ import {
   fmtRangeCompact,
   DAY_NAMES,
   STATUS_LABELS,
+  weekOrdinalLabel,
   resolvePresetLabel,
   calcHeadcountWeight,
   defaultBreakMinutes,
@@ -764,7 +766,19 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   }, [jumpToDate]);
 
   const visibleWeekStartDate = useMemo(() => new Date(visibleWeekStartStr + "T12:00:00"), [visibleWeekStartStr]);
-  const visibleWeekEnd = fmtDate(addDays(visibleWeekStartDate, 6)) + "T23:59:59";
+  const visibleWeekEndDate = useMemo(() => addDays(visibleWeekStartDate, 6), [visibleWeekStartDate]);
+  const visibleWeekEnd = fmtDate(visibleWeekEndDate) + "T23:59:59";
+
+  // E2: 가시 주 7일의 공휴일·대체공휴일 (스티키 헤더 배지)
+  const visibleWeekHolidays = useMemo(() => {
+    const list: { day: number; name: string }[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(visibleWeekStartDate, i);
+      const name = getHolidayName(fmtDate(d));
+      if (name) list.push({ day: d.getDate(), name });
+    }
+    return list;
+  }, [visibleWeekStartDate]);
 
   // ─── 프리셋 시간 계산 ─────────────────────
   function getPresetTimesInner(preset: string, dateStr?: string) {
@@ -912,6 +926,9 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   };
 
   const today = fmtDate(new Date());
+  // E3: 오늘 주가 화면에 보이면 오늘 버튼 강조 해제
+  const todayWeekStartStr = fmtDate(getWeekDates(new Date())[0]);
+  const isTodayWeekVisible = visibleWeekStartStr === todayWeekStartStr;
 
   // 프리셋 목록 (빠른배정 드롭다운용)
   const presetOptions = useMemo(() => {
@@ -1004,12 +1021,28 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
         style={{ top: minimapH }}
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold text-foreground whitespace-nowrap">
-            {visibleWeekStartDate.getMonth() + 1}월 {visibleWeekStartDate.getDate()}일 ~ {addDays(visibleWeekStartDate, 6).getMonth() + 1}월 {addDays(visibleWeekStartDate, 6).getDate()}일
-          </span>
-          <div className="flex items-center gap-1.5">
-            <Button variant="ghost" size="sm" onClick={jumpToToday} className="text-xs h-7 px-2">
-              오늘
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            <span className="text-sm font-semibold text-foreground whitespace-nowrap">
+              {weekOrdinalLabel(visibleWeekStartDate)}
+            </span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
+              {visibleWeekStartDate.getMonth() + 1}.{visibleWeekStartDate.getDate()}~{visibleWeekEndDate.getMonth() + 1}.{visibleWeekEndDate.getDate()}
+            </span>
+            {visibleWeekHolidays.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">
+                {visibleWeekHolidays.slice(0, 2).map((h) => `${h.day}일 ${h.name}`).join(", ")}
+                {visibleWeekHolidays.length > 2 ? ` 외 ${visibleWeekHolidays.length - 2}` : ""}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Button
+              variant={isTodayWeekVisible ? "outline" : "default"}
+              size="sm"
+              onClick={jumpToToday}
+              className={`text-xs h-7 px-2.5 gap-1 rounded-full ${isTodayWeekVisible ? "text-muted-foreground" : ""}`}
+            >
+              <Locate className="w-3 h-3" /> 오늘
             </Button>
             {isManager && (
               <Button
@@ -1031,7 +1064,6 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
         <div ref={topSentinelRef} className="h-px" aria-hidden="true" />
         {renderWeeks.map(({ weekStartDate, weekStartStr, loaded }) => {
           const wDates = Array.from({ length: 7 }, (_, wi) => addDays(weekStartDate, wi));
-          const wEnd = wDates[6];
           return (
             <div
               key={weekStartStr}
@@ -1043,12 +1075,14 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 scrollMarginTop: minimapH + 52,
               } as any}
             >
-              <div className="mb-1 px-0.5 text-xs font-semibold text-muted-foreground">
-                {weekStartDate.getMonth() + 1}월 {weekStartDate.getDate()}일 ~ {wEnd.getMonth() + 1}월 {wEnd.getDate()}일
-              </div>
+              {/* E1: 주차 정보는 스티키 헤더 단독 담당 — 주 경계는 구분선만 유지 */}
+              <div className="mb-2 border-t border-border/70" aria-hidden="true" />
               <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
         {wDates.map((date, i) => {
           const dateStr = fmtDate(date);
+          // E2: 월 정보는 스티키 헤더 담당 — 월이 바뀌는 1일만 "M/1"로 경계 표시
+          const dayLabel = date.getDate() === 1 ? `${date.getMonth() + 1}/1` : `${date.getDate()}`;
+          const holidayName = getHolidayName(dateStr);
           if (!loaded) {
             // 골격 셀 — 데이터 미도착 구간 (스피너 없음, min-height 고정으로 CLS 방지)
             return (
@@ -1059,7 +1093,10 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 }`}
               >
                 <span className={`text-xs md:text-sm font-semibold ${i >= 5 ? "text-red-500/50" : "text-muted-foreground/50"}`}>
-                  {DAY_NAMES[i]} {date.getDate()}일
+                  {DAY_NAMES[i]} {dayLabel}
+                  {holidayName && (
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500/60 ml-1 align-middle" title={holidayName} />
+                  )}
                 </span>
                 <div className="mt-2 space-y-1 animate-pulse">
                   <div className="h-6 rounded bg-muted/60" />
@@ -1093,7 +1130,10 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                     isToday ? "text-primary" : isWeekend ? "text-red-500" : "text-muted-foreground"
                   }`}
                 >
-                  {DAY_NAMES[i]} {date.getDate()}일
+                  {DAY_NAMES[i]} {dayLabel}
+                  {holidayName && (
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 ml-1 align-middle" title={holidayName} />
+                  )}
                   {hc > 0 && <span className="ml-1 text-[10px] md:text-xs font-normal">({hc % 1 === 0 ? hc : hc.toFixed(1)}명)</span>}
                 </span>
                 {allDay.some((s) => s.status === "draft") && (
