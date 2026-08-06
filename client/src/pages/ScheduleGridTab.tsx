@@ -1127,6 +1127,28 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 })}
               </div>
 
+              {/* D1: 파생 휴무자 — 재직 직원 중 해당일 미배정 전원 (배정 1건 이상 있는 날만, 임시근로자 자연 제외) */}
+              {active.length > 0 && (() => {
+                const assignedIds = new Set(active.filter((s) => s.userId).map((s) => s.userId!));
+                const derivedOffs = (staffList as StaffItem[]).filter((s) => !assignedIds.has(s.userId));
+                if (derivedOffs.length === 0) return null;
+                const leaveIdSet = new Set((leavesByDate.get(dateStr) ?? []).map((lv) => lv.userId));
+                return (
+                  <div className="mt-1 text-[10px] md:text-[11px] text-muted-foreground leading-snug">
+                    휴무 {derivedOffs.length}:{" "}
+                    {derivedOffs.map((s, idx) => (
+                      <span key={s.userId} className="whitespace-nowrap">
+                        {leaveIdSet.has(s.userId) && (
+                          <span className="text-orange-500" title="휴무 기록 있음">●</span>
+                        )}
+                        {s.name.length >= 2 ? s.name.slice(1) : s.name}
+                        {idx < derivedOffs.length - 1 ? ", " : ""}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
+
               {isManager && (
                 quickMode && quickUserId ? (
                   <button
