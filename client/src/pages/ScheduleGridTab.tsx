@@ -665,15 +665,19 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     didPrefetchNextRef.current = false;
   }, [anchorKey, restaurantId]);
 
-  // 초기 로드 후 앵커 주로 스크롤 (스티키 헤더 아래 위치하도록 scroll-mt 사용)
+  // 초기 로드 후 앵커 날짜 셀로 스크롤 (없으면 주 블록, 스티키 스택 아래 위치는 scroll-margin으로)
+  const anchorDateStr = fmtDate(anchorDate);
   useLayoutEffect(() => {
     if (didInitialScrollRef.current || pages.length === 0) return;
-    const el = containerRef.current?.querySelector<HTMLElement>(`[data-week-start="${anchorKey}"]`);
+    const cont = containerRef.current;
+    const el =
+      cont?.querySelector<HTMLElement>(`[data-date="${anchorDateStr}"]`) ??
+      cont?.querySelector<HTMLElement>(`[data-week-start="${anchorKey}"]`);
     if (el) {
       el.scrollIntoView({ block: "start" });
       didInitialScrollRef.current = true;
     }
-  }, [pages.length, anchorKey]);
+  }, [pages.length, anchorKey, anchorDateStr]);
 
   // 초기 로드 직후 다음 페이지 1개 즉시 prefetch
   useEffect(() => {
@@ -748,7 +752,16 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     setAnchorDate(date);
   }, []);
 
-  const jumpToToday = useCallback(() => jumpToDate(new Date()), [jumpToDate]);
+  // 오늘로 가기: 주 블록이 아니라 오늘 '날짜 셀'이 상단에 오도록 (모바일 1열에서 체감 차이)
+  const jumpToToday = useCallback(() => {
+    const todayStr = fmtDate(new Date());
+    const cell = containerRef.current?.querySelector<HTMLElement>(`[data-date="${todayStr}"]`);
+    if (cell) {
+      cell.scrollIntoView({ block: "start", behavior: "smooth" });
+      return;
+    }
+    jumpToDate(new Date());
+  }, [jumpToDate]);
 
   const visibleWeekStartDate = useMemo(() => new Date(visibleWeekStartStr + "T12:00:00"), [visibleWeekStartStr]);
   const visibleWeekEnd = fmtDate(addDays(visibleWeekStartDate, 6)) + "T23:59:59";
@@ -1064,6 +1077,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
           return (
             <div
               key={dateStr}
+              data-date={dateStr}
+              style={{ scrollMarginTop: minimapH + 52 }}
               className={`border rounded-lg min-h-[100px] md:min-h-[140px] p-2 ${
                 isToday
                   ? "border-primary bg-primary/5"
