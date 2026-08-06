@@ -122,7 +122,20 @@ function MonthlyMinimap({
     }
   }, [baseDate]);
 
-  const [collapsed, setCollapsed] = useState(false);
+  // D2: 접기 상태 localStorage 유지, 저장값 없으면 모바일(<md) 기본 접힘
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      const saved = localStorage.getItem("schedule_minimap_collapsed");
+      if (saved !== null) return saved === "1";
+    } catch { /* Safari private 모드 등 */ }
+    return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+  });
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      try { localStorage.setItem("schedule_minimap_collapsed", c ? "0" : "1"); } catch { /* ignore */ }
+      return !c;
+    });
+  };
 
   return (
     <div className="border rounded-lg bg-card p-3">
@@ -133,7 +146,7 @@ function MonthlyMinimap({
           <button onClick={nextMonth} className="p-1 rounded hover:bg-accent"><ChevronRight className="w-4 h-4" /></button>
         </div>
         <button
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={toggleCollapsed}
           className="text-[10px] text-muted-foreground hover:text-foreground"
         >
           {collapsed ? "펼치기" : "접기"}
@@ -598,6 +611,20 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     return scrollerRef.current;
   }, []);
 
+  // D2: sticky 미니맵 높이 측정 → 주간 헤더 top·스크롤 보정 offset 동적화
+  const minimapWrapRef = useRef<HTMLDivElement | null>(null);
+  const [minimapH, setMinimapH] = useState(0);
+  const stickyOffsetRef = useRef(56);
+  stickyOffsetRef.current = minimapH + 52; // 주간 헤더(~44px) + 여백
+  useEffect(() => {
+    const el = minimapWrapRef.current;
+    if (!el) { setMinimapH(0); return; }
+    const ro = new ResizeObserver(() => setMinimapH(el.offsetHeight));
+    ro.observe(el);
+    setMinimapH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, [isManager, restaurantId]);
+
   // 렌더할 주 목록: 로드된 범위 + 양끝 1페이지(4주) 골격
   const renderWeeks = useMemo(() => {
     const list: { weekStartDate: Date; weekStartStr: string; loaded: boolean }[] = [];
@@ -697,7 +724,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
         const cont = containerRef.current;
         if (!cont) return;
         const topBound =
-          (scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top) + 56;
+          (scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top) +
+          stickyOffsetRef.current;
         const blocks = cont.querySelectorAll<HTMLElement>("[data-week-start]");
         for (const b of blocks) {
           if (b.getBoundingClientRect().bottom > topBound) {
@@ -906,13 +934,15 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
         <h1 className="text-lg font-bold text-foreground">스케줄 관리</h1>
       </div>
 
-      {/* ─── 월간 미니맵 (매니저) ──────────────── */}
+      {/* ─── 월간 미니맵 (매니저, sticky 고정) ──── */}
       {isManager && restaurantId > 0 && (
-        <MonthlyMinimap
-          restaurantId={restaurantId}
-          baseDate={visibleWeekStartDate}
-          onDateClick={jumpToDate}
-        />
+        <div ref={minimapWrapRef} className="sticky top-0 z-40 -mx-3 md:-mx-6 px-3 md:px-6 pb-1 bg-background">
+          <MonthlyMinimap
+            restaurantId={restaurantId}
+            baseDate={visibleWeekStartDate}
+            onDateClick={jumpToDate}
+          />
+        </div>
       )}
 
       {/* ─── 빠른배정 바 (매니저) ──────────────── */}
@@ -964,8 +994,11 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
         <span className="text-[9px]">(리포트·지출반영)</span>
       </div>
 
-      {/* ─── 스티키 주 헤더 (가시 주 기준) ─────── */}
-      <div className="sticky top-0 z-30 -mx-3 md:-mx-6 px-3 md:px-6 py-2 bg-background/95 backdrop-blur border-b border-border">
+      {/* ─── 스티키 주 헤더 (가시 주 기준, 미니맵 아래 겹 sticky) ─────── */}
+      <div
+        className="sticky z-30 -mx-3 md:-mx-6 px-3 md:px-6 py-2 bg-background/95 backdrop-blur border-b border-border"
+        style={{ top: minimapH }}
+      >
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-foreground whitespace-nowrap">
             {visibleWeekStartDate.getMonth() + 1}월 {visibleWeekStartDate.getDate()}일 ~ {addDays(visibleWeekStartDate, 6).getMonth() + 1}월 {addDays(visibleWeekStartDate, 6).getDate()}일
@@ -1011,8 +1044,11 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               key={weekStartStr}
               data-week-start={weekStartStr}
               data-loaded={loaded ? "true" : "false"}
-              className="scroll-mt-14"
-              style={{ contentVisibility: "auto", containIntrinsicSize: "auto 360px" } as any}
+              style={{
+                contentVisibility: "auto",
+                containIntrinsicSize: "auto 360px",
+                scrollMarginTop: minimapH + 52,
+              } as any}
             >
               <div className="mb-1 px-0.5 text-xs font-semibold text-muted-foreground">
                 {weekStartDate.getMonth() + 1}월 {weekStartDate.getDate()}일 ~ {wEnd.getMonth() + 1}월 {wEnd.getDate()}일
