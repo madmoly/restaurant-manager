@@ -3575,6 +3575,11 @@ function CloseTab({
     const gift = parseNum(giftCardAmount);
     const transfer = parseNum(transferAmount);
     const total = cash + card + gift + transfer + otherItems.reduce((s, i) => s + i.amount, 0);
+    // 서버 cumulative는 월초~오늘 '저장된' 금일분까지 포함(상한 inclusive).
+    // 이중집계 방지: 저장된 금일분을 빼고 라이브 total을 더해
+    // 항상 '이전일 누적 + 오늘 라이브'로 맞춘다. 미저장 편집도 즉시 반영.
+    const savedTodayTotal = Number((salesQuery.data as any)?.totalAmount ?? 0);
+    const cumulativeWithToday = cumulative - savedTodayTotal + total;
     const specialTotal = specialItems.reduce((s, i) => s + i.amount, 0);
     const fixedCash = rest?.fixedCashRegister ?? 200000;
 
@@ -3586,7 +3591,7 @@ function CloseTab({
     const lines: string[] = [];
     lines.push(`[${restName}] ${dateStr}`);
     lines.push('');
-    lines.push(`누적매출: ${fmtNum(cumulative)}원`);
+    lines.push(`누적매출: ${fmtNum(cumulativeWithToday)}원`);
     lines.push(`금일매출: ${fmtNum(total)}원`);
     lines.push('');
     lines.push(`현금: ${fmtNum(cash)}원`);
