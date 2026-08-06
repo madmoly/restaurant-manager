@@ -28,6 +28,7 @@ import {
   getWeekDates,
   fmtDate,
   fmtTime,
+  fmtRangeCompact,
   DAY_NAMES,
   STATUS_LABELS,
   resolvePresetLabel,
@@ -780,15 +781,18 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               <div className="space-y-1">
                 {active.map((s) => {
                   const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.draft;
-                  const presetLabel = s.shiftPreset ? resolvePresetLabel(s.shiftPreset, shiftPresets) : "";
+                  const isTemp = !!s.tempWorkerName;
+                  const isCustom = !s.shiftPreset || s.shiftPreset === "custom";
+                  const presetLabel = !isCustom ? resolvePresetLabel(s.shiftPreset, shiftPresets) : "";
                   return (
                     <button
                       key={s.id}
                       onClick={() => openEditModal(s)}
-                      className={`w-full text-left p-1 md:p-1.5 rounded bg-background border-l-2 ${st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors`}
+                      className={`w-full text-left p-1 md:p-1.5 rounded bg-background border-l-2 ${isTemp ? "border-l-orange-400" : st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors`}
                     >
                       <div className="flex items-center gap-1">
-                        <span className={`font-medium truncate text-[11px] md:text-xs ${s.tempWorkerName ? "text-orange-600 dark:text-orange-400" : "text-foreground"}`}>
+                        {isTemp && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-orange-500" aria-hidden="true" />}
+                        <span className={`font-medium text-[11px] md:text-xs ${isTemp ? "text-orange-600 dark:text-orange-400" : "text-foreground"}`}>
                           {(() => {
                             if (s.userName) {
                               return s.userName.length >= 2 ? s.userName.slice(1) : s.userName;
@@ -799,14 +803,11 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                         <span className={`shrink-0 px-1 py-0 rounded text-[9px] md:text-[10px] font-medium leading-tight ${st.color}`}>
                           {st.label.charAt(0)}
                         </span>
-                        {s.tempWorkerName && (
-                          <span className="shrink-0 px-1 py-0 rounded text-[9px] md:text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400">
-                            임시
-                          </span>
-                        )}
-                        <span className="text-muted-foreground text-[10px] md:text-[11px] shrink-0 ml-auto">
-                          {presetLabel ? presetLabel.charAt(0) : `${fmtTime(s.startTime)}~${fmtTime(s.endTime)}`}
-                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[10px] md:text-[11px] text-muted-foreground leading-tight tabular-nums">
+                        {isTemp || isCustom || !presetLabel
+                          ? fmtRangeCompact(s.startTime, s.endTime)
+                          : presetLabel}
                       </div>
                     </button>
                   );

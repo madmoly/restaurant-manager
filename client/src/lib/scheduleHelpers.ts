@@ -48,6 +48,22 @@ export function fmtTime(d: Date | string) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+/**
+ * 압축 시간 범위: 정시는 분 생략 — "10:00~15:00" → "10~15시", "10:30~15:00" → "10:30~15시".
+ * 종료가 정시가 아니면 "시" 접미사 생략 ("10~15:30").
+ */
+export function fmtRangeCompact(start: Date | string, end: Date | string): string {
+  const part = (d: Date | string) => {
+    const date = typeof d === "string" ? new Date(d) : d;
+    const h = date.getHours();
+    const m = date.getMinutes();
+    return m === 0 ? String(h) : `${h}:${String(m).padStart(2, "0")}`;
+  };
+  const endDate = typeof end === "string" ? new Date(end) : end;
+  const suffix = endDate.getMinutes() === 0 ? "시" : "";
+  return `${part(start)}~${part(end)}${suffix}`;
+}
+
 // ─── 상수 ─────────────────────────────────────────────────────────────────────
 
 export const DAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"];
