@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import {
   ChevronLeft,
   ChevronRight,
-  Copy,
   Send,
   Clock,
   X,
@@ -482,14 +481,6 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       setEditSchedule(null);
       setDeleteConfirm(false);
       if (dateStr) refreshDate(dateStr);
-    },
-    onError(err) { toast.error(err.message); },
-  });
-
-  const copyWeek = trpc.schedules.copyPreviousWeek.useMutation({
-    onSuccess(data, vars) {
-      toast.success(`지난주 ${data.copied}건 복사됨`);
-      refreshDate(vars.targetWeekStart);
     },
     onError(err) { toast.error(err.message); },
   });
@@ -1008,26 +999,15 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               오늘
             </Button>
             {isManager && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => copyWeek.mutate({ restaurantId, targetWeekStart: visibleWeekStartStr })}
-                  disabled={copyWeek.isPending}
-                  className="text-xs gap-1 h-7 px-2"
-                >
-                  <Copy className="w-3 h-3" /> 지난주 복사
-                </Button>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => confirmRange.mutate({ restaurantId, from: visibleWeekStartStr, to: visibleWeekEnd })}
-                  disabled={confirmRange.isPending}
-                  className="text-xs gap-1 h-7 px-2"
-                >
-                  <Send className="w-3 h-3" /> 초안 전체 확정
-                </Button>
-              </>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => confirmRange.mutate({ restaurantId, from: visibleWeekStartStr, to: visibleWeekEnd })}
+                disabled={confirmRange.isPending}
+                className="text-xs gap-1 h-7 px-2"
+              >
+                <Send className="w-3 h-3" /> 초안 전체 확정
+              </Button>
             )}
           </div>
         </div>
@@ -1974,28 +1954,40 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 </div>
               )}
 
-              {isManager && (
-                <div className="flex gap-2 pt-2">
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="flex-1"
-                    onClick={handleDelete}
-                    disabled={deleteSchedule.isPending}
-                  >
-                    <Trash2 className="w-4 h-4 mr-1" />
-                    {deleteConfirm ? "삭제 확인" : editSchedule.status === "draft" ? "삭제" : "취소 처리"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="flex-1"
-                    onClick={handleUpdate}
-                    disabled={updateSchedule.isPending}
-                  >
-                    저장
-                  </Button>
-                </div>
-              )}
+              {/* 오클릭 대비 명시적 닫기 버튼 — 변경사항 저장 없이 닫음 */}
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => { setEditSchedule(null); setDeleteConfirm(false); }}
+                >
+                  <X className="w-4 h-4 mr-1" />
+                  닫기
+                </Button>
+                {isManager && (
+                  <>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="flex-1"
+                      onClick={handleDelete}
+                      disabled={deleteSchedule.isPending}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      {deleteConfirm ? "삭제 확인" : editSchedule.status === "draft" ? "삭제" : "취소 처리"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      onClick={handleUpdate}
+                      disabled={updateSchedule.isPending}
+                    >
+                      저장
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>
