@@ -11,7 +11,9 @@
  * 여기서는 필드 분류와 상태 전이 규칙만 단위 테스트한다.
  */
 import { describe, it, expect } from "vitest";
+import { getTableColumns } from "drizzle-orm";
 import { A_FIELDS, B_FIELDS, C_FIELDS } from "../shared/contractFields.js";
+import { employmentElectronicContracts } from "../drizzle/schema.js";
 
 // ─── 필드 분류 무결성 ─────────────────────────────────────────────────────────
 
@@ -36,7 +38,7 @@ describe("계약서 필드 분류 (A/B/C군)", () => {
     ]);
   });
 
-  it("C군(단방향 sync): 8개 필드", () => {
+  it("C군(스냅샷 박제 대상): 8개 필드", () => {
     expect(C_FIELDS).toEqual([
       "name",
       "phone",
@@ -45,7 +47,7 @@ describe("계약서 필드 분류 (A/B/C군)", () => {
       "bankAccount",
       "affiliatedCompany",
       "hireDate",
-      "weeklyOffDays",
+      "contractOffDays",
     ]);
   });
 
@@ -67,50 +69,40 @@ describe("계약서 필드 분류 (A/B/C군)", () => {
 // ─── 스냅샷 필드 매핑 ─────────────────────────────────────────────────────────
 
 describe("스냅샷 필드 매핑", () => {
-  // 계약서 테이블의 snapshot* 컬럼은 A군 + C군 일부의 서명 시점 값
-  const SNAPSHOT_FIELDS = [
-    "snapshotName",
-    "snapshotPhone",
-    "snapshotAddress",
-    "snapshotWage",
-    "snapshotWageType",
-    "snapshotWeeklyHours",
-    "snapshotWeeklyOffDays",
-    "snapshotContractStart",
-    "snapshotContractEnd",
-    "snapshotAffiliatedCompany",
-  ];
+  // 하드코딩 픽스처 금지 — drizzle 스키마에서 실제 snapshot* 컬럼을 파생해 검증한다.
+  const SNAPSHOT_FIELDS = Object.keys(
+    getTableColumns(employmentElectronicContracts),
+  ).filter((key) => key.startsWith("snapshot"));
 
-  it("스냅샷 필드는 A군 + C군 일부 조합", () => {
-    // A군 전부 스냅샷됨
+  const toSnapshotName = (field: string) =>
+    `snapshot${field.charAt(0).toUpperCase() + field.slice(1)}`;
+
+  it("스키마에 snapshot* 컬럼이 존재함 (파생 실패 감지)", () => {
+    expect(SNAPSHOT_FIELDS.length).toBeGreaterThanOrEqual(20);
+  });
+
+  it("A군 전부 스냅샷됨", () => {
     for (const field of A_FIELDS) {
-      const snapshotName = `snapshot${field.charAt(0).toUpperCase() + field.slice(1)}`;
-      expect(SNAPSHOT_FIELDS).toContain(snapshotName);
+      expect(SNAPSHOT_FIELDS).toContain(toSnapshotName(field));
+    }
+  });
+
+  it("C군 전부 스냅샷됨 (residentNumber, bankAccount, hireDate 포함)", () => {
+    for (const field of C_FIELDS) {
+      expect(SNAPSHOT_FIELDS).toContain(toSnapshotName(field));
     }
   });
 
   it("B군 필드는 스냅샷되지 않음 (계약서와 무관)", () => {
     for (const field of B_FIELDS) {
-      const snapshotName = `snapshot${field.charAt(0).toUpperCase() + field.slice(1)}`;
-      expect(SNAPSHOT_FIELDS).not.toContain(snapshotName);
+      expect(SNAPSHOT_FIELDS).not.toContain(toSnapshotName(field));
     }
   });
 
-  it("C군 중 스냅샷 대상은 name, phone, address, affiliatedCompany, weeklyOffDays", () => {
-    const c_snapshot = ["name", "phone", "address", "affiliatedCompany", "weeklyOffDays"];
-    for (const field of c_snapshot) {
-      const snapshotName = `snapshot${field.charAt(0).toUpperCase() + field.slice(1)}`;
-      expect(SNAPSHOT_FIELDS).toContain(snapshotName);
-    }
-  });
-
-  it("C군 중 residentNumber, bankAccount, hireDate는 스냅샷에 없음", () => {
-    // 이 필드들은 employee_contracts 테이블로 직접 sync (별도 보안)
-    const notSnapshotted = ["residentNumber", "bankAccount", "hireDate"];
-    for (const field of notSnapshotted) {
-      const snapshotName = `snapshot${field.charAt(0).toUpperCase() + field.slice(1)}`;
-      expect(SNAPSHOT_FIELDS).not.toContain(snapshotName);
-    }
+  it("deprecated snapshotWeeklyOffDays는 snapshotContractOffDays와 공존", () => {
+    // 2026-07-02 계약휴무일수 컬럼 교체 — 구 컬럼은 데이터 보존용으로 유지
+    expect(SNAPSHOT_FIELDS).toContain("snapshotWeeklyOffDays");
+    expect(SNAPSHOT_FIELDS).toContain("snapshotContractOffDays");
   });
 });
 
