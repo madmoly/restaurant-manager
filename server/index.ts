@@ -55,6 +55,8 @@ app.use(express.json({ limit: "10mb" }));
         INDEX idx_leave_date (leaveDate, restaurantId)
       )
     `);
+    // 2026-08-06: 휴무 기록 출처 — 'employee'(직원 신청) | 'manager'(매니저 지정)
+    await addColumnIfNotExists("leave_requests", "source", "VARCHAR(16) DEFAULT 'employee'");
 
     // error_logs 테이블 (에러 자동 수집)
     await conn.query(`

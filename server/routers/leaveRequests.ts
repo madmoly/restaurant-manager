@@ -4,6 +4,7 @@ import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { leaveRequests, users } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+import { insertManagerLeaves } from "../helpers/dayAssign";
 
 const LEAVE_TYPE_LABELS: Record<string, string> = {
   dayoff: "휴무",
@@ -68,6 +69,59 @@ export const leaveRequestsRouter = router({
         .where(and(...conditions))
         .orderBy(desc(leaveRequests.leaveDate))
         .limit(100);
+    }),
+
+  /** 기간별 휴무 조회 — 주간 그리드 휴무자 칩용 (직원도 조회 가능, verifyStoreAccess 필수) */
+  listByDateRange: protectedProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      from: z.string(), // "YYYY-MM-DD"
+      to: z.string(),
+      status: z.enum(["approved"]).optional(),
+    }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const conditions = [
+        eq(leaveRequests.restaurantId, input.restaurantId),
+        sql`${leaveRequests.leaveDate} >= ${input.from}`,
+        sql`${leaveRequests.leaveDate} <= ${input.to}`,
+      ];
+      if (input.status) conditions.push(eq(leaveRequests.status, input.status) as any);
+      return db
+        .select({
+          id: leaveRequests.id,
+          userId: leaveRequests.userId,
+          userName: users.name,
+          // 타임존 모호성 방지: DATE 컬럼을 문자열로 직렬화
+          leaveDate: sql<string>`DATE_FORMAT(${leaveRequests.leaveDate}, '%Y-%m-%d')`,
+          leaveType: leaveRequests.leaveType,
+          status: leaveRequests.status,
+          source: leaveRequests.source,
+        })
+        .from(leaveRequests)
+        .leftJoin(users, eq(leaveRequests.userId, users.id))
+        .where(and(...conditions))
+        .orderBy(leaveRequests.leaveDate);
+    }),
+
+  /** 매니저 지정 휴무 — 5일 전 제한 미적용, 즉시 approved/source='manager' 기록 */
+  createByManager: managerProcedure
+    .input(z.object({
+      restaurantId: z.number(),
+      userIds: z.array(z.number()).min(1).max(50),
+      leaveDate: z.string(), // "YYYY-MM-DD"
+      leaveType: z.enum(["dayoff"]).default("dayoff"),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      const { recorded, skipped } = await insertManagerLeaves(db, {
+        restaurantId: input.restaurantId,
+        userIds: input.userIds,
+        leaveDate: input.leaveDate,
+        leaveType: input.leaveType,
+        reviewerId: ctx.user.userId,
+      });
+      return { recorded, skipped };
     }),
 
   /** 신청 생성 (직원) — 최소 5일 전 */

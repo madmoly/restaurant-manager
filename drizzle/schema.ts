@@ -412,6 +412,8 @@ export const leaveRequests = mysqlTable("leave_requests", {
   leaveType: mysqlEnum("leaveType", ["dayoff", "half_morning", "half_evening"]).notNull().default("dayoff"),
   reason: text("reason"),
   status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  // 'employee' = 직원 사전 신청, 'manager' = 매니저 지정 (승인 즉시 기록, 수당·대체휴무 미발생)
+  source: varchar("source", { length: 16 }).default("employee"),
   reviewedBy: int("reviewedBy"),
   reviewNote: text("reviewNote"),
   reviewedAt: timestamp("reviewedAt"),

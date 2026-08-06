@@ -12,11 +12,13 @@ import {
   restaurantUsers,
   employeeWageHistory,
   restaurantShiftPresets,
+  leaveRequests,
   leaveTransactions,
   affiliatedCompanies,
   employmentElectronicContracts,
 } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+import { hasDuplicateSchedule, insertManagerLeaves } from "../helpers/dayAssign";
 import { getHolidayName } from "@shared/holidays";
 import {
   computeWageForShift,
@@ -71,38 +73,10 @@ async function isClosedDay(restaurantId: number, dateStr: string): Promise<boole
   return !!closure;
 }
 
-/** 동일 매장·날짜에 해당 직원(또는 임시직원)의 스케줄이 이미 있는지 검사 */
-async function hasDuplicateSchedule(
-  restaurantId: number,
-  dateStr: string,
-  opts: { userId?: number | null; tempWorkerName?: string | null; excludeId?: number }
-): Promise<boolean> {
-  const dayStart = new Date(`${dateStr}T00:00:00+09:00`);
-  const dayEnd = new Date(`${dateStr}T23:59:59+09:00`);
-
-  const conditions = [
-    eq(schedules.restaurantId, restaurantId),
-    gte(schedules.startTime, dayStart),
-    sql`${schedules.startTime} <= ${dayEnd}`,
-    sql`${schedules.status} != 'canceled'`,
-  ];
-
-  if (opts.userId) {
-    conditions.push(eq(schedules.userId, opts.userId));
-  } else if (opts.tempWorkerName) {
-    conditions.push(sql`${schedules.tempWorkerName} = ${opts.tempWorkerName}`);
-  }
-
-  if (opts.excludeId) {
-    conditions.push(sql`${schedules.id} != ${opts.excludeId}`);
-  }
-
-  const [existing] = await db
-    .select({ id: schedules.id })
-    .from(schedules)
-    .where(and(...conditions))
-    .limit(1);
-  return !!existing;
+/** KST 기준 HH:mm 추출 (timestamp → 시각 문자열) */
+function toKSTHHmm(d: Date): string {
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().substring(11, 16);
 }
 
 // ─── 스케줄 라우터 ──────────────────────────────────────────────────────────
@@ -458,6 +432,176 @@ export const schedulesRouter = router({
       }
 
       return { created: results, skipped };
+    }),
+
+  /** 재직 직원별 가장 최근 근무 패턴 — 휴무자 우선 배정 미리보기용 (임시근로자 행 제외) */
+  lastPatterns: managerProcedure
+    .input(z.object({ restaurantId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const res = await db.execute(sql`
+        SELECT userId, shiftPreset, startTime, endTime, breakMinutes FROM (
+          SELECT s.userId, s.shiftPreset, s.startTime, s.endTime, s.breakMinutes,
+                 ROW_NUMBER() OVER (PARTITION BY s.userId ORDER BY s.startTime DESC) AS rn
+          FROM schedules s
+          JOIN restaurant_users ru ON ru.userId = s.userId AND ru.restaurantId = s.restaurantId
+          WHERE s.restaurantId = ${input.restaurantId}
+            AND s.userId IS NOT NULL
+            AND s.status != 'canceled'
+            AND ru.resignedAt IS NULL
+        ) t WHERE t.rn = 1
+      `);
+      const rows = res[0] as unknown as any[];
+      return rows.map((r) => {
+        const st = new Date(r.startTime);
+        const et = new Date(r.endTime);
+        return {
+          userId: r.userId as number,
+          shiftPreset: (r.shiftPreset ?? null) as string | null,
+          startHHmm: toKSTHHmm(st),
+          endHHmm: toKSTHHmm(et),
+          breakMinutes: (r.breakMinutes ?? 0) as number,
+          lastWorkDate: toKSTDateString(st),
+        };
+      });
+    }),
+
+  /** 휴무자 지정 + 나머지 재직 직원을 각자 최근 근무 패턴으로 draft 자동배정 (트랜잭션) */
+  assignDayWithOffs: managerProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        workDate: z.string(), // YYYY-MM-DD
+        offUserIds: z.array(z.number()).max(50),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+      if (await isClosedDay(input.restaurantId, input.workDate)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
+      }
+
+      // 자동배정 대상 = 직원정보 등록 재직자만 (restaurants.getStaff와 동일 기준, 임시근로자 제외)
+      const staffRows = await db
+        .select({ userId: restaurantUsers.userId })
+        .from(restaurantUsers)
+        .innerJoin(users, eq(restaurantUsers.userId, users.id))
+        .where(
+          and(
+            eq(restaurantUsers.restaurantId, input.restaurantId),
+            eq(users.isActive, true),
+            sql`${restaurantUsers.resignedAt} IS NULL`
+          )
+        );
+
+      const dayStart = new Date(`${input.workDate}T00:00:00+09:00`);
+      const dayEnd = new Date(`${input.workDate}T23:59:59+09:00`);
+      const scheduledRows = await db
+        .select({ userId: schedules.userId })
+        .from(schedules)
+        .where(
+          and(
+            eq(schedules.restaurantId, input.restaurantId),
+            gte(schedules.startTime, dayStart),
+            sql`${schedules.startTime} <= ${dayEnd}`,
+            sql`${schedules.status} != 'canceled'`,
+            sql`${schedules.userId} IS NOT NULL`
+          )
+        );
+      const leaveRows = await db
+        .select({ userId: leaveRequests.userId })
+        .from(leaveRequests)
+        .where(
+          and(
+            eq(leaveRequests.restaurantId, input.restaurantId),
+            sql`${leaveRequests.leaveDate} = ${input.workDate}`,
+            eq(leaveRequests.status, "approved")
+          )
+        );
+
+      const offSet = new Set(input.offUserIds);
+      const excluded = new Set<number>([
+        ...scheduledRows.map((r) => r.userId!),
+        ...leaveRows.map((r) => r.userId),
+      ]);
+      const targets = staffRows
+        .map((r) => r.userId)
+        .filter((uid) => !offSet.has(uid) && !excluded.has(uid));
+
+      // 각 대상의 가장 최근 스케줄 (배정일 이전 건만, 임시근로자 행 제외)
+      const patterns = new Map<
+        number,
+        { start: Date; end: Date; breakMinutes: number; shiftPreset: string | null }
+      >();
+      if (targets.length > 0) {
+        const res = await db.execute(sql`
+          SELECT userId, shiftPreset, startTime, endTime, breakMinutes FROM (
+            SELECT userId, shiftPreset, startTime, endTime, breakMinutes,
+                   ROW_NUMBER() OVER (PARTITION BY userId ORDER BY startTime DESC) AS rn
+            FROM schedules
+            WHERE restaurantId = ${input.restaurantId}
+              AND userId IN (${sql.join(targets.map((t) => sql`${t}`), sql`, `)})
+              AND status != 'canceled'
+              AND startTime < ${dayStart}
+          ) t WHERE t.rn = 1
+        `);
+        for (const r of res[0] as unknown as any[]) {
+          patterns.set(r.userId, {
+            start: new Date(r.startTime),
+            end: new Date(r.endTime),
+            breakMinutes: r.breakMinutes ?? 0,
+            shiftPreset: r.shiftPreset ?? null,
+          });
+        }
+      }
+
+      const assigned: { userId: number; startTime: string; endTime: string; preset: string | null }[] = [];
+      const skippedNoHistory: number[] = [];
+
+      const offs = await db.transaction(async (tx) => {
+        for (const uid of targets) {
+          const pat = patterns.get(uid);
+          if (!pat) {
+            skippedNoHistory.push(uid);
+            continue;
+          }
+          if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { userId: uid }, tx)) {
+            continue;
+          }
+          // time-of-day 복사, 야간(익일 종료) 시프트는 duration 유지로 보존
+          const newStart = new Date(`${input.workDate}T${toKSTHHmm(pat.start)}:00+09:00`);
+          const newEnd = new Date(newStart.getTime() + (pat.end.getTime() - pat.start.getTime()));
+          await tx.insert(schedules).values({
+            userId: uid,
+            restaurantId: input.restaurantId,
+            startTime: newStart,
+            endTime: newEnd,
+            breakMinutes: pat.breakMinutes,
+            shiftPreset: pat.shiftPreset ?? "custom",
+            status: "draft",
+            createdBy: ctx.user.userId,
+          });
+          assigned.push({
+            userId: uid,
+            startTime: toKSTHHmm(newStart),
+            endTime: toKSTHHmm(newEnd),
+            preset: pat.shiftPreset,
+          });
+        }
+        return insertManagerLeaves(tx, {
+          restaurantId: input.restaurantId,
+          userIds: input.offUserIds,
+          leaveDate: input.workDate,
+          reviewerId: ctx.user.userId,
+        });
+      });
+
+      return {
+        assigned,
+        skippedNoHistory,
+        offsRecorded: offs.recorded,
+        offsSkipped: offs.skipped,
+      };
     }),
 
   /** 스케줄 수정 — 상태별 정책 적용 */

@@ -236,7 +236,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   const [quickPreset, setQuickPreset] = useState<string>("full");
 
   // ─── 모달 상태 ─────────────────────────────
-  type AssignStep = "employee" | "preset" | "custom-time" | "temp-worker";
+  type AssignStep = "employee" | "preset" | "custom-time" | "temp-worker" | "off-select" | "off-preview";
   const [assignDate, setAssignDate] = useState<string | null>(null);
   const [assignStep, setAssignStep] = useState<AssignStep>("employee");
   const [assignUserIds, setAssignUserIds] = useState<Set<number>>(new Set());
@@ -255,6 +255,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     breakMinutes: "",
     note: "",
   });
+  // 휴무자 우선 배정 (Step A에서 선택한 신규 휴무자 — 기존 승인 휴무자는 제외)
+  const [offUserIds, setOffUserIds] = useState<Set<number>>(new Set());
   const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
   const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "", shiftPreset: "custom" as string, breakMinutes: 0 });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -270,6 +272,18 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     { restaurantId },
     { enabled: restaurantId > 0 },
   ) as { data: StaffItem[] };
+
+  // 주간 승인 휴무 (휴무자 칩 표시용 — 직원도 조회)
+  const { data: weekLeaves = [] } = trpc.leaveRequests.listByDateRange.useQuery(
+    { restaurantId, from: weekStart, to: fmtDate(weekDates[6]), status: "approved" },
+    { enabled: restaurantId > 0 },
+  );
+
+  // 최근 근무 패턴 (자동배정 미리보기 단계에서만 fetch)
+  const { data: lastPatterns = [] } = trpc.schedules.lastPatterns.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 && isManager && assignStep === "off-preview" },
+  );
 
   // ─── Mutations ─────────────────────────────
   const quickAssignMut = trpc.schedules.quickAssign.useMutation({
@@ -406,7 +420,33 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   const invalidate = useCallback(() => {
     utils.schedules.listByRestaurant.invalidate();
     utils.schedules.monthlySummary.invalidate();
+    utils.leaveRequests.listByDateRange.invalidate();
   }, [utils]);
+
+  const staffNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    (staffList as StaffItem[]).forEach((s) => m.set(s.userId, s.name));
+    return m;
+  }, [staffList]);
+
+  const assignDayWithOffsMut = trpc.schedules.assignDayWithOffs.useMutation({
+    onSuccess(data) {
+      const parts = [`${data.assigned.length}명 자동배정`];
+      if (data.offsRecorded.length > 0) parts.push(`휴무 ${data.offsRecorded.length}명 기록`);
+      toast.success(parts.join(" · "));
+      if (data.skippedNoHistory.length > 0) {
+        const names = data.skippedNoHistory.map((uid) => staffNameById.get(uid) ?? `#${uid}`).join(", ");
+        toast.info(`근무이력 없어 제외: ${names}`);
+      }
+      if (data.offsSkipped.length > 0) {
+        const msgs = data.offsSkipped.map((s) => `${staffNameById.get(s.userId) ?? `#${s.userId}`}(${s.reason})`).join(", ");
+        toast.info(`휴무 기록 제외: ${msgs}`);
+      }
+      closeAssignModal();
+      invalidate();
+    },
+    onError(err) { toast.error(err.message); },
+  });
 
   // ─── 메모이제이션된 데이터 ───────────────────
   const scheduleByDate = useMemo(() => {
@@ -442,6 +482,30 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     const daySchedules = scheduleByDate.get(assignDate) ?? [];
     return new Set(daySchedules.filter((s) => s.userId && s.status !== "canceled").map((s) => s.userId!));
   }, [assignDate, scheduleByDate]);
+
+  // 날짜별 승인 휴무 목록 (휴무자 칩)
+  type LeaveChip = { id: number; userId: number; userName: string | null; leaveType: string; source: string | null };
+  const leavesByDate = useMemo(() => {
+    const map = new Map<string, LeaveChip[]>();
+    (weekLeaves as LeaveChip[] & { leaveDate: string }[]).forEach((lv: any) => {
+      const list = map.get(lv.leaveDate) ?? [];
+      list.push(lv);
+      map.set(lv.leaveDate, list);
+    });
+    return map;
+  }, [weekLeaves]);
+
+  // 배정 모달 대상 날짜의 기존 승인 휴무자 (Step A에서 미리 체크 + disabled)
+  const existingLeaveUserIds = useMemo(() => {
+    if (!assignDate) return new Set<number>();
+    return new Set((leavesByDate.get(assignDate) ?? []).map((lv) => lv.userId));
+  }, [assignDate, leavesByDate]);
+
+  const patternByUser = useMemo(() => {
+    const m = new Map<number, { shiftPreset: string | null; startHHmm: string; endHHmm: string; breakMinutes: number; lastWorkDate: string }>();
+    (lastPatterns as any[]).forEach((p) => m.set(p.userId, p));
+    return m;
+  }, [lastPatterns]);
 
   const presetTimesMap = useMemo(() => {
     const map = new Map<string, { startTime: string; endTime: string; breakMinutes?: number } | null>();
@@ -503,8 +567,17 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     setAssignUserNames(new Map());
     setCustomTime({ startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
     setTempForm({ name: "", wageType: "hourly", wageAmount: "", startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
+    setOffUserIds(new Set());
   };
-  const closeAssignModal = () => { setAssignDate(null); setAssignStep("employee"); };
+  const closeAssignModal = () => { setAssignDate(null); setAssignStep("employee"); setOffUserIds(new Set()); };
+
+  const toggleOffUser = (userId: number) => {
+    setOffUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId); else next.add(userId);
+      return next;
+    });
+  };
 
   const toggleEmployee = (userId: number, name: string) => {
     setAssignUserIds(prev => {
@@ -778,6 +851,21 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 )}
               </div>
 
+              {/* 휴무자 칩 */}
+              {(leavesByDate.get(dateStr) ?? []).length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-1">
+                  {(leavesByDate.get(dateStr) ?? []).map((lv) => (
+                    <span
+                      key={lv.id}
+                      className="px-1.5 py-0.5 rounded text-[9px] md:text-[10px] font-medium bg-red-50 text-red-500 dark:bg-red-900/20 dark:text-red-400 border border-red-100 dark:border-red-900/40"
+                    >
+                      {lv.leaveType === "dayoff" ? "휴무" : "반차"}{" "}
+                      {lv.userName ? (lv.userName.length >= 2 ? lv.userName.slice(1) : lv.userName) : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+
               <div className="space-y-1">
                 {active.map((s) => {
                   const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.draft;
@@ -863,6 +951,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   )}
                   {assignStep === "custom-time" && `${assignUserName} — 시간 직접입력`}
                   {assignStep === "temp-worker" && "임시근로자 등록"}
+                  {assignStep === "off-select" && "휴무자 선택"}
+                  {assignStep === "off-preview" && "자동배정 미리보기"}
                 </h2>
                 <p className="text-xs text-muted-foreground mt-0.5">{assignDate}</p>
               </div>
@@ -874,6 +964,21 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
             {/* Step 1: 직원 목록 (다중 체크박스 선택) */}
             {assignStep === "employee" && (
               <div className="overflow-y-auto flex-1 px-4 pb-4 flex flex-col">
+                {/* 빈 날짜: 휴무자 우선 배정 진입 */}
+                {(activeSchedulesByDate.get(assignDate)?.length ?? 0) === 0 && staffList.length > 0 && (
+                  <button
+                    onClick={() => { setOffUserIds(new Set()); setAssignStep("off-select"); }}
+                    className="w-full flex items-center gap-3 p-3 mb-2 rounded-lg border border-primary/40 bg-primary/5 text-sm hover:bg-primary/10 active:bg-primary/15 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <Zap className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="text-left">
+                      <span className="font-medium text-foreground">휴무자 먼저 정하고 나머지 자동배정</span>
+                      <span className="block text-xs text-muted-foreground">각자 최근 근무 시간으로 초안 생성</span>
+                    </div>
+                  </button>
+                )}
                 {staffList.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">등록된 직원이 없습니다</p>
                 ) : (
@@ -1261,6 +1366,142 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 </Button>
               </div>
             )}
+
+            {/* Step A: 휴무자 선택 */}
+            {assignStep === "off-select" && (
+              <div className="overflow-y-auto flex-1 px-4 pb-4 flex flex-col">
+                <button
+                  onClick={() => setAssignStep("employee")}
+                  className="text-xs text-muted-foreground hover:text-foreground mb-2 flex items-center gap-1 self-start"
+                >
+                  <ChevronLeft className="w-3 h-3" /> 직원 선택으로
+                </button>
+                <p className="text-xs text-muted-foreground mb-2">
+                  이 날 쉬는 직원을 체크하세요. 나머지 재직 직원은 각자 최근 근무 시간으로 자동배정됩니다.
+                </p>
+                <div className="space-y-1">
+                  {(staffList as StaffItem[]).map((staff) => {
+                    const isExistingLeave = existingLeaveUserIds.has(staff.userId);
+                    const isChecked = isExistingLeave || offUserIds.has(staff.userId);
+                    return (
+                      <button
+                        key={staff.userId}
+                        disabled={isExistingLeave}
+                        onClick={() => toggleOffUser(staff.userId)}
+                        className={`w-full flex items-center justify-between p-3 rounded-lg text-sm transition-colors ${
+                          isExistingLeave
+                            ? "opacity-50 cursor-not-allowed bg-muted/30"
+                            : isChecked
+                            ? "bg-red-50 dark:bg-red-900/15 ring-1 ring-red-300 dark:ring-red-800"
+                            : "hover:bg-accent active:bg-accent/70"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
+                            isChecked ? "border-red-400 bg-red-400" : "border-muted-foreground/40"
+                          }`}>
+                            {isChecked && <Check className="w-3.5 h-3.5 text-white" />}
+                          </div>
+                          <span className="font-medium text-foreground">{staff.name}</span>
+                        </div>
+                        {isExistingLeave && (
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-muted text-muted-foreground">휴무 승인됨</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 pt-3 border-t border-border">
+                  <button
+                    onClick={() => setAssignStep("off-preview")}
+                    className="w-full flex items-center justify-center gap-2 p-3 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80 transition-colors"
+                  >
+                    휴무 {offUserIds.size}명 — 자동배정 미리보기
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step B: 자동배정 미리보기 → 확인 */}
+            {assignStep === "off-preview" && (() => {
+              const autoTargets = (staffList as StaffItem[]).filter(
+                (s) => !offUserIds.has(s.userId) && !existingLeaveUserIds.has(s.userId) && !assignedUserIds.has(s.userId),
+              );
+              const withPattern = autoTargets.filter((s) => patternByUser.has(s.userId));
+              const noHistory = autoTargets.filter((s) => !patternByUser.has(s.userId));
+              const offNames = [...offUserIds].map((uid) => staffNameById.get(uid) ?? `#${uid}`);
+              return (
+                <div className="overflow-y-auto flex-1 px-4 pb-4 flex flex-col">
+                  <button
+                    onClick={() => setAssignStep("off-select")}
+                    className="text-xs text-muted-foreground hover:text-foreground mb-2 flex items-center gap-1 self-start"
+                  >
+                    <ChevronLeft className="w-3 h-3" /> 휴무자 다시 선택
+                  </button>
+
+                  {offNames.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs font-medium text-muted-foreground mb-1">휴무 기록 예정 ({offNames.length}명)</p>
+                      <div className="flex flex-wrap gap-1">
+                        {offNames.map((n) => (
+                          <span key={n} className="px-2 py-0.5 rounded text-xs bg-red-50 text-red-500 dark:bg-red-900/20 dark:text-red-400">{n}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs font-medium text-muted-foreground mb-1">자동배정 예정 ({withPattern.length}명)</p>
+                  {withPattern.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-3 text-center">자동배정할 직원이 없습니다</p>
+                  ) : (
+                    <div className="space-y-1 mb-3">
+                      {withPattern.map((s) => {
+                        const pat = patternByUser.get(s.userId)!;
+                        const isCustomPat = !pat.shiftPreset || pat.shiftPreset === "custom";
+                        const label = !isCustomPat ? resolvePresetLabel(pat.shiftPreset, shiftPresets) : "";
+                        return (
+                          <div key={s.userId} className="flex items-center justify-between p-2.5 rounded-lg border border-border/60 text-sm">
+                            <span className="font-medium text-foreground">{s.name}</span>
+                            <span className="text-xs text-muted-foreground tabular-nums">
+                              {label ? `${label} · ` : ""}{pat.startHHmm}~{pat.endHHmm}
+                              <span className="ml-1 text-[10px]">(최근 {pat.lastWorkDate.substring(5)})</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {noHistory.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">근무이력 없음 → 제외 ({noHistory.length}명)</p>
+                      <div className="flex flex-wrap gap-1">
+                        {noHistory.map((s) => (
+                          <span key={s.userId} className="px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400">{s.name}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-auto pt-3 border-t border-border">
+                    <Button
+                      className="w-full"
+                      onClick={() => {
+                        if (!assignDate) return;
+                        assignDayWithOffsMut.mutate({
+                          restaurantId,
+                          workDate: assignDate,
+                          offUserIds: [...offUserIds],
+                        });
+                      }}
+                      disabled={assignDayWithOffsMut.isPending || (withPattern.length === 0 && offUserIds.size === 0)}
+                    >
+                      {assignDayWithOffsMut.isPending ? "배정 중..." : `확인 — ${withPattern.length}명 배정 · 휴무 ${offUserIds.size}명`}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
