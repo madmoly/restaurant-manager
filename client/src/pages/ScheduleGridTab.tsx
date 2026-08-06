@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, useLayoutEffect } from "react";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { trpc } from "../lib/trpc";
 import { toast } from "sonner";
 import {
@@ -42,6 +43,27 @@ interface ScheduleGridTabProps {
   isManager: boolean;
   shiftPresets: any[];
   current: any;
+}
+
+// ─── 무한스크롤 헬퍼 ────────────────────────────────────────────────────────
+
+const WEEKS_PER_PAGE = 4;
+
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+/** 가장 가까운 스크롤 가능한 조상 (AppLayout의 <main overflow-y-auto>) */
+function getScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null;
+  while (node) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+    node = node.parentElement;
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? null;
 }
 
 // ─── 월간 미니맵 컴포넌트 ───────────────────────────────────────────────────
@@ -221,14 +243,20 @@ function BreakMinutesInput({
 // ─── 메인 ScheduleGridTab ───────────────────────────────────────────────────
 
 export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets, current }: ScheduleGridTabProps) {
-  const [baseDate, setBaseDate] = useState(() => {
+  // 앵커: 스트림 페이지 계산의 기준 날짜 (?date= 진입 시 해당 주가 초기 페이지 중심)
+  const [anchorDate, setAnchorDate] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const d = params.get("date");
     return d ? new Date(d + "T12:00:00") : new Date();
   });
-  const weekDates = useMemo(() => getWeekDates(baseDate), [baseDate]);
-  const weekStart = fmtDate(weekDates[0]);
-  const weekEnd = fmtDate(weekDates[6]) + "T23:59:59";
+  const anchorMonday = useMemo(() => getWeekDates(anchorDate)[0], [anchorDate]);
+  const anchorKey = fmtDate(anchorMonday);
+  // page 0 = 앵커 주 - 1주부터 4주 (앵커 주가 페이지 안쪽에 오도록)
+  const page0Start = useMemo(() => addDays(anchorMonday, -7), [anchorKey]);
+
+  // 현재 가시 주 (스티키 헤더 + 미니맵 동기용)
+  const [visibleWeekStartStr, setVisibleWeekStartStr] = useState(anchorKey);
+  useEffect(() => { setVisibleWeekStartStr(anchorKey); }, [anchorKey]);
 
   // ─── 빠른배정 상태 ─────────────────────────
   const [quickMode, setQuickMode] = useState(false);
@@ -262,22 +290,66 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
 
-  const { data: scheduleList = [], isLoading } = trpc.schedules.listByRestaurant.useQuery(
-    { restaurantId, from: weekStart, to: weekEnd },
-    { enabled: restaurantId > 0 },
+  // ─── 주간 스트림 (4주 단위 페이지, 양방향 무한 로드) ─────────────────────
+  type StreamPage = { pageIndex: number; from: string; to: string; items: ScheduleItem[]; leaves: any[] };
+  const streamKey = useMemo(() => ["schedules", "stream", restaurantId, anchorKey], [restaurantId, anchorKey]);
+
+  const pageIndexForDate = useCallback((dateStr: string) => {
+    const d = new Date(dateStr + "T12:00:00");
+    const base = new Date(page0Start);
+    base.setHours(12, 0, 0, 0);
+    const diff = Math.round((d.getTime() - base.getTime()) / 86400000);
+    return Math.floor(diff / (WEEKS_PER_PAGE * 7));
+  }, [page0Start]);
+
+  const fetchPage = useCallback(async (pageIndex: number): Promise<StreamPage> => {
+    const start = addDays(page0Start, pageIndex * WEEKS_PER_PAGE * 7);
+    const from = fmtDate(start);
+    const toDate = fmtDate(addDays(start, WEEKS_PER_PAGE * 7 - 1));
+    const [items, leaves] = await Promise.all([
+      utils.client.schedules.listByRestaurant.query({ restaurantId, from, to: toDate + "T23:59:59" }),
+      utils.client.leaveRequests.listByDateRange.query({ restaurantId, from, to: toDate, status: "approved" }),
+    ]);
+    return { pageIndex, from, to: toDate, items: items as ScheduleItem[], leaves };
+  }, [restaurantId, page0Start, utils]);
+
+  const stream = useInfiniteQuery({
+    queryKey: streamKey,
+    queryFn: ({ pageParam }) => fetchPage(pageParam as number),
+    initialPageParam: 0,
+    getNextPageParam: (last: StreamPage) => last.pageIndex + 1,
+    getPreviousPageParam: (first: StreamPage) => first.pageIndex - 1,
+    staleTime: 5 * 60_000,
+    enabled: restaurantId > 0,
+  });
+
+  const pages = useMemo(
+    () => ([...(stream.data?.pages ?? [])] as StreamPage[]).sort((a, b) => a.pageIndex - b.pageIndex),
+    [stream.data],
   );
+  const minPage = pages[0]?.pageIndex ?? 0;
+  const maxPage = pages[pages.length - 1]?.pageIndex ?? -1;
+
+  /** 해당 날짜가 포함된 페이지만 재조회해 캐시 교체 (스트림 전체 무효화 방지) */
+  const refreshDate = useCallback(async (dateStr: string) => {
+    utils.schedules.monthlySummary.invalidate();
+    const p = pageIndexForDate(dateStr);
+    try {
+      const fresh = await fetchPage(p);
+      queryClient.setQueryData(streamKey, (old: any) =>
+        old ? { ...old, pages: old.pages.map((pg: StreamPage) => (pg.pageIndex === p ? fresh : pg)) } : old,
+      );
+    } catch {
+      queryClient.invalidateQueries({ queryKey: streamKey, refetchType: "active" });
+    }
+  }, [fetchPage, pageIndexForDate, queryClient, streamKey, utils]);
 
   const { data: staffList = [] } = trpc.restaurants.getStaff.useQuery(
     { restaurantId },
     { enabled: restaurantId > 0 },
   ) as { data: StaffItem[] };
-
-  // 주간 승인 휴무 (휴무자 칩 표시용 — 직원도 조회)
-  const { data: weekLeaves = [] } = trpc.leaveRequests.listByDateRange.useQuery(
-    { restaurantId, from: weekStart, to: fmtDate(weekDates[6]), status: "approved" },
-    { enabled: restaurantId > 0 },
-  );
 
   // 최근 근무 패턴 (자동배정 미리보기 단계에서만 fetch)
   const { data: lastPatterns = [] } = trpc.schedules.lastPatterns.useQuery(
@@ -287,83 +359,89 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
 
   // ─── Mutations ─────────────────────────────
   const quickAssignMut = trpc.schedules.quickAssign.useMutation({
-    onSuccess() {
+    onSuccess(_data, vars) {
       toast.success("스케줄 등록됨");
       closeAssignModal();
-      invalidate();
+      refreshDate(vars.workDate);
     },
     onError(err) { toast.error(err.message); },
   });
 
   const batchQuickAssignMut = trpc.schedules.batchQuickAssign.useMutation({
-    onSuccess(data) {
+    onSuccess(data, vars) {
       const msg = data.skipped.length > 0
         ? `${data.created.length}명 배정 완료 (${data.skipped.length}명 이미 배정됨)`
         : `${data.created.length}명 배정 완료`;
       toast.success(msg);
       closeAssignModal();
-      invalidate();
+      refreshDate(vars.workDate);
     },
     onError(err) { toast.error(err.message); },
   });
 
-  // 빠른배정 모드용 mutation (optimistic)
+  // 빠른배정 모드용 mutation (optimistic — 스트림 캐시의 해당 페이지에 즉시 추가)
   const quickAssignFast = trpc.schedules.quickAssign.useMutation({
     onMutate: async (vars) => {
-      await utils.schedules.listByRestaurant.cancel();
-      const prev = utils.schedules.listByRestaurant.getData({ restaurantId, from: weekStart, to: weekEnd });
+      await queryClient.cancelQueries({ queryKey: streamKey });
+      const prev = queryClient.getQueryData(streamKey);
       const staff = (staffList as StaffItem[]).find(s => s.userId === vars.userId);
-      utils.schedules.listByRestaurant.setData(
-        { restaurantId, from: weekStart, to: weekEnd },
-        (old: any) => [...(old ?? []), {
-          id: -Date.now(),
-          userId: vars.userId,
-          tempWorkerName: null,
-          tempWageType: null,
-          tempWageAmount: null,
-          userName: staff?.name ?? "...",
-          startTime: `${vars.workDate}T09:00:00`,
-          endTime: `${vars.workDate}T18:00:00`,
-          status: "draft",
-          shiftPreset: vars.preset,
-          breakMinutes: null,
-          note: null,
-          editReason: null,
-          payrollRecheckRequired: null,
-        }],
+      const p = pageIndexForDate(vars.workDate);
+      const optimistic = {
+        id: -Date.now(),
+        userId: vars.userId,
+        tempWorkerName: null,
+        tempWageType: null,
+        tempWageAmount: null,
+        userName: staff?.name ?? "...",
+        startTime: `${vars.workDate}T09:00:00`,
+        endTime: `${vars.workDate}T18:00:00`,
+        status: "draft",
+        shiftPreset: vars.preset,
+        breakMinutes: null,
+        note: null,
+        editReason: null,
+        payrollRecheckRequired: null,
+      };
+      queryClient.setQueryData(streamKey, (old: any) =>
+        old
+          ? {
+              ...old,
+              pages: old.pages.map((pg: StreamPage) =>
+                pg.pageIndex === p ? { ...pg, items: [...pg.items, optimistic] } : pg,
+              ),
+            }
+          : old,
       );
       return { prev };
     },
     onError: (err, _vars, ctx) => {
-      if (ctx?.prev) {
-        utils.schedules.listByRestaurant.setData({ restaurantId, from: weekStart, to: weekEnd }, ctx.prev);
-      }
+      if (ctx?.prev) queryClient.setQueryData(streamKey, ctx.prev);
       toast.error(err.message);
     },
-    onSettled: () => invalidate(),
+    onSettled: (_d, _e, vars) => refreshDate(vars.workDate),
     onSuccess: () => toast.success("배정됨"),
   });
 
   const createSchedule = trpc.schedules.create.useMutation({
-    onSuccess() {
+    onSuccess(_data, vars) {
       toast.success("스케줄 등록됨");
       closeAssignModal();
-      invalidate();
+      refreshDate(vars.workDate);
     },
     onError(err) { toast.error(err.message); },
   });
 
   const createTempWorker = trpc.schedules.createTempWorker.useMutation({
-    onSuccess() {
+    onSuccess(_data, vars) {
       toast.success("임시근로자 스케줄 등록됨");
       closeAssignModal();
-      invalidate();
+      refreshDate(vars.workDate);
     },
     onError(err) { toast.error(err.message); },
   });
 
   const updateSchedule = trpc.schedules.update.useMutation({
-    onSuccess(data: any) {
+    onSuccess(data: any, vars) {
       if (data.payrollRecheck) {
         toast.warning("수정됨 — 완료 스케줄 변경으로 정산 재확인 필요");
       } else {
@@ -371,7 +449,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       }
       setEditSchedule(null);
       setDeleteConfirm(false);
-      invalidate();
+      if (vars.workDate) refreshDate(vars.workDate);
     },
     onError(err) { toast.error(err.message); },
   });
@@ -387,41 +465,36 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       } else {
         toast.success("삭제됨");
       }
+      const dateStr = editSchedule ? fmtDate(new Date(editSchedule.startTime)) : null;
       setEditSchedule(null);
       setDeleteConfirm(false);
-      invalidate();
+      if (dateStr) refreshDate(dateStr);
     },
     onError(err) { toast.error(err.message); },
   });
 
   const copyWeek = trpc.schedules.copyPreviousWeek.useMutation({
-    onSuccess(data) {
+    onSuccess(data, vars) {
       toast.success(`지난주 ${data.copied}건 복사됨`);
-      invalidate();
+      refreshDate(vars.targetWeekStart);
     },
     onError(err) { toast.error(err.message); },
   });
 
   const confirmRange = trpc.schedules.confirmRange.useMutation({
-    onSuccess(data: any) {
+    onSuccess(data: any, vars) {
       const cnt = data?.affected ?? 0;
       if (cnt > 0) toast.success(`${cnt}건 스케줄 확정 완료`);
       else toast.info("확정할 초안 스케줄이 없습니다");
-      invalidate();
+      refreshDate(vars.from.substring(0, 10));
     },
     onError(err) { toast.error(err.message); },
   });
 
   const confirmDay = trpc.schedules.confirmDay.useMutation({
-    onSuccess(data: any) { toast.success(`${data.affected}건 확정됨`); invalidate(); },
+    onSuccess(data: any, vars) { toast.success(`${data.affected}건 확정됨`); refreshDate(vars.date); },
     onError(err) { toast.error(err.message); },
   });
-
-  const invalidate = useCallback(() => {
-    utils.schedules.listByRestaurant.invalidate();
-    utils.schedules.monthlySummary.invalidate();
-    utils.leaveRequests.listByDateRange.invalidate();
-  }, [utils]);
 
   const staffNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -430,7 +503,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   }, [staffList]);
 
   const assignDayWithOffsMut = trpc.schedules.assignDayWithOffs.useMutation({
-    onSuccess(data) {
+    onSuccess(data, vars) {
       const parts = [`${data.assigned.length}명 자동배정`];
       if (data.offsRecorded.length > 0) parts.push(`휴무 ${data.offsRecorded.length}명 기록`);
       toast.success(parts.join(" · "));
@@ -443,7 +516,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
         toast.info(`휴무 기록 제외: ${msgs}`);
       }
       closeAssignModal();
-      invalidate();
+      refreshDate(vars.workDate);
     },
     onError(err) { toast.error(err.message); },
   });
@@ -451,14 +524,16 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   // ─── 메모이제이션된 데이터 ───────────────────
   const scheduleByDate = useMemo(() => {
     const map = new Map<string, ScheduleItem[]>();
-    weekDates.forEach((d) => map.set(fmtDate(d), []));
-    (scheduleList as ScheduleItem[]).forEach((s) => {
-      const key = fmtDate(new Date(s.startTime));
-      const list = map.get(key);
-      if (list) list.push(s);
-    });
+    for (const pg of pages) {
+      for (const s of pg.items) {
+        const key = fmtDate(new Date(s.startTime));
+        const list = map.get(key) ?? [];
+        list.push(s);
+        map.set(key, list);
+      }
+    }
     return map;
-  }, [scheduleList, weekDates]);
+  }, [pages]);
 
   const activeSchedulesByDate = useMemo(() => {
     const map = new Map<string, ScheduleItem[]>();
@@ -483,17 +558,19 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     return new Set(daySchedules.filter((s) => s.userId && s.status !== "canceled").map((s) => s.userId!));
   }, [assignDate, scheduleByDate]);
 
-  // 날짜별 승인 휴무 목록 (휴무자 칩)
+  // 날짜별 승인 휴무 목록 (휴무자 칩) — 스트림 페이지에서 파생
   type LeaveChip = { id: number; userId: number; userName: string | null; leaveType: string; source: string | null };
   const leavesByDate = useMemo(() => {
     const map = new Map<string, LeaveChip[]>();
-    (weekLeaves as LeaveChip[] & { leaveDate: string }[]).forEach((lv: any) => {
-      const list = map.get(lv.leaveDate) ?? [];
-      list.push(lv);
-      map.set(lv.leaveDate, list);
-    });
+    for (const pg of pages) {
+      for (const lv of pg.leaves as any[]) {
+        const list = map.get(lv.leaveDate) ?? [];
+        list.push(lv);
+        map.set(lv.leaveDate, list);
+      }
+    }
     return map;
-  }, [weekLeaves]);
+  }, [pages]);
 
   // 배정 모달 대상 날짜의 기존 승인 휴무자 (Step A에서 미리 체크 + disabled)
   const existingLeaveUserIds = useMemo(() => {
@@ -507,25 +584,155 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     return m;
   }, [lastPatterns]);
 
-  const presetTimesMap = useMemo(() => {
-    const map = new Map<string, { startTime: string; endTime: string; breakMinutes?: number } | null>();
-    if (!shiftPresets) return map;
-    const allPresetTypes = new Set<string>();
-    ["full", "open", "close"].forEach(p => allPresetTypes.add(p));
-    shiftPresets.forEach((p: any) => allPresetTypes.add(p.presetType));
-    weekDates.forEach(date => {
-      const dateStr = fmtDate(date);
-      allPresetTypes.forEach(preset => {
-        map.set(`${preset}_${dateStr}`, getPresetTimesInner(preset, dateStr));
-      });
-    });
-    return map;
-  }, [shiftPresets, weekDates, current?.openTime, current?.closeTime]);
+  // ─── 무한스크롤 인프라 ─────────────────────
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLElement | null>(null);
+  const prependSnapshotRef = useRef<number | null>(null);
+  const didInitialScrollRef = useRef(false);
+  const didPrefetchNextRef = useRef(false);
 
-  // ─── 주 이동 ──────────────────────────────
-  const prevWeek = () => { const d = new Date(baseDate); d.setDate(d.getDate() - 7); setBaseDate(d); };
-  const nextWeek = () => { const d = new Date(baseDate); d.setDate(d.getDate() + 7); setBaseDate(d); };
-  const goThisWeek = () => setBaseDate(new Date());
+  const getScroller = useCallback(() => {
+    if (!scrollerRef.current) scrollerRef.current = getScrollParent(containerRef.current);
+    return scrollerRef.current;
+  }, []);
+
+  // 렌더할 주 목록: 로드된 범위 + 양끝 1페이지(4주) 골격
+  const renderWeeks = useMemo(() => {
+    const list: { weekStartDate: Date; weekStartStr: string; loaded: boolean }[] = [];
+    const hasPages = pages.length > 0;
+    const startK = hasPages ? minPage * WEEKS_PER_PAGE - WEEKS_PER_PAGE : 0;
+    const endK = hasPages ? (maxPage + 1) * WEEKS_PER_PAGE - 1 + WEEKS_PER_PAGE : WEEKS_PER_PAGE - 1;
+    for (let k = startK; k <= endK; k++) {
+      const ws = addDays(page0Start, k * 7);
+      list.push({
+        weekStartDate: ws,
+        weekStartStr: fmtDate(ws),
+        loaded: hasPages && k >= minPage * WEEKS_PER_PAGE && k <= (maxPage + 1) * WEEKS_PER_PAGE - 1,
+      });
+    }
+    return list;
+  }, [pages.length, minPage, maxPage, page0Start]);
+
+  // 위쪽 로드: prepend 전 scrollHeight 스냅샷 → 도착 후 scrollTop 보정 (Safari는 overflow-anchor 미지원)
+  const loadPrev = useCallback(() => {
+    if (stream.isFetchingPreviousPage || !stream.data) return;
+    const sc = getScroller();
+    if (sc) prependSnapshotRef.current = sc.scrollHeight;
+    stream.fetchPreviousPage();
+  }, [stream, getScroller]);
+
+  const loadNext = useCallback(() => {
+    if (stream.isFetchingNextPage || !stream.data) return;
+    stream.fetchNextPage();
+  }, [stream]);
+
+  const loadPrevRef = useRef(loadPrev);
+  const loadNextRef = useRef(loadNext);
+  loadPrevRef.current = loadPrev;
+  loadNextRef.current = loadNext;
+
+  // prepend 시 스크롤 위치 보정
+  useLayoutEffect(() => {
+    if (prependSnapshotRef.current == null) return;
+    const sc = getScroller();
+    if (sc) sc.scrollTop += sc.scrollHeight - prependSnapshotRef.current;
+    prependSnapshotRef.current = null;
+  }, [minPage, getScroller]);
+
+  // 앵커 변경 시 초기화
+  useEffect(() => {
+    didInitialScrollRef.current = false;
+    didPrefetchNextRef.current = false;
+  }, [anchorKey, restaurantId]);
+
+  // 초기 로드 후 앵커 주로 스크롤 (스티키 헤더 아래 위치하도록 scroll-mt 사용)
+  useLayoutEffect(() => {
+    if (didInitialScrollRef.current || pages.length === 0) return;
+    const el = containerRef.current?.querySelector<HTMLElement>(`[data-week-start="${anchorKey}"]`);
+    if (el) {
+      el.scrollIntoView({ block: "start" });
+      didInitialScrollRef.current = true;
+    }
+  }, [pages.length, anchorKey]);
+
+  // 초기 로드 직후 다음 페이지 1개 즉시 prefetch
+  useEffect(() => {
+    if (!didPrefetchNextRef.current && pages.length === 1 && !stream.isFetching) {
+      didPrefetchNextRef.current = true;
+      stream.fetchNextPage();
+    }
+  }, [pages.length, stream.isFetching, stream]);
+
+  // 상/하 sentinel — 화면 2뷰포트 밖에서 미리 fetch (체감 로딩 제로)
+  useEffect(() => {
+    if (restaurantId <= 0) return;
+    const scroller = getScroller();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          if (e.target === topSentinelRef.current) loadPrevRef.current();
+          else loadNextRef.current();
+        }
+      },
+      { root: scroller === document.scrollingElement ? null : scroller, rootMargin: "200% 0px" },
+    );
+    if (topSentinelRef.current) io.observe(topSentinelRef.current);
+    if (bottomSentinelRef.current) io.observe(bottomSentinelRef.current);
+    return () => io.disconnect();
+  }, [restaurantId, anchorKey, getScroller]);
+
+  // 현재 가시 주 추적 (스티키 헤더 + 미니맵 동기)
+  useEffect(() => {
+    if (restaurantId <= 0) return;
+    const scroller = getScroller();
+    if (!scroller) return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const cont = containerRef.current;
+        if (!cont) return;
+        const topBound =
+          (scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top) + 56;
+        const blocks = cont.querySelectorAll<HTMLElement>("[data-week-start]");
+        for (const b of blocks) {
+          if (b.getBoundingClientRect().bottom > topBound) {
+            const ws = b.dataset.weekStart!;
+            setVisibleWeekStartStr((prev) => (prev === ws ? prev : ws));
+            break;
+          }
+        }
+      });
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [restaurantId, anchorKey, getScroller]);
+
+  // 날짜로 점프 — 로드된 주면 스크롤, 미로드면 앵커 리셋(골격 즉시 렌더 후 채움)
+  const jumpToDate = useCallback((date: Date) => {
+    const wkStartStr = fmtDate(getWeekDates(date)[0]);
+    const el = containerRef.current?.querySelector<HTMLElement>(
+      `[data-week-start="${wkStartStr}"][data-loaded="true"]`,
+    );
+    if (el) {
+      el.scrollIntoView({ block: "start", behavior: "smooth" });
+      return;
+    }
+    setAnchorDate(date);
+  }, []);
+
+  const jumpToToday = useCallback(() => jumpToDate(new Date()), [jumpToDate]);
+
+  const visibleWeekStartDate = useMemo(() => new Date(visibleWeekStartStr + "T12:00:00"), [visibleWeekStartStr]);
+  const visibleWeekEnd = fmtDate(addDays(visibleWeekStartDate, 6)) + "T23:59:59";
 
   // ─── 프리셋 시간 계산 ─────────────────────
   function getPresetTimesInner(preset: string, dateStr?: string) {
@@ -551,13 +758,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     }
   }
 
-  const getPresetTimes = (preset: string, dateStr?: string) => {
-    if (dateStr) {
-      const cached = presetTimesMap.get(`${preset}_${dateStr}`);
-      if (cached !== undefined) return cached;
-    }
-    return getPresetTimesInner(preset, dateStr);
-  };
+  const getPresetTimes = (preset: string, dateStr?: string) => getPresetTimesInner(preset, dateStr);
 
   // ─── 모달 헬퍼 ────────────────────────────
   const openAssignModal = (dateStr: string) => {
@@ -678,18 +879,6 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     quickAssignFast.mutate({ restaurantId, userId: quickUserId, workDate: dateStr, preset: quickPreset });
   };
 
-  // ─── 인접 주 프리페치 ─────────────────────
-  useEffect(() => {
-    if (!isLoading && restaurantId > 0) {
-      const prevWeekStart = fmtDate(new Date(weekDates[0].getTime() - 7 * 86400000));
-      const prevWeekEnd = fmtDate(new Date(weekDates[0].getTime() - 86400000)) + "T23:59:59";
-      const nextWeekStart = fmtDate(new Date(weekDates[6].getTime() + 86400000));
-      const nextWeekEnd = fmtDate(new Date(weekDates[6].getTime() + 7 * 86400000)) + "T23:59:59";
-      utils.schedules.listByRestaurant.prefetch({ restaurantId, from: prevWeekStart, to: prevWeekEnd });
-      utils.schedules.listByRestaurant.prefetch({ restaurantId, from: nextWeekStart, to: nextWeekEnd });
-    }
-  }, [weekStart, isLoading, restaurantId]);
-
   const today = fmtDate(new Date());
 
   // 프리셋 목록 (빠른배정 드롭다운용)
@@ -715,51 +904,16 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       {/* ─── 헤더 ──────────────────────────────── */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold text-foreground">스케줄 관리</h1>
-        {isManager && (
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => copyWeek.mutate({ restaurantId, targetWeekStart: weekStart })}
-              disabled={copyWeek.isPending}
-              className="text-xs gap-1.5"
-            >
-              <Copy className="w-3.5 h-3.5" /> 지난주 복사
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => confirmRange.mutate({ restaurantId, from: weekStart, to: weekEnd })}
-              disabled={confirmRange.isPending}
-              className="text-xs gap-1.5"
-            >
-              <Send className="w-3.5 h-3.5" /> 초안 전체 확정
-            </Button>
-          </div>
-        )}
       </div>
 
       {/* ─── 월간 미니맵 (매니저) ──────────────── */}
       {isManager && restaurantId > 0 && (
         <MonthlyMinimap
           restaurantId={restaurantId}
-          baseDate={baseDate}
-          onDateClick={(date) => setBaseDate(date)}
+          baseDate={visibleWeekStartDate}
+          onDateClick={jumpToDate}
         />
       )}
-
-      {/* ─── 주 네비게이션 ─────────────────────── */}
-      <div className="flex items-center justify-center gap-3">
-        <Button variant="ghost" size="icon" onClick={prevWeek} className="h-8 w-8">
-          <ChevronLeft className="w-5 h-5" />
-        </Button>
-        <button onClick={goThisWeek} className="text-sm font-medium text-foreground hover:text-primary">
-          {weekDates[0].getMonth() + 1}월 {weekDates[0].getDate()}일 ~ {weekDates[6].getMonth() + 1}월 {weekDates[6].getDate()}일
-        </button>
-        <Button variant="ghost" size="icon" onClick={nextWeek} className="h-8 w-8">
-          <ChevronRight className="w-5 h-5" />
-        </Button>
-      </div>
 
       {/* ─── 빠른배정 바 (매니저) ──────────────── */}
       {isManager && (
@@ -810,10 +964,81 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
         <span className="text-[9px]">(리포트·지출반영)</span>
       </div>
 
-      {/* ─── 주간 그리드 ───────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
-        {weekDates.map((date, i) => {
+      {/* ─── 스티키 주 헤더 (가시 주 기준) ─────── */}
+      <div className="sticky top-0 z-30 -mx-3 md:-mx-6 px-3 md:px-6 py-2 bg-background/95 backdrop-blur border-b border-border">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-foreground whitespace-nowrap">
+            {visibleWeekStartDate.getMonth() + 1}월 {visibleWeekStartDate.getDate()}일 ~ {addDays(visibleWeekStartDate, 6).getMonth() + 1}월 {addDays(visibleWeekStartDate, 6).getDate()}일
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Button variant="ghost" size="sm" onClick={jumpToToday} className="text-xs h-7 px-2">
+              오늘
+            </Button>
+            {isManager && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => copyWeek.mutate({ restaurantId, targetWeekStart: visibleWeekStartStr })}
+                  disabled={copyWeek.isPending}
+                  className="text-xs gap-1 h-7 px-2"
+                >
+                  <Copy className="w-3 h-3" /> 지난주 복사
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => confirmRange.mutate({ restaurantId, from: visibleWeekStartStr, to: visibleWeekEnd })}
+                  disabled={confirmRange.isPending}
+                  className="text-xs gap-1 h-7 px-2"
+                >
+                  <Send className="w-3 h-3" /> 초안 전체 확정
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ─── 주간 스트림 (세로 무한스크롤) ─────── */}
+      <div ref={containerRef} className="space-y-5">
+        <div ref={topSentinelRef} className="h-px" aria-hidden="true" />
+        {renderWeeks.map(({ weekStartDate, weekStartStr, loaded }) => {
+          const wDates = Array.from({ length: 7 }, (_, wi) => addDays(weekStartDate, wi));
+          const wEnd = wDates[6];
+          return (
+            <div
+              key={weekStartStr}
+              data-week-start={weekStartStr}
+              data-loaded={loaded ? "true" : "false"}
+              className="scroll-mt-14"
+              style={{ contentVisibility: "auto", containIntrinsicSize: "auto 360px" } as any}
+            >
+              <div className="mb-1 px-0.5 text-xs font-semibold text-muted-foreground">
+                {weekStartDate.getMonth() + 1}월 {weekStartDate.getDate()}일 ~ {wEnd.getMonth() + 1}월 {wEnd.getDate()}일
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
+        {wDates.map((date, i) => {
           const dateStr = fmtDate(date);
+          if (!loaded) {
+            // 골격 셀 — 데이터 미도착 구간 (스피너 없음, min-height 고정으로 CLS 방지)
+            return (
+              <div
+                key={dateStr}
+                className={`border rounded-lg min-h-[100px] md:min-h-[140px] p-2 ${
+                  i >= 5 ? "border-muted bg-muted/30" : "border-border bg-card"
+                }`}
+              >
+                <span className={`text-xs md:text-sm font-semibold ${i >= 5 ? "text-red-500/50" : "text-muted-foreground/50"}`}>
+                  {DAY_NAMES[i]} {date.getDate()}일
+                </span>
+                <div className="mt-2 space-y-1 animate-pulse">
+                  <div className="h-6 rounded bg-muted/60" />
+                  <div className="h-6 rounded bg-muted/40" />
+                </div>
+              </div>
+            );
+          }
           const active = activeSchedulesByDate.get(dateStr) ?? [];
           const allDay = scheduleByDate.get(dateStr) ?? [];
           const isToday = dateStr === today;
@@ -923,11 +1148,12 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
             </div>
           );
         })}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomSentinelRef} className="h-px" aria-hidden="true" />
       </div>
-
-      {isLoading && (
-        <div className="text-center py-8 text-muted-foreground">로딩 중...</div>
-      )}
 
       {/* ═══════════════════════════════════════════════════════════════════════
           직원 배정 바텀시트
