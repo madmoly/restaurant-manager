@@ -1107,21 +1107,6 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 )}
               </div>
 
-              {/* 휴무자 칩 */}
-              {(leavesByDate.get(dateStr) ?? []).length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-1">
-                  {(leavesByDate.get(dateStr) ?? []).map((lv) => (
-                    <span
-                      key={lv.id}
-                      className="px-1.5 py-0.5 rounded text-[9px] md:text-[10px] font-medium bg-red-50 text-red-500 dark:bg-red-900/20 dark:text-red-400 border border-red-100 dark:border-red-900/40"
-                    >
-                      {lv.leaveType === "dayoff" ? "휴무" : "반차"}{" "}
-                      {lv.userName ? (lv.userName.length >= 2 ? lv.userName.slice(1) : lv.userName) : ""}
-                    </span>
-                  ))}
-                </div>
-              )}
-
               <div className="space-y-1">
                 {active.map((s) => {
                   const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.draft;
@@ -1158,24 +1143,38 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 })}
               </div>
 
-              {/* D1: 파생 휴무자 — 재직 직원 중 해당일 미배정 전원 (배정 1건 이상 있는 날만, 임시근로자 자연 제외) */}
-              {active.length > 0 && (() => {
+              {/* 휴무자 통합 표시 (한 곳만) — 배정 있는 날: 미배정 재직자 전원 / 빈 날: 휴무 기록 보유자만. 반차는 뒤에 병기 */}
+              {(() => {
                 const assignedIds = new Set(active.filter((s) => s.userId).map((s) => s.userId!));
-                const derivedOffs = (staffList as StaffItem[]).filter((s) => !assignedIds.has(s.userId));
-                if (derivedOffs.length === 0) return null;
-                const leaveIdSet = new Set((leavesByDate.get(dateStr) ?? []).map((lv) => lv.userId));
+                const dayLeaves = leavesByDate.get(dateStr) ?? [];
+                const dayoffIdSet = new Set(dayLeaves.filter((lv) => lv.leaveType === "dayoff").map((lv) => lv.userId));
+                const halfLeaves = dayLeaves.filter((lv) => lv.leaveType !== "dayoff");
+                const derivedOffs = active.length > 0
+                  ? (staffList as StaffItem[]).filter((s) => !assignedIds.has(s.userId))
+                  : (staffList as StaffItem[]).filter((s) => dayoffIdSet.has(s.userId));
+                if (derivedOffs.length === 0 && halfLeaves.length === 0) return null;
+                const shortName = (n: string) => (n.length >= 2 ? n.slice(1) : n);
                 return (
                   <div className="mt-1 text-[10px] md:text-[11px] text-muted-foreground leading-snug">
-                    휴무 {derivedOffs.length}:{" "}
-                    {derivedOffs.map((s, idx) => (
-                      <span key={s.userId} className="whitespace-nowrap">
-                        {leaveIdSet.has(s.userId) && (
-                          <span className="text-orange-500" title="휴무 기록 있음">●</span>
-                        )}
-                        {s.name.length >= 2 ? s.name.slice(1) : s.name}
-                        {idx < derivedOffs.length - 1 ? ", " : ""}
+                    {derivedOffs.length > 0 && (
+                      <>
+                        휴무 {derivedOffs.length}:{" "}
+                        {derivedOffs.map((s, idx) => (
+                          <span key={s.userId} className="whitespace-nowrap">
+                            {dayoffIdSet.has(s.userId) && (
+                              <span className="text-orange-500" title="휴무 기록 있음">●</span>
+                            )}
+                            {shortName(s.name)}
+                            {idx < derivedOffs.length - 1 ? ", " : ""}
+                          </span>
+                        ))}
+                      </>
+                    )}
+                    {halfLeaves.length > 0 && (
+                      <span className="whitespace-nowrap">
+                        {derivedOffs.length > 0 ? " · " : ""}반차: {halfLeaves.map((lv) => shortName(lv.userName ?? "")).join(", ")}
                       </span>
-                    ))}
+                    )}
                   </div>
                 );
               })()}
