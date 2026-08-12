@@ -1171,7 +1171,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                     <button
                       key={s.id}
                       onClick={() => openEditModal(s)}
-                      className={`w-full text-left p-1 md:p-1.5 rounded border-l-2 ${isTemp ? "border-l-orange-400" : st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors ${isMine ? "ring-2 ring-primary/70 bg-primary/10" : "bg-background"}`}
+                      className={`w-full text-left p-1 md:p-1.5 rounded border-l-2 ${isTemp ? "border-l-orange-400" : st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors ${isMine ? "bg-primary/20" : "bg-background"}`}
                     >
                       <div className="flex items-center gap-1">
                         {isMine && (
