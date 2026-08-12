@@ -80,6 +80,53 @@ export function isWeekendIndex(i: number): boolean {
   return i === 0 || i === 6;
 }
 
+// ─── 날짜 셀 근무 칩 정렬 ─────────────────────────────────────────────────────
+
+/** 매장 내 직급 서열. 값이 클수록 상단. 레거시 store_manager·manager는 supervisor 급. */
+export const STORE_ROLE_RANK: Record<string, number> = {
+  owner: 3,
+  supervisor: 2,
+  store_manager: 2,
+  manager: 2,
+  staff: 1,
+};
+
+/** 실근무 분 = (퇴근 - 출근) - 휴게. 정렬 전용(급여 계산에 쓰지 말 것). */
+export function scheduleWorkMinutes(s: { startTime: string | Date; endTime: string | Date; breakMinutes: number | null }): number {
+  const start = new Date(s.startTime).getTime();
+  const end = new Date(s.endTime).getTime();
+  if (!isFinite(start) || !isFinite(end)) return 0;
+  const span = Math.max(0, Math.round((end - start) / 60000));
+  return Math.max(0, span - (s.breakMinutes ?? 0));
+}
+
+/**
+ * 날짜 셀 근무 칩 정렬 비교자 생성.
+ * 순서: 정규직원 먼저 → 실근무 긴 순 → 직급 높은 순 → 이름 가나다 → id(완전 결정성)
+ */
+export function makeChipComparator(roleByUserId: Map<number, string>) {
+  return (a: ScheduleItem, b: ScheduleItem): number => {
+    const aTemp = a.userId == null ? 1 : 0;
+    const bTemp = b.userId == null ? 1 : 0;
+    if (aTemp !== bTemp) return aTemp - bTemp;
+
+    const aw = scheduleWorkMinutes(a);
+    const bw = scheduleWorkMinutes(b);
+    if (aw !== bw) return bw - aw;
+
+    const aRank = a.userId != null ? (STORE_ROLE_RANK[roleByUserId.get(a.userId) ?? ""] ?? 0) : 0;
+    const bRank = b.userId != null ? (STORE_ROLE_RANK[roleByUserId.get(b.userId) ?? ""] ?? 0) : 0;
+    if (aRank !== bRank) return bRank - aRank;
+
+    const aName = a.userName ?? a.tempWorkerName ?? "";
+    const bName = b.userName ?? b.tempWorkerName ?? "";
+    const byName = aName.localeCompare(bName, "ko");
+    if (byName !== 0) return byName;
+
+    return a.id - b.id;
+  };
+}
+
 // ─── 상수 ─────────────────────────────────────────────────────────────────────
 
 export const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];

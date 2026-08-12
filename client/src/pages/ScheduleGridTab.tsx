@@ -32,6 +32,7 @@ import {
   fmtRangeCompact,
   DAY_NAMES,
   isWeekendIndex,
+  makeChipComparator,
   STATUS_LABELS,
   weekOrdinalLabel,
   resolvePresetLabel,
@@ -511,6 +512,12 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     return m;
   }, [staffList]);
 
+  const staffRoleById = useMemo(() => {
+    const m = new Map<number, string>();
+    (staffList as StaffItem[]).forEach((s) => m.set(s.userId, s.storeRole));
+    return m;
+  }, [staffList]);
+
   const assignDayWithOffsMut = trpc.schedules.assignDayWithOffs.useMutation({
     onSuccess(data, vars) {
       const parts = [`${data.assigned.length}명 자동배정`];
@@ -545,12 +552,14 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   }, [pages]);
 
   const activeSchedulesByDate = useMemo(() => {
+    const cmp = makeChipComparator(staffRoleById);
     const map = new Map<string, ScheduleItem[]>();
     scheduleByDate.forEach((items, dateStr) => {
-      map.set(dateStr, items.filter(s => s.status !== "canceled"));
+      // filter가 새 배열을 반환하므로 in-place sort 안전 (원본 pages 불변)
+      map.set(dateStr, items.filter(s => s.status !== "canceled").sort(cmp));
     });
     return map;
-  }, [scheduleByDate]);
+  }, [scheduleByDate, staffRoleById]);
 
   const headcountByDate = useMemo(() => {
     const map = new Map<string, number>();
