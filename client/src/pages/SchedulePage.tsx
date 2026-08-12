@@ -57,6 +57,7 @@ export default function SchedulePage() {
           isManager={isManager}
           shiftPresets={shiftPresets}
           current={current}
+          currentUserId={user?.id ?? null}
         />
       )}
       {activeTab === "leave" && (

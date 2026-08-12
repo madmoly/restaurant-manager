@@ -44,6 +44,8 @@ interface ScheduleGridTabProps {
   isManager: boolean;
   shiftPresets: any[];
   current: any;
+  /** 로그인 사용자 id — 본인 스케줄 강조용 (미로그인·비소속 시 null) */
+  currentUserId?: number | null;
 }
 
 // ─── 무한스크롤 헬퍼 ────────────────────────────────────────────────────────
@@ -256,7 +258,7 @@ function BreakMinutesInput({
 
 // ─── 메인 ScheduleGridTab ───────────────────────────────────────────────────
 
-export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets, current }: ScheduleGridTabProps) {
+export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets, current, currentUserId = null }: ScheduleGridTabProps) {
   // 앵커: 스트림 페이지 계산의 기준 날짜 (?date= 진입 시 해당 주가 초기 페이지 중심)
   const [anchorDate, setAnchorDate] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1151,17 +1153,22 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 {active.map((s) => {
                   const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.draft;
                   const isTemp = !!s.tempWorkerName;
+                  // 임시근로자는 userId가 null이라 isMine이 true가 될 수 없음 (오렌지 규칙과 상호배타)
+                  const isMine = currentUserId != null && s.userId === currentUserId;
                   const isCustom = !s.shiftPreset || s.shiftPreset === "custom";
                   const presetLabel = !isCustom ? resolvePresetLabel(s.shiftPreset, shiftPresets) : "";
                   return (
                     <button
                       key={s.id}
                       onClick={() => openEditModal(s)}
-                      className={`w-full text-left p-1 md:p-1.5 rounded bg-background border-l-2 ${isTemp ? "border-l-orange-400" : st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors`}
+                      className={`w-full text-left p-1 md:p-1.5 rounded border-l-2 ${isTemp ? "border-l-orange-400" : st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors ${isMine ? "ring-2 ring-primary/70 bg-primary/10" : "bg-background"}`}
                     >
                       <div className="flex items-center gap-1">
+                        {isMine && (
+                          <span className="shrink-0 px-1 rounded bg-primary text-primary-foreground text-[9px] font-semibold leading-tight">나</span>
+                        )}
                         {isTemp && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-orange-500" aria-hidden="true" />}
-                        <span className={`font-medium text-[11px] md:text-xs ${isTemp ? "text-orange-600 dark:text-orange-400" : "text-foreground"}`}>
+                        <span className={`font-medium text-[11px] md:text-xs ${isTemp ? "text-orange-600 dark:text-orange-400" : isMine ? "text-primary font-semibold" : "text-foreground"}`}>
                           {(() => {
                             if (s.userName) {
                               return s.userName.length >= 2 ? s.userName.slice(1) : s.userName;
@@ -1199,20 +1206,32 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                     {derivedOffs.length > 0 && (
                       <>
                         휴무 {derivedOffs.length}:{" "}
-                        {derivedOffs.map((s, idx) => (
-                          <span key={s.userId} className="whitespace-nowrap">
-                            {dayoffIdSet.has(s.userId) && (
-                              <span className="text-orange-500" title="휴무 기록 있음">●</span>
-                            )}
-                            {shortName(s.name)}
-                            {idx < derivedOffs.length - 1 ? ", " : ""}
-                          </span>
-                        ))}
+                        {derivedOffs.map((s, idx) => {
+                          const mine = currentUserId != null && s.userId === currentUserId;
+                          return (
+                            <span key={s.userId} className={`whitespace-nowrap ${mine ? "font-semibold text-foreground" : ""}`}>
+                              {dayoffIdSet.has(s.userId) && (
+                                <span className="text-orange-500" title="휴무 기록 있음">●</span>
+                              )}
+                              {shortName(s.name)}
+                              {idx < derivedOffs.length - 1 ? ", " : ""}
+                            </span>
+                          );
+                        })}
                       </>
                     )}
                     {halfLeaves.length > 0 && (
                       <span className="whitespace-nowrap">
-                        {derivedOffs.length > 0 ? " · " : ""}반차: {halfLeaves.map((lv) => shortName(lv.userName ?? "")).join(", ")}
+                        {derivedOffs.length > 0 ? " · " : ""}반차:{" "}
+                        {halfLeaves.map((lv, idx) => {
+                          const mine = currentUserId != null && lv.userId === currentUserId;
+                          return (
+                            <span key={lv.id} className={mine ? "font-semibold text-foreground" : ""}>
+                              {shortName(lv.userName ?? "")}
+                              {idx < halfLeaves.length - 1 ? ", " : ""}
+                            </span>
+                          );
+                        })}
                       </span>
                     )}
                   </div>
