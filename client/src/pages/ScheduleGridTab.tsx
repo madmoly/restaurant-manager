@@ -31,6 +31,7 @@ import {
   fmtTime,
   fmtRangeCompact,
   DAY_NAMES,
+  isWeekendIndex,
   STATUS_LABELS,
   weekOrdinalLabel,
   resolvePresetLabel,
@@ -100,11 +101,11 @@ function MonthlyMinimap({
   const weekStartStr = fmtDate(weekDates[0]);
   const weekEndStr = fmtDate(weekDates[6]);
 
-  // 달력 날짜 배열 (월요일 시작)
+  // 달력 날짜 배열 (일요일 시작)
   const calendarDays = useMemo(() => {
     const firstDay = new Date(year, month - 1, 1);
     const lastDay = new Date(year, month, 0);
-    const startDow = (firstDay.getDay() + 6) % 7; // 월=0
+    const startDow = firstDay.getDay(); // 일=0
     const days: (Date | null)[] = [];
     for (let i = 0; i < startDow; i++) days.push(null);
     for (let d = 1; d <= lastDay.getDate(); d++) days.push(new Date(year, month - 1, d));
@@ -159,7 +160,7 @@ function MonthlyMinimap({
         <>
           <div className="grid grid-cols-7 gap-0.5 text-center mb-1">
             {DAY_NAMES.map((d, i) => (
-              <span key={d} className={`text-[10px] font-medium ${i >= 5 ? "text-red-400" : "text-muted-foreground"}`}>{d}</span>
+              <span key={d} className={`text-[10px] font-medium ${isWeekendIndex(i) ? "text-red-400" : "text-muted-foreground"}`}>{d}</span>
             ))}
           </div>
           <div className="grid grid-cols-7 gap-0.5">
@@ -265,10 +266,10 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     const d = params.get("date");
     return d ? new Date(d + "T12:00:00") : new Date();
   });
-  const anchorMonday = useMemo(() => getWeekDates(anchorDate)[0], [anchorDate]);
-  const anchorKey = fmtDate(anchorMonday);
+  const anchorWeekStart = useMemo(() => getWeekDates(anchorDate)[0], [anchorDate]);
+  const anchorKey = fmtDate(anchorWeekStart);
   // page 0 = 앵커 주 - 1주부터 4주 (앵커 주가 페이지 안쪽에 오도록)
-  const page0Start = useMemo(() => addDays(anchorMonday, -7), [anchorKey]);
+  const page0Start = useMemo(() => addDays(anchorWeekStart, -7), [anchorKey]);
 
   // 현재 가시 주 (스티키 헤더 + 미니맵 동기용)
   const [visibleWeekStartStr, setVisibleWeekStartStr] = useState(anchorKey);
@@ -1091,10 +1092,10 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               <div
                 key={dateStr}
                 className={`border rounded-lg min-h-[100px] md:min-h-[140px] p-2 ${
-                  i >= 5 ? "border-muted bg-muted/30" : "border-border bg-card"
+                  isWeekendIndex(i) ? "border-muted bg-muted/30" : "border-border bg-card"
                 }`}
               >
-                <span className={`text-xs md:text-sm font-semibold ${i >= 5 ? "text-red-500/50" : "text-muted-foreground/50"}`}>
+                <span className={`text-xs md:text-sm font-semibold ${isWeekendIndex(i) ? "text-red-500/50" : "text-muted-foreground/50"}`}>
                   {DAY_NAMES[i]} {dayLabel}
                   {holidayName && (
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500/60 ml-1 align-middle" title={holidayName} />
@@ -1110,7 +1111,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
           const active = activeSchedulesByDate.get(dateStr) ?? [];
           const allDay = scheduleByDate.get(dateStr) ?? [];
           const isToday = dateStr === today;
-          const isWeekend = i >= 5;
+          const isWeekend = isWeekendIndex(i);
           const hc = headcountByDate.get(dateStr) ?? 0;
 
           return (

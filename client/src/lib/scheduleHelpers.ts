@@ -29,12 +29,12 @@ export type StaffItem = {
 
 export function getWeekDates(baseDate: Date): Date[] {
   const d = new Date(baseDate);
-  const day = d.getDay();
-  const mon = new Date(d);
-  mon.setDate(d.getDate() - ((day + 6) % 7));
+  const day = d.getDay(); // 일=0
+  const start = new Date(d);
+  start.setDate(d.getDate() - day); // 그 주 일요일로 되돌림
   return Array.from({ length: 7 }, (_, i) => {
-    const dd = new Date(mon);
-    dd.setDate(mon.getDate() + i);
+    const dd = new Date(start);
+    dd.setDate(start.getDate() + i);
     return dd;
   });
 }
@@ -67,17 +67,22 @@ export function fmtRangeCompact(start: Date | string, end: Date | string): strin
 const WEEK_ORDINALS = ["첫째주", "둘째주", "셋째주", "넷째주", "다섯째주"];
 
 /**
- * 주차 서수 라벨: 해당 주 월요일이 속한 달 기준, 그 달의 n번째 월요일 = n째주.
- * 월요일이 8/31이고 주말이 9월이어도 "8월 다섯째주".
+ * 주차 서수 라벨: 해당 주 일요일이 속한 달 기준, 그 달의 n번째 일요일 = n째주.
+ * 일요일이 8/31이고 나머지 요일이 9월이어도 "8월 다섯째주".
  */
 export function weekOrdinalLabel(weekStart: Date): string {
   const n = Math.ceil(weekStart.getDate() / 7);
   return `${weekStart.getMonth() + 1}월 ${WEEK_ORDINALS[n - 1] ?? `${n}째주`}`;
 }
 
+/** 주 시작일이 일요일이므로 그리드 인덱스 0(일)·6(토)이 주말 */
+export function isWeekendIndex(i: number): boolean {
+  return i === 0 || i === 6;
+}
+
 // ─── 상수 ─────────────────────────────────────────────────────────────────────
 
-export const DAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"];
+export const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
 
 export const STATUS_LABELS: Record<string, { label: string; color: string; bgCard: string }> = {
   draft: {
