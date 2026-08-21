@@ -20,6 +20,8 @@ import {
   purchaseOrderItemsV2,
   counterparties,
   restaurants,
+  storeClosedDays,
+  storeWeeklyClosures,
 } from "../../drizzle/schema";
 import { shouldShowOnDate } from "./storeChecklists";
 
@@ -288,7 +290,9 @@ export const dailyOpsRouter = router({
             eq(intermediateSales.restaurantId, input.restaurantId),
             sql`${intermediateSales.saleDate} = ${input.date}`
           )
-        );
+        )
+        // 정렬 미지정 시 마지막 행이 최신이라는 보장이 없음 (대시보드 "최신 시각" 표시용)
+        .orderBy(intermediateSales.recordedAt);
       return rows;
     }),
 
@@ -821,6 +825,224 @@ export const dailyOpsRouter = router({
       const closedDays = ops.filter((o) => o.closeCheckedAt).length;
 
       return { days, totalSales, totalPurchases, closedDays };
+    }),
+
+  // ─── 이번 달 운영일지 미작성(누락) 집계 ────────────────────────────────────
+  /**
+   * 월 단위로 "운영일지가 비어 있는 날짜×탭"만 골라 반환한다.
+   *
+   * 집계 대상 영업일 = 1일 ~ 어제(영업일 기준, 새벽 3시 컷)
+   *   − 정기 휴무 요일(store_weekly_closures.isClosed)
+   *   − 지정 휴무일(store_closed_days)
+   *   − 매장 생성일(restaurants.createdAt) 이전 날짜
+   *   + 오늘(마감이 찍힌 경우에만 — 마감했는데 빠진 탭은 실제 누락)
+   *
+   * 탭 완료 판정은 DailyOpsPage 마감탭(checklistStatus)과 동일 정의:
+   *   그 날짜에 유효한 템플릿 수(total) > 0 이고
+   *   로그의 checkedItemIds ∩ 템플릿ID 수 < total → 미작성.
+   *   오픈/마감 탭은 여기에 openCheckedAt / closeCheckedAt NULL 조건을 추가로 본다.
+   *   매입 탭은 noOrderToday=true(입고/발주 없음 확인)면 완료로 본다.
+   */
+  getMonthlyLogGaps: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), year: z.number(), month: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const startDate = `${input.year}-${pad(input.month)}-01`;
+      const endDate =
+        input.month === 12
+          ? `${input.year + 1}-01-01`
+          : `${input.year}-${pad(input.month + 1)}-01`;
+
+      // ── 영업일 기준 오늘/어제 (KST, 새벽 3시 컷) ──
+      const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const bizNow = new Date(nowKst.getTime() - 3 * 60 * 60 * 1000);
+      const todayStr = bizNow.toISOString().slice(0, 10);
+      const yesterdayStr = new Date(bizNow.getTime() - 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+
+      // ── 월 범위 일괄 조회 (날짜별 루프 안에서 쿼리 금지) ──
+      const [
+        ops,
+        checklistLogs,
+        activeTemplates,
+        weeklyClosures,
+        closedDays,
+        restaurantRow,
+      ] = await Promise.all([
+        db
+          .select({
+            operationDate: dailyOperations.operationDate,
+            openCheckedAt: dailyOperations.openCheckedAt,
+            closeCheckedAt: dailyOperations.closeCheckedAt,
+          })
+          .from(dailyOperations)
+          .where(
+            and(
+              eq(dailyOperations.restaurantId, input.restaurantId),
+              sql`${dailyOperations.operationDate} >= ${startDate}`,
+              sql`${dailyOperations.operationDate} < ${endDate}`
+            )
+          ),
+        db
+          .select()
+          .from(dailyChecklistLogs)
+          .where(
+            and(
+              eq(dailyChecklistLogs.restaurantId, input.restaurantId),
+              sql`${dailyChecklistLogs.logDate} >= ${startDate}`,
+              sql`${dailyChecklistLogs.logDate} < ${endDate}`
+            )
+          ),
+        db
+          .select({
+            id: storeChecklistTemplates.id,
+            targetTab: storeChecklistTemplates.targetTab,
+            repeatType: storeChecklistTemplates.repeatType,
+            repeatDays: storeChecklistTemplates.repeatDays,
+            specificDate: storeChecklistTemplates.specificDate,
+            effectiveFrom: storeChecklistTemplates.effectiveFrom,
+            effectiveTo: storeChecklistTemplates.effectiveTo,
+            createdAt: storeChecklistTemplates.createdAt,
+          })
+          .from(storeChecklistTemplates)
+          .where(
+            and(
+              eq(storeChecklistTemplates.restaurantId, input.restaurantId),
+              eq(storeChecklistTemplates.isActive, true)
+            )
+          ),
+        db
+          .select()
+          .from(storeWeeklyClosures)
+          .where(eq(storeWeeklyClosures.restaurantId, input.restaurantId)),
+        db
+          .select()
+          .from(storeClosedDays)
+          .where(
+            and(
+              eq(storeClosedDays.restaurantId, input.restaurantId),
+              sql`${storeClosedDays.closedDate} >= ${startDate}`,
+              sql`${storeClosedDays.closedDate} < ${endDate}`
+            )
+          ),
+        db
+          .select({ createdAt: restaurants.createdAt })
+          .from(restaurants)
+          .where(eq(restaurants.id, input.restaurantId))
+          .limit(1),
+      ]);
+
+      const toDateStr = (v: string | Date) =>
+        typeof v === "string" ? v.slice(0, 10) : v.toISOString().slice(0, 10);
+
+      // ── 휴무 집합 ──
+      const closedWeekdays = new Set(
+        weeklyClosures.filter((w) => w.isClosed).map((w) => w.weekday)
+      );
+      const closedDateSet = new Set(closedDays.map((c) => toDateStr(c.closedDate as any)));
+
+      // ── 매장 생성일 이전 날짜는 집계 제외 (도입 전 날짜 노이즈 방지) ──
+      const storeStartStr = restaurantRow[0]?.createdAt
+        ? toDateStr(restaurantRow[0].createdAt as any)
+        : null;
+
+      // ── 날짜별 운영 상태 맵 ──
+      const opsByDate: Record<string, { openCheckedAt: Date | null; closeCheckedAt: Date | null }> = {};
+      for (const op of ops) {
+        const dateStr = toDateStr(op.operationDate as any);
+        const prev = opsByDate[dateStr];
+        opsByDate[dateStr] = {
+          openCheckedAt: (op.openCheckedAt ?? prev?.openCheckedAt) ?? null,
+          closeCheckedAt: (op.closeCheckedAt ?? prev?.closeCheckedAt) ?? null,
+        };
+      }
+
+      // ── (날짜|탭) → 체크 상태 맵 (중복 로그는 합집합) ──
+      const logByDateTab: Record<string, { checked: Set<number>; noOrderToday: boolean }> = {};
+      for (const log of checklistLogs) {
+        const dateStr = toDateStr(log.logDate as any);
+        const rawTab = (log as any).targetTab ?? log.checkType;
+        const tab = (CHECK_TYPE_TO_TAB[rawTab] ?? rawTab) as string;
+        if (!tab) continue;
+        const key = `${dateStr}|${tab}`;
+        if (!logByDateTab[key]) logByDateTab[key] = { checked: new Set(), noOrderToday: false };
+        for (const id of ((log.checkedItemIds as number[]) ?? [])) {
+          logByDateTab[key].checked.add(id);
+        }
+        if ((log as any).noOrderToday === true) logByDateTab[key].noOrderToday = true;
+      }
+
+      // ── 날짜별 유효 템플릿 ID (탭별) ──
+      const templateCache: Record<string, Record<string, number[]>> = {};
+      const templatesForDate = (dateStr: string): Record<string, number[]> => {
+        if (!templateCache[dateStr]) {
+          const byTab: Record<string, number[]> = {};
+          for (const t of activeTemplates) {
+            if (!t.targetTab) continue;
+            if (!shouldShowOnDate(t as any, dateStr)) continue;
+            (byTab[t.targetTab] ??= []).push(t.id);
+          }
+          templateCache[dateStr] = byTab;
+        }
+        return templateCache[dateStr];
+      };
+
+      // ── 집계 대상 영업일 목록 ──
+      const TABS = ["open", "purchase", "midday", "close"] as const;
+      type TabKey = (typeof TABS)[number];
+      const lastDay = new Date(Date.UTC(input.year, input.month, 0)).getUTCDate();
+
+      const targetDates: string[] = [];
+      for (let day = 1; day <= lastDay; day++) {
+        const dateStr = `${input.year}-${pad(input.month)}-${pad(day)}`;
+        // 어제까지만. 오늘은 마감이 찍힌 경우에만 포함.
+        if (dateStr > todayStr) break;
+        if (dateStr > yesterdayStr && !opsByDate[dateStr]?.closeCheckedAt) continue;
+        if (storeStartStr && dateStr < storeStartStr) continue;
+        if (closedDateSet.has(dateStr)) continue;
+        const weekday = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+        if (closedWeekdays.has(weekday)) continue;
+        targetDates.push(dateStr);
+      }
+
+      // ── 날짜×탭 판정 ──
+      const gaps: Array<{ date: string; tabs: TabKey[] }> = [];
+      let totalGapTabs = 0;
+
+      for (const dateStr of targetDates) {
+        const byTab = templatesForDate(dateStr);
+        const op = opsByDate[dateStr];
+        const missing: TabKey[] = [];
+
+        for (const tab of TABS) {
+          const log = logByDateTab[`${dateStr}|${tab}`];
+          // 매입: 입고/발주 없음 확인 = 완료
+          if (tab === "purchase" && log?.noOrderToday) continue;
+
+          const templateIds = byTab[tab] ?? [];
+          const total = templateIds.length;
+          const checked = total > 0
+            ? templateIds.filter((id) => log?.checked.has(id)).length
+            : 0;
+          const checklistIncomplete = total > 0 && checked < total;
+
+          const opIncomplete =
+            (tab === "open" && !op?.openCheckedAt) ||
+            (tab === "close" && !op?.closeCheckedAt);
+
+          if (checklistIncomplete || opIncomplete) missing.push(tab);
+        }
+
+        if (missing.length > 0) {
+          gaps.push({ date: dateStr, tabs: missing });
+          totalGapTabs += missing.length;
+        }
+      }
+
+      return { gaps, checkedDays: targetDates.length, totalGapTabs };
     }),
 
   // ─── 일별 상세 (운영캘린더 우측 패널용) ──────────────────────────────────

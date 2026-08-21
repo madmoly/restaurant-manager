@@ -3,10 +3,11 @@ import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Card, EmptyState } from "@/components/ui/compat";
 import { DashboardSkeleton } from "@/components/ui/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Store, TrendingUp, TrendingDown, Users, CheckCircle2, XCircle,
   Clock, ShoppingCart, Receipt, CalendarDays, Bell, ChevronRight,
-  ClipboardCheck, AlertCircle, Minus,
+  ClipboardCheck, AlertCircle, Minus, FileWarning,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -37,30 +38,36 @@ export default function ManagerDashboard() {
   const enabled = restaurantId > 0;
 
   // ─── 월간 요약 데이터 (수익분석과 동일한 settlementData) ────────────────
-  const { data: settlement } = trpc.monthlyClosings.settlementData.useQuery(
+  const { data: settlement, isLoading: settlementLoading } = trpc.monthlyClosings.settlementData.useQuery(
     { restaurantId, year, month }, { enabled }
   );
 
   // ─── 금일 운영 데이터 ────────────────────────────────────────────────────
-  const { data: dailyOps } = trpc.dailyOps.getByDate.useQuery(
+  const { data: dailyOps, isLoading: dailyOpsLoading } = trpc.dailyOps.getByDate.useQuery(
     { restaurantId, date: todayStr }, { enabled }
   );
-  const { data: dailyClosing } = trpc.dailyClosings.getByDate.useQuery(
+  const { data: dailyClosing, isLoading: dailyClosingLoading } = trpc.dailyClosings.getByDate.useQuery(
     { restaurantId, date: todayStr }, { enabled }
   );
 
   // ─── 스케줄 (7일) ────────────────────────────────────────────────────────
-  const { data: upcoming } = trpc.schedules.getUpcoming7Days.useQuery(
+  const { data: upcoming, isLoading: upcomingLoading } = trpc.schedules.getUpcoming7Days.useQuery(
     { restaurantId }, { enabled }
   );
 
   // ─── 중간매출 ───────────────────────────────────────────────────────────
-  const { data: midSalesData } = trpc.dailyOps.getMidSales.useQuery(
+  const { data: midSalesData, isLoading: midSalesLoading } = trpc.dailyOps.getMidSales.useQuery(
     { restaurantId, date: todayStr }, { enabled }
+  );
+
+  // ─── 이번 달 운영일지 누락 ────────────────────────────────────────────────
+  const { data: logGaps, isLoading: logGapsLoading } = trpc.dailyOps.getMonthlyLogGaps.useQuery(
+    { restaurantId, year, month }, { enabled }
   );
 
   // ─── 알림 ────────────────────────────────────────────────────────────────
   const { data: notifications } = trpc.notifications.listMine.useQuery({ limit: 5 });
+  const { data: unreadCountData } = trpc.notifications.unreadCount.useQuery();
 
   // ─── 미입�� 발주 리마인더 ─────────────────────────
   const unreceivedQuery = trpc.purchasesV2.listUnreceived.useQuery(
@@ -126,8 +133,8 @@ export default function ManagerDashboard() {
   // 5일 스케줄 (오늘 포함)
   const fiveDaySchedule = buildFiveDaySchedule(upcoming ?? [], todayStr);
 
-  // 읽지 않은 알림
-  const unreadNotifs = (notifications ?? []).filter((n: any) => !n.isRead);
+  // 읽지 않은 알림 (전체 개수 — 목록은 최근 5건만 표시)
+  const unreadCount = unreadCountData?.count ?? 0;
 
   return (
     <div className="px-4 py-4 space-y-4 max-w-lg mx-auto">
@@ -169,7 +176,80 @@ export default function ManagerDashboard() {
         </Card>
       )}
 
+      {/* ─── 이번 달 운영일지 누락 ─── */}
+      <Card className="p-3">
+        <h2 className="text-sm font-semibold mb-2">운영일지</h2>
+        {logGapsLoading ? (
+          <Skeleton className="h-4 w-2/3" />
+        ) : (logGaps?.gaps.length ?? 0) === 0 ? (
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">운영일지 누락없음</span>
+            <span className="text-[10px] text-muted-foreground ml-auto">영업일 {logGaps?.checkedDays ?? 0}일 확인</span>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 mb-1">
+              <FileWarning size={14} className="text-amber-600 shrink-0" />
+              <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                운영일지 미작성 {logGaps!.totalGapTabs}건 ({logGaps!.gaps.length}일)
+              </span>
+            </div>
+            {logGaps!.gaps.slice(0, 5).map((g) => (
+              <button
+                key={g.date}
+                onClick={() => setLocation(`/daily-ops?date=${g.date}&tab=${g.tabs[0]}`)}
+                className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors text-left"
+              >
+                <span className="text-xs font-medium text-foreground w-20 shrink-0">{formatGapDate(g.date)}</span>
+                <span className="flex flex-wrap gap-1 flex-1 min-w-0">
+                  {g.tabs.map((t) => (
+                    <span
+                      key={t}
+                      role="link"
+                      tabIndex={0}
+                      onClick={(e) => { e.stopPropagation(); setLocation(`/daily-ops?date=${g.date}&tab=${t}`); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setLocation(`/daily-ops?date=${g.date}&tab=${t}`);
+                        }
+                      }}
+                      className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900"
+                    >
+                      {TAB_LABELS[t] ?? t}
+                    </span>
+                  ))}
+                </span>
+                <ChevronRight size={12} className="text-muted-foreground/50 shrink-0" />
+              </button>
+            ))}
+            {logGaps!.gaps.length > 5 && (
+              <button
+                onClick={() => setLocation('/ops-calendar')}
+                className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline"
+              >
+                +{logGaps!.gaps.length - 5}일 더보기
+              </button>
+            )}
+          </div>
+        )}
+      </Card>
+
       {/* ─── 섹션 1: 이번 달 수익 요약 ─── */}
+      {settlementLoading ? (
+        <Card className="p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">이번 달 수익</h2>
+            <Skeleton className="h-4 w-12" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full rounded-lg" />)}
+          </div>
+          <Skeleton className="h-4 w-1/2" />
+        </Card>
+      ) : (
       <Card className="p-3">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold">이번 달 수익</h2>
@@ -202,6 +282,7 @@ export default function ManagerDashboard() {
           </span>
         </div>
       </Card>
+      )}
 
       {/* ─── 섹션 2: 매장 상황 ─── */}
       <Card className="p-3">
@@ -213,6 +294,7 @@ export default function ManagerDashboard() {
             label="출근 인원"
             value={`${todayStaffCount}명`}
             status={todayStaffCount > 0 ? "ok" : "warn"}
+            loading={upcomingLoading}
             onClick={() => setLocation("/schedule")}
           />
           {/* 오픈 체크 */}
@@ -221,6 +303,7 @@ export default function ManagerDashboard() {
             label="오픈 체크"
             value={isOpenChecked ? `완료 ${openTime}` : "미완료"}
             status={isOpenChecked ? "ok" : "warn"}
+            loading={dailyOpsLoading}
             onClick={() => setLocation("/daily-ops")}
           />
           {/* 중간 매출 */}
@@ -237,6 +320,7 @@ export default function ManagerDashboard() {
                 })()
               : "입력 없음"}
             status={midSalesData && midSalesData.length > 0 ? "ok" : "neutral"}
+            loading={midSalesLoading}
             onClick={() => setLocation("/daily-ops")}
           />
           {/* 매입 현황 */}
@@ -245,6 +329,7 @@ export default function ManagerDashboard() {
             label="금일 매입"
             value={dailyClosing ? formatKRW(Number(dailyClosing.purchasesTotal ?? 0)) + "원" : "—"}
             status="neutral"
+            loading={dailyClosingLoading}
             onClick={() => setLocation("/purchases")}
           />
           {/* 일마감 */}
@@ -253,6 +338,7 @@ export default function ManagerDashboard() {
             label="일마감"
             value={isClosed ? "마감 완료" : "미마감"}
             status={isClosed ? "ok" : "warn"}
+            loading={dailyClosingLoading}
             onClick={() => setLocation("/daily-ops")}
           />
         </div>
@@ -310,9 +396,9 @@ export default function ManagerDashboard() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold">
             알림
-            {unreadNotifs.length > 0 && (
-              <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-destructive text-destructive-foreground rounded-full">
-                {unreadNotifs.length}
+            {unreadCount > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center min-w-5 h-5 px-1 text-[10px] font-bold bg-destructive text-destructive-foreground rounded-full">
+                {unreadCount}
               </span>
             )}
           </h2>
@@ -360,14 +446,25 @@ function MiniStat({ label, value, color }: { label: string; value: number; color
 }
 
 function StatusRow({
-  icon, label, value, status, onClick,
+  icon, label, value, status, onClick, loading,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   status: "ok" | "warn" | "neutral";
   onClick?: () => void;
+  loading?: boolean;
 }) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 w-full px-2 py-2 rounded-lg text-left">
+        <span className="text-muted-foreground shrink-0">{icon}</span>
+        <span className="text-xs text-muted-foreground flex-1">{label}</span>
+        <Skeleton className="h-3 w-16" />
+      </div>
+    );
+  }
+
   const statusColor = status === "ok"
     ? "text-emerald-500"
     : status === "warn"
@@ -395,6 +492,21 @@ function StatusRow({
 }
 
 // ─── 유틸리티 ───────────────────────────────────────────────────────────────
+
+// 일일운영 탭 한글 라벨 (DailyOpsPage와 동일)
+const TAB_LABELS: Record<string, string> = {
+  open: "오픈",
+  purchase: "매입",
+  midday: "일간보고",
+  close: "마감",
+};
+
+/** "2026-08-14" → "8/14 (목)" */
+function formatGapDate(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00+09:00");
+  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+  return `${d.getMonth() + 1}/${d.getDate()} (${dayNames[d.getDay()]})`;
+}
 
 function formatKRW(n: number): string {
   const abs = Math.abs(n);

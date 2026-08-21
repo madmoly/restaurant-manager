@@ -4434,12 +4434,24 @@ export default function DailyOpsPage() {
   const { user } = useAuth();
   const { selectedRestaurant } = useRestaurant();
   const searchString = useSearch();
-  const urlDate = new URLSearchParams(searchString).get('date');
+  const urlParams = new URLSearchParams(searchString);
+  const urlDate = urlParams.get('date');
+  const urlTab = urlParams.get('tab');
   const [date, setDate] = useState(() => {
     if (urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate)) return urlDate;
     return formatDate(new Date(), 'yyyy-MM-dd');
   });
-  const [activeTab, setActiveTab] = useState<TabType>('open');
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    const valid: TabType[] = ['open', 'purchase', 'midday', 'close'];
+    return valid.includes(urlTab as TabType) ? (urlTab as TabType) : 'open';
+  });
+
+  // URL 쿼리(date/tab)가 바뀌면 동기화 — 이미 이 페이지에 머문 상태에서 들어온 딥링크 대응
+  useEffect(() => {
+    if (urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate)) setDate(urlDate);
+    const valid: TabType[] = ['open', 'purchase', 'midday', 'close'];
+    if (urlTab && valid.includes(urlTab as TabType)) setActiveTab(urlTab as TabType);
+  }, [urlDate, urlTab]);
 
   const restaurantId = selectedRestaurant?.id ?? 0;
   const dateObj = new Date(date + "T12:00:00");
