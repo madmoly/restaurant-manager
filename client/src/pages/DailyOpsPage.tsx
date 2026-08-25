@@ -4510,36 +4510,45 @@ export default function DailyOpsPage() {
               </div>
             );
           })()}
-          {isManager && (
+          {/* 휴무일일 때 해제는 본문 버튼이 담당 — 상단 토글은 영업일에만 노출 */}
+          {isManager && !isClosedDay && (
             <div className="mt-1 flex justify-center">
-              {isWeeklyClosedDay ? (
-                <span className="text-[11px] text-muted-foreground px-2 py-0.5 rounded-full bg-muted">정기휴무일</span>
-              ) : (
-                <button
-                  onClick={handleToggleClosedDay}
-                  disabled={createClosureMut.isPending || deleteClosureMut.isPending}
-                  className={`text-[11px] px-2 py-0.5 rounded-full font-medium transition-colors ${
-                    specificClosedEntry
-                      ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
-                >
-                  {specificClosedEntry ? "휴무 해제" : "휴무일로 지정"}
-                </button>
-              )}
+              <button
+                onClick={handleToggleClosedDay}
+                disabled={createClosureMut.isPending || deleteClosureMut.isPending}
+                className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+              >
+                휴무일로 지정
+              </button>
             </div>
           )}
         </div>
 
         {isClosedDay ? (
-          /* 휴무일: 탭·세부 입력 전부 숨기고 안내만 (지정 해제는 상단 배지/버튼으로) */
+          /* 휴무일: 탭·세부 입력 전부 숨기고, 그 자리를 휴무일 취소 버튼이 대신한다 */
           <div className="max-w-2xl mx-auto px-4 py-16 text-center">
             <p className="text-base font-semibold text-foreground">휴무일</p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {isWeeklyClosedDay
-                ? "정기 휴무 요일입니다. 매장정보에서 정기휴무를 변경할 수 있습니다."
-                : "이 날짜는 휴무일로 지정되어 있습니다. 위 \"휴무 해제\"를 누르면 운영일지를 다시 작성할 수 있습니다."}
-            </p>
+            {isWeeklyClosedDay ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                정기 휴무 요일입니다. 매장정보에서 정기휴무를 변경할 수 있습니다.
+              </p>
+            ) : (
+              <>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  운영일지 입력이 잠겨 있습니다.
+                </p>
+                {isManager && (
+                  <Button
+                    variant="outline"
+                    className="mt-6"
+                    onClick={handleToggleClosedDay}
+                    disabled={createClosureMut.isPending || deleteClosureMut.isPending}
+                  >
+                    {deleteClosureMut.isPending ? "취소 중..." : "휴무일 취소"}
+                  </Button>
+                )}
+              </>
+            )}
           </div>
         ) : (
         <>
