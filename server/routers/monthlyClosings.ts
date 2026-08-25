@@ -167,6 +167,17 @@ export async function sumLaborByCompany(
   month: number,
   closedDateStrs?: string[],
 ) {
+  // 확정분 조회(배열 전달)인데 일마감이 0건이면 확정 인건비도 0이다.
+  // undefined(필터 미사용 = 월 전체 합산)와 [](확정 0건)의 의미를 구분해야 한다.
+  // 이 가드가 없으면 아래 dateCondition이 undefined로 떨어져 월 전체가 "확정"으로
+  // 계상된다 (매출 sumSalesByMethod에는 같은 가드가 이미 있음).
+  if (closedDateStrs && closedDateStrs.length === 0) {
+    return {
+      totalCost: 0,
+      byCompany: [] as Array<{ company: string; headcount: number; hours: number; amount: number }>,
+    };
+  }
+
   const mm = String(month).padStart(2, "0");
   const kstFrom = new Date(`${year}-${mm}-01T00:00:00+09:00`);
   const nm = month === 12 ? 1 : month + 1;
