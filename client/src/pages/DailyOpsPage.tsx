@@ -6,6 +6,7 @@ import { trpc } from '../lib/trpc';
 import { useRestaurant } from '@/contexts/RestaurantContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getEffectiveRole, isManagerLevel } from '@shared/permissions';
+import { toDateOnly } from "@shared/dateOnly";
 import { resizeImage, OCR_HIGH } from '@/lib/imageResize';
 import { formatDateWithHoliday, getHolidayName } from '@/lib/koreanHolidays';
 import { formatKRW } from '@/lib/utils';
@@ -4435,7 +4436,7 @@ export default function DailyOpsPage() {
     { enabled: restaurantId > 0 },
   );
   const specificClosedEntry = (closedDaysQuery.data ?? []).find(
-    (d: any) => (typeof d.closedDate === 'string' ? d.closedDate : d.closedDate?.toISOString?.()?.slice(0, 10)) === date
+    (d: any) => toDateOnly(d.closedDate) === date
   ) ?? null;
   const isWeeklyClosedDay = (weeklyClosuresQuery.data ?? []).some((w: any) => w.weekday === dateObj.getDay());
   const isClosedDay = !!specificClosedEntry || isWeeklyClosedDay;

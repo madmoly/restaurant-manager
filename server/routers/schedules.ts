@@ -33,6 +33,7 @@ import {
   defaultBreakMinutes,
 } from "../helpers/labor";
 import { computeAnnualAccrual } from "../helpers/leave";
+import { toDateOnly } from "../../shared/dateOnly";
 
 // ─── 헬퍼 함수 ──────────────────────────────────────────────────────────────
 
@@ -1275,7 +1276,7 @@ export const schedulesRouter = router({
           sql`${storeClosedDays.closedDate} >= ${`${input.year}-${monthStr}-01`}`,
           sql`${storeClosedDays.closedDate} < ${`${ny}-${String(nm).padStart(2, "0")}-01`}`,
         ));
-      const closedDateSet = new Set(closedDayRows.map(r => String(r.closedDate)));
+      const closedDateSet = new Set(closedDayRows.map(r => toDateOnly(r.closedDate as any)));
 
       // 3) 월 내 영업일수 계산
       const daysInMonth = new Date(input.year, input.month, 0).getDate();
@@ -1879,7 +1880,7 @@ export const schedulesRouter = router({
           sql`${storeClosedDays.closedDate} >= ${`${input.year}-${monthStr}-01`}`,
           sql`${storeClosedDays.closedDate} < ${`${ny}-${String(nm).padStart(2, "0")}-01`}`,
         ));
-      const closedDateSet = new Set(closedDayRows.map(r => String(r.closedDate)));
+      const closedDateSet = new Set(closedDayRows.map(r => toDateOnly(r.closedDate as any)));
       const daysInMonth = new Date(input.year, input.month, 0).getDate();
       let operatingDays = 0;
       for (let d = 1; d <= daysInMonth; d++) {
@@ -2114,7 +2115,7 @@ export const schedulesRouter = router({
           sql`${storeClosedDays.closedDate} >= ${`${input.year}-${monthStr}-01`}`,
           sql`${storeClosedDays.closedDate} < ${`${ny}-${String(nm).padStart(2, "0")}-01`}`,
         ));
-      const closedDateSet = new Set(closedDayRows.map(r => String(r.closedDate)));
+      const closedDateSet = new Set(closedDayRows.map(r => toDateOnly(r.closedDate as any)));
 
       const WEEKDAY_LABEL = ["일", "월", "화", "수", "목", "금", "토"];
 

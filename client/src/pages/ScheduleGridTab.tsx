@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getHolidayName } from "@shared/holidays";
+import { toDateOnly } from "@shared/dateOnly";
 import {
   type ScheduleItem,
   type StaffItem,
@@ -390,9 +391,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       utils.client.leaveRequests.listByDateRange.query({ restaurantId, from, to: toDate, status: "approved" }),
       utils.client.storeClosures.listByRange.query({ restaurantId, from, to: toDate }),
     ]);
-    const closedDates = (closures as any[]).map((c) =>
-      typeof c.closedDate === "string" ? c.closedDate.slice(0, 10) : new Date(c.closedDate).toISOString().slice(0, 10),
-    );
+    const closedDates = (closures as any[]).map((c) => toDateOnly(c.closedDate)).filter(Boolean) as string[];
     return { pageIndex, from, to: toDate, items: items as ScheduleItem[], leaves, closedDates };
   }, [restaurantId, page0Start, utils]);
 

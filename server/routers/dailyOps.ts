@@ -3,6 +3,7 @@ import { eq, and, sql, sum, between, count } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
 import { verifyStoreAccess } from "../middleware/storeAuth";
+import { toDateOnly } from "../../shared/dateOnly";
 import { verifyOperatingDay } from "../middleware/operatingDayGuard";
 import {
   dailyOperations,
@@ -935,8 +936,7 @@ export const dailyOpsRouter = router({
           .limit(1),
       ]);
 
-      const toDateStr = (v: string | Date) =>
-        typeof v === "string" ? v.slice(0, 10) : v.toISOString().slice(0, 10);
+      const toDateStr = (v: string | Date) => toDateOnly(v) ?? "";
 
       // ── 휴무 집합 ──
       const closedWeekdays = new Set(

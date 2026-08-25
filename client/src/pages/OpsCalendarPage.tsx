@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { getHolidayName } from "@/lib/koreanHolidays";
+import { toDateOnly } from "@shared/dateOnly";
 import {
   ChevronLeft, ChevronRight, CalendarDays, CheckCircle2, Clock,
   XCircle, Users, TrendingUp, TrendingDown, ClipboardCheck, X, Receipt,
@@ -67,9 +68,7 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
     { enabled: restaurantId > 0 },
   );
   const storeClosed =
-    (monthClosures as any[]).some((c) =>
-      (typeof c.closedDate === "string" ? c.closedDate.slice(0, 10) : new Date(c.closedDate).toISOString().slice(0, 10)) === date,
-    ) ||
+    (monthClosures as any[]).some((c) => toDateOnly(c.closedDate) === date) ||
     (weeklyClosures as any[]).some((w) => w.weekday === new Date(date + "T12:00:00").getDay());
 
   if (isLoading) return <div className="text-center py-8 text-muted-foreground text-sm">로딩 중...</div>;
@@ -319,9 +318,7 @@ export default function OpsCalendarPage() {
   );
   // 매장 휴무일: 지정 휴무일 + 정기 휴무 요일
   const closedDateSet = useMemo(
-    () => new Set((closedDays as any[]).map((c) =>
-      typeof c.closedDate === "string" ? c.closedDate.slice(0, 10) : new Date(c.closedDate).toISOString().slice(0, 10),
-    )),
+    () => new Set((closedDays as any[]).map((c) => toDateOnly(c.closedDate))),
     [closedDays],
   );
   const closedWeekdays = useMemo(
