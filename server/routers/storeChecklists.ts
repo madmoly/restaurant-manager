@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, sql, gte, lte, count } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
-import { storeChecklistTemplates, dailyChecklistLogs, users } from "../../drizzle/schema";
+import { storeChecklistTemplates, dailyChecklistLogs, dailyOperations, users } from "../../drizzle/schema";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 import type { CheckedItemData } from "../../drizzle/schema";
 
@@ -70,6 +70,72 @@ export function shouldShowOnDate(
   }
 
   return true;
+}
+
+/**
+ * 오픈 탭 체크리스트 완료 상태를 dailyOperations.openCheckedAt에 반영.
+ * - 해당 날짜에 표시되는 활성 오픈 템플릿을 모두 체크 → openCheckedAt 기록 (이미 있으면 유지)
+ * - 하나라도 해제되면 → openCheckedAt 해제 (미완료 상태와 표시가 어긋나지 않도록)
+ * 템플릿이 0개인 매장은 판단 근거가 없으므로 아무것도 하지 않는다.
+ */
+async function syncOpenCheckedAt(
+  restaurantId: number,
+  dateStr: string,
+  checkedItemIds: number[],
+  userId: number,
+) {
+  const templates = await db
+    .select()
+    .from(storeChecklistTemplates)
+    .where(
+      and(
+        eq(storeChecklistTemplates.restaurantId, restaurantId),
+        eq(storeChecklistTemplates.targetTab, "open"),
+        eq(storeChecklistTemplates.isActive, true),
+      )
+    );
+  const due = templates.filter((t) => shouldShowOnDate(t, dateStr));
+  if (due.length === 0) return;
+
+  const checked = new Set(checkedItemIds);
+  const complete = due.every((t) => checked.has(t.id));
+
+  const [existing] = await db
+    .select({ id: dailyOperations.id, openCheckedAt: dailyOperations.openCheckedAt })
+    .from(dailyOperations)
+    .where(
+      and(
+        eq(dailyOperations.restaurantId, restaurantId),
+        sql`${dailyOperations.operationDate} = ${dateStr}`,
+      )
+    )
+    .limit(1);
+
+  if (complete) {
+    if (existing?.openCheckedAt) return; // 최초 완료 시각 유지
+    if (existing) {
+      await db
+        .update(dailyOperations)
+        .set({ openCheckedAt: new Date(), openCheckedBy: userId })
+        .where(eq(dailyOperations.id, existing.id));
+    } else {
+      await db.insert(dailyOperations).values({
+        restaurantId,
+        operationDate: dateStr,
+        openCheckedAt: new Date(),
+        openCheckedBy: userId,
+      } as any);
+    }
+    return;
+  }
+
+  // 미완료로 되돌아간 경우
+  if (existing?.openCheckedAt) {
+    await db
+      .update(dailyOperations)
+      .set({ openCheckedAt: null, openCheckedBy: null })
+      .where(eq(dailyOperations.id, existing.id));
+  }
 }
 
 export const storeChecklistsRouter = router({
@@ -313,6 +379,12 @@ export const storeChecklistsRouter = router({
             completedAt: new Date(),
           } as any,
         });
+
+      // 오픈 탭: 체크리스트 전항목 완료 여부를 dailyOperations.openCheckedAt에 동기화.
+      // (별도 "오픈 체크 완료" 버튼을 제거하고 체크리스트 완료로 갈음 — 2026-08-25)
+      if (input.targetTab === "open") {
+        await syncOpenCheckedAt(input.restaurantId, input.logDate, input.checkedItemIds, ctx.user.userId);
+      }
 
       return { ok: true };
     }),

@@ -812,23 +812,7 @@ function OpenTab({
   restaurantId: number;
   date: string;
 }) {
-  const operationQuery = trpc.dailyOps.getByDate.useQuery({
-    restaurantId,
-    date,
-  });
-
-  const checkOpenMutation = trpc.dailyOps.checkOpen.useMutation({
-    onSuccess: () => {
-      toast.success('오픈 체크 완료');
-      operationQuery.refetch();
-    },
-    onError: (error: any) => {
-      toast.error(`오픈 체크 실패: ${error.message}`);
-    },
-  });
-
-  const operation = operationQuery.data;
-
+  // 오픈 완료 상태는 체크리스트 완료로 갈음 (storeChecklists.saveLog에서 자동 동기화)
   return (
     <div className="space-y-4 p-4">
       <TabChecklists
@@ -842,22 +826,6 @@ function OpenTab({
       <YesterdayClosingCard restaurantId={restaurantId} date={date} />
       <WeatherCard />
       <WeekdayAvgSalesCard restaurantId={restaurantId} date={date} />
-
-      <Button
-        onClick={() => {
-          checkOpenMutation.mutate({
-            restaurantId,
-            date,
-          });
-        }}
-        disabled={checkOpenMutation.isPending || !!operation?.openCheckedAt}
-        className="w-full"
-        size="lg"
-      >
-        {operation?.openCheckedAt
-          ? `오픈 완료 (${fmtTs(operation.openCheckedAt)})`
-          : '오픈 체크 완료'}
-      </Button>
     </div>
   );
 }
