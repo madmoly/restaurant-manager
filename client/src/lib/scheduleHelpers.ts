@@ -1,5 +1,25 @@
 import { Sun, Moon, Maximize2 } from "lucide-react";
 
+/** 근무시간 입력 단위 (분). input[type=time]의 step 속성은 초 단위라 ×60 해서 쓴다. */
+export const WORK_TIME_STEP_MIN = 30;
+
+/**
+ * "HH:MM"을 30분 단위로 스냅한다.
+ * input[type=time]의 step은 브라우저 피커만 제약하고 직접 타이핑은 막지 못하므로,
+ * onChange에서 한 번 더 강제해야 09:17 같은 값이 저장되지 않는다.
+ * 빈 값·형식 불일치는 그대로 돌려보내 사용자가 입력 중인 상태를 깨지 않는다.
+ */
+export function snapTo30Min(t: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (!m) return t;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!isFinite(h) || !isFinite(min) || h > 23 || min > 59) return t;
+  const total = Math.round((h * 60 + min) / WORK_TIME_STEP_MIN) * WORK_TIME_STEP_MIN;
+  const clamped = Math.min(total, 23 * 60 + 30); // 24:00은 유효하지 않은 값
+  return `${String(Math.floor(clamped / 60)).padStart(2, "0")}:${String(clamped % 60).padStart(2, "0")}`;
+}
+
 /** 임시근로자 구인 루트 빠른 선택 — 자유 입력도 허용하므로 목록은 단축키일 뿐이다 */
 export const HIRING_SOURCE_PRESETS = ["급구", "당근", "알바몬", "지인", "소개", "파출"] as const;
 

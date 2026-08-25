@@ -43,6 +43,7 @@ import {
   timeToMinutes,
   tempDisplayName,
   HIRING_SOURCE_PRESETS,
+  snapTo30Min,
 } from "@/lib/scheduleHelpers";
 
 interface ScheduleGridTabProps {
@@ -1670,19 +1671,19 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">시작</label>
                     <input
-                      type="time" step="600"
+                      type="time" step="1800"
                       className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={customTime.startTime}
-                      onChange={(e) => setCustomTime({ ...customTime, startTime: e.target.value })}
+                      onChange={(e) => setCustomTime({ ...customTime, startTime: snapTo30Min(e.target.value) })}
                     />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">종료</label>
                     <input
-                      type="time" step="600"
+                      type="time" step="1800"
                       className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={customTime.endTime}
-                      onChange={(e) => setCustomTime({ ...customTime, endTime: e.target.value })}
+                      onChange={(e) => setCustomTime({ ...customTime, endTime: snapTo30Min(e.target.value) })}
                     />
                   </div>
                 </div>
@@ -1823,19 +1824,19 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">시작</label>
                     <input
-                      type="time" step="600"
+                      type="time" step="1800"
                       className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={tempForm.startTime}
-                      onChange={(e) => setTempForm({ ...tempForm, startTime: e.target.value })}
+                      onChange={(e) => setTempForm({ ...tempForm, startTime: snapTo30Min(e.target.value) })}
                     />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">종료</label>
                     <input
-                      type="time" step="600"
+                      type="time" step="1800"
                       className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={tempForm.endTime}
-                      onChange={(e) => setTempForm({ ...tempForm, endTime: e.target.value })}
+                      onChange={(e) => setTempForm({ ...tempForm, endTime: snapTo30Min(e.target.value) })}
                     />
                   </div>
                 </div>
@@ -2115,19 +2116,19 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">시작</label>
                   <input
-                    type="time" step="600"
+                    type="time" step="1800"
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={editForm.startTime}
-                    onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value, shiftPreset: "custom" })}
+                    onChange={(e) => setEditForm({ ...editForm, startTime: snapTo30Min(e.target.value), shiftPreset: "custom" })}
                   />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">종료</label>
                   <input
-                    type="time" step="600"
+                    type="time" step="1800"
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={editForm.endTime}
-                    onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value, shiftPreset: "custom" })}
+                    onChange={(e) => setEditForm({ ...editForm, endTime: snapTo30Min(e.target.value), shiftPreset: "custom" })}
                   />
                 </div>
               </div>

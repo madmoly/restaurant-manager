@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { snapTo30Min } from "@/lib/scheduleHelpers";
 import { trpc } from "../lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { useRestaurant } from "@/contexts/RestaurantContext";
@@ -944,13 +945,13 @@ export default function StaffPage() {
                               <label className="text-xs text-muted-foreground w-20">시작/종료</label>
                               {isField("workTime") ? (
                                 <div className="flex items-center gap-2 flex-1">
-                                  <input type="time" className="text-xs px-2 py-1 rounded border border-input bg-background"
+                                  <input type="time" step="1800" className="text-xs px-2 py-1 rounded border border-input bg-background"
                                     value={editingEmpField!.value?.start ?? "09:00"}
-                                    onChange={(e) => setEditingEmpField({ ...editingEmpField!, value: { ...editingEmpField!.value, start: e.target.value } })} />
+                                    onChange={(e) => setEditingEmpField({ ...editingEmpField!, value: { ...editingEmpField!.value, start: snapTo30Min(e.target.value) } })} />
                                   <span className="text-xs">~</span>
-                                  <input type="time" className="text-xs px-2 py-1 rounded border border-input bg-background"
+                                  <input type="time" step="1800" className="text-xs px-2 py-1 rounded border border-input bg-background"
                                     value={editingEmpField!.value?.end ?? "18:00"}
-                                    onChange={(e) => setEditingEmpField({ ...editingEmpField!, value: { ...editingEmpField!.value, end: e.target.value } })} />
+                                    onChange={(e) => setEditingEmpField({ ...editingEmpField!, value: { ...editingEmpField!.value, end: snapTo30Min(e.target.value) } })} />
                                   <button onClick={() => saveEmp({ workStartTime: editingEmpField!.value.start, workEndTime: editingEmpField!.value.end })} className="p-1 rounded hover:bg-accent text-green-600"><Check className="w-3.5 h-3.5" /></button>
                                   <button onClick={() => setEditingEmpField(null)} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
                                 </div>
@@ -2165,11 +2166,11 @@ function ContractFormModal({ restaurantId, staffList, onClose, defaultEmployee, 
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className={labelCls}>출근</label>
-                <input type="time" step="600" className={inputCls} value={form.workStartTime} onChange={(e) => setForm({ ...form, workStartTime: e.target.value })} />
+                <input type="time" step="1800" className={inputCls} value={form.workStartTime} onChange={(e) => setForm({ ...form, workStartTime: snapTo30Min(e.target.value) })} />
               </div>
               <div>
                 <label className={labelCls}>퇴근</label>
-                <input type="time" step="600" className={inputCls} value={form.workEndTime} onChange={(e) => setForm({ ...form, workEndTime: e.target.value })} />
+                <input type="time" step="1800" className={inputCls} value={form.workEndTime} onChange={(e) => setForm({ ...form, workEndTime: snapTo30Min(e.target.value) })} />
               </div>
               <div>
                 <label className={labelCls}>휴게(분)</label>

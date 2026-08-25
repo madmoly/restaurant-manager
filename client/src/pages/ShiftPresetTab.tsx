@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { snapTo30Min } from "@/lib/scheduleHelpers";
 import { trpc } from "../lib/trpc";
 import { toast } from "sonner";
 import { Settings, Plus, Pencil, Trash2 } from "lucide-react";
@@ -103,9 +104,9 @@ export default function ShiftPresetTab({ restaurantId, shiftPresets, onPresetsCh
   }) => (
     <div className="flex items-center gap-1.5 text-xs">
       <span className="w-8 text-muted-foreground shrink-0">{label}</span>
-      <input type="time" step="600" value={startTime} onChange={(e) => onStartChange(e.target.value)} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
+      <input type="time" step="1800" value={startTime} onChange={(e) => onStartChange(snapTo30Min(e.target.value))} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
       <span className="text-muted-foreground">~</span>
-      <input type="time" step="600" value={endTime} onChange={(e) => onEndChange(e.target.value)} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
+      <input type="time" step="1800" value={endTime} onChange={(e) => onEndChange(snapTo30Min(e.target.value))} className="w-[90px] rounded border border-input bg-background px-1.5 py-1 text-xs" />
       <span className="text-muted-foreground shrink-0 ml-1">휴게</span>
       <input type="number" value={breakMin} onChange={(e) => onBreakChange(Number(e.target.value) || 0)} className="w-[48px] rounded border border-input bg-background px-1 py-1 text-xs text-center" min={0} max={180} />
       <span className="text-muted-foreground">분</span>

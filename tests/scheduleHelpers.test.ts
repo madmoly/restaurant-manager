@@ -6,7 +6,7 @@
  * - scheduleWorkMinutes: 실근무 분 = (퇴근 - 출근) - 휴게 (정렬 전용)
  */
 import { describe, test, expect } from "vitest";
-import { makeChipComparator, type ScheduleItem } from "@/lib/scheduleHelpers";
+import { makeChipComparator, type ScheduleItem, snapTo30Min } from "@/lib/scheduleHelpers";
 
 const mk = (o: Partial<ScheduleItem> & { id: number }) => ({
   userId: null, tempWorkerName: null, userName: null, breakMinutes: 0,
@@ -32,5 +32,30 @@ describe("makeChipComparator", () => {
     const a = mk({ id: 1, userId: 1, userName: "가", endTime: "2026-08-12T18:00:00", breakMinutes: 120 }); // 7h
     const b = mk({ id: 2, userId: 2, userName: "나", endTime: "2026-08-12T17:00:00", breakMinutes: 0 });   // 8h
     expect([a, b].sort(makeChipComparator(new Map<number, string>())).map(r => r.id)).toEqual([2, 1]);
+  });
+});
+
+describe("snapTo30Min — 근무시간 30분 단위 강제", () => {
+  it("30분 미만은 내림, 이상은 올림", () => {
+    expect(snapTo30Min("09:14")).toBe("09:00");
+    expect(snapTo30Min("09:15")).toBe("09:30");
+    expect(snapTo30Min("09:17")).toBe("09:30");
+    expect(snapTo30Min("09:45")).toBe("10:00");
+  });
+
+  it("이미 30분 단위면 그대로", () => {
+    expect(snapTo30Min("18:00")).toBe("18:00");
+    expect(snapTo30Min("18:30")).toBe("18:30");
+  });
+
+  it("자정 넘김 방지 — 23:45는 24:00이 아니라 23:30", () => {
+    expect(snapTo30Min("23:45")).toBe("23:30");
+    expect(snapTo30Min("23:50")).toBe("23:30");
+  });
+
+  it("입력 중이거나 형식이 아니면 건드리지 않는다", () => {
+    expect(snapTo30Min("")).toBe("");
+    expect(snapTo30Min("9")).toBe("9");
+    expect(snapTo30Min("25:00")).toBe("25:00");
   });
 });
