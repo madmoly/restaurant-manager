@@ -349,13 +349,16 @@ function EmployeeShiftCard({
 
       {/* 메타 칩 */}
       <div className="flex flex-wrap gap-1.5 text-[10px]">
+        {/* 임시직은 매장 영업일 대비 휴무 개념이 없어 총 근무만 표시 */}
         <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
-          실근무 <b className="text-foreground">{emp.shifts}일 · {emp.totalHours.toFixed(1)}h</b>
+          {emp.isTemp ? "총 근무" : "실근무"} <b className="text-foreground">{emp.shifts}일 · {emp.totalHours.toFixed(1)}h</b>
         </span>
-        <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
-          실휴무 <b className="text-foreground">{emp.daysOff ?? 0}일</b>
-        </span>
-        {emp.contractDaysOff != null && (
+        {!emp.isTemp && (
+          <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
+            실휴무 <b className="text-foreground">{emp.daysOff ?? 0}일</b>
+          </span>
+        )}
+        {!emp.isTemp && emp.contractDaysOff != null && (
           <span className="bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">
             계약휴무 <b className="text-foreground">{emp.contractDaysOff}일</b>
           </span>

@@ -630,7 +630,7 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
           {/* 임시직 근무 요약 */}
           {emp.isTemp && (
             <div className="text-[10px] text-muted-foreground pt-2 border-t border-border/30">
-              출근 {emp.workedDays ?? 0}일 · 실휴무 {emp.daysOff ?? 0}일
+              총 근무 {emp.workedDays ?? 0}일 · {(emp.totalHours ?? 0).toFixed(1)}h
             </div>
           )}
 
