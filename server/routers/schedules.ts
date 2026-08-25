@@ -1317,6 +1317,7 @@ export const schedulesRouter = router({
           rawTempName: string | null;
           tempTag: string | null;
           hiringSources: Set<string>;
+          wageAmounts: Set<number>;
           dateSet: Set<string>;
           shiftsForWeek: Array<{ startDate: string; hours: number }>;
         }>;
@@ -1370,6 +1371,7 @@ export const schedulesRouter = router({
             rawTempName: uid ? null : (r.tempWorkerName ?? null),
             tempTag: uid ? null : (r.tempWorkerTag ?? null),
             hiringSources: new Set<string>(),
+            wageAmounts: new Set<number>(),
             dateSet: new Set<string>(),
             shiftsForWeek: [],
           };
@@ -1412,6 +1414,10 @@ export const schedulesRouter = router({
         const kstStartDt = new Date(startDt.getTime() + 9 * 60 * 60 * 1000);
         const dateStr = kstStartDt.toISOString().slice(0, 10);
 
+        // 월중 시급 변경·건별 다른 단가를 카드에서 드러내기 위해 실제 적용된 단가를 모은다
+        if (shiftWageAmount && isFinite(shiftWageAmount) && shiftWageAmount > 0) {
+          companyMap[company].employees[empKey].wageAmounts.add(shiftWageAmount);
+        }
         companyMap[company].employees[empKey].totalHours += hours;
         companyMap[company].employees[empKey].totalWage += wage;
         companyMap[company].employees[empKey].shifts++;
@@ -1590,6 +1596,8 @@ export const schedulesRouter = router({
             tempWorkerName: emp.rawTempName,
             tempWorkerTag: emp.tempTag,
             hiringSources: Array.from(emp.hiringSources),
+            // 건별로 단가가 다르면 카드의 단일 "시급" 표시가 합계와 어긋난다 → 범위 노출
+            wageAmounts: Array.from(emp.wageAmounts).sort((a, b) => a - b),
             // 근무현황 딥링크(empKey 생성)용으로 노출. ownerProcedure 한정.
             userId: uid,
             dateSet: undefined, // 내부 집계용

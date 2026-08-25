@@ -487,6 +487,10 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
   const wb = emp.wageBreakdown ?? { base: Math.round(emp.totalWage ?? 0), weeklyHoliday: 0, overtime: 0, night: 0 };
   const isHourly = emp.wageType === "hourly";
   const hourlyRate = isHourly ? Number(emp.wageAmount) : NaN;
+  // 근무 건마다 단가가 다르면(월중 시급 변경·임시직 건별 등록) 단일 "시급" 표시가
+  // 합계와 어긋난다. 실제 적용된 단가 목록을 받아 범위와 실효 단가로 대체한다.
+  const rates: number[] = emp.wageAmounts ?? [];
+  const mixedRates = isHourly && rates.length > 1;
   const totalWage = Math.round(emp.totalWage ?? 0);
 
   // 메타 요약 1줄
@@ -571,8 +575,13 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
               <div>
                 <span className="text-muted-foreground">시급</span>
                 <div className="font-medium text-foreground">
-                  {isFinite(hourlyRate) && hourlyRate > 0 ? fmtWon(hourlyRate) : "-"}
+                  {mixedRates
+                    ? `${fmtWonRaw(rates[0])}~${fmtWonRaw(rates[rates.length - 1])}원`
+                    : isFinite(hourlyRate) && hourlyRate > 0 ? fmtWon(hourlyRate) : "-"}
                 </div>
+                {mixedRates && (
+                  <div className="text-[10px] text-amber-600 dark:text-amber-400">건별 상이</div>
+                )}
               </div>
             )}
             <div>
@@ -581,8 +590,9 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
               {/* 산출 근거: 실근무시간(휴게 차감 후) × 시급 */}
               {isHourly && (emp.totalHours ?? 0) > 0 && (
                 <div className="text-[10px] text-muted-foreground tabular-nums">
-                  {emp.totalHours.toFixed(1)}h
-                  {isFinite(hourlyRate) && hourlyRate > 0 ? ` × ${fmtWonRaw(hourlyRate)}원` : ""}
+                  {mixedRates
+                    ? `${emp.totalHours.toFixed(1)}h · 실효 ${fmtWonRaw(emp.effectiveHourly ?? 0)}원/h`
+                    : `${emp.totalHours.toFixed(1)}h${isFinite(hourlyRate) && hourlyRate > 0 ? ` × ${fmtWonRaw(hourlyRate)}원` : ""}`}
                 </div>
               )}
             </div>
