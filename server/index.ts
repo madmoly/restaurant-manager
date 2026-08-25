@@ -705,6 +705,7 @@ app.use(express.json({ limit: "10mb" }));
     await addColumnIfNotExists("schedules", "tempPhone", "VARCHAR(30) DEFAULT NULL");
     await addColumnIfNotExists("schedules", "tempResidentNumber", "VARCHAR(20) DEFAULT NULL");
     await addColumnIfNotExists("schedules", "tempWorkerTag", "VARCHAR(20) DEFAULT NULL");
+    await addColumnIfNotExists("schedules", "tempHiringSource", "VARCHAR(30) DEFAULT NULL");
 
     // ─── 매장별 근무 프리셋 시간 테이블 ───
     await conn.query(`

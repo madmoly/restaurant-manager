@@ -41,6 +41,7 @@ import {
   defaultBreakMinutes,
   timeToMinutes,
   tempDisplayName,
+  HIRING_SOURCE_PRESETS,
 } from "@/lib/scheduleHelpers";
 
 interface ScheduleGridTabProps {
@@ -351,6 +352,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   const [tempForm, setTempForm] = useState({
     name: "",
     tag: "",
+    hiringSource: "",
     wageType: "hourly" as "hourly" | "daily",
     wageAmount: "",
     startTime: "09:00",
@@ -361,7 +363,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   // 휴무자 우선 배정 (Step A에서 선택한 신규 휴무자 — 기존 승인 휴무자는 제외)
   const [offUserIds, setOffUserIds] = useState<Set<number>>(new Set());
   const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
-  const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "", shiftPreset: "custom" as string, breakMinutes: 0 });
+  const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "", shiftPreset: "custom" as string, breakMinutes: 0, hiringSource: "" });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const utils = trpc.useUtils();
@@ -907,7 +909,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     setAssignUserIds(new Set());
     setAssignUserNames(new Map());
     setCustomTime({ startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
-    setTempForm({ name: "", tag: "", wageType: "hourly", wageAmount: "", startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
+    setTempForm({ name: "", tag: "", hiringSource: "", wageType: "hourly", wageAmount: "", startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
     setOffUserIds(new Set());
   };
   const closeAssignModal = () => { setAssignDate(null); setAssignStep("employee"); setOffUserIds(new Set()); };
@@ -968,6 +970,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       restaurantId,
       tempWorkerName: tempForm.name.trim(),
       tempWorkerTag: tempForm.tag.trim() || undefined,
+      hiringSource: tempForm.hiringSource.trim() || undefined,
       workDate: assignDate!,
       startTime: tempForm.startTime,
       endTime: tempForm.endTime,
@@ -987,6 +990,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       editReason: "",
       shiftPreset: schedule.shiftPreset ?? "custom",
       breakMinutes: schedule.breakMinutes ?? 0,
+      hiringSource: schedule.tempHiringSource ?? "",
     });
     setDeleteConfirm(false);
   };
@@ -1003,6 +1007,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       shiftPreset: editForm.shiftPreset,
       breakMinutes: editForm.breakMinutes,
       note: editForm.note || undefined,
+      // 구인 루트는 임시근로자 전용 — 정규직 스케줄은 건드리지 않는다
+      tempHiringSource: editSchedule.tempWorkerName ? (editForm.hiringSource.trim() || null) : undefined,
       editReason: editForm.editReason || undefined,
     });
   };
@@ -1745,6 +1751,34 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 </p>
 
                 <div>
+                  <label className="text-xs font-medium text-muted-foreground">구인 루트</label>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {HIRING_SOURCE_PRESETS.map((src) => (
+                      <button
+                        key={src}
+                        type="button"
+                        onClick={() => setTempForm({ ...tempForm, hiringSource: tempForm.hiringSource === src ? "" : src })}
+                        className={`px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${
+                          tempForm.hiringSource === src
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground hover:bg-accent"
+                        }`}
+                      >
+                        {src}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={30}
+                    className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={tempForm.hiringSource}
+                    onChange={(e) => setTempForm({ ...tempForm, hiringSource: e.target.value })}
+                    placeholder="직접 입력 (선택)"
+                  />
+                </div>
+
+                <div>
                   <label className="text-xs font-medium text-muted-foreground">급여 유형</label>
                   <div className="mt-1 flex gap-2">
                     <button
@@ -2126,6 +2160,36 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   })()}
                 </div>
               </div>
+
+              {editSchedule.tempWorkerName && (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">구인 루트</label>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {HIRING_SOURCE_PRESETS.map((src) => (
+                      <button
+                        key={src}
+                        type="button"
+                        onClick={() => setEditForm({ ...editForm, hiringSource: editForm.hiringSource === src ? "" : src })}
+                        className={`px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${
+                          editForm.hiringSource === src
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground hover:bg-accent"
+                        }`}
+                      >
+                        {src}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={30}
+                    className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={editForm.hiringSource}
+                    onChange={(e) => setEditForm({ ...editForm, hiringSource: e.target.value })}
+                    placeholder="직접 입력 (선택)"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-medium text-muted-foreground">메모</label>

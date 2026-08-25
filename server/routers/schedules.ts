@@ -100,6 +100,7 @@ export const schedulesRouter = router({
           userId: schedules.userId,
           tempWorkerName: schedules.tempWorkerName,
           tempWorkerTag: schedules.tempWorkerTag,
+          tempHiringSource: schedules.tempHiringSource,
           tempWageType: schedules.tempWageType,
           tempWageAmount: schedules.tempWageAmount,
           userName: users.name,
@@ -217,6 +218,7 @@ export const schedulesRouter = router({
         restaurantId: z.number(),
         tempWorkerName: z.string().trim().min(1),
         tempWorkerTag: z.string().trim().max(20).optional(),
+        hiringSource: z.string().trim().max(30).optional(),
         workDate: z.string(),
         startTime: z.string(),
         endTime: z.string(),
@@ -248,6 +250,7 @@ export const schedulesRouter = router({
         userId: null as any,
         tempWorkerName: input.tempWorkerName,
         tempWorkerTag: input.tempWorkerTag || null,
+        tempHiringSource: input.hiringSource || null,
         tempWageType: input.wageType ?? null,
         tempWageAmount: input.wageAmount ? String(input.wageAmount) : null,
         restaurantId: input.restaurantId,
@@ -629,6 +632,7 @@ export const schedulesRouter = router({
         shiftPreset: z.string().max(30).optional(),
         breakMinutes: z.number().min(0).max(240).optional(),
         note: z.string().optional(),
+        tempHiringSource: z.string().max(30).nullable().optional(),
         editReason: z.string().optional(),
       })
     )
@@ -810,6 +814,7 @@ export const schedulesRouter = router({
           breakMinutes: s.breakMinutes ?? 0,
           tempWorkerName: s.tempWorkerName,
           tempWorkerTag: s.tempWorkerTag,
+          tempHiringSource: s.tempHiringSource,
           tempWageType: s.tempWageType,
           tempWageAmount: s.tempWageAmount,
           note: s.note,
@@ -903,6 +908,7 @@ export const schedulesRouter = router({
           userId: schedules.userId,
           tempWorkerName: schedules.tempWorkerName,
           tempWorkerTag: schedules.tempWorkerTag,
+          tempHiringSource: schedules.tempHiringSource,
           userName: users.name,
           startTime: schedules.startTime,
           endTime: schedules.endTime,
@@ -985,6 +991,7 @@ export const schedulesRouter = router({
           userName: users.name,
           tempWorkerName: schedules.tempWorkerName,
           tempWorkerTag: schedules.tempWorkerTag,
+          tempHiringSource: schedules.tempHiringSource,
           startTime: schedules.startTime,
           endTime: schedules.endTime,
           status: schedules.status,
@@ -1022,6 +1029,7 @@ export const schedulesRouter = router({
           userId: schedules.userId,
           tempWorkerName: schedules.tempWorkerName,
           tempWorkerTag: schedules.tempWorkerTag,
+          tempHiringSource: schedules.tempHiringSource,
           tempWageType: schedules.tempWageType,
           tempWageAmount: schedules.tempWageAmount,
           userName: users.name,
@@ -1083,6 +1091,7 @@ export const schedulesRouter = router({
           status: schedules.status,
           tempWorkerName: schedules.tempWorkerName,
           tempWorkerTag: schedules.tempWorkerTag,
+          tempHiringSource: schedules.tempHiringSource,
           tempWageType: schedules.tempWageType,
           tempWageAmount: schedules.tempWageAmount,
           tempBankAccount: schedules.tempBankAccount,
@@ -1306,6 +1315,7 @@ export const schedulesRouter = router({
           weeklyHolidayBonus: number;
           rawTempName: string | null;
           tempTag: string | null;
+          hiringSources: Set<string>;
           dateSet: Set<string>;
           shiftsForWeek: Array<{ startDate: string; hours: number }>;
         }>;
@@ -1358,6 +1368,7 @@ export const schedulesRouter = router({
             weeklyHolidayBonus: 0,
             rawTempName: uid ? null : (r.tempWorkerName ?? null),
             tempTag: uid ? null : (r.tempWorkerTag ?? null),
+            hiringSources: new Set<string>(),
             dateSet: new Set<string>(),
             shiftsForWeek: [],
           };
@@ -1404,6 +1415,8 @@ export const schedulesRouter = router({
         companyMap[company].employees[empKey].totalWage += wage;
         companyMap[company].employees[empKey].shifts++;
         companyMap[company].employees[empKey].dateSet.add(dateStr);
+        // 구인 루트는 근무 단위라 사람 카드에서는 등장한 값을 모두 모은다
+        if (r.tempHiringSource) companyMap[company].employees[empKey].hiringSources.add(r.tempHiringSource);
         // 시급제 + 주휴별도 직원의 주별 가산용 시프트 누적
         companyMap[company].employees[empKey].shiftsForWeek.push({ startDate: dateStr, hours });
         if (r.payrollRecheckRequired) companyMap[company].employees[empKey].recheckRequired = true;
@@ -1575,6 +1588,7 @@ export const schedulesRouter = router({
             // 임시직 정보 수정(updateTempWorkerInfo) 호출용 — 표시명 아닌 DB 원본값
             tempWorkerName: emp.rawTempName,
             tempWorkerTag: emp.tempTag,
+            hiringSources: Array.from(emp.hiringSources),
             // 근무현황 딥링크(empKey 생성)용으로 노출. ownerProcedure 한정.
             userId: uid,
             dateSet: undefined, // 내부 집계용
@@ -1817,6 +1831,7 @@ export const schedulesRouter = router({
           status: schedules.status,
           tempWorkerName: schedules.tempWorkerName,
           tempWorkerTag: schedules.tempWorkerTag,
+          tempHiringSource: schedules.tempHiringSource,
           tempWageType: schedules.tempWageType,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,

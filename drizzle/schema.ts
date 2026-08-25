@@ -362,6 +362,8 @@ export const schedules = mysqlTable("schedules", {
   tempResidentNumber: varchar("tempResidentNumber", { length: 20 }),
   // 동명이인 구분 꼬리표 (예: 뒷자리 "1234", 별칭 "주방"). 사람 식별 = (매장, 이름, 꼬리표)
   tempWorkerTag: varchar("tempWorkerTag", { length: 20 }),
+  // 구인 루트 (급구/당근/알바몬/지인/소개/파출 등). 근무 단위 — 같은 사람도 건마다 다를 수 있다
+  tempHiringSource: varchar("tempHiringSource", { length: 30 }),
   restaurantId: int("restaurantId").notNull(),
   startTime: timestamp("startTime").notNull(),
   endTime: timestamp("endTime").notNull(),

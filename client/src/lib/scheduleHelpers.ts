@@ -1,5 +1,8 @@
 import { Sun, Moon, Maximize2 } from "lucide-react";
 
+/** 임시근로자 구인 루트 빠른 선택 — 자유 입력도 허용하므로 목록은 단축키일 뿐이다 */
+export const HIRING_SOURCE_PRESETS = ["급구", "당근", "알바몬", "지인", "소개", "파출"] as const;
+
 /**
  * 임시근로자 표시명 — 동명이인 구분 꼬리표를 결합한다.
  * 식별은 (매장, 이름, 꼬리표) 조합. 서버 집계도 같은 규칙으로 표시명을 만든다.
@@ -16,6 +19,7 @@ export type ScheduleItem = {
   userId: number | null;
   tempWorkerName: string | null;
   tempWorkerTag: string | null;
+  tempHiringSource: string | null;
   tempWageType: string | null;
   tempWageAmount: string | null;
   userName: string | null;

@@ -636,6 +636,9 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
           {emp.isTemp && (
             <div className="text-[10px] text-muted-foreground pt-2 border-t border-border/30">
               총 근무 {emp.workedDays ?? 0}일 · {(emp.totalHours ?? 0).toFixed(1)}h
+              {(emp.hiringSources?.length ?? 0) > 0 && (
+                <> · 구인 {emp.hiringSources.join(", ")}</>
+              )}
             </div>
           )}
 
