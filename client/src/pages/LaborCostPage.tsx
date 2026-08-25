@@ -5,7 +5,7 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   ChevronLeft, ChevronRight, Building2, Wallet,
   ChevronDown, ChevronUp, FileText, Download, CalendarCheck, CalendarDays,
-  AlertTriangle, Check, X, Plus, Info, UserX, Edit3, Save, Phone, CreditCard, Eye,
+  AlertTriangle, Check, X, Plus, Info, UserX, Edit3, Save, Phone, CreditCard, Eye, IdCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
@@ -469,6 +469,7 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
   const [editingTemp, setEditingTemp] = useState(false);
   const [tempBank, setTempBank] = useState(emp.bankAccount ?? "");
   const [tempPhoneVal, setTempPhoneVal] = useState(emp.phone ?? "");
+  const [tempResident, setTempResident] = useState(emp.residentNumber ?? "");
 
   const saveTempInfo = () => {
     updateTempInfo.mutate({
@@ -476,6 +477,7 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
       tempWorkerName: emp.name,
       bankAccount: tempBank,
       phone: tempPhoneVal,
+      residentNumber: tempResident,
     });
     setEditingTemp(false);
   };
@@ -693,6 +695,15 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
                         onChange={(e) => setTempPhoneVal(e.target.value)}
                       />
                     </div>
+                    <div className="flex items-center gap-2">
+                      <IdCard className="w-3 h-3 text-muted-foreground shrink-0" />
+                      <input
+                        className="flex-1 px-2 py-1 border border-input rounded text-xs bg-background"
+                        placeholder="주민번호 (예: 900101-1234567)"
+                        value={tempResident}
+                        onChange={(e) => setTempResident(e.target.value)}
+                      />
+                    </div>
                     <div className="flex items-center gap-1.5 justify-end">
                       <button onClick={() => setEditingTemp(false)} className="text-[11px] text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent">취소</button>
                       <button onClick={saveTempInfo} disabled={updateTempInfo.isPending} className="text-[11px] text-primary font-medium px-2 py-1 rounded hover:bg-primary/10 flex items-center gap-1">
@@ -713,15 +724,25 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
                           <Phone className="w-3 h-3" /> {emp.phone}
                         </span>
                       )}
-                      {!emp.bankAccount && !emp.phone && (
-                        <span className="text-muted-foreground/60">계좌/연락처 미등록</span>
+                      {emp.residentNumber && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAccount(!showAccount)}
+                          className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                        >
+                          <IdCard className="w-3 h-3" />
+                          {showAccount ? emp.residentNumber : "주민번호 보기"}
+                        </button>
+                      )}
+                      {!emp.bankAccount && !emp.phone && !emp.residentNumber && (
+                        <span className="text-muted-foreground/60">계좌/연락처/주민번호 미등록</span>
                       )}
                     </div>
                     <button
-                      onClick={() => { setTempBank(emp.bankAccount ?? ""); setTempPhoneVal(emp.phone ?? ""); setEditingTemp(true); }}
+                      onClick={() => { setTempBank(emp.bankAccount ?? ""); setTempPhoneVal(emp.phone ?? ""); setTempResident(emp.residentNumber ?? ""); setEditingTemp(true); }}
                       className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-primary/10"
                     >
-                      <Edit3 className="w-3 h-3" /> {emp.bankAccount || emp.phone ? "수정" : "입력"}
+                      <Edit3 className="w-3 h-3" /> {emp.bankAccount || emp.phone || emp.residentNumber ? "수정" : "입력"}
                     </button>
                   </div>
                 )}

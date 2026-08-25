@@ -1073,6 +1073,7 @@ export const schedulesRouter = router({
           tempWageAmount: schedules.tempWageAmount,
           tempBankAccount: schedules.tempBankAccount,
           tempPhone: schedules.tempPhone,
+          tempResidentNumber: schedules.tempResidentNumber,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
           weeklyOffDays: restaurantUsers.weeklyOffDays,
@@ -1327,7 +1328,7 @@ export const schedulesRouter = router({
             // 노무사전송 누락 보완 (2026-05-02): 정규 직원은 박제 계약서에서, 임시는 schedule.tempBankAccount.
             bankName: uid ? ec?.bankName ?? null : null,
             bankAccount: uid ? ec?.bankAccount ?? null : (r.tempBankAccount ?? null),
-            residentNumber: uid ? ec?.residentNumber ?? null : null,
+            residentNumber: uid ? ec?.residentNumber ?? null : (r.tempResidentNumber ?? null),
             phone: r.tempPhone ?? null,
             over5Employees: over5,
             // 시급제 + 주휴포함 여부 (latest signed contract). null 시 true 폴백 (보수적)
@@ -1684,12 +1685,14 @@ export const schedulesRouter = router({
       tempWorkerName: z.string().min(1),
       bankAccount: z.string().optional(),
       phone: z.string().optional(),
+      residentNumber: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const updates: Record<string, any> = {};
       if (input.bankAccount !== undefined) updates.tempBankAccount = input.bankAccount || null;
       if (input.phone !== undefined) updates.tempPhone = input.phone || null;
+      if (input.residentNumber !== undefined) updates.tempResidentNumber = input.residentNumber || null;
       if (Object.keys(updates).length === 0) return { ok: true, updated: 0 };
       const result = await db.update(schedules)
         .set(updates)

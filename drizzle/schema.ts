@@ -359,6 +359,7 @@ export const schedules = mysqlTable("schedules", {
   tempWageAmount: decimal("tempWageAmount", { precision: 10, scale: 2 }),
   tempBankAccount: varchar("tempBankAccount", { length: 100 }),
   tempPhone: varchar("tempPhone", { length: 30 }),
+  tempResidentNumber: varchar("tempResidentNumber", { length: 20 }),
   restaurantId: int("restaurantId").notNull(),
   startTime: timestamp("startTime").notNull(),
   endTime: timestamp("endTime").notNull(),
