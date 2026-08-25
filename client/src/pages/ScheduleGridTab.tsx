@@ -217,12 +217,14 @@ function BreakMinutesInput({
   startTime,
   endTime,
   showDailyNotice,
+  placeholder = "자동 (8시간↑ 60분, 4시간↑ 30분)",
 }: {
   value: string;
   onChange: (v: string) => void;
   startTime: string;
   endTime: string;
   showDailyNotice?: boolean;
+  placeholder?: string;
 }) {
   const netPreview = (() => {
     if (value === "") return null;
@@ -245,7 +247,7 @@ function BreakMinutesInput({
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="자동 (8시간↑ 60분, 4시간↑ 30분)"
+          placeholder={placeholder}
         />
         {netPreview && <span className="text-xs text-muted-foreground shrink-0">({netPreview})</span>}
       </div>
@@ -267,6 +269,14 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     const d = params.get("date");
     return d ? new Date(d + "T12:00:00") : new Date();
   });
+  // 딥링크 하이라이트 (?hl=<userId> / ?hlt=<임시근로자명>) — 근무현황에서 진입 시
+  const [highlightUserId] = useState<number | null>(() => {
+    const v = new URLSearchParams(window.location.search).get("hl");
+    return v && /^\d+$/.test(v) ? Number(v) : null;
+  });
+  const [highlightTempName] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("hlt"),
+  );
   const anchorWeekStart = useMemo(() => getWeekDates(anchorDate)[0], [anchorDate]);
   const anchorKey = fmtDate(anchorWeekStart);
   // page 0 = 앵커 주 - 1주부터 4주 (앵커 주가 페이지 안쪽에 오도록)
@@ -1165,13 +1175,17 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   const isTemp = !!s.tempWorkerName;
                   // 임시근로자는 userId가 null이라 isMine이 true가 될 수 없음 (오렌지 규칙과 상호배타)
                   const isMine = currentUserId != null && s.userId === currentUserId;
+                  // 딥링크 하이라이트 — isMine(배경색)과 별개로 테두리로 표시
+                  const isHighlighted =
+                    (highlightUserId != null && s.userId === highlightUserId) ||
+                    (!!highlightTempName && s.tempWorkerName === highlightTempName);
                   const isCustom = !s.shiftPreset || s.shiftPreset === "custom";
                   const presetLabel = !isCustom ? resolvePresetLabel(s.shiftPreset, shiftPresets) : "";
                   return (
                     <button
                       key={s.id}
                       onClick={() => openEditModal(s)}
-                      className={`w-full text-left p-1 md:p-1.5 rounded border-l-2 ${isTemp ? "border-l-orange-400" : st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors ${isMine ? "bg-primary/20" : "bg-background"}`}
+                      className={`w-full text-left p-1 md:p-1.5 rounded border-l-2 ${isTemp ? "border-l-orange-400" : st.bgCard} border border-border/50 text-xs active:bg-accent/50 transition-colors ${isMine ? "bg-primary/20" : "bg-background"} ${isHighlighted ? "ring-2 ring-primary" : ""}`}
                     >
                       <div className="flex items-center gap-1">
                         {isMine && (
@@ -1691,6 +1705,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   startTime={tempForm.startTime}
                   endTime={tempForm.endTime}
                   showDailyNotice={tempForm.wageType === "daily"}
+                  placeholder="0 (미입력 시 휴게 없음)"
                 />
 
                 <div>

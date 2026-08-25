@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useLocation } from "wouter";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
@@ -27,9 +28,17 @@ export default function WorkSummaryPage() {
   const restaurantId = current?.id ?? 0;
 
   const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth() + 1);
-  const [expandedEmpKey, setExpandedEmpKey] = useState<string | null>(null);
+  // 인건비정산 등에서 넘어온 딥링크 파라미터 (?year=&month=&emp=)
+  const [initialParams] = useState(() => new URLSearchParams(window.location.search));
+  const [year, setYear] = useState(() => {
+    const y = Number(initialParams.get("year"));
+    return y >= 2000 && y <= 2100 ? y : today.getFullYear();
+  });
+  const [month, setMonth] = useState(() => {
+    const m = Number(initialParams.get("month"));
+    return m >= 1 && m <= 12 ? m : today.getMonth() + 1;
+  });
+  const [expandedEmpKey, setExpandedEmpKey] = useState<string | null>(() => initialParams.get("emp"));
 
   const prevMonth = () => { if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1); };
@@ -43,6 +52,19 @@ export default function WorkSummaryPage() {
 
   const grandTotalHours = companies.reduce((s, c) => s + c.totalHours, 0);
   const grandTotalShifts = companies.reduce((s, c) => s + c.totalShifts, 0);
+
+  // 딥링크 진입 시 해당 직원 카드로 1회 스크롤
+  const listRef = useRef<HTMLDivElement>(null);
+  const didScrollRef = useRef(false);
+  useEffect(() => {
+    if (didScrollRef.current) return;
+    const key = initialParams.get("emp");
+    if (!key || isLoading || companies.length === 0) return;
+    const el = listRef.current?.querySelector(`[data-empkey="${CSS.escape(key)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    didScrollRef.current = true;
+  }, [isLoading, companies.length]);
 
   if (!restaurantId) return <div className="p-6 text-center text-muted-foreground">매장을 선택해주세요</div>;
 
@@ -217,7 +239,7 @@ export default function WorkSummaryPage() {
         const regularEmps = allEmployees.filter((e: any) => !e.isTemp);
         const tempEmps = allEmployees.filter((e: any) => e.isTemp);
         return (
-          <div className="bg-card border border-border rounded-lg overflow-hidden">
+          <div ref={listRef} className="bg-card border border-border rounded-lg overflow-hidden">
             <div className="divide-y divide-border/50">
               {regularEmps.map((emp, i) => (
                 <EmployeeShiftCard
@@ -226,6 +248,7 @@ export default function WorkSummaryPage() {
                   restaurantId={restaurantId}
                   year={year}
                   month={month}
+                  empKey={empKey(emp)}
                   expanded={expandedEmpKey === empKey(emp)}
                   onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
                 />
@@ -245,6 +268,7 @@ export default function WorkSummaryPage() {
                       restaurantId={restaurantId}
                       year={year}
                       month={month}
+                      empKey={empKey(emp)}
                       expanded={expandedEmpKey === empKey(emp)}
                       onToggle={() => setExpandedEmpKey(expandedEmpKey === empKey(emp) ? null : empKey(emp))}
                     />
@@ -261,15 +285,17 @@ export default function WorkSummaryPage() {
 
 // ─── 인원별 카드 (헤더 + 펼침 시 세부 근무내역 인라인 테이블) ────────────────
 function EmployeeShiftCard({
-  emp, restaurantId, year, month, expanded, onToggle,
+  emp, restaurantId, year, month, empKey, expanded, onToggle,
 }: {
   emp: any;
   restaurantId: number;
   year: number;
   month: number;
+  empKey: string;
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const [, setLocation] = useLocation();
   const subUsed = emp.substituteLeave && emp.substituteLeave.used > 0;
   const annUsed = emp.annualLeave && emp.annualLeave.used > 0;
 
@@ -289,8 +315,18 @@ function EmployeeShiftCard({
   const totalHours = shifts?.reduce((s, r) => s + r.netHours, 0) ?? 0;
   const totalDays = shifts?.length ?? 0;
 
+  // 스케줄 딥링크 — 해당 날짜 주간 + 본인 칩 하이라이트
+  const highlightParam = userId != null
+    ? `hl=${userId}`
+    : tempWorkerName
+      ? `hlt=${encodeURIComponent(tempWorkerName)}`
+      : "";
+  const goSchedule = (date: string) => {
+    setLocation(`/schedule?date=${date}${highlightParam ? `&${highlightParam}` : ""}`);
+  };
+
   return (
-    <div className={`px-4 py-3 space-y-2 ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
+    <div data-empkey={empKey} className={`px-4 py-3 space-y-2 ${emp.recheckRequired ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
       {/* 1행: 이름 + 펼침 */}
       <div className="flex items-start justify-between gap-2 cursor-pointer" onClick={onToggle}>
         <div className="flex-1 min-w-0">
@@ -339,6 +375,15 @@ function EmployeeShiftCard({
       {/* 펼침: 세부 근무내역 인라인 테이블 */}
       {expanded && (
         <div className="pt-2 space-y-2">
+          {/* 스케줄 딥링크 */}
+          <button
+            type="button"
+            onClick={() => goSchedule(`${year}-${String(month).padStart(2, "0")}-01`)}
+            className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-primary/10"
+          >
+            <Eye className="w-3 h-3" /> 스케줄 보기
+          </button>
+
           {/* 상단 요약 */}
           <div className="grid grid-cols-2 gap-2 px-3 py-2 border border-border rounded bg-muted/20">
             <div className="text-center">
@@ -371,7 +416,12 @@ function EmployeeShiftCard({
                 </thead>
                 <tbody>
                   {shifts.map((s) => (
-                    <tr key={s.id} className="border-t border-border/40">
+                    <tr
+                      key={s.id}
+                      onClick={() => goSchedule(s.date)}
+                      title="해당 날짜 스케줄 보기"
+                      className="border-t border-border/40 cursor-pointer hover:bg-accent/40 transition-colors"
+                    >
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1">
                           <span className="text-foreground font-medium">{s.date.slice(5)}</span>

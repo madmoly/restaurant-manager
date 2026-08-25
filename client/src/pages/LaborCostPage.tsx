@@ -1,10 +1,11 @@
 import { Fragment, useState, useRef, useEffect } from "react";
+import { useLocation } from "wouter";
 import { trpc } from "../lib/trpc";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   ChevronLeft, ChevronRight, Building2, Wallet,
   ChevronDown, ChevronUp, FileText, Download, CalendarCheck, CalendarDays,
-  AlertTriangle, Check, X, Plus, Info, UserX, Edit3, Save, Phone, CreditCard,
+  AlertTriangle, Check, X, Plus, Info, UserX, Edit3, Save, Phone, CreditCard, Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CompanyCardListSkeleton } from "@/components/ui/skeletons";
@@ -411,7 +412,7 @@ export default function LaborCostPage() {
                       {/* 정규 직원 */}
                       <div className="divide-y divide-border/50">
                         {regularEmps.map((emp, i) => (
-                          <EmployeeRow key={`r-${i}`} emp={emp} restaurantId={restaurantId} />
+                          <EmployeeRow key={`r-${i}`} emp={emp} restaurantId={restaurantId} year={year} month={month} />
                         ))}
                       </div>
                       {/* 임시근로자 + 주휴미제공 */}
@@ -423,7 +424,7 @@ export default function LaborCostPage() {
                           </div>
                           <div className="divide-y divide-border/50">
                             {tempEmps.map((emp, i) => (
-                              <EmployeeRow key={`t-${i}`} emp={emp} restaurantId={restaurantId} />
+                              <EmployeeRow key={`t-${i}`} emp={emp} restaurantId={restaurantId} year={year} month={month} />
                             ))}
                           </div>
                         </div>
@@ -454,7 +455,8 @@ function EffSpan({ label, eff, guide }: { label: string; eff: number | null; gui
 }
 
 /* ─── 직원 행 컴포넌트 (점진적 공개) ─────────────────────────────── */
-function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) {
+function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantId: number; year: number; month: number }) {
+  const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
   const updateTempInfo = trpc.schedules.updateTempWorkerInfo.useMutation({
     onSuccess() { utils.schedules.laborCostByCompany.invalidate(); },
@@ -543,6 +545,21 @@ function EmployeeRow({ emp, restaurantId }: { emp: any; restaurantId: number }) 
       {/* ── 펼침 시: 상세 정보 ── */}
       {expanded && (
         <div className="mt-2 space-y-2">
+          {/* 근무현황 딥링크 */}
+          <div className="pt-2 border-t border-border/30">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                const empKey = emp.isTemp ? `t_${emp.name}` : `${emp.userId}_${emp.name}`;
+                setLocation(`/work-summary?year=${year}&month=${month}&emp=${encodeURIComponent(empKey)}`);
+              }}
+              className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-primary/10"
+            >
+              <Eye className="w-3 h-3" /> 근무현황 보기
+            </button>
+          </div>
+
           {/* 급여 내역 */}
           <div className="text-[11px] grid grid-cols-3 gap-x-3 gap-y-1 pt-2 border-t border-border/30">
             {isHourly && (

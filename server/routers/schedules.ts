@@ -234,8 +234,8 @@ export const schedulesRouter = router({
       }
       const start = new Date(`${input.workDate}T${input.startTime}:00+09:00`);
       const end = new Date(`${input.workDate}T${input.endTime}:00+09:00`);
-      const grossHours = (end.getTime() - start.getTime()) / 3600000;
-      const breakMin = input.breakMinutes ?? defaultBreakMinutes(grossHours);
+      // 임시근로자는 휴게시간 자동계산 없음 — 미입력 시 0분
+      const breakMin = input.breakMinutes ?? 0;
       const [result] = await db.insert(schedules).values({
         userId: null as any,
         tempWorkerName: input.tempWorkerName,
@@ -1548,7 +1548,8 @@ export const schedulesRouter = router({
               contractEnd: r.contractEnd,
               signedAt: r.signedAt,
             })),
-            userId: undefined, // 클라이언트에 노출하지 않음
+            // 근무현황 딥링크(empKey 생성)용으로 노출. ownerProcedure 한정.
+            userId: uid,
             dateSet: undefined, // 내부 집계용
             shiftsForWeek: undefined, // 내부 집계용
           };
