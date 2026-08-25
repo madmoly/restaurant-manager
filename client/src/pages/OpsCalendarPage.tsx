@@ -57,8 +57,29 @@ function DayDetailContent({ restaurantId, date, onNavigate }: {
     { restaurantId, date },
     { enabled: restaurantId > 0 },
   );
+  // 매장 휴무일이면 세부 내역 대신 "휴무일"만
+  const { data: monthClosures = [] } = trpc.storeClosures.listByMonth.useQuery(
+    { restaurantId, year: Number(date.slice(0, 4)), month: Number(date.slice(5, 7)) },
+    { enabled: restaurantId > 0 },
+  );
+  const { data: weeklyClosures = [] } = trpc.storeClosures.getWeeklyClosures.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const storeClosed =
+    (monthClosures as any[]).some((c) =>
+      (typeof c.closedDate === "string" ? c.closedDate.slice(0, 10) : new Date(c.closedDate).toISOString().slice(0, 10)) === date,
+    ) ||
+    (weeklyClosures as any[]).some((w) => w.weekday === new Date(date + "T12:00:00").getDay());
 
   if (isLoading) return <div className="text-center py-8 text-muted-foreground text-sm">로딩 중...</div>;
+  if (storeClosed) {
+    return (
+      <div className="text-center py-10">
+        <span className="text-sm font-medium text-muted-foreground px-3 py-1 rounded-full bg-muted">휴무일</span>
+      </div>
+    );
+  }
   if (!data) return <div className="text-center py-8 text-muted-foreground text-sm">데이터 없음</div>;
 
   return (
@@ -288,6 +309,26 @@ export default function OpsCalendarPage() {
     { enabled: restaurantId > 0 },
   );
   // 월간 P&L: 수익분석(monthly-settlement)과 동일한 settlementData 쿼리 사용
+  const { data: closedDays = [] } = trpc.storeClosures.listByMonth.useQuery(
+    { restaurantId, year, month },
+    { enabled: restaurantId > 0 },
+  );
+  const { data: weeklyClosures = [] } = trpc.storeClosures.getWeeklyClosures.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  // 매장 휴무일: 지정 휴무일 + 정기 휴무 요일
+  const closedDateSet = useMemo(
+    () => new Set((closedDays as any[]).map((c) =>
+      typeof c.closedDate === "string" ? c.closedDate.slice(0, 10) : new Date(c.closedDate).toISOString().slice(0, 10),
+    )),
+    [closedDays],
+  );
+  const closedWeekdays = useMemo(
+    () => new Set((weeklyClosures as any[]).map((w) => w.weekday)),
+    [weeklyClosures],
+  );
+
   const { data: settlement } = trpc.monthlyClosings.settlementData.useQuery(
     { restaurantId, year, month },
     { enabled: restaurantId > 0 },
@@ -422,55 +463,61 @@ export default function OpsCalendarPage() {
                 const StatusIcon = dayData?.status === "closed" ? CheckCircle2 : dayData?.status === "open" ? Clock : XCircle;
                 const statusColor = dayData?.status === "closed" ? "text-green-600" : dayData?.status === "open" ? "text-amber-500" : "text-muted-foreground/30";
                 const dailyProfit = (dayData?.totalSales ?? 0) - (dayData?.totalPurchases ?? 0);
+                // 매장 휴무일: 매출·매입·체크리스트·스케줄 전부 숨기고 "휴무일"만
+                const storeClosed = closedDateSet.has(dateStr) || closedWeekdays.has(dow);
 
                 return (
                   <div
                     key={day}
                     onClick={() => !isFuture && setSelectedDate(isSelected ? null : dateStr)}
                     className={`border-b border-r border-border min-h-[72px] p-1 relative cursor-pointer transition-colors hover:bg-accent/50
+                      ${storeClosed ? "bg-muted/50" : ""}
                       ${isToday ? "bg-primary/5 ring-1 ring-primary/30 ring-inset" : ""}
                       ${isFuture ? "opacity-40 cursor-default" : ""}
                       ${isSelected ? "bg-primary/10 ring-2 ring-primary/50 ring-inset" : ""}`}
                   >
                     <div className="flex items-center justify-between mb-0.5">
                       <span className={`text-xs font-medium ${dow === 0 || holiday ? "text-red-500" : dow === 6 ? "text-blue-500" : "text-foreground"} ${isToday ? "bg-primary text-primary-foreground rounded-full w-5 h-5 flex items-center justify-center text-[10px]" : ""}`}>{day}</span>
-                      {!isFuture && dayData && <StatusIcon className={`w-3 h-3 ${statusColor}`} />}
+                      {!storeClosed && !isFuture && dayData && <StatusIcon className={`w-3 h-3 ${statusColor}`} />}
                     </div>
                     {holiday && <div className="text-[9px] text-red-400 truncate leading-tight">{holiday}</div>}
-                    {dayData?.closedByName && (
+                    {storeClosed && (
+                      <div className="text-[10px] font-medium text-muted-foreground mt-1">휴무일</div>
+                    )}
+                    {!storeClosed && dayData?.closedByName && (
                       <div className="text-[9px] text-green-600 dark:text-green-400 truncate leading-tight">
                         {dayData.closedByName}
                       </div>
                     )}
                     {/* 매출 */}
-                    {dayData && dayData.totalSales > 0 && (
+                    {!storeClosed && dayData && dayData.totalSales > 0 && (
                       <div className="text-[10px] font-medium text-foreground mt-0.5 flex items-center gap-0.5">
                         <TrendingUp className="w-2.5 h-2.5 text-emerald-500 shrink-0" />
                         <span className="truncate">{fmtWon(dayData.totalSales)}</span>
                       </div>
                     )}
                     {/* 매입 */}
-                    {dayData && dayData.totalPurchases > 0 && (
+                    {!storeClosed && dayData && dayData.totalPurchases > 0 && (
                       <div className="text-[10px] font-medium text-foreground mt-0.5 flex items-center gap-0.5">
                         <ShoppingCart className="w-2.5 h-2.5 text-orange-400 shrink-0" />
                         <span className="truncate text-muted-foreground">{fmtWon(dayData.totalPurchases)}</span>
                       </div>
                     )}
                     {/* 일일 손익 (매출+매입 모두 있을 때) */}
-                    {dayData && dayData.totalSales > 0 && dayData.totalPurchases > 0 && (
+                    {!storeClosed && dayData && dayData.totalSales > 0 && dayData.totalPurchases > 0 && (
                       <div className={`text-[9px] font-medium mt-0.5 ${dailyProfit >= 0 ? "text-emerald-600" : "text-red-500"}`}>
                         {dailyProfit >= 0 ? "+" : ""}{fmtWon(dailyProfit)}
                       </div>
                     )}
                     {/* 체크리스트 완료 현황 */}
-                    {dayData?.checklist && dayData.checklist.total > 0 && (
+                    {!storeClosed && dayData?.checklist && dayData.checklist.total > 0 && (
                       <div className={`text-[9px] flex items-center gap-0.5 mt-0.5 ${dayData.checklist.checked === dayData.checklist.total ? "text-emerald-600" : dayData.checklist.checked > 0 ? "text-blue-500" : "text-muted-foreground/50"}`}>
                         <ClipboardCheck className="w-2.5 h-2.5 shrink-0" />
                         <span className="truncate">{dayData.checklist.checked}/{dayData.checklist.total}</span>
                       </div>
                     )}
                     {/* 스케줄 (공간 있을 때만) */}
-                    {dayData?.schedule && dayData.schedule.total > 0 && !dayData.totalPurchases && !dayData?.checklist && (
+                    {!storeClosed && dayData?.schedule && dayData.schedule.total > 0 && !dayData.totalPurchases && !dayData?.checklist && (
                       <div className={`text-[9px] flex items-center gap-0.5 mt-0.5 ${dayData.schedule.completed === dayData.schedule.total ? "text-emerald-600" : dayData.schedule.completed > 0 ? "text-blue-500" : "text-muted-foreground"}`}>
                         <Users className="w-2.5 h-2.5 shrink-0" />
                         <span className="truncate">{dayData.schedule.completed}/{dayData.schedule.total}</span>

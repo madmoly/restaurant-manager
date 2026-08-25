@@ -4531,6 +4531,18 @@ export default function DailyOpsPage() {
           )}
         </div>
 
+        {isClosedDay ? (
+          /* 휴무일: 탭·세부 입력 전부 숨기고 안내만 (지정 해제는 상단 배지/버튼으로) */
+          <div className="max-w-2xl mx-auto px-4 py-16 text-center">
+            <p className="text-base font-semibold text-foreground">휴무일</p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {isWeeklyClosedDay
+                ? "정기 휴무 요일입니다. 매장정보에서 정기휴무를 변경할 수 있습니다."
+                : "이 날짜는 휴무일로 지정되어 있습니다. 위 \"휴무 해제\"를 누르면 운영일지를 다시 작성할 수 있습니다."}
+            </p>
+          </div>
+        ) : (
+        <>
         {/* Tab Navigation */}
         <div className="sticky top-[85px] z-10 bg-background/95 backdrop-blur border-b border-border">
           <div className="max-w-2xl mx-auto px-4">
@@ -4567,6 +4579,8 @@ export default function DailyOpsPage() {
             <CloseTab restaurantId={selectedRestaurant.id} date={date} isClosedDay={isClosedDay} />
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
   );

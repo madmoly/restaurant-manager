@@ -26,6 +26,23 @@ export const storeClosuresRouter = router({
         .orderBy(storeClosedDays.closedDate);
     }),
 
+  /** 기간 휴무일 조회 — 스케줄 주간 스트림처럼 월 경계를 걸치는 화면용 */
+  listByRange: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), from: z.string(), to: z.string() }))
+    .query(({ input }) =>
+      db
+        .select()
+        .from(storeClosedDays)
+        .where(
+          and(
+            eq(storeClosedDays.restaurantId, input.restaurantId),
+            sql`${storeClosedDays.closedDate} >= ${input.from}`,
+            sql`${storeClosedDays.closedDate} <= ${input.to}`
+          )
+        )
+        .orderBy(storeClosedDays.closedDate)
+    ),
+
   /** 휴무일 추가 */
   create: managerProcedure
     .input(

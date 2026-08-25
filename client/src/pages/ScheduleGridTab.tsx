@@ -363,7 +363,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   const queryClient = useQueryClient();
 
   // ─── 주간 스트림 (4주 단위 페이지, 양방향 무한 로드) ─────────────────────
-  type StreamPage = { pageIndex: number; from: string; to: string; items: ScheduleItem[]; leaves: any[] };
+  type StreamPage = { pageIndex: number; from: string; to: string; items: ScheduleItem[]; leaves: any[]; closedDates: string[] };
   const streamKey = useMemo(() => ["schedules", "stream", restaurantId, anchorKey], [restaurantId, anchorKey]);
 
   const pageIndexForDate = useCallback((dateStr: string) => {
@@ -378,11 +378,15 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     const start = addDays(page0Start, pageIndex * WEEKS_PER_PAGE * 7);
     const from = fmtDate(start);
     const toDate = fmtDate(addDays(start, WEEKS_PER_PAGE * 7 - 1));
-    const [items, leaves] = await Promise.all([
+    const [items, leaves, closures] = await Promise.all([
       utils.client.schedules.listByRestaurant.query({ restaurantId, from, to: toDate + "T23:59:59" }),
       utils.client.leaveRequests.listByDateRange.query({ restaurantId, from, to: toDate, status: "approved" }),
+      utils.client.storeClosures.listByRange.query({ restaurantId, from, to: toDate }),
     ]);
-    return { pageIndex, from, to: toDate, items: items as ScheduleItem[], leaves };
+    const closedDates = (closures as any[]).map((c) =>
+      typeof c.closedDate === "string" ? c.closedDate.slice(0, 10) : new Date(c.closedDate).toISOString().slice(0, 10),
+    );
+    return { pageIndex, from, to: toDate, items: items as ScheduleItem[], leaves, closedDates };
   }, [restaurantId, page0Start, utils]);
 
   const stream = useInfiniteQuery({
@@ -630,6 +634,26 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
 
   // 날짜별 승인 휴무 목록 (휴무자 칩) — 스트림 페이지에서 파생
   type LeaveChip = { id: number; userId: number; userName: string | null; leaveType: string; source: string | null };
+  // ─── 매장 휴무일 (지정 휴무 + 정기 휴무 요일) ──────────────────────────
+  const { data: weeklyClosures = [] } = trpc.storeClosures.getWeeklyClosures.useQuery(
+    { restaurantId },
+    { enabled: restaurantId > 0 },
+  );
+  const closedWeekdays = useMemo(
+    () => new Set((weeklyClosures as any[]).map((w) => w.weekday)),
+    [weeklyClosures],
+  );
+  const closedDateSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const pg of pages) for (const d of pg.closedDates ?? []) set.add(d);
+    return set;
+  }, [pages]);
+  /** 해당 날짜가 매장 휴무일인가 (지정 휴무 우선, 없으면 정기 휴무 요일) */
+  const isStoreClosed = useCallback(
+    (dateStr: string, weekday: number) => closedDateSet.has(dateStr) || closedWeekdays.has(weekday),
+    [closedDateSet, closedWeekdays],
+  );
+
   const leavesByDate = useMemo(() => {
     const map = new Map<string, LeaveChip[]>();
     for (const pg of pages) {
@@ -1174,6 +1198,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
           const isToday = dateStr === today;
           const isWeekend = isWeekendIndex(i);
           const hc = headcountByDate.get(dateStr) ?? 0;
+          // 매장 휴무일: 근무 칩·휴무자·배정 버튼 전부 숨기고 "휴무일"만 표시
+          const storeClosed = isStoreClosed(dateStr, date.getDay());
 
           return (
             <div
@@ -1181,7 +1207,9 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               data-date={dateStr}
               style={{ scrollMarginTop: minimapH + 52 }}
               className={`border rounded-lg min-h-[100px] md:min-h-[140px] p-2 ${
-                isToday
+                storeClosed
+                  ? "border-dashed border-border bg-muted/40"
+                  : isToday
                   ? "border-primary bg-primary/5"
                   : isWeekend
                   ? "border-muted bg-muted/30"
@@ -1203,7 +1231,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   )}
                   {hc > 0 && <span className="ml-1 text-[10px] md:text-xs font-normal">({hc % 1 === 0 ? hc : hc.toFixed(1)}명)</span>}
                 </button>
-                {allDay.some((s) => s.status === "draft") && (
+                {!storeClosed && allDay.some((s) => s.status === "draft") && (
                   <button
                     onClick={(e) => { e.stopPropagation(); confirmDay.mutate({ restaurantId, date: dateStr }); }}
                     disabled={confirmDay.isPending}
@@ -1214,6 +1242,14 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                 )}
               </div>
 
+              {storeClosed ? (
+                <div className="flex items-center justify-center py-5">
+                  <span className="text-[11px] md:text-xs font-medium text-muted-foreground px-2 py-0.5 rounded-full bg-muted">
+                    휴무일
+                  </span>
+                </div>
+              ) : (
+              <>
               <div className="space-y-1">
                 {active.map((s) => {
                   const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.draft;
@@ -1324,6 +1360,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                     + 직원 배정
                   </button>
                 )
+              )}
+              </>
               )}
             </div>
           );
