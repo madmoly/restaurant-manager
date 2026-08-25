@@ -6,6 +6,9 @@ dist
 .env.local
 _railway_sync.sh
 *.log
+# DB 덤프·진단 SQL (CLAUDE.md §1 — repo 커밋 금지). 마이그레이션은 예외.
+*.sql
+!drizzle/migrations/*.sql
 .DS_Store
 
 # Archives & snapshots
