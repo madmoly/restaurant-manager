@@ -375,15 +375,6 @@ function EmployeeShiftCard({
       {/* 펼침: 세부 근무내역 인라인 테이블 */}
       {expanded && (
         <div className="pt-2 space-y-2">
-          {/* 스케줄 딥링크 */}
-          <button
-            type="button"
-            onClick={() => goSchedule(`${year}-${String(month).padStart(2, "0")}-01`)}
-            className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-primary/10"
-          >
-            <Eye className="w-3 h-3" /> 스케줄 보기
-          </button>
-
           {/* 상단 요약 */}
           <div className="grid grid-cols-2 gap-2 px-3 py-2 border border-border rounded bg-muted/20">
             <div className="text-center">
