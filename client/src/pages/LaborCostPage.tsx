@@ -573,6 +573,13 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
             <div>
               <span className="text-muted-foreground">{isHourly ? "시간×시급" : "기본급"}</span>
               <div className="font-medium text-foreground">{fmtWon(wb.base)}</div>
+              {/* 산출 근거: 실근무시간(휴게 차감 후) × 시급 */}
+              {isHourly && (emp.totalHours ?? 0) > 0 && (
+                <div className="text-[10px] text-muted-foreground tabular-nums">
+                  {emp.totalHours.toFixed(1)}h
+                  {isFinite(hourlyRate) && hourlyRate > 0 ? ` × ${fmtWonRaw(hourlyRate)}원` : ""}
+                </div>
+              )}
             </div>
             <div>
               <span className="text-muted-foreground">주휴</span>
