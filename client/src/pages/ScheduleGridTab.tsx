@@ -218,6 +218,7 @@ function BreakMinutesInput({
   endTime,
   showDailyNotice,
   placeholder = "자동 (8시간↑ 60분, 4시간↑ 30분)",
+  guideMode,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -225,7 +226,19 @@ function BreakMinutesInput({
   endTime: string;
   showDailyNotice?: boolean;
   placeholder?: string;
+  /** 자동계산 없이 근로기준법 가이드만 안내하고 직접 입력을 유도 (임시근로자 등록) */
+  guideMode?: boolean;
 }) {
+  // 가이드: 근로기준법 §54 기준 권장 휴게시간 (자동 입력 아님 — 안내 + 원터치 적용)
+  const guide = (() => {
+    if (!guideMode) return null;
+    const totalMin = timeToMinutes(endTime) - timeToMinutes(startTime);
+    if (!isFinite(totalMin) || totalMin <= 0) return null;
+    const grossHours = totalMin / 60;
+    const recommended = defaultBreakMinutes(grossHours);
+    return { grossHours, recommended };
+  })();
+
   const netPreview = (() => {
     if (value === "") return null;
     const totalMin = timeToMinutes(endTime) - timeToMinutes(startTime);
@@ -251,6 +264,33 @@ function BreakMinutesInput({
         />
         {netPreview && <span className="text-xs text-muted-foreground shrink-0">({netPreview})</span>}
       </div>
+      {guide && (
+        <p className="text-[11px] mt-1 flex items-center gap-1.5 flex-wrap">
+          {guide.recommended > 0 ? (
+            <>
+              <span className="text-muted-foreground">
+                근무 {guide.grossHours.toFixed(1)}시간 — 근로기준법 권장 휴게 <b className="text-foreground">{guide.recommended}분</b>
+              </span>
+              {value !== String(guide.recommended) && (
+                <button
+                  type="button"
+                  onClick={() => onChange(String(guide.recommended))}
+                  className="text-primary hover:text-primary/80 underline underline-offset-2"
+                >
+                  {guide.recommended}분 입력
+                </button>
+              )}
+            </>
+          ) : (
+            <span className="text-muted-foreground">
+              근무 {guide.grossHours.toFixed(1)}시간 — 4시간 미만이라 법정 휴게 의무 없음
+            </span>
+          )}
+          {value === "" && (
+            <span className="text-amber-600 dark:text-amber-400">비워두면 휴게 0분으로 저장됩니다</span>
+          )}
+        </p>
+      )}
       {showDailyNotice && (
         <p className="text-[11px] text-muted-foreground mt-1">
           일급은 정액이라 휴게시간이 급여에 영향을 주지 않습니다 (근무시간 기록에만 반영)
@@ -1705,7 +1745,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   startTime={tempForm.startTime}
                   endTime={tempForm.endTime}
                   showDailyNotice={tempForm.wageType === "daily"}
-                  placeholder="0 (미입력 시 휴게 없음)"
+                  placeholder="직접 입력 (미입력 시 0분)"
+                  guideMode
                 />
 
                 <div>
