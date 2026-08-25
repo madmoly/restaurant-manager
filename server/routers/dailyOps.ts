@@ -1070,7 +1070,7 @@ export const dailyOpsRouter = router({
 
       // 3. 스케줄 목록 (전체 조회 후 active/canceled 분리)
       const allScheduleRows = await db
-        .select({ id: schedules.id, userName: users.name, startTime: schedules.startTime, endTime: schedules.endTime, status: schedules.status, shiftPreset: schedules.shiftPreset, tempWorkerName: schedules.tempWorkerName })
+        .select({ id: schedules.id, userName: users.name, startTime: schedules.startTime, endTime: schedules.endTime, status: schedules.status, shiftPreset: schedules.shiftPreset, tempWorkerName: schedules.tempWorkerName, tempWorkerTag: schedules.tempWorkerTag })
         .from(schedules)
         .leftJoin(users, eq(schedules.userId, users.id))
         .where(and(eq(schedules.restaurantId, input.restaurantId), sql`DATE(${schedules.startTime}) = ${input.date}`));
@@ -1107,7 +1107,7 @@ export const dailyOpsRouter = router({
         } : null,
         schedules: scheduleRows.map(s => ({
           id: s.id,
-          name: s.userName ?? s.tempWorkerName ?? "미지정",
+          name: s.userName ?? (s.tempWorkerName ? (s.tempWorkerTag ? `${s.tempWorkerName} (${s.tempWorkerTag})` : s.tempWorkerName) : null) ?? "미지정",
           startTime: s.startTime,
           endTime: s.endTime,
           status: s.status,
@@ -1115,7 +1115,7 @@ export const dailyOpsRouter = router({
         })),
         canceledSchedules: canceledRows.map(s => ({
           id: s.id,
-          name: s.userName ?? s.tempWorkerName ?? "미지정",
+          name: s.userName ?? (s.tempWorkerName ? (s.tempWorkerTag ? `${s.tempWorkerName} (${s.tempWorkerTag})` : s.tempWorkerName) : null) ?? "미지정",
           startTime: s.startTime,
           endTime: s.endTime,
           shiftPreset: s.shiftPreset,

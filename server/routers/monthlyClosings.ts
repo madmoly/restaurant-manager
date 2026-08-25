@@ -200,6 +200,7 @@ export async function sumLaborByCompany(
     endTime: schedules.endTime,
     breakMinutes: schedules.breakMinutes,
     tempWorkerName: schedules.tempWorkerName,
+    tempWorkerTag: schedules.tempWorkerTag,
     tempWageType: schedules.tempWageType,
     tempWageAmount: schedules.tempWageAmount,
     wageType: employeeWageHistory.wageType,
@@ -289,7 +290,11 @@ export async function sumLaborByCompany(
     }
 
     const company = r.tempWorkerName ? "임시근로" : (empCompany ?? "기본");
-    const key = r.tempWorkerName ? `임시-${r.tempWorkerName}` : (r.userId ? String(r.userId) : "unknown");
+    // 동명이인은 꼬리표까지 합쳐야 별개 인원 (schedules.tempWorkerTag)
+    const tempLabel = r.tempWorkerName
+      ? (r.tempWorkerTag ? `${r.tempWorkerName} (${r.tempWorkerTag})` : r.tempWorkerName)
+      : null;
+    const key = tempLabel ? `임시-${tempLabel}` : (r.userId ? String(r.userId) : "unknown");
 
     if (isRegularMonthly && r.userId) {
       // 월급제 정규직: 시프트 임금 누적 X. 직원별 actualHours만 모아 월말 일괄 합산.

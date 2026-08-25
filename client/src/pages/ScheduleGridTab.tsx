@@ -40,6 +40,7 @@ import {
   calcHeadcountWeight,
   defaultBreakMinutes,
   timeToMinutes,
+  tempDisplayName,
 } from "@/lib/scheduleHelpers";
 
 interface ScheduleGridTabProps {
@@ -319,6 +320,9 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   const [highlightTempName] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get("hlt"),
   );
+  const [highlightTempTag] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("hltag"),
+  );
   const anchorWeekStart = useMemo(() => getWeekDates(anchorDate)[0], [anchorDate]);
   const anchorKey = fmtDate(anchorWeekStart);
   // page 0 = 앵커 주 - 1주부터 4주 (앵커 주가 페이지 안쪽에 오도록)
@@ -346,6 +350,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   const [customTime, setCustomTime] = useState({ startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
   const [tempForm, setTempForm] = useState({
     name: "",
+    tag: "",
     wageType: "hourly" as "hourly" | "daily",
     wageAmount: "",
     startTime: "09:00",
@@ -464,6 +469,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
         id: -Date.now(),
         userId: vars.userId,
         tempWorkerName: null,
+        tempWorkerTag: null,
         tempWageType: null,
         tempWageAmount: null,
         userName: staff?.name ?? "...",
@@ -901,7 +907,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     setAssignUserIds(new Set());
     setAssignUserNames(new Map());
     setCustomTime({ startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
-    setTempForm({ name: "", wageType: "hourly", wageAmount: "", startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
+    setTempForm({ name: "", tag: "", wageType: "hourly", wageAmount: "", startTime: "09:00", endTime: "18:00", breakMinutes: "", note: "" });
     setOffUserIds(new Set());
   };
   const closeAssignModal = () => { setAssignDate(null); setAssignStep("employee"); setOffUserIds(new Set()); };
@@ -961,6 +967,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
     createTempWorker.mutate({
       restaurantId,
       tempWorkerName: tempForm.name.trim(),
+      tempWorkerTag: tempForm.tag.trim() || undefined,
       workDate: assignDate!,
       startTime: tempForm.startTime,
       endTime: tempForm.endTime,
@@ -1259,7 +1266,9 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   // 딥링크 하이라이트 — isMine(배경색)과 별개로 테두리로 표시
                   const isHighlighted =
                     (highlightUserId != null && s.userId === highlightUserId) ||
-                    (!!highlightTempName && s.tempWorkerName === highlightTempName);
+                    (!!highlightTempName &&
+                      s.tempWorkerName === highlightTempName &&
+                      (s.tempWorkerTag ?? "") === (highlightTempTag ?? ""));
                   const isCustom = !s.shiftPreset || s.shiftPreset === "custom";
                   const presetLabel = !isCustom ? resolvePresetLabel(s.shiftPreset, shiftPresets) : "";
                   return (
@@ -1278,7 +1287,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                             if (s.userName) {
                               return s.userName.length >= 2 ? s.userName.slice(1) : s.userName;
                             }
-                            return s.tempWorkerName ?? "미배정";
+                            return tempDisplayName(s.tempWorkerName, s.tempWorkerTag) ?? "미배정";
                           })()}
                         </span>
                         <span className={`shrink-0 px-1 py-0 rounded text-[9px] md:text-[10px] font-medium leading-tight ${st.color}`}>
@@ -1707,17 +1716,33 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   <ChevronLeft className="w-3 h-3" /> 직원 선택
                 </button>
 
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">이름 *</label>
-                  <input
-                    type="text"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    value={tempForm.name}
-                    onChange={(e) => setTempForm({ ...tempForm, name: e.target.value })}
-                    placeholder="근로자 이름"
-                    autoFocus
-                  />
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-muted-foreground">이름 *</label>
+                    <input
+                      type="text"
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={tempForm.name}
+                      onChange={(e) => setTempForm({ ...tempForm, name: e.target.value })}
+                      placeholder="근로자 이름"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">구분</label>
+                    <input
+                      type="text"
+                      maxLength={20}
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={tempForm.tag}
+                      onChange={(e) => setTempForm({ ...tempForm, tag: e.target.value })}
+                      placeholder="선택"
+                    />
+                  </div>
                 </div>
+                <p className="text-[11px] text-muted-foreground -mt-2">
+                  동명이인이 있으면 <b>구분</b>에 전화 뒷자리·별칭 등을 넣으세요. 급여·근무시간이 따로 집계됩니다.
+                </p>
 
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">급여 유형</label>
@@ -1967,7 +1992,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               <div>
                 <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
                   <Edit3 className="w-4 h-4" />
-                  {editSchedule.userName ?? editSchedule.tempWorkerName ?? "미배정"}
+                  {editSchedule.userName ?? tempDisplayName(editSchedule.tempWorkerName, editSchedule.tempWorkerTag) ?? "미배정"}
                   {editSchedule.tempWorkerName && <span className="text-xs text-orange-500">(임시)</span>}
                 </h2>
                 <p className="text-xs text-muted-foreground mt-0.5">

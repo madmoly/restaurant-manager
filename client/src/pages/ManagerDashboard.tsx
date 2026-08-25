@@ -536,7 +536,13 @@ interface DaySchedule {
 }
 
 function buildFiveDaySchedule(
-  upcoming: Array<{ startTime: string | Date; userName?: string | null; status?: string }>,
+  upcoming: Array<{
+    startTime: string | Date;
+    userName?: string | null;
+    tempWorkerName?: string | null;
+    tempWorkerTag?: string | null;
+    status?: string;
+  }>,
   todayStr: string,
 ): DaySchedule[] {
   const days: DaySchedule[] = [];
@@ -565,7 +571,7 @@ function buildFiveDaySchedule(
       label,
       isToday: i === 0,
       count: daySchedules.length,
-      names: daySchedules.map(s => s.userName ?? s.tempWorkerName ?? "").filter(Boolean).slice(0, 3),
+      names: daySchedules.map(s => s.userName ?? (s.tempWorkerName ? (s.tempWorkerTag ? `${s.tempWorkerName} (${s.tempWorkerTag})` : s.tempWorkerName) : null) ?? "").filter(Boolean).slice(0, 3),
     });
   }
   return days;

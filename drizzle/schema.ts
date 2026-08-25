@@ -360,6 +360,8 @@ export const schedules = mysqlTable("schedules", {
   tempBankAccount: varchar("tempBankAccount", { length: 100 }),
   tempPhone: varchar("tempPhone", { length: 30 }),
   tempResidentNumber: varchar("tempResidentNumber", { length: 20 }),
+  // 동명이인 구분 꼬리표 (예: 뒷자리 "1234", 별칭 "주방"). 사람 식별 = (매장, 이름, 꼬리표)
+  tempWorkerTag: varchar("tempWorkerTag", { length: 20 }),
   restaurantId: int("restaurantId").notNull(),
   startTime: timestamp("startTime").notNull(),
   endTime: timestamp("endTime").notNull(),

@@ -474,7 +474,8 @@ function EmployeeRow({ emp, restaurantId, year, month }: { emp: any; restaurantI
   const saveTempInfo = () => {
     updateTempInfo.mutate({
       restaurantId,
-      tempWorkerName: emp.name,
+      tempWorkerName: emp.tempWorkerName ?? emp.name,
+      tempWorkerTag: emp.tempWorkerTag ?? null,
       bankAccount: tempBank,
       phone: tempPhoneVal,
       residentNumber: tempResident,

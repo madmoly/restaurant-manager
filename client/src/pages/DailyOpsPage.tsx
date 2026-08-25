@@ -3145,7 +3145,7 @@ function MiddayTab({
     lines.push(`* 금일 근무자`);
     if (todaySchedules.length > 0) {
       for (const s of todaySchedules) {
-        const name = s.userName ?? s.tempWorkerName ?? '미배정';
+        const name = s.userName ?? (s.tempWorkerName ? (s.tempWorkerTag ? `${s.tempWorkerName} (${s.tempWorkerTag})` : s.tempWorkerName) : null) ?? '미배정';
         const w = calcHeadcountWeight(
           s.startTime,
           s.endTime,
@@ -3584,7 +3584,7 @@ function CloseTab({
       lines.push('');
       lines.push('금일근무:');
       for (const s of todaySchedules) {
-        const name = s.userName ?? s.tempWorkerName ?? '미배정';
+        const name = s.userName ?? (s.tempWorkerName ? (s.tempWorkerTag ? `${s.tempWorkerName} (${s.tempWorkerTag})` : s.tempWorkerName) : null) ?? '미배정';
         const w = calcHeadcountWeight(s.startTime, s.endTime, rest?.openTime, rest?.closeTime, rest?.halfShiftThreshold);
         if (w === 0.5) {
           const hours = ((new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 3600000).toFixed(1).replace(/\.0$/, '');
@@ -3603,7 +3603,7 @@ function CloseTab({
       lines.push('');
       lines.push(`내일근무 (${tmrwStr}):`);
       for (const s of tmrw) {
-        const name = s.userName ?? s.tempWorkerName ?? '미배정';
+        const name = s.userName ?? (s.tempWorkerName ? (s.tempWorkerTag ? `${s.tempWorkerName} (${s.tempWorkerTag})` : s.tempWorkerName) : null) ?? '미배정';
         const w = calcHeadcountWeight(s.startTime, s.endTime, rest?.openTime, rest?.closeTime, rest?.halfShiftThreshold);
         if (w === 0.5) {
           const hours = ((new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 3600000).toFixed(1).replace(/\.0$/, '');
@@ -4072,7 +4072,7 @@ function ClosingScheduleSummary({ restaurantId, date }: { restaurantId: number; 
                       <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0" />
                     )}
                     <span className="font-medium text-foreground truncate">
-                      {s.userName ?? s.tempWorkerName ?? '미배정'}
+                      {s.userName ?? (s.tempWorkerName ? (s.tempWorkerTag ? `${s.tempWorkerName} (${s.tempWorkerTag})` : s.tempWorkerName) : null) ?? '미배정'}
                       {s.tempWorkerName && <span className="text-orange-500 ml-1 text-xs">(임시)</span>}
                       {calcHeadcountWeight(s.startTime, s.endTime, restaurant?.openTime, restaurant?.closeTime, restaurant?.halfShiftThreshold) === 0.5 && (
                         <span className="text-amber-500 ml-1 text-xs">(반차)</span>

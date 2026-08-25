@@ -302,10 +302,11 @@ function EmployeeShiftCard({
 
   const userId = emp.userId ?? null;
   const tempWorkerName = emp.tempWorkerName ?? (emp.isTemp ? emp.name : null);
+  const tempWorkerTag = emp.tempWorkerTag ?? null;
   const enabled = expanded && (userId !== null || !!tempWorkerName);
 
   const { data: shifts, isLoading } = trpc.schedules.employeeMonthlyShifts.useQuery(
-    { restaurantId, year, month, userId, tempWorkerName },
+    { restaurantId, year, month, userId, tempWorkerName, tempWorkerTag },
     { enabled },
   );
   const { data: shiftPresets } = trpc.restaurants.getShiftPresets.useQuery(
@@ -320,7 +321,7 @@ function EmployeeShiftCard({
   const highlightParam = userId != null
     ? `hl=${userId}`
     : tempWorkerName
-      ? `hlt=${encodeURIComponent(tempWorkerName)}`
+      ? `hlt=${encodeURIComponent(tempWorkerName)}${tempWorkerTag ? `&hltag=${encodeURIComponent(tempWorkerTag)}` : ""}`
       : "";
   const goSchedule = (date: string) => {
     setLocation(`/schedule?date=${date}${highlightParam ? `&${highlightParam}` : ""}`);

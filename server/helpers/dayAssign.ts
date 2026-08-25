@@ -12,7 +12,7 @@ export type DbExecutor = typeof db | Tx;
 export async function hasDuplicateSchedule(
   restaurantId: number,
   dateStr: string,
-  opts: { userId?: number | null; tempWorkerName?: string | null; excludeId?: number },
+  opts: { userId?: number | null; tempWorkerName?: string | null; tempWorkerTag?: string | null; excludeId?: number },
   dbx: DbExecutor = db
 ): Promise<boolean> {
   const dayStart = new Date(`${dateStr}T00:00:00+09:00`);
@@ -28,7 +28,13 @@ export async function hasDuplicateSchedule(
   if (opts.userId) {
     conditions.push(eq(schedules.userId, opts.userId));
   } else if (opts.tempWorkerName) {
+    // 동명이인은 꼬리표까지 같아야 같은 사람 (꼬리표 없음끼리도 동일 취급)
     conditions.push(sql`${schedules.tempWorkerName} = ${opts.tempWorkerName}`);
+    conditions.push(
+      opts.tempWorkerTag
+        ? sql`${schedules.tempWorkerTag} = ${opts.tempWorkerTag}`
+        : sql`(${schedules.tempWorkerTag} IS NULL OR ${schedules.tempWorkerTag} = '')`,
+    );
   }
 
   if (opts.excludeId) {

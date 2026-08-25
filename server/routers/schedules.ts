@@ -99,6 +99,7 @@ export const schedulesRouter = router({
           id: schedules.id,
           userId: schedules.userId,
           tempWorkerName: schedules.tempWorkerName,
+          tempWorkerTag: schedules.tempWorkerTag,
           tempWageType: schedules.tempWageType,
           tempWageAmount: schedules.tempWageAmount,
           userName: users.name,
@@ -215,6 +216,7 @@ export const schedulesRouter = router({
       z.object({
         restaurantId: z.number(),
         tempWorkerName: z.string().trim().min(1),
+        tempWorkerTag: z.string().trim().max(20).optional(),
         workDate: z.string(),
         startTime: z.string(),
         endTime: z.string(),
@@ -229,8 +231,14 @@ export const schedulesRouter = router({
       if (await isClosedDay(input.restaurantId, input.workDate)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "해당 날짜는 휴무일입니다." });
       }
-      if (await hasDuplicateSchedule(input.restaurantId, input.workDate, { tempWorkerName: input.tempWorkerName })) {
-        throw new TRPCError({ code: "CONFLICT", message: `임시직원 "${input.tempWorkerName}"은(는) 이 날짜에 이미 등록되어 있습니다.` });
+      const tagged = input.tempWorkerTag
+        ? `${input.tempWorkerName} (${input.tempWorkerTag})`
+        : input.tempWorkerName;
+      if (await hasDuplicateSchedule(input.restaurantId, input.workDate, {
+        tempWorkerName: input.tempWorkerName,
+        tempWorkerTag: input.tempWorkerTag ?? null,
+      })) {
+        throw new TRPCError({ code: "CONFLICT", message: `임시직원 "${tagged}"은(는) 이 날짜에 이미 등록되어 있습니다.` });
       }
       const start = new Date(`${input.workDate}T${input.startTime}:00+09:00`);
       const end = new Date(`${input.workDate}T${input.endTime}:00+09:00`);
@@ -239,6 +247,7 @@ export const schedulesRouter = router({
       const [result] = await db.insert(schedules).values({
         userId: null as any,
         tempWorkerName: input.tempWorkerName,
+        tempWorkerTag: input.tempWorkerTag || null,
         tempWageType: input.wageType ?? null,
         tempWageAmount: input.wageAmount ? String(input.wageAmount) : null,
         restaurantId: input.restaurantId,
@@ -800,6 +809,7 @@ export const schedulesRouter = router({
           shiftPreset: s.shiftPreset,
           breakMinutes: s.breakMinutes ?? 0,
           tempWorkerName: s.tempWorkerName,
+          tempWorkerTag: s.tempWorkerTag,
           tempWageType: s.tempWageType,
           tempWageAmount: s.tempWageAmount,
           note: s.note,
@@ -892,6 +902,7 @@ export const schedulesRouter = router({
           id: schedules.id,
           userId: schedules.userId,
           tempWorkerName: schedules.tempWorkerName,
+          tempWorkerTag: schedules.tempWorkerTag,
           userName: users.name,
           startTime: schedules.startTime,
           endTime: schedules.endTime,
@@ -973,6 +984,7 @@ export const schedulesRouter = router({
           userId: schedules.userId,
           userName: users.name,
           tempWorkerName: schedules.tempWorkerName,
+          tempWorkerTag: schedules.tempWorkerTag,
           startTime: schedules.startTime,
           endTime: schedules.endTime,
           status: schedules.status,
@@ -1009,6 +1021,7 @@ export const schedulesRouter = router({
           id: schedules.id,
           userId: schedules.userId,
           tempWorkerName: schedules.tempWorkerName,
+          tempWorkerTag: schedules.tempWorkerTag,
           tempWageType: schedules.tempWageType,
           tempWageAmount: schedules.tempWageAmount,
           userName: users.name,
@@ -1069,6 +1082,7 @@ export const schedulesRouter = router({
           breakMinutes: schedules.breakMinutes,
           status: schedules.status,
           tempWorkerName: schedules.tempWorkerName,
+          tempWorkerTag: schedules.tempWorkerTag,
           tempWageType: schedules.tempWageType,
           tempWageAmount: schedules.tempWageAmount,
           tempBankAccount: schedules.tempBankAccount,
@@ -1290,6 +1304,8 @@ export const schedulesRouter = router({
           taxMode: string | null;
           // 시급제 + 주휴별도 가산 합계 (월말 일괄 계산 후 wageBreakdown.weeklyHoliday로 노출)
           weeklyHolidayBonus: number;
+          rawTempName: string | null;
+          tempTag: string | null;
           dateSet: Set<string>;
           shiftsForWeek: Array<{ startDate: string; hours: number }>;
         }>;
@@ -1299,7 +1315,12 @@ export const schedulesRouter = router({
 
       for (const r of rows) {
         const company = (r.affiliatedCompany ?? "미지정").trim() || "미지정";
-        const name = r.userName ?? r.tempWorkerName ?? "미지정";
+        // 동명이인 구분: 임시직 표시명 = "이름 (꼬리표)". empKey가 이 이름을 쓰므로 카드도 분리된다.
+        const name = r.userName
+          ?? (r.tempWorkerName
+            ? (r.tempWorkerTag ? `${r.tempWorkerName} (${r.tempWorkerTag})` : r.tempWorkerName)
+            : null)
+          ?? "미지정";
         // 재설계 2026-05-02: treatAsTemp(noWeeklyHolidayPay 분리) 폐기. 정규직은 항상 같은 카드.
         const empKey = !r.userId ? `temp_${name}` : String(r.userId);
         const over5 = over5ByCompany.get(company) ?? false;
@@ -1335,6 +1356,8 @@ export const schedulesRouter = router({
             hourlyWageIncludesHolidayPay: r.hourlyWageIncludesHolidayPay ?? true,
             taxMode: r.taxMode ?? null,
             weeklyHolidayBonus: 0,
+            rawTempName: uid ? null : (r.tempWorkerName ?? null),
+            tempTag: uid ? null : (r.tempWorkerTag ?? null),
             dateSet: new Set<string>(),
             shiftsForWeek: [],
           };
@@ -1549,6 +1572,9 @@ export const schedulesRouter = router({
               contractEnd: r.contractEnd,
               signedAt: r.signedAt,
             })),
+            // 임시직 정보 수정(updateTempWorkerInfo) 호출용 — 표시명 아닌 DB 원본값
+            tempWorkerName: emp.rawTempName,
+            tempWorkerTag: emp.tempTag,
             // 근무현황 딥링크(empKey 생성)용으로 노출. ownerProcedure 한정.
             userId: uid,
             dateSet: undefined, // 내부 집계용
@@ -1683,6 +1709,7 @@ export const schedulesRouter = router({
     .input(z.object({
       restaurantId: z.number(),
       tempWorkerName: z.string().min(1),
+      tempWorkerTag: z.string().nullable().optional(),
       bankAccount: z.string().optional(),
       phone: z.string().optional(),
       residentNumber: z.string().optional(),
@@ -1699,6 +1726,10 @@ export const schedulesRouter = router({
         .where(and(
           eq(schedules.restaurantId, input.restaurantId),
           sql`${schedules.tempWorkerName} = ${input.tempWorkerName}`,
+          // 동명이인 분리 — 꼬리표가 다른 사람의 계좌·주민번호를 덮어쓰지 않게
+          input.tempWorkerTag
+            ? sql`${schedules.tempWorkerTag} = ${input.tempWorkerTag}`
+            : sql`(${schedules.tempWorkerTag} IS NULL OR ${schedules.tempWorkerTag} = '')`,
         ));
       return { ok: true };
     }),
@@ -1785,6 +1816,7 @@ export const schedulesRouter = router({
           breakMinutes: schedules.breakMinutes,
           status: schedules.status,
           tempWorkerName: schedules.tempWorkerName,
+          tempWorkerTag: schedules.tempWorkerTag,
           tempWageType: schedules.tempWageType,
           affiliatedCompany: restaurantUsers.affiliatedCompany,
           hireDate: restaurantUsers.hireDate,
@@ -1860,13 +1892,20 @@ export const schedulesRouter = router({
           contractDaysOff: number | null;
           recheckRequired: boolean;
           isNoHolidayPayWorker: boolean;
+          rawTempName: string | null;
+          tempTag: string | null;
           dailyMap: Map<string, { hours: number; shifts: number }>;
         }>;
       }> = {};
 
       for (const r of rows) {
         const company = (r.affiliatedCompany ?? "미지정").trim() || "미지정";
-        const name = r.userName ?? r.tempWorkerName ?? "미지정";
+        // 동명이인 구분: 임시직 표시명 = "이름 (꼬리표)". empKey가 이 이름을 쓰므로 카드도 분리된다.
+        const name = r.userName
+          ?? (r.tempWorkerName
+            ? (r.tempWorkerTag ? `${r.tempWorkerName} (${r.tempWorkerTag})` : r.tempWorkerName)
+            : null)
+          ?? "미지정";
         // 재설계 2026-05-02: treatAsTemp 폐기
         const empKey = !r.userId ? `temp_${name}` : String(r.userId);
 
@@ -1876,6 +1915,8 @@ export const schedulesRouter = router({
         if (!companyMap[company].employees[empKey]) {
           companyMap[company].employees[empKey] = {
             name,
+            rawTempName: r.userId ? null : (r.tempWorkerName ?? null),
+            tempTag: r.userId ? null : (r.tempWorkerTag ?? null),
             position: r.position ?? null,
             hireDate: r.hireDate ? String(r.hireDate) : null,
             userId: r.userId ? Number(r.userId) : null,
@@ -1957,7 +1998,9 @@ export const schedulesRouter = router({
             position: emp.position,
             hireDate: emp.hireDate,
             userId: uid,
-            tempWorkerName: isTemp && !emp.isNoHolidayPayWorker ? emp.name : null,
+            // 세부 조회(employeeMonthlyShifts) 필터용 — 표시명(꼬리표 결합) 아닌 DB 원본값
+            tempWorkerName: isTemp && !emp.isNoHolidayPayWorker ? (emp.rawTempName ?? emp.name) : null,
+            tempWorkerTag: emp.tempTag,
             shifts: emp.shifts,
             totalHours: emp.totalHours,
             daysOff: Math.max(0, operatingDays - emp.shifts),
@@ -1999,6 +2042,7 @@ export const schedulesRouter = router({
       month: z.number(),
       userId: z.number().nullable().optional(),
       tempWorkerName: z.string().nullable().optional(),
+      tempWorkerTag: z.string().nullable().optional(),
     }))
     .query(async ({ input, ctx }) => {
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
@@ -2025,6 +2069,11 @@ export const schedulesRouter = router({
       } else if (input.tempWorkerName) {
         conds.push(sql`${schedules.userId} IS NULL`);
         conds.push(sql`${schedules.tempWorkerName} = ${input.tempWorkerName}`);
+        conds.push(
+          input.tempWorkerTag
+            ? sql`${schedules.tempWorkerTag} = ${input.tempWorkerTag}`
+            : sql`(${schedules.tempWorkerTag} IS NULL OR ${schedules.tempWorkerTag} = '')`,
+        );
       }
 
       const rows = await db.select({

@@ -1,11 +1,21 @@
 import { Sun, Moon, Maximize2 } from "lucide-react";
 
+/**
+ * 임시근로자 표시명 — 동명이인 구분 꼬리표를 결합한다.
+ * 식별은 (매장, 이름, 꼬리표) 조합. 서버 집계도 같은 규칙으로 표시명을 만든다.
+ */
+export function tempDisplayName(name: string | null | undefined, tag: string | null | undefined) {
+  if (!name) return null;
+  return tag ? `${name} (${tag})` : name;
+}
+
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
 
 export type ScheduleItem = {
   id: number;
   userId: number | null;
   tempWorkerName: string | null;
+  tempWorkerTag: string | null;
   tempWageType: string | null;
   tempWageAmount: string | null;
   userName: string | null;
@@ -118,8 +128,8 @@ export function makeChipComparator(roleByUserId: Map<number, string>) {
     const bRank = b.userId != null ? (STORE_ROLE_RANK[roleByUserId.get(b.userId) ?? ""] ?? 0) : 0;
     if (aRank !== bRank) return bRank - aRank;
 
-    const aName = a.userName ?? a.tempWorkerName ?? "";
-    const bName = b.userName ?? b.tempWorkerName ?? "";
+    const aName = a.userName ?? tempDisplayName(a.tempWorkerName, a.tempWorkerTag) ?? "";
+    const bName = b.userName ?? tempDisplayName(b.tempWorkerName, b.tempWorkerTag) ?? "";
     const byName = aName.localeCompare(bName, "ko");
     if (byName !== 0) return byName;
 
