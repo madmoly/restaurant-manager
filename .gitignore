@@ -47,3 +47,6 @@ analyze_schema.py
 
 # OCR 실험 산출물 (실제 전표 데이터 포함)
 test-ocr-results/
+
+# 로컬 전용 문서 보관소 (실매출·실명 포함 — public repo라 커밋 금지)
+docs/_local/
