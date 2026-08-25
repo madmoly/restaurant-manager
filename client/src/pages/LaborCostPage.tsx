@@ -135,8 +135,9 @@ export default function LaborCostPage() {
             emp.wageAmount ? Number(emp.wageAmount) : 0,
             insuranceLabel,
             emp.workedDays ?? 0,
-            emp.daysOff ?? 0,
-            emp.contractDaysOff ?? "", // 시급제는 계약휴무 미적용 → 공란
+            // 임시직은 매장 영업일 대비 휴무 개념이 없어 공란
+            emp.isTemp ? "" : (emp.daysOff ?? 0),
+            emp.isTemp ? "" : (emp.contractDaysOff ?? ""), // 시급제는 계약휴무 미적용 → 공란
             subUsed,
             subRemain,
             annUsed,
@@ -157,10 +158,11 @@ export default function LaborCostPage() {
             emp.position ?? "-",
             wageTypeLabel,
             emp.wageAmount ? Number(emp.wageAmount) : 0,
-            emp.contractDaysOff ?? "", // 시급제는 계약휴무 미적용 → 공란
+            emp.isTemp ? "" : (emp.contractDaysOff ?? ""), // 시급제는 계약휴무 미적용 → 공란
             emp.workedDays ?? 0,
             emp.totalHours != null ? Number((emp.totalHours).toFixed(1)) : 0,
-            emp.daysOff ?? 0,
+            // 임시직은 매장 영업일 대비 휴무 개념이 없어 공란
+            emp.isTemp ? "" : (emp.daysOff ?? 0),
             subRemain,
             annRemain,
             insuranceLabel,

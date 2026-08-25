@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { trpc } from "../lib/trpc";
 import { toast } from "sonner";
 import {
@@ -303,6 +304,7 @@ function BreakMinutesInput({
 // ─── 메인 ScheduleGridTab ───────────────────────────────────────────────────
 
 export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets, current, currentUserId = null }: ScheduleGridTabProps) {
+  const [, setLocation] = useLocation();
   // 앵커: 스트림 페이지 계산의 기준 날짜 (?date= 진입 시 해당 주가 초기 페이지 중심)
   const [anchorDate, setAnchorDate] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1187,8 +1189,11 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
               }`}
             >
               <div className="flex items-center justify-between mb-1.5">
-                <span
-                  className={`text-xs md:text-sm font-semibold ${
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setLocation(`/daily-ops?date=${dateStr}`); }}
+                  title="이 날짜의 운영일지 열기"
+                  className={`text-xs md:text-sm font-semibold rounded px-0.5 -ml-0.5 hover:underline underline-offset-2 hover:bg-accent/50 transition-colors ${
                     isToday ? "text-primary" : isWeekend ? "text-red-500" : "text-muted-foreground"
                   }`}
                 >
@@ -1197,7 +1202,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 ml-1 align-middle" title={holidayName} />
                   )}
                   {hc > 0 && <span className="ml-1 text-[10px] md:text-xs font-normal">({hc % 1 === 0 ? hc : hc.toFixed(1)}명)</span>}
-                </span>
+                </button>
                 {allDay.some((s) => s.status === "draft") && (
                   <button
                     onClick={(e) => { e.stopPropagation(); confirmDay.mutate({ restaurantId, date: dateStr }); }}
