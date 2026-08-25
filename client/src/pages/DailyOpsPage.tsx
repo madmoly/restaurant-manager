@@ -4450,7 +4450,7 @@ export default function DailyOpsPage() {
   const handleToggleClosedDay = () => {
     if (isWeeklyClosedDay) return;
     if (specificClosedEntry) {
-      deleteClosureMut.mutate({ id: specificClosedEntry.id });
+      deleteClosureMut.mutate({ id: specificClosedEntry.id, restaurantId });
     } else {
       if (!window.confirm('이 날짜를 휴무일로 지정하시겠습니까? (매출/스케줄 입력이 차단됩니다)')) return;
       createClosureMut.mutate({ restaurantId, closedDate: date });

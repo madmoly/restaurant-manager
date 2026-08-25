@@ -635,7 +635,7 @@ function ClosedDaysManager({ restaurantId, canEdit }: { restaurantId: number; ca
                     {isPast && <span className="text-muted-foreground ml-1">(지남)</span>}
                   </span>
                   {canEdit && !isPast && (
-                    <button onClick={() => delClosed.mutate({ id: d.id })} className="text-red-400 hover:text-red-600 p-1">
+                    <button onClick={() => delClosed.mutate({ id: d.id, restaurantId })} className="text-red-400 hover:text-red-600 p-1">
                       <Trash2 size={12} />
                     </button>
                   )}
