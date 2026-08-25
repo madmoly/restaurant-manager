@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { snapTo30Min } from "@/lib/scheduleHelpers";
 import { trpc } from "../lib/trpc";
 import { useAuth } from "../hooks/useAuth";
 import { useRestaurant } from "@/contexts/RestaurantContext";
@@ -279,8 +280,8 @@ function RestaurantDetail({ restaurant: r, onNavigate }: {
             <EditField label="매장명" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} />
             <EditField label="전화번호" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
             <EditField label="주소" value={form.address} onChange={v => setForm(f => ({ ...f, address: v }))} full />
-            <EditField label="운영 시작" value={form.openTime} onChange={v => setForm(f => ({ ...f, openTime: v }))} placeholder="09:00" />
-            <EditField label="운영 종료" value={form.closeTime} onChange={v => setForm(f => ({ ...f, closeTime: v }))} placeholder="22:00" />
+            <EditField label="운영 시작" value={form.openTime} onChange={v => setForm(f => ({ ...f, openTime: v }))} placeholder="09:00" time />
+            <EditField label="운영 종료" value={form.closeTime} onChange={v => setForm(f => ({ ...f, closeTime: v }))} placeholder="22:00" time />
             <EditField label="월 목표매출" value={form.monthlyTargetSales} onChange={v => setForm(f => ({ ...f, monthlyTargetSales: v }))} placeholder="0" />
             <EditField label="목표 원가율(%)" value={form.targetCostRatio} onChange={v => setForm(f => ({ ...f, targetCostRatio: v }))} placeholder="80" />
             <EditField label="목표 인건비율(%)" value={form.targetLaborRatio} onChange={v => setForm(f => ({ ...f, targetLaborRatio: v }))} placeholder="30" />
@@ -309,15 +310,19 @@ function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string;
   );
 }
 
-function EditField({ label, value, onChange, placeholder, full }: {
+function EditField({ label, value, onChange, placeholder, full, time }: {
   label: string; value: string; onChange: (v: string) => void; placeholder?: string; full?: boolean;
+  /** 시각 입력 — 30분 단위 피커 + 직접 타이핑도 30분으로 스냅 */
+  time?: boolean;
 }) {
   return (
     <div className={full ? "col-span-2" : ""}>
       <label className="text-[10px] text-muted-foreground">{label}</label>
       <input
+        type={time ? "time" : "text"}
+        step={time ? 1800 : undefined}
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={e => onChange(time ? snapTo30Min(e.target.value) : e.target.value)}
         placeholder={placeholder}
         className="w-full px-2 py-1 border border-border rounded text-xs bg-background text-foreground"
       />
@@ -427,17 +432,17 @@ function SingleRestaurantView() {
               <Clock size={14} className="text-muted-foreground/70 shrink-0" />
               <input
                 type="time"
-                step="600"
+                step="1800"
                 value={editOpenTime}
-                onChange={(e) => setEditOpenTime(e.target.value)}
+                onChange={(e) => setEditOpenTime(snapTo30Min(e.target.value))}
                 className="w-[110px] px-2.5 py-1.5 border border-border rounded text-sm bg-background text-foreground"
               />
               <span className="text-xs text-muted-foreground">~</span>
               <input
                 type="time"
-                step="600"
+                step="1800"
                 value={editCloseTime}
-                onChange={(e) => setEditCloseTime(e.target.value)}
+                onChange={(e) => setEditCloseTime(snapTo30Min(e.target.value))}
                 className="w-[110px] px-2.5 py-1.5 border border-border rounded text-sm bg-background text-foreground"
               />
               <span className="text-[11px] text-muted-foreground">운영시간</span>
