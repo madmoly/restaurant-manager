@@ -634,6 +634,8 @@ export const schedulesRouter = router({
         breakMinutes: z.number().min(0).max(240).optional(),
         note: z.string().optional(),
         tempHiringSource: z.string().max(30).nullable().optional(),
+        tempWageType: z.enum(["hourly", "daily"]).nullable().optional(),
+        tempWageAmount: z.number().min(0).nullable().optional(),
         editReason: z.string().optional(),
       })
     )
@@ -665,6 +667,17 @@ export const schedulesRouter = router({
       delete data.id;
       delete data.restaurantId;
       delete data.editReason;
+
+      // 임시근로자 전용 필드는 임시직 행(userId NULL)에만 적용. 정규직 시프트에
+      // 잘못 넘어오면 조용히 기록되지 않도록 여기서 떨어뜨린다.
+      if (current.userId != null) {
+        delete data.tempWageType;
+        delete data.tempWageAmount;
+        delete data.tempHiringSource;
+      } else if (input.tempWageAmount !== undefined) {
+        // decimal 컬럼이라 문자열로 저장 (스프레드로 들어온 number를 덮어씀)
+        data.tempWageAmount = input.tempWageAmount == null ? null : String(input.tempWageAmount);
+      }
 
       // 사유 및 정산 재확인 플래그 설정
       if (editReason) data.editReason = editReason.trim();

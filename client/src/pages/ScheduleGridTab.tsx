@@ -365,7 +365,7 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
   // 휴무자 우선 배정 (Step A에서 선택한 신규 휴무자 — 기존 승인 휴무자는 제외)
   const [offUserIds, setOffUserIds] = useState<Set<number>>(new Set());
   const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
-  const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "", shiftPreset: "custom" as string, breakMinutes: 0, hiringSource: "" });
+  const [editForm, setEditForm] = useState({ startTime: "", endTime: "", note: "", editReason: "", shiftPreset: "custom" as string, breakMinutes: 0, hiringSource: "", wageType: "hourly" as "hourly" | "daily", wageAmount: "" });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const utils = trpc.useUtils();
@@ -991,6 +991,8 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       shiftPreset: schedule.shiftPreset ?? "custom",
       breakMinutes: schedule.breakMinutes ?? 0,
       hiringSource: schedule.tempHiringSource ?? "",
+      wageType: (schedule.tempWageType as "hourly" | "daily") ?? "hourly",
+      wageAmount: schedule.tempWageAmount != null ? String(Number(schedule.tempWageAmount)) : "",
     });
     setDeleteConfirm(false);
   };
@@ -1009,6 +1011,10 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
       note: editForm.note || undefined,
       // 구인 루트는 임시근로자 전용 — 정규직 스케줄은 건드리지 않는다
       tempHiringSource: editSchedule.tempWorkerName ? (editForm.hiringSource.trim() || null) : undefined,
+      tempWageType: editSchedule.tempWorkerName ? editForm.wageType : undefined,
+      tempWageAmount: editSchedule.tempWorkerName
+        ? (editForm.wageAmount.trim() === "" ? null : Number(editForm.wageAmount))
+        : undefined,
       editReason: editForm.editReason || undefined,
     });
   };
@@ -2160,6 +2166,40 @@ export default function ScheduleGridTab({ restaurantId, isManager, shiftPresets,
                   })()}
                 </div>
               </div>
+
+              {editSchedule.tempWorkerName && (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">급여</label>
+                  <div className="mt-1 flex gap-2">
+                    {(["hourly", "daily"] as const).map((wt) => (
+                      <button
+                        key={wt}
+                        type="button"
+                        onClick={() => setEditForm({ ...editForm, wageType: wt })}
+                        className={`px-3 py-2 rounded-md border text-sm font-medium transition-colors ${
+                          editForm.wageType === wt
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground hover:bg-accent"
+                        }`}
+                      >
+                        {wt === "hourly" ? "시급" : "일급"}
+                      </button>
+                    ))}
+                    <input
+                      type="number"
+                      min={0}
+                      step={100}
+                      className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={editForm.wageAmount}
+                      onChange={(e) => setEditForm({ ...editForm, wageAmount: e.target.value })}
+                      placeholder="금액"
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    이 근무 건에만 적용됩니다. 같은 사람이라도 건마다 단가가 다를 수 있습니다.
+                  </p>
+                </div>
+              )}
 
               {editSchedule.tempWorkerName && (
                 <div>
