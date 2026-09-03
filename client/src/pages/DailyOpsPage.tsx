@@ -3479,6 +3479,7 @@ function CloseTab({
     onSuccess: () => {
       toast.success('매출이 저장되었습니다.');
       salesQuery.refetch();
+      utils.dailyOps.getCumulativeSales.invalidate({ restaurantId, date });
       // 마감탭 매출/손익 갱신 → 마감 조건 재평가
       utils.dailyClosings.calculateDay.invalidate();
     },
@@ -3544,11 +3545,10 @@ function CloseTab({
     const gift = parseNum(giftCardAmount);
     const transfer = parseNum(transferAmount);
     const total = cash + card + gift + transfer + otherItems.reduce((s, i) => s + i.amount, 0);
-    // 서버 cumulative는 월초~오늘 '저장된' 금일분까지 포함(상한 inclusive).
-    // 이중집계 방지: 저장된 금일분을 빼고 라이브 total을 더해
-    // 항상 '이전일 누적 + 오늘 라이브'로 맞춘다. 미저장 편집도 즉시 반영.
-    const savedTodayTotal = Number((salesQuery.data as any)?.totalAmount ?? 0);
-    const cumulativeWithToday = cumulative - savedTodayTotal + total;
+    // 서버 cumulative는 월초~'전일'까지 (당일 제외).
+    // 여기에 오늘 라이브 total을 더해 '이전일 누적 + 오늘'로 맞춘다.
+    // 미저장 편집도 즉시 반영되고, 저장 직후 캐시가 stale이어도 금일분이 누락되지 않는다.
+    const cumulativeWithToday = cumulative + total;
     const specialTotal = specialItems.reduce((s, i) => s + i.amount, 0);
     const fixedCash = rest?.fixedCashRegister ?? 200000;
 

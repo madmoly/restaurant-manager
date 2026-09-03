@@ -422,13 +422,15 @@ export const dailyOpsRouter = router({
       await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
       const d = new Date(input.date);
       const monthStart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      // 월초 ~ '전일'까지 합계(당일 제외). 당일분은 호출측이 라이브 값으로 더한다.
+      // 당일을 포함하면 저장 직후 이 쿼리가 stale일 때 금일 매출이 누락된다.
       const [row] = await db
         .select({ total: sql<string>`COALESCE(SUM(${dailySalesDetail.totalAmount}), 0)` })
         .from(dailySalesDetail)
         .where(and(
           eq(dailySalesDetail.restaurantId, input.restaurantId),
           sql`${dailySalesDetail.saleDate} >= ${monthStart}`,
-          sql`${dailySalesDetail.saleDate} <= ${input.date}`
+          sql`${dailySalesDetail.saleDate} < ${input.date}`
         ));
       return { cumulative: row?.total ?? "0" };
     }),
