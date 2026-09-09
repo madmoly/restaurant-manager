@@ -89,6 +89,7 @@ export default function SalesPage() {
       // 2. 업로드
       const formData = new FormData();
       formData.append("photo", resized);
+      formData.append("restaurantId", String(restaurantId));
       const uploadRes = await fetch("/api/upload/order-image", { method: "POST", body: formData });
       if (!uploadRes.ok) throw new Error("이미지 업로드 실패");
       const { url } = await uploadRes.json();

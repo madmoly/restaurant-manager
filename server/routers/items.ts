@@ -1,8 +1,10 @@
 import { z } from "zod";
-import { eq, and, like, sql } from "drizzle-orm";
+import { eq, and, like, sql, inArray } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, managerProcedure, storeReadProcedure } from "../trpc";
 import { db } from "../db";
 import { items, counterpartyItems, counterparties, purchaseOrderItemsV2 } from "../../drizzle/schema";
+import { requireStoreManager } from "../middleware/storeAuth";
 
 export const itemsRouter = router({
   /** 매장 품목 목록 */
@@ -265,12 +267,26 @@ export const itemsRouter = router({
       sourceIds: z.array(z.number()).min(1),
       targetName: z.string().min(1).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { targetId, sourceIds, targetName } = input;
 
       // sourceIds에 targetId가 포함되면 제거
       const mergeIds = sourceIds.filter(id => id !== targetId);
       if (mergeIds.length === 0) return { merged: 0 };
+
+      // 대상·병합 품목이 모두 같은 매장 소속인지 확인 후 매장 매니저 권한 검증
+      const involved = await db
+        .select({ id: items.id, restaurantId: items.restaurantId })
+        .from(items)
+        .where(inArray(items.id, [targetId, ...mergeIds]));
+      if (involved.length !== mergeIds.length + 1) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "존재하지 않는 품목이 포함되어 있습니다" });
+      }
+      const restaurantIds = new Set(involved.map((i) => i.restaurantId));
+      if (restaurantIds.size !== 1) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "서로 다른 매장의 품목은 합칠 수 없습니다" });
+      }
+      await requireStoreManager(ctx.user.userId, ctx.user.role, involved[0].restaurantId);
 
       // 1) counterparty_items의 itemId를 targetId로 변경
       for (const srcId of mergeIds) {

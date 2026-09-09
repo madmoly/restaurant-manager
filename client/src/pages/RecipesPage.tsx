@@ -449,6 +449,7 @@ function RecipeFormModal({ restaurantId, editId, onClose }: {
       const resized = await resizeImage(file, { maxSize: 800 });
       const fd = new FormData();
       fd.append("photo", resized);
+      fd.append("restaurantId", String(restaurantId));
       const res = await fetch("/api/upload/checklist-photo", { method: "POST", body: fd });
       const { url } = await res.json();
       setForm(f => ({ ...f, imageUrl: url }));

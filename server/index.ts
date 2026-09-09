@@ -7,6 +7,7 @@ import path from "path";
 import fs from "fs";
 import { uploadRouter, UPLOAD_ROOT, startCleanupScheduler } from "./upload";
 import { ocrRouter } from "./ocr";
+import { requireSession, readSession } from "./middleware/httpAuth";
 import { exportDatasetToGDrive, isGDriveConfigured } from "./gdrive";
 
 const app = express();
@@ -1577,17 +1578,7 @@ app.post("/api/error-report", async (req, res) => {
 
     try {
       // 쿠키에서 userId 추출 시도
-      let userId: number | null = null;
-      try {
-        const { parse: parseCookie } = await import("cookie");
-        const { verifyToken } = await import("./auth");
-        const cookies = parseCookie(req.headers.cookie || "");
-        const token = cookies["session"];
-        if (token) {
-          const payload = await verifyToken(token);
-          userId = payload?.userId ?? null;
-        }
-      } catch {}
+      const userId: number | null = (await readSession(req))?.userId ?? null;
 
       const userAgent = req.headers["user-agent"]?.slice(0, 500);
       // master user ids (알림 수신자) - 1회 조회
@@ -1729,9 +1720,10 @@ app.post("/api/error-report", async (req, res) => {
 });
 
 // ─── 파일 업로드 라우터 + 정적 서빙 ──────────────────────────────────────────
-app.use("/api/upload", uploadRouter);
-app.use("/api/ocr", ocrRouter);
-app.use("/uploads", express.static(UPLOAD_ROOT));
+// 테넌트 격리: tRPC 밖의 REST 엔드포인트도 세션 필수 (2026-09-10 PR1)
+app.use("/api/upload", requireSession, uploadRouter);
+app.use("/api/ocr", requireSession, ocrRouter);
+app.use("/uploads", requireSession, express.static(UPLOAD_ROOT));
 
 // ─── 계약서 이메일 발송 ─────────────────────────────────────────────────────
 app.post("/api/contract/send-email", async (req, res) => {

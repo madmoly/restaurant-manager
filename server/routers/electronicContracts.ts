@@ -5,7 +5,7 @@ import { router, publicProcedure, protectedProcedure, managerProcedure, ownerPro
 import { db } from "../db";
 import { affiliatedCompanies, employmentElectronicContracts, employeeWageHistory, employerPresets, restaurants, restaurantContracts, restaurantUsers } from "../../drizzle/schema";
 import { TRPCError } from "@trpc/server";
-import { verifyStoreAccess } from "../middleware/storeAuth";
+import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 import { getOver5FromCompany } from "../helpers/labor";
 
 const TAX_MODE_VALUES = ["social_insurance", "biz_income_3_3"] as const;
@@ -47,6 +47,7 @@ export const electronicContractsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
       const [result] = await db
         .insert(restaurantContracts)
         .values({
@@ -82,7 +83,15 @@ export const electronicContractsRouter = router({
         isActive: z.boolean().optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await db
+        .select({ restaurantId: restaurantContracts.restaurantId })
+        .from(restaurantContracts)
+        .where(eq(restaurantContracts.id, input.id))
+        .limit(1);
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "계약 조건을 찾을 수 없습니다" });
+      await requireStoreManager(ctx.user.userId, ctx.user.role, row.restaurantId);
+
       const { id, startDate, endDate, ...data } = input;
       const updatePayload: Record<string, any> = { ...data };
       if (startDate !== undefined)
@@ -124,13 +133,24 @@ export const electronicContractsRouter = router({
   /** 근로계약서 상세 */
   getEmploymentContract: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const [row] = await db
         .select()
         .from(employmentElectronicContracts)
         .where(eq(employmentElectronicContracts.id, input.id))
         .limit(1);
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "계약서를 찾을 수 없습니다" });
+
+      const { storeRole } = await verifyStoreAccess(
+        ctx.user.userId, ctx.user.role, row.restaurantId, false,
+      );
+      // user 레벨은 본인 계약서 또는 매장 점장/매니져만 열람 가능
+      const isStoreManager = storeRole === "owner" || storeRole === "supervisor"
+        || storeRole === "store_manager" || storeRole === "manager";
+      const isSystemLevel = ctx.user.role === "master" || ctx.user.role === "admin";
+      if (!isSystemLevel && !isStoreManager && row.employeeId !== ctx.user.userId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "본인 계약서만 조회할 수 있습니다" });
+      }
       return row;
     }),
 

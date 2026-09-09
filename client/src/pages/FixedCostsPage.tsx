@@ -332,6 +332,7 @@ function FixedCostForm({
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("restaurantId", String(restaurantId));
       const res = await fetch("/api/upload/fixed-cost-attachment", { method: "POST", body: formData });
       const data = await res.json();
       if (data.url) {

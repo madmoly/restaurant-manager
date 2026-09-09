@@ -1207,6 +1207,7 @@ function PurchaseTab({
       setExpUploading(true);
       const formData = new FormData();
       formData.append('photo', file);
+      formData.append('restaurantId', String(restaurantId));
       const res = await fetch('/api/upload/order-image', { method: 'POST', body: formData });
       if (!res.ok) throw new Error('업로드 실패');
       const { url } = await res.json();
@@ -1250,6 +1251,7 @@ function PurchaseTab({
       setMemoUploading(true);
       const formData = new FormData();
       formData.append('photo', file);
+      formData.append('restaurantId', String(restaurantId));
       const res = await fetch('/api/upload/order-image', { method: 'POST', body: formData });
       if (!res.ok) throw new Error('업로드 실패');
       const { url } = await res.json();
@@ -1385,6 +1387,7 @@ function PurchaseTab({
 
       const formData = new FormData();
       formData.append('photo', file);
+      formData.append('restaurantId', String(restaurantId));
 
       const uploadRes = await fetch('/api/upload/order-image', {
         method: 'POST',
@@ -1501,6 +1504,7 @@ function PurchaseTab({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                      restaurantId,
                       counterpartyId: ocrData.counterpartyId,
                       contactName: ci.contactName || undefined,
                       contactPhone: ci.contactPhone || undefined,
@@ -3336,6 +3340,7 @@ function CloseTab({
       // 업로드
       const formData = new FormData();
       formData.append('photo', resized);
+      formData.append('restaurantId', String(restaurantId));
       const uploadRes = await fetch('/api/upload/order-image', { method: 'POST', body: formData });
       if (!uploadRes.ok) throw new Error('이미지 업로드 실패');
       const { url } = await uploadRes.json();

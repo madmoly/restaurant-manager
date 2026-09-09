@@ -5,7 +5,9 @@ import { restaurantUsers, restaurants, users } from "../../drizzle/schema";
 
 /**
  * 매장 접근 권한 검증
- * - admin: 매장 배정 무관하게 읽기 가능, 쓰기는 (배정 OR ownerAdminId 일치) 시 허용
+ * - master: 전체 허용
+ * - admin: 읽기/쓰기 무관하게 자기 사업그룹(restaurants.ownerAdminId === effectiveOwnerId) 매장만 허용.
+ *          타 그룹 매장은 restaurant_users 배정이 있어도 거부 (사업그룹 완전 분리 — 2026-09-10)
  * - user: 배정된 매장만 접근 가능
  */
 export async function verifyStoreAccess(
@@ -25,26 +27,24 @@ export async function verifyStoreAccess(
   // master는 항상 허용
   if (systemRole === "master") return { storeRole };
 
-  // admin은 읽기 항상 가능, 쓰기는 (배정 OR ownerAdminId 본인/상위 일치) 시 허용
+  // admin은 읽기/쓰기 모두 자기 사업그룹 매장에서만 허용
   if (systemRole === "admin") {
-    if (requireWrite && !storeRole) {
-      const [r] = await db
-        .select({ ownerAdminId: restaurants.ownerAdminId })
-        .from(restaurants)
-        .where(eq(restaurants.id, restaurantId))
-        .limit(1);
-      if (!r) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "매장을 찾을 수 없습니다" });
-      }
-      const [me] = await db
-        .select({ parentId: users.parentId })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-      const effectiveOwnerId = me?.parentId ?? userId;
-      if (r.ownerAdminId !== effectiveOwnerId) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "이 매장에 배정되지 않아 수정할 수 없습니다" });
-      }
+    const [r] = await db
+      .select({ ownerAdminId: restaurants.ownerAdminId })
+      .from(restaurants)
+      .where(eq(restaurants.id, restaurantId))
+      .limit(1);
+    if (!r) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "매장을 찾을 수 없습니다" });
+    }
+    const [me] = await db
+      .select({ parentId: users.parentId })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    const effectiveOwnerId = me?.parentId ?? userId;
+    if (r.ownerAdminId !== effectiveOwnerId) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "다른 사업그룹의 매장입니다" });
     }
     return { storeRole };
   }

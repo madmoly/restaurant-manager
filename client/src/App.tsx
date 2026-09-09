@@ -136,7 +136,7 @@ function RoleRouter() {
             <Route path="/" component={ManagerDashboard} />
             <Route path="/business" component={AdminDashboard} />
             <Route path="/store-analysis" component={StoreAnalysisPage} />
-            <Route path="/users" component={UsersPage} />
+            {/* /users는 master 전용 — 사업그룹 완전 분리 정책 (2026-09-10) */}
             <Route path="/restaurants" component={RestaurantsPage} />
             <Route path="/monthly-settlement" component={MonthlySettlementPage} />
             <Route path="/profitability">{() => <Redirect to="/monthly-settlement" />}</Route>

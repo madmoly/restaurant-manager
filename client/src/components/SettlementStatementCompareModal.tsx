@@ -174,6 +174,7 @@ export default function SettlementStatementCompareModal({
       for (const file of imageFiles) {
         const form = new FormData();
         form.append("file", file);
+        form.append("restaurantId", String(restaurantId));
         const res = await fetch("/api/upload/settlement-image", { method: "POST", body: form });
         if (!res.ok) throw new Error("업로드 실패");
         const { url } = await res.json();

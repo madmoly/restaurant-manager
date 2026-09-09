@@ -13,6 +13,7 @@ import { runHybridOcr, runUpstageStage, runClaudeTextStage, type HybridDeps } fr
 import type { UpstageParseResult } from "./ocr-engines/upstage";
 import { promptV2, promptV1ImageFallback } from "./ocr-engines/prompts";
 import { OCR_MODELS } from "./ocr-engines/models";
+import { requireMaster, requireStore } from "./middleware/httpAuth";
 
 // ─── OCR 이미지 전처리 해상도 캡 (px) ────────────────────────────────────────
 // 클라 OCR_HIGH(imageResize.ts)가 이미 2560px로 리사이즈하므로 3500은 실질적으로
@@ -75,7 +76,7 @@ async function logOcrApiUsage(opts: {
 export const ocrRouter = Router();
 
 // ─── 진단: 배포 버전 + sharp 동작 확인 ─────────────────────────────────────────
-ocrRouter.get("/debug", async (_req: Request, res: Response) => {
+ocrRouter.get("/debug", requireMaster, async (_req: Request, res: Response) => {
   let sharpStatus = "unknown";
   try {
     // 1x1 빨간 픽셀 JPEG 생성으로 sharp 동작 확인
@@ -1308,7 +1309,7 @@ function upstageCacheGet(key: string): UpstageParseResult | null {
 // ═════════════════════════════════════════════════════════════════════════════
 // POST /api/ocr/extract-purchase — 단일 Vision 직접 구조화
 // ═════════════════════════════════════════════════════════════════════════════
-ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
+ocrRouter.post("/extract-purchase", requireStore(true), async (req: Request, res: Response) => {
   try {
     const anthropic = getAnthropicClient();
     if (!anthropic) {
@@ -1500,7 +1501,7 @@ ocrRouter.post("/extract-purchase", async (req: Request, res: Response) => {
 // Upstage는 캐시 재사용(미스 시에만 1회 재호출), Claude 텍스트 단계만 재실행.
 // 자동 재시도(MAX_OCR_AUTO_RETRY) 경로와 완전 분리 — 사용자 명시 클릭 전용.
 // ═════════════════════════════════════════════════════════════════════════════
-ocrRouter.post("/reanalyze-purchase", async (req: Request, res: Response) => {
+ocrRouter.post("/reanalyze-purchase", requireStore(true), async (req: Request, res: Response) => {
   const startedAt = Date.now();
   try {
     const anthropic = getAnthropicClient();
@@ -1677,7 +1678,7 @@ ${prevLines}
 // 거래처가 발행한 한 달치 매입 정산표를 OCR로 읽어 구조화된 JSON으로 반환.
 // 비교 알고리즘은 settlementStatements 라우터에서 별도 처리.
 // ═════════════════════════════════════════════════════════════════════════════
-ocrRouter.post("/extract-statement", async (req: Request, res: Response) => {
+ocrRouter.post("/extract-statement", requireStore(true), async (req: Request, res: Response) => {
   const ocrStartTime = Date.now();
   try {
     const anthropic = getAnthropicClient();
@@ -1972,7 +1973,7 @@ ${profileHint}`;
 // ═════════════════════════════════════════════════════════════════════════════
 // POST /api/ocr/extract-health-cert — 보건증 판독 (haiku로 변경)
 // ═════════════════════════════════════════════════════════════════════════════
-ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
+ocrRouter.post("/extract-health-cert", requireStore(true), async (req: Request, res: Response) => {
   try {
     const anthropic = getAnthropicClient();
     if (!anthropic) {
@@ -2048,11 +2049,21 @@ ocrRouter.post("/extract-health-cert", async (req: Request, res: Response) => {
 // ═════════════════════════════════════════════════════════════════════════════
 // POST /api/ocr/update-counterparty-info — 사용자 확인 후 거래처 정보 반영
 // ═════════════════════════════════════════════════════════════════════════════
-ocrRouter.post("/update-counterparty-info", async (req: Request, res: Response) => {
+ocrRouter.post("/update-counterparty-info", requireStore(true), async (req: Request, res: Response) => {
   try {
-    const { counterpartyId, contactName, contactPhone } = req.body;
+    const { counterpartyId, contactName, contactPhone, restaurantId } = req.body;
     if (!counterpartyId) {
       res.status(400).json({ error: "counterpartyId 필요" });
+      return;
+    }
+    // 거래처가 요청한 매장 소속인지 확인 (타 그룹 거래처 수정 차단)
+    const [cp] = await db
+      .select({ restaurantId: counterparties.restaurantId })
+      .from(counterparties)
+      .where(eq(counterparties.id, Number(counterpartyId)))
+      .limit(1);
+    if (!cp || cp.restaurantId !== Number(restaurantId)) {
+      res.status(403).json({ error: "이 매장의 거래처가 아닙니다" });
       return;
     }
     await updateCounterpartyInfo(Number(counterpartyId), { contactName, contactPhone });
@@ -2066,7 +2077,7 @@ ocrRouter.post("/update-counterparty-info", async (req: Request, res: Response) 
 // ═════════════════════════════════════════════════════════════════════════════
 // POST /api/ocr/submit-correction — 사용자 수정 데이터 축적 (Phase 3-2)
 // ═════════════════════════════════════════════════════════════════════════════
-ocrRouter.post("/submit-correction", async (req: Request, res: Response) => {
+ocrRouter.post("/submit-correction", requireStore(true), async (req: Request, res: Response) => {
   try {
     const { restaurantId, counterpartyId, imageUrl, originalItems, correctedItems } = req.body;
     if (!restaurantId || !imageUrl || !correctedItems) {
@@ -2103,7 +2114,7 @@ ocrRouter.post("/submit-correction", async (req: Request, res: Response) => {
 // ═════════════════════════════════════════════════════════════════════════════
 // GET /api/ocr/corrections — OCR 수정 이력 조회 (master/admin용)
 // ═════════════════════════════════════════════════════════════════════════════
-ocrRouter.get("/corrections", async (req: Request, res: Response) => {
+ocrRouter.get("/corrections", requireStore(false, true), async (req: Request, res: Response) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const offset = Number(req.query.offset) || 0;
@@ -2129,7 +2140,7 @@ ocrRouter.get("/corrections", async (req: Request, res: Response) => {
 // ═════════════════════════════════════════════════════════════════════════════
 // GET /api/ocr/corrections/stats — OCR 수정 통계 (거래처별 수정 빈도)
 // ═════════════════════════════════════════════════════════════════════════════
-ocrRouter.get("/corrections/stats", async (req: Request, res: Response) => {
+ocrRouter.get("/corrections/stats", requireMaster, async (req: Request, res: Response) => {
   try {
     const restaurantId = req.query.restaurantId ? Number(req.query.restaurantId) : undefined;
 
@@ -2188,7 +2199,7 @@ ocrRouter.get("/corrections/stats", async (req: Request, res: Response) => {
 // ═════════════════════════════════════════════════════════════════════════════
 // GET /api/ocr/tracking — OCR 트래킹 종합 대시보드 데이터
 // ═════════════════════════════════════════════════════════════════════════════
-ocrRouter.get("/tracking", async (req: Request, res: Response) => {
+ocrRouter.get("/tracking", requireMaster, async (req: Request, res: Response) => {
   try {
     const days = Math.min(Number(req.query.days) || 30, 90);
     const since = new Date();
@@ -2315,7 +2326,7 @@ ocrRouter.get("/tracking", async (req: Request, res: Response) => {
 // ============================================================
 
 // 1) OCR 수정 데이터셋: 원본 OCR → 사람이 수정한 값 쌍
-ocrRouter.get("/export-dataset/corrections", async (req: Request, res: Response) => {
+ocrRouter.get("/export-dataset/corrections", requireMaster, async (req: Request, res: Response) => {
   try {
     const rows = await db
       .select({
@@ -2358,7 +2369,7 @@ ocrRouter.get("/export-dataset/corrections", async (req: Request, res: Response)
 });
 
 // 2) 확정 매입 데이터셋: 사람이 검증 완료한 매입 내역
-ocrRouter.get("/export-dataset/purchases", async (req: Request, res: Response) => {
+ocrRouter.get("/export-dataset/purchases", requireMaster, async (req: Request, res: Response) => {
   try {
     const orders = await db
       .select({
@@ -2446,7 +2457,7 @@ ocrRouter.get("/export-dataset/purchases", async (req: Request, res: Response) =
 });
 
 // 3) 거래처 OCR 프로파일 + 품목 마스터
-ocrRouter.get("/export-dataset/profiles", async (req: Request, res: Response) => {
+ocrRouter.get("/export-dataset/profiles", requireMaster, async (req: Request, res: Response) => {
   try {
     const profiles = await db
       .select({
@@ -2564,7 +2575,7 @@ function mapSalesOcrToStandard(result: SalesOcrResult) {
   };
 }
 
-ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
+ocrRouter.post("/extract-sales", requireStore(true), async (req: Request, res: Response) => {
   const startTime = Date.now();
   try {
     const anthropic = getAnthropicClient();
@@ -2727,7 +2738,7 @@ ocrRouter.post("/extract-sales", async (req: Request, res: Response) => {
 // ============================================================
 
 // 연동 상태 + 마지막 업로드 결과 확인
-ocrRouter.get("/gdrive/status", async (_req: Request, res: Response) => {
+ocrRouter.get("/gdrive/status", requireMaster, async (_req: Request, res: Response) => {
   const { lastExport, inProgress } = getLastExportResult();
   res.json({
     configured: isGDriveConfigured(),
@@ -2738,7 +2749,7 @@ ocrRouter.get("/gdrive/status", async (_req: Request, res: Response) => {
 });
 
 // Drive에 전체 데이터셋 업로드 실행
-ocrRouter.post("/gdrive/export", async (_req: Request, res: Response) => {
+ocrRouter.post("/gdrive/export", requireMaster, async (_req: Request, res: Response) => {
   if (!isGDriveConfigured()) {
     return res.status(400).json({
       success: false,

@@ -1,30 +1,69 @@
 import { z } from "zod";
-import { eq, and, sql, isNull } from "drizzle-orm";
+import { eq, and, sql, isNull, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { users, restaurantUsers, restaurants, businessGroups } from "../../drizzle/schema";
 import { hashPassword } from "../auth";
-import { activeRealStoreCondition } from "../helpers/restaurantScope";
+import {
+  activeRealStoreCondition,
+  assertUserInScope,
+  getScopedUserIds,
+  ownedRestaurantFilter,
+} from "../helpers/restaurantScope";
+import { verifyStoreAccess } from "../middleware/storeAuth";
+
+/** 매장 쓰기 권한 + 대상이 그 매장 배정 직원인지 확인 */
+async function assertStoreStaff(
+  callerId: number,
+  callerRole: string,
+  restaurantId: number,
+  targetUserId: number,
+): Promise<void> {
+  await verifyStoreAccess(callerId, callerRole, restaurantId, true);
+  const [link] = await db
+    .select({ userId: restaurantUsers.userId })
+    .from(restaurantUsers)
+    .where(and(
+      eq(restaurantUsers.restaurantId, restaurantId),
+      eq(restaurantUsers.userId, targetUserId),
+    ))
+    .limit(1);
+  if (!link) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "해당 매장의 직원이 아닙니다" });
+  }
+}
 
 export const usersRouter = router({
-  list: adminProcedure.query(() =>
-    db.select({
+  /** 사용자 목록 — master는 전체, admin은 자기 사업그룹 소속만 */
+  list: adminProcedure.query(async ({ ctx }) => {
+    const scoped = await getScopedUserIds(ctx.user.userId, ctx.user.role);
+    const where = scoped === null
+      ? eq(users.isTutorial, false)
+      : and(eq(users.isTutorial, false), inArray(users.id, scoped));
+    return db.select({
       id: users.id, username: users.username, name: users.name,
       email: users.email, phone: users.phone, role: users.role,
       isActive: users.isActive, createdAt: users.createdAt,
-    }).from(users).where(eq(users.isTutorial, false))
-  ),
+    }).from(users).where(where);
+  }),
 
   /** 사용자 목록 + 매장 배정 현황 */
-  listWithAssignments: adminProcedure.query(async () => {
+  listWithAssignments: adminProcedure.query(async ({ ctx }) => {
+    const scoped = await getScopedUserIds(ctx.user.userId, ctx.user.role);
+    const userWhere = scoped === null
+      ? eq(users.isTutorial, false)
+      : and(eq(users.isTutorial, false), inArray(users.id, scoped));
     const allUsers = await db.select({
       id: users.id, username: users.username, name: users.name,
       email: users.email, phone: users.phone, role: users.role,
       isActive: users.isActive, createdAt: users.createdAt,
-    }).from(users).where(eq(users.isTutorial, false));
+    }).from(users).where(userWhere);
 
-    // 중앙 스코핑 — tutorial 매장 자동 제외
+    // 중앙 스코핑 — tutorial 매장 자동 제외 + 자기 사업그룹 매장으로 제한
+    const storeFilter = ctx.user.role === "master"
+      ? undefined
+      : await ownedRestaurantFilter(restaurantUsers.restaurantId, ctx.user.userId, ctx.user.role);
     const assignments = await db.select({
       userId: restaurantUsers.userId,
       restaurantId: restaurantUsers.restaurantId,
@@ -33,7 +72,7 @@ export const usersRouter = router({
     })
       .from(restaurantUsers)
       .innerJoin(restaurants, eq(restaurants.id, restaurantUsers.restaurantId))
-      .where(activeRealStoreCondition());
+      .where(and(activeRealStoreCondition(), storeFilter));
 
     const assignmentMap: Record<number, Array<{ restaurantId: number; restaurantName: string; storeRole: string }>> = {};
     for (const a of assignments) {
@@ -49,7 +88,8 @@ export const usersRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertUserInScope(ctx.user.userId, ctx.user.role, input.id);
       const [user] = await db.select().from(users).where(eq(users.id, input.id)).limit(1);
       if (!user) throw new Error("사용자를 찾을 수 없습니다");
       const { passwordHash, ...safe } = user;
@@ -102,11 +142,12 @@ export const usersRouter = router({
       if (input.role === "admin" && ctx.user.role !== "master") {
         throw new Error("admin 역할 변경은 개발자만 가능합니다");
       }
-      // master 계정은 수정 불가 (자기 자신 제외)
+      // master/admin 계정은 수정 불가 (자기 자신 제외) + 타 사업그룹 사용자 차단
       if (input.id !== ctx.user.userId) {
+        await assertUserInScope(ctx.user.userId, ctx.user.role, input.id);
         const [target] = await db.select({ role: users.role }).from(users).where(eq(users.id, input.id)).limit(1);
-        if (target?.role === "master" && ctx.user.role !== "master") {
-          throw new Error("개발자 계정은 수정할 수 없습니다");
+        if ((target?.role === "master" || target?.role === "admin") && ctx.user.role !== "master") {
+          throw new Error("대표/개발자 계정은 개발자만 수정할 수 있습니다");
         }
       }
 
@@ -133,6 +174,9 @@ export const usersRouter = router({
       if (input.userId === ctx.user.userId) {
         throw new Error("본인 계정은 삭제할 수 없습니다");
       }
+
+      // 1-a. 타 사업그룹 사용자 차단
+      await assertUserInScope(ctx.user.userId, ctx.user.role, input.userId);
 
       // 2. 대상 사용자 조회
       const [target] = await db
@@ -210,6 +254,8 @@ export const usersRouter = router({
       phone: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId, true);
+
       // 자기 매장 직원인지 확인
       const [staffLink] = await db
         .select()
@@ -256,6 +302,12 @@ export const usersRouter = router({
       if (ctx.user.role !== "admin" && ctx.user.role !== "master") {
         throw new Error("대표 이상만 SUB대표를 생성할 수 있습니다");
       }
+      // parentId 체인 2단 방지 — SUB대표는 다시 SUB대표를 만들 수 없음
+      if (ctx.user.role === "admin") {
+        const [me] = await db.select({ parentId: users.parentId }).from(users)
+          .where(eq(users.id, ctx.user.userId)).limit(1);
+        if (me?.parentId) throw new Error("SUB대표는 하위 SUB대표를 생성할 수 없습니다");
+      }
       const existing = await db.select().from(users).where(eq(users.username, input.username)).limit(1);
       if (existing.length > 0) throw new Error("이미 존재하는 아이디입니다");
 
@@ -293,14 +345,16 @@ export const usersRouter = router({
     }).from(users).where(and(eq(users.role, "admin"), eq(users.parentId, ctx.user.userId)));
   }),
 
-  /** 보건증 정보 업데이트 */
+  /** 보건증 정보 업데이트 (해당 매장 배정 직원만) */
   updateHealthCert: managerProcedure
     .input(z.object({
       userId: z.number(),
+      restaurantId: z.number(),
       healthCertUrl: z.string(),
       healthCertExpiry: z.string().optional(), // "YYYY-MM-DD"
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertStoreStaff(ctx.user.userId, ctx.user.role, input.restaurantId, input.userId);
       const update: Record<string, unknown> = { healthCertUrl: input.healthCertUrl };
       if (input.healthCertExpiry) update.healthCertExpiry = input.healthCertExpiry;
       await db.update(users).set(update).where(eq(users.id, input.userId));
@@ -310,9 +364,11 @@ export const usersRouter = router({
   updateBankBook: managerProcedure
     .input(z.object({
       userId: z.number(),
+      restaurantId: z.number(),
       bankBookUrl: z.string(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertStoreStaff(ctx.user.userId, ctx.user.role, input.restaurantId, input.userId);
       await db.update(users).set({ bankBookUrl: input.bankBookUrl }).where(eq(users.id, input.userId));
       return { ok: true };
     }),

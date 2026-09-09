@@ -253,7 +253,7 @@ export default function StaffPage() {
         const ocrRes = await fetch("/api/ocr/extract-health-cert", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageUrl }),
+          body: JSON.stringify({ imageUrl, restaurantId }),
         });
         const ocrData = await ocrRes.json();
         if (ocrData.expiryDate) expiryDate = ocrData.expiryDate;
@@ -270,6 +270,7 @@ export default function StaffPage() {
       // 3. 서버에 저장
       await updateHealthCert.mutateAsync({
         userId,
+        restaurantId,
         healthCertUrl: imageUrl,
         healthCertExpiry: expiryDate,
       });
@@ -293,7 +294,7 @@ export default function StaffPage() {
       formData.append("file", file);
       const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
       const { url: imageUrl } = await uploadRes.json();
-      await updateBankBook.mutateAsync({ userId, bankBookUrl: imageUrl });
+      await updateBankBook.mutateAsync({ userId, restaurantId, bankBookUrl: imageUrl });
     } catch (err: any) {
       toast.error("통장사본 업로드 실패: " + err.message);
     } finally {

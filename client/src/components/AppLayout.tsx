@@ -67,8 +67,8 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
     label: "사용자 관리", href: "/users",
     icon: <ShieldCheck className="h-4 w-4" />,
     mobileIcon: <ShieldCheck className="h-5 w-5" />,
-    roles: ["master", "admin"],
-    mobileTabPriority: { master: 2, admin: 2 },
+    roles: ["master"],
+    mobileTabPriority: { master: 2 },
   },
   {
     label: "전체 매장", href: "/restaurants",
@@ -76,6 +76,7 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
     icon: <Store className="h-4 w-4" />,
     mobileIcon: <Store className="h-5 w-5" />,
     roles: ["master", "admin"],
+    mobileTabPriority: { admin: 2 },
   },
   {
     label: "사업그룹", href: "/groups",
@@ -99,7 +100,8 @@ const SYSTEM_NAV_ITEMS: NavItem[] = [
 
 // ─── 매장별 운영 메뉴 (점장 기준, master/admin도 매장 선택 시 동일하게 표시) ──
 // 모바일 하단탭 목표:
-//   master/admin: 사업현황(1), 사용자관리/전체매장(2), 스케줄(3), 월정산(4)
+//   master: 사업현황(1), 사용자관리(2), 스케줄(3), 월정산(4)
+//   admin:  사업현황(1), 전체매장(2), 스케줄(3), 월정산(4)
 //   manager:      대시보드(1), 운영일지(2), 스케줄(3), 월정산(4)
 //   staff:        대시보드(1), 운영일지(2), 스케줄(3)
 const STORE_NAV_GROUPS: NavGroup[] = [

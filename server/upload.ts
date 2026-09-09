@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import sharp from "sharp";
 import { Request, Response, Router } from "express";
+import { requireStore } from "./middleware/httpAuth";
 
 // ─── 업로드 디렉토리 ──────────────────────────────────────────────────────────
 //
@@ -64,7 +65,7 @@ export const uploadRouter = Router();
  * multipart/form-data: field name = "photo"
  * 응답: { url: "/uploads/checklists/2026-03-23/abc123.jpg" }
  */
-uploadRouter.post("/checklist-photo", upload.single("photo"), (req: Request, res: Response) => {
+uploadRouter.post("/checklist-photo", upload.single("photo"), requireStore(true), (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ error: "파일이 없습니다" });
     return;
@@ -106,7 +107,7 @@ const orderUpload = multer({
   },
 });
 
-uploadRouter.post("/order-image", orderUpload.single("photo"), async (req: Request, res: Response) => {
+uploadRouter.post("/order-image", orderUpload.single("photo"), requireStore(true), async (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ error: "파일이 없습니다" });
     return;
@@ -168,7 +169,7 @@ const fixedCostUpload = multer({
   },
 });
 
-uploadRouter.post("/fixed-cost-attachment", fixedCostUpload.single("file"), (req: Request, res: Response) => {
+uploadRouter.post("/fixed-cost-attachment", fixedCostUpload.single("file"), requireStore(true), (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ error: "파일이 없습니다" });
     return;
@@ -210,7 +211,7 @@ const settlementUpload = multer({
   },
 });
 
-uploadRouter.post("/settlement-image", settlementUpload.single("file"), (req: Request, res: Response) => {
+uploadRouter.post("/settlement-image", settlementUpload.single("file"), requireStore(true), (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ error: "파일이 없습니다" });
     return;
@@ -225,7 +226,7 @@ uploadRouter.post("/settlement-image", settlementUpload.single("file"), (req: Re
  * 업로드된 이미지를 90° 시계방향 회전 → 파일 덮어쓰기
  * Body: { url: "/uploads/orders/..." }
  */
-uploadRouter.post("/rotate-image", async (req: Request, res: Response) => {
+uploadRouter.post("/rotate-image", requireStore(true), async (req: Request, res: Response) => {
   const { url } = req.body;
   if (!url || typeof url !== "string") {
     res.status(400).json({ error: "url이 필요합니다" });
@@ -253,7 +254,7 @@ uploadRouter.post("/rotate-image", async (req: Request, res: Response) => {
  * OCR 분석 완료 후 고품질 이미지를 저품질로 교체 (저장 공간 절약)
  * Body: multipart { photo: File, replaceUrl: string }
  */
-uploadRouter.post("/order-image-replace", orderUpload.single("photo"), (req: Request, res: Response) => {
+uploadRouter.post("/order-image-replace", orderUpload.single("photo"), requireStore(true), (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ error: "파일이 없습니다" });
     return;
@@ -313,7 +314,7 @@ const storeInfoUpload = multer({
   },
 });
 
-uploadRouter.post("/store-info-image", storeInfoUpload.single("photo"), async (req: Request, res: Response) => {
+uploadRouter.post("/store-info-image", storeInfoUpload.single("photo"), requireStore(true), async (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ error: "파일이 없습니다" });
     return;

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and, gte, sql, sum, count, between } from "drizzle-orm";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
-import { verifyStoreAccess } from "../middleware/storeAuth";
+import { verifyStoreAccess, requireStoreManager } from "../middleware/storeAuth";
 import { computeWageForShift, computeMonthlyOnlyWage, type WageType } from "../helpers/wage";
 import { computeMonthlyStandardHours } from "../helpers/labor";
 import {
@@ -675,7 +675,8 @@ export const monthlyClosingsRouter = router({
   /** 증빙 이미지 삭제 */
   deleteImage: managerProcedure
     .input(z.object({ id: z.number(), restaurantId: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
       await db.delete(settlementImages).where(
         and(eq(settlementImages.id, input.id), eq(settlementImages.restaurantId, input.restaurantId)),
       );
@@ -685,7 +686,8 @@ export const monthlyClosingsRouter = router({
   /** 증빙 이미지 정산서 금액 업데이트 */
   updateImageAmount: managerProcedure
     .input(z.object({ id: z.number(), restaurantId: z.number(), claimedAmount: z.number().nullable() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
       await db.update(settlementImages)
         .set({ claimedAmount: input.claimedAmount })
         .where(and(eq(settlementImages.id, input.id), eq(settlementImages.restaurantId, input.restaurantId)));
@@ -739,6 +741,7 @@ export const monthlyClosingsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      await requireStoreManager(ctx.user.userId, ctx.user.role, input.restaurantId);
       const mm = String(input.month).padStart(2, "0");
       const startDate = `${input.year}-${mm}-01`;
       const daysInMonth = new Date(input.year, input.month, 0).getDate();

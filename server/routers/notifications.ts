@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../db";
 import { notifications } from "../../drizzle/schema";
+import { assertUserInScope } from "../helpers/restaurantScope";
 
 export const notificationsRouter = router({
   /** 내 알림 목록 (최신 50개) */
@@ -82,7 +84,14 @@ export const notificationsRouter = router({
         restaurantId: z.number().optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // 전체 공지는 master 전용
+      if (input.type === "system_announcement" && ctx.user.role !== "master") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "전체 공지는 개발자만 발송할 수 있습니다" });
+      }
+      // 수신자가 호출자 스코프(사업그룹) 안에 있는지 확인
+      await assertUserInScope(ctx.user.userId, ctx.user.role, input.recipientId);
+
       const [result] = await db
         .insert(notifications)
         .values({

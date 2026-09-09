@@ -226,6 +226,7 @@ function InfoCardFormModal({ restaurantId, editId, cards, onClose }: {
     try {
       const fd = new FormData();
       fd.append("photo", file);
+      fd.append("restaurantId", String(restaurantId));
       const res = await fetch("/api/upload/store-info-image", { method: "POST", body: fd });
       const data = await res.json();
       if (data.url) {
