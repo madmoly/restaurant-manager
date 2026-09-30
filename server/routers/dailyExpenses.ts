@@ -3,7 +3,9 @@ import { eq, and, sql, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
-import { dailyExpenses, expenseCategories } from "../../drizzle/schema";
+import { dailyExpenses, expenseCategories, restaurants } from "../../drizzle/schema";
+import { parseExpenseText, markDuplicates } from "../../shared/expenseTextParser";
+import { toDateOnly } from "../../shared/dateOnly";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
 /** Drizzle/mysql2 에러의 실제 MySQL 원인(sqlMessage/code)을 surface. */
@@ -140,6 +142,112 @@ export const dailyExpensesRouter = router({
       } catch (err: any) {
         if (err instanceof TRPCError) throw err;
         throw unwrapDbError(err, "즉시지출 등록 실패");
+      }
+    }),
+
+  /** 텍스트 일괄입력 미리보기: 파싱 + 기존건(매장·날짜·금액 동일) 중복 표시. DB 쓰기 없음 */
+  previewBulk: protectedProcedure
+    .input(z.object({ restaurantId: z.number(), text: z.string().min(1).max(20000) }))
+    .query(async ({ input, ctx }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      const cats = await db
+        .select({ id: expenseCategories.id, name: expenseCategories.name })
+        .from(expenseCategories)
+        .where(and(eq(expenseCategories.restaurantId, input.restaurantId), eq(expenseCategories.isActive, true)));
+      // KST 기준 오늘
+      const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+      const parsed = parseExpenseText(input.text, today, cats.map((c) => c.name));
+
+      let rows = parsed.rows;
+      if (rows.length > 0) {
+        const dates = rows.map((r) => r.date).sort();
+        const existing = await db
+          .select({ date: dailyExpenses.date, amount: dailyExpenses.amount })
+          .from(dailyExpenses)
+          .where(
+            and(
+              eq(dailyExpenses.restaurantId, input.restaurantId),
+              sql`${dailyExpenses.date} >= ${dates[0]}`,
+              sql`${dailyExpenses.date} <= ${dates[dates.length - 1]}`,
+            ),
+          );
+        rows = markDuplicates(
+          rows,
+          existing.map((e) => ({ date: toDateOnly(e.date as any) ?? "", amount: Number(e.amount) })),
+        );
+      }
+
+      // 매장명 후보는 현재 선택 매장 이름과만 비교 (타 매장 이름 노출 방지)
+      let storeMismatch = false;
+      if (parsed.storeCandidate) {
+        const [r] = await db
+          .select({ name: restaurants.name })
+          .from(restaurants)
+          .where(eq(restaurants.id, input.restaurantId));
+        const cand = parsed.storeCandidate.replace(/\s/g, "");
+        const name = (r?.name ?? "").replace(/\s/g, "");
+        storeMismatch = !(name.includes(cand) || cand.includes(name));
+      }
+
+      return {
+        rows: rows.map((r) => ({
+          ...r,
+          categoryId: cats.find((c) => c.name === r.category)?.id ?? null,
+        })),
+        errors: parsed.errors,
+        storeCandidate: parsed.storeCandidate,
+        storeMismatch,
+      };
+    }),
+
+  /** 텍스트 일괄입력 확정: 트랜잭션 insert. 카테고리 미지정 행이 있으면 전체 거부 */
+  bulkCreate: protectedProcedure
+    .input(
+      z.object({
+        restaurantId: z.number(),
+        rows: z
+          .array(
+            z.object({
+              date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+              categoryId: z.number().nullable(),
+              title: z.string().min(1).max(200),
+              amount: z.number().int().positive(),
+            }),
+          )
+          .min(1)
+          .max(200),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await verifyStoreAccess(ctx.user.userId, ctx.user.role, input.restaurantId);
+      if (input.rows.some((r) => r.categoryId == null)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "분류가 지정되지 않은 행이 있습니다." });
+      }
+      const cats = await db
+        .select({ id: expenseCategories.id, name: expenseCategories.name })
+        .from(expenseCategories)
+        .where(eq(expenseCategories.restaurantId, input.restaurantId));
+      const nameById = new Map(cats.map((c) => [c.id, c.name]));
+      if (input.rows.some((r) => !nameById.has(r.categoryId!))) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "이 매장의 지출 분류가 아닙니다." });
+      }
+      try {
+        await db.transaction(async (tx) => {
+          await tx.insert(dailyExpenses).values(
+            input.rows.map((r) => ({
+              restaurantId: input.restaurantId,
+              date: r.date as unknown as Date, // DATE 컬럼에 문자열 그대로 저장 (기존 create와 동일)
+              categoryId: r.categoryId!,
+              category: nameById.get(r.categoryId!)!,
+              title: r.title,
+              amount: String(r.amount),
+              createdBy: ctx.user.userId,
+            })),
+          );
+        });
+        return { inserted: input.rows.length };
+      } catch (err: any) {
+        throw unwrapDbError(err, "즉시지출 일괄등록 실패");
       }
     }),
 

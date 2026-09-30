@@ -203,6 +203,7 @@ import { Button, Card, Input, Badge } from '@/components/ui/index';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { BulkExpenseDialog } from '@/components/BulkExpenseDialog';
 
 // ============================================================================
 // TAB LABELS
@@ -1019,6 +1020,7 @@ function PurchaseTab({
 
   // ── 즉시지출 state ──
   const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [showBulkExpense, setShowBulkExpense] = useState(false);
   const [expCategoryId, setExpCategoryId] = useState<number>(0);
   const [expTitle, setExpTitle] = useState('');
   const [expAmount, setExpAmount] = useState('');
@@ -2171,6 +2173,18 @@ function PurchaseTab({
             즉시지출 등록
           </button>
         )}
+        <button
+          onClick={() => setShowBulkExpense(true)}
+          className="w-full mt-2 py-2 rounded-lg text-xs font-medium text-muted-foreground border border-border hover:bg-muted/50 transition-colors"
+        >
+          텍스트로 일괄입력
+        </button>
+        <BulkExpenseDialog
+          open={showBulkExpense}
+          onOpenChange={setShowBulkExpense}
+          restaurantId={restaurantId}
+          categories={categories}
+        />
       </Card>
 
       {/* ═══════════════ 전표 매입 (OCR) ═══════════════ */}
