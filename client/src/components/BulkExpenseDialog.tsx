@@ -24,7 +24,7 @@ interface Props {
   categories: { id: number; name: string }[];
 }
 
-const FLAG_LABEL: Record<string, string> = { prepaid: '사전결제', duplicate: '중복 의심' };
+const FLAG_LABEL: Record<string, string> = { prepaid: '사전결제', duplicate: '기존 등록건과 중복', batchDuplicate: '입력 내 중복' };
 
 export function BulkExpenseDialog({ open, onOpenChange, restaurantId, categories }: Props) {
   const utils = trpc.useUtils();
@@ -32,11 +32,11 @@ export function BulkExpenseDialog({ open, onOpenChange, restaurantId, categories
   const [submittedText, setSubmittedText] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
-  const [storeNote, setStoreNote] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) {
-      setText(''); setSubmittedText(''); setRows([]); setErrors([]); setStoreNote(null);
+      setText(''); setSubmittedText(''); setRows([]); setErrors([]); setWarnings([]);
     }
   }, [open]);
 
@@ -50,6 +50,7 @@ export function BulkExpenseDialog({ open, onOpenChange, restaurantId, categories
     if (!d) return;
     setRows(d.rows.map((r, i) => ({
       key: i,
+      // 사전결제·기존건 중복은 기본 해제. 입력 내 중복(batchDuplicate)은 표시만 하고 체크 유지
       checked: !r.flags.includes('prepaid') && !r.flags.includes('duplicate'),
       date: r.date,
       amount: String(r.amount),
@@ -58,9 +59,7 @@ export function BulkExpenseDialog({ open, onOpenChange, restaurantId, categories
       flags: r.flags,
     })));
     setErrors(d.errors);
-    setStoreNote(d.storeMismatch && d.storeCandidate
-      ? `입력된 매장명 "${d.storeCandidate}"이(가) 현재 선택된 매장과 다릅니다. 매장을 확인하세요.`
-      : null);
+    setWarnings(d.warnings);
   }, [preview.data]);
 
   const bulkMut = trpc.dailyExpenses.bulkCreate.useMutation({
@@ -116,8 +115,10 @@ export function BulkExpenseDialog({ open, onOpenChange, restaurantId, categories
           {preview.error && <p className="text-xs text-red-500">분석 실패: {preview.error.message}</p>}
         </div>
 
-        {storeNote && (
-          <p className="text-xs text-amber-700 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-1.5 rounded">{storeNote}</p>
+        {warnings.length > 0 && (
+          <div className="text-xs text-amber-700 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-1.5 rounded space-y-0.5">
+            {warnings.map((w, i) => <p key={i}>{w} — 아래 표에서 분류를 직접 선택하세요.</p>)}
+          </div>
         )}
 
         {rows.length > 0 && (
@@ -163,7 +164,7 @@ export function BulkExpenseDialog({ open, onOpenChange, restaurantId, categories
                       </td>
                       <td className="p-2 whitespace-nowrap">
                         {r.flags.map((f) => (
-                          <span key={f} className={`mr-1 px-1.5 py-0.5 rounded text-[10px] ${f === 'duplicate' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'}`}>
+                          <span key={f} className={`mr-1 px-1.5 py-0.5 rounded text-[10px] ${f === 'duplicate' ? 'bg-red-100 text-red-600' : f === 'batchDuplicate' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>
                             {FLAG_LABEL[f] ?? f}
                           </span>
                         ))}

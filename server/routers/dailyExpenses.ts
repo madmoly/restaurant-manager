@@ -4,7 +4,8 @@ import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, managerProcedure } from "../trpc";
 import { db } from "../db";
 import { dailyExpenses, expenseCategories, restaurants } from "../../drizzle/schema";
-import { parseExpenseText, markDuplicates } from "../../shared/expenseTextParser";
+import { parseExpenseText, markDuplicates, markBatchDuplicates } from "../../shared/expenseTextParser";
+import { toDailyExpenseInsertValues } from "../helpers/expenseBulk";
 import { toDateOnly } from "../../shared/dateOnly";
 import { verifyStoreAccess } from "../middleware/storeAuth";
 
@@ -154,11 +155,16 @@ export const dailyExpensesRouter = router({
         .select({ id: expenseCategories.id, name: expenseCategories.name })
         .from(expenseCategories)
         .where(and(eq(expenseCategories.restaurantId, input.restaurantId), eq(expenseCategories.isActive, true)));
+      const [store] = await db
+        .select({ name: restaurants.name })
+        .from(restaurants)
+        .where(eq(restaurants.id, input.restaurantId));
       // KST 기준 오늘
       const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-      const parsed = parseExpenseText(input.text, today, cats.map((c) => c.name));
+      // 매장명 비교는 현재 선택 매장 이름과만 (타 매장 이름 노출 방지)
+      const parsed = parseExpenseText(input.text, today, cats.map((c) => c.name), store?.name ?? null);
 
-      let rows = parsed.rows;
+      let rows = markBatchDuplicates(parsed.rows);
       if (rows.length > 0) {
         const dates = rows.map((r) => r.date).sort();
         const existing = await db
@@ -177,26 +183,14 @@ export const dailyExpensesRouter = router({
         );
       }
 
-      // 매장명 후보는 현재 선택 매장 이름과만 비교 (타 매장 이름 노출 방지)
-      let storeMismatch = false;
-      if (parsed.storeCandidate) {
-        const [r] = await db
-          .select({ name: restaurants.name })
-          .from(restaurants)
-          .where(eq(restaurants.id, input.restaurantId));
-        const cand = parsed.storeCandidate.replace(/\s/g, "");
-        const name = (r?.name ?? "").replace(/\s/g, "");
-        storeMismatch = !(name.includes(cand) || cand.includes(name));
-      }
-
       return {
         rows: rows.map((r) => ({
           ...r,
           categoryId: cats.find((c) => c.name === r.category)?.id ?? null,
         })),
         errors: parsed.errors,
+        warnings: parsed.warnings,
         storeCandidate: parsed.storeCandidate,
-        storeMismatch,
       };
     }),
 
@@ -234,15 +228,13 @@ export const dailyExpensesRouter = router({
       try {
         await db.transaction(async (tx) => {
           await tx.insert(dailyExpenses).values(
-            input.rows.map((r) => ({
-              restaurantId: input.restaurantId,
-              date: r.date as unknown as Date, // DATE 컬럼에 문자열 그대로 저장 (기존 create와 동일)
-              categoryId: r.categoryId!,
-              category: nameById.get(r.categoryId!)!,
-              title: r.title,
-              amount: String(r.amount),
-              createdBy: ctx.user.userId,
-            })),
+            // date는 문자열 그대로 — 컬럼 타입(Date)과 맞추려 캐스팅만 한다 (단건 create와 동일 경로)
+            toDailyExpenseInsertValues(
+              input.restaurantId,
+              ctx.user.userId,
+              input.rows.map((r) => ({ ...r, categoryId: r.categoryId! })),
+              nameById,
+            ) as unknown as (typeof dailyExpenses.$inferInsert)[],
           );
         });
         return { inserted: input.rows.length };
