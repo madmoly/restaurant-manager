@@ -106,7 +106,7 @@ export function BulkExpenseDialog({ open, onOpenChange, restaurantId, categories
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={8}
-            placeholder={'분류 제목 줄 아래에 "9/25 쿠팡 세제 45,000원" 형식으로 붙여넣으세요.\n구분선(———)을 넣으면 분류가 초기화됩니다.'}
+            placeholder={'분류 제목 줄 아래에 "9/25 쿠팡 세제 45,000원" 형식으로 붙여넣으세요.'}
             className="text-sm"
           />
           <Button onClick={parse} disabled={preview.isFetching} className="w-full">

@@ -13,7 +13,7 @@
  *   · 카테고리명과 일치 → 현재 카테고리
  *   · 선택 매장명과 부분일치 → 매장명 후보(storeCandidate)
  *   · 그 외 → 없는 카테고리 헤더로 보고 현재 카테고리를 null로 두고 warnings에 "카테고리 없음: X"
- * - 구분선(— - = 3자 이상)은 카테고리를 미지정(null)으로 리셋한다. 상속하지 않는다.
+ * - 구분선(— - = 3자 이상)은 무시한다(카테고리 유지).
  * - 연도는 기준일 이하 가장 가까운 날짜로 추정한다.
  * - 파싱 실패 줄은 errors에 원문 그대로 담는다.
  */
@@ -122,10 +122,7 @@ export function parseExpenseText(
     const line = raw.trim();
     if (!line) continue;
 
-    if (DIVIDER.test(line)) {
-      category = null;
-      continue;
-    }
+    if (DIVIDER.test(line)) continue;
 
     const m = DATE_LINE.exec(line);
     if (m) {

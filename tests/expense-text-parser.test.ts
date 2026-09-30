@@ -62,20 +62,19 @@ describe("parseExpenseText — 천호점 실샘플", () => {
     expect(r.warnings).toEqual(["카테고리 없음: 식자재", "카테고리 없음: 잡비"]);
     expect(r.rows.every((x) => x.category === null)).toBe(true);
   });
-  it("식자재·잡비 카테고리가 있다면: 매칭되고 구분선 뒤 9/26 1건만 null", () => {
+  it("식자재·잡비 카테고리가 있다면: 매칭되고 구분선은 무시 — 9/26도 잡비 유지", () => {
     const r2 = parseExpenseText(REAL_SAMPLE, TODAY, [...CHEONHO_CATS, "식자재", "잡비"], CHEONHO_STORE);
     expect(r2.warnings).toEqual([]);
+    expect(r2.errors).toEqual([]);
     expect(r2.rows.filter((x) => x.category === "식자재")).toHaveLength(6);
-    expect(r2.rows.filter((x) => x.category === "잡비")).toHaveLength(5);
-    const nulls = r2.rows.filter((x) => x.category === null);
-    expect(nulls).toHaveLength(1);
-    expect(nulls[0]).toMatchObject({ date: "2026-09-26", amount: 63820, memo: "양파후레이크, 백합" });
+    expect(r2.rows.filter((x) => x.category === "잡비")).toHaveLength(6);
+    expect(r2.rows.at(-1)).toMatchObject({ date: "2026-09-26", amount: 63820, memo: "양파후레이크, 백합", category: "잡비" });
   });
 });
 
 // ── 보조 케이스: 대체 샘플 ──
 
-// 사용자 원본 샘플이 전달되지 않아 명세(12건 / 9·26건 미지정 / 사전결제 / 오류 0)에 맞춰 구성한 대체 샘플
+// 헤더·구분선·금액 앞뒤·사전결제 조합을 넓게 보는 보조 샘플
 const SAMPLE = `천호점
 인터넷발주
 9/1 쿠팡 세제 45,000원
@@ -103,9 +102,9 @@ describe("parseExpenseText", () => {
     expect(r.rows).toHaveLength(12);
     expect(r.errors).toEqual([]);
   });
-  it("구분선 뒤 9/26 건은 category=null (상속 금지)", () => {
-    const nulls = r.rows.filter((x) => x.category === null);
-    expect(nulls.map((x) => x.date)).toEqual(["2026-09-26", "2026-09-26"]);
+  it("구분선은 무시하고 직전 카테고리 유지", () => {
+    expect(r.rows.filter((x) => x.date === "2026-09-26").map((x) => x.category)).toEqual(["소모품", "기타"]);
+    expect(r.rows.every((x) => x.category !== null)).toBe(true);
   });
   it("사전결제·충전 flag=prepaid", () => {
     expect(r.rows.filter((x) => x.flags.includes("prepaid")).map((x) => x.memo)).toEqual([
