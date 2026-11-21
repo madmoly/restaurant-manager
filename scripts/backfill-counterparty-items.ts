@@ -11,8 +11,12 @@ import "dotenv/config";
 import mysql from "mysql2/promise";
 
 const DRY_RUN = process.argv.includes("--dry-run");
-const DB_URL =
-  "mysql://root:aNrJhlVXGkYZZSEEEOxtflFrwjEimSqQ@caboose.proxy.rlwy.net:11909/railway";
+const DB_URL = process.env.DATABASE_URL;
+if (!DB_URL) {
+  throw new Error(
+    "DATABASE_URL 환경변수가 설정되어 있지 않습니다. .env 파일에 접속 문자열을 설정한 뒤 다시 실행하세요.",
+  );
+}
 
 async function main() {
   const conn = await mysql.createConnection(DB_URL);
