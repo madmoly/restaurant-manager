@@ -3510,26 +3510,37 @@ function CloseTab({
 
 
   // Initialize from saved sales
+  // 날짜를 바꿨을 때 이전 날짜의 매출이 그대로 남지 않도록, 저장된 매출이 없는 날(신규)은 빈 값으로 초기화
   useEffect(() => {
-    if (salesQuery.data) {
-      const fmtSaved = (v: any) => { const n = Number(v); return n ? fmtNum(n) : ''; };
-      setCashAmount(fmtSaved(salesQuery.data.cashAmount));
-      setCardAmount(fmtSaved(salesQuery.data.cardAmount));
-      setGiftCardAmount(fmtSaved(salesQuery.data.giftCardAmount));
-      setTransferAmount(fmtSaved(salesQuery.data.transferAmount));
-      setTransferDepositor(salesQuery.data.transferDepositor || '');
-      setOtherItems((salesQuery.data.otherItems || []).map((i: any) => ({
-        itemName: i.itemName,
-        amount: typeof i.amount === 'string' ? parseInt(i.amount, 10) : i.amount,
-      })));
-      setSpecialItems((salesQuery.data.specialItems || []).map((i: any) => ({
-        typeName: i.typeName,
-        amount: typeof i.amount === 'string' ? parseInt(i.amount, 10) : i.amount,
-        note: i.note || undefined,
-      })));
-      setCloseNote(salesQuery.data.note || '');
+    if (!salesQuery.data) {
+      setCashAmount('');
+      setCardAmount('');
+      setGiftCardAmount('');
+      setTransferAmount('');
+      setTransferDepositor('');
+      setOtherItems([]);
+      setSpecialItems([]);
+      setCloseNote('');
+      return;
     }
-  }, [salesQuery.data]);
+    const saved = salesQuery.data;
+    const fmtSaved = (v: any) => { const n = Number(v); return n ? fmtNum(n) : ''; };
+    setCashAmount(fmtSaved(saved.cashAmount));
+    setCardAmount(fmtSaved(saved.cardAmount));
+    setGiftCardAmount(fmtSaved(saved.giftCardAmount));
+    setTransferAmount(fmtSaved(saved.transferAmount));
+    setTransferDepositor(saved.transferDepositor || '');
+    setOtherItems((saved.otherItems || []).map((i: any) => ({
+      itemName: i.itemName,
+      amount: typeof i.amount === 'string' ? parseInt(i.amount, 10) : i.amount,
+    })));
+    setSpecialItems((saved.specialItems || []).map((i: any) => ({
+      typeName: i.typeName,
+      amount: typeof i.amount === 'string' ? parseInt(i.amount, 10) : i.amount,
+      note: i.note || undefined,
+    })));
+    setCloseNote(saved.note || '');
+  }, [salesQuery.data, date]);
 
   const handleSaveSales = async () => {
     if (isClosedDay) {
@@ -4605,7 +4616,7 @@ export default function DailyOpsPage() {
             <MiddayTab restaurantId={selectedRestaurant.id} date={date} />
           )}
           {activeTab === 'close' && (
-            <CloseTab restaurantId={selectedRestaurant.id} date={date} isClosedDay={isClosedDay} />
+            <CloseTab key={`close-${selectedRestaurant.id}-${date}`} restaurantId={selectedRestaurant.id} date={date} isClosedDay={isClosedDay} />
           )}
         </div>
         </>
